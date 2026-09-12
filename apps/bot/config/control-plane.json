@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "instance": {
+    "name": "AL AI",
+    "sourceLayer": "bot-runtime"
+  },
+  "intents": {
+    "warnAt": 8000,
+    "limit": 10000,
+    "renewalDays": 365,
+    "renewedAt": null,
+    "_todo": "TODO: يحتاج قرار صريح من المالك — تاريخ آخر تجديد لتوثيق الـ privileged intents (ISO 8601)."
+  },
+  "retention": {
+    "auditDays": null,
+    "logDays": null,
+    "_todo": "TODO: يحتاج قرار صريح من المالك — مدد الاحتفاظ بسجل التدقيق وسجلات الوجهات."
+  },
+  "encryption": {
+    "keyRotationDays": null,
+    "_todo": "TODO: يحتاج قرار صريح من المالك — دورة تدوير مفتاح التشفير."
+  },
+  "gateway": {
+    "ceilingPerMinute": 120,
+    "voiceDebounceMs": 2000
+  },
+  "commands": {
+    "deployment": "manual",
+    "_todo": "TODO: يحتاج قرار صريح من المالك — قائمة الأوامر الكاملة. المسجّل حالياً في packages/core/src/command-registry.ts فقط."
+  }
+}

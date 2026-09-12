@@ -1,0 +1,14 @@
+# Keep container builds clean: never ship host dependencies or local artifacts.
+**/node_modules
+**/dist
+**/.git
+**/.output
+**/.tanstack
+**/.wrangler
+.env
+.env.*
+!.env.example
+*.log
+coverage
+.workbuddy-ai
+.al-ai-bot.lock

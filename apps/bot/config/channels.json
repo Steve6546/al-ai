@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "note": "الوجهات السبع ثابتة. هذا الملف هو المرجع الثابت للأسماء؛ أما ربط القنوات فعلياً فيتم لكل سيرفر في جدول guild_log_channels.",
+  "destinations": [
+    {
+      "id": "member-log",
+      "label": "الأعضاء",
+      "subCategories": ["member.join", "member.leave", "member.nickname-change", "member.role-add", "member.role-remove"],
+      "required": false
+    },
+    {
+      "id": "moderation-log",
+      "label": "الإشراف",
+      "subCategories": ["moderation.ban", "moderation.unban", "moderation.kick", "moderation.timeout", "moderation.warn"],
+      "required": false,
+      "note": "يشمل أحداث الإشراف الحساسة المحصورة بالمديرين."
+    },
+    {
+      "id": "voice-log",
+      "label": "الصوت",
+      "subCategories": ["voice.join", "voice.leave", "voice.move", "voice.state-change"],
+      "required": false,
+      "note": "أي انتقال أسرع من 2000ms يُجمَع في حدث واحد."
+    },
+    {
+      "id": "role-log",
+      "label": "الرتب",
+      "subCategories": ["role.create", "role.update", "role.delete"],
+      "required": false
+    },
+    {
+      "id": "message-log",
+      "label": "الرسائل",
+      "subCategories": ["message.delete", "message.edit", "message.bulk-delete"],
+      "required": false,
+      "note": "يعتمد على الكاش الداخلي للرسائل لاستعادة المحتوى المحذوف."
+    },
+    {
+      "id": "server-log",
+      "label": "السيرفر",
+      "subCategories": [
+        "server.channel-create",
+        "server.channel-update",
+        "server.channel-delete",
+        "server.invite-create",
+        "server.expression-create",
+        "server.expression-delete"
+      ],
+      "required": false
+    },
+    {
+      "id": "bot-log",
+      "label": "البوت",
+      "subCategories": [
+        "bot.command-success",
+        "bot.command-failure",
+        "bot.gateway-throttle",
+        "bot.security-rejection",
+        "bot.health",
+        "security.invalid-role-attempt",
+        "security.hmac-invalid",
+        "security.abnormal-request",
+        "security.revoked-credential",
+        "security.audit-tamper",
+        "security.watchdog-down"
+      ],
+      "required": false,
+      "note": "يستقبل كل أحداث security.* — وهي critical دائماً، وتُكتب في سجل التدقيق معه."
+    }
+  ]
+}

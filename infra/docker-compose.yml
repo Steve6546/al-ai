@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: al_ai
+      POSTGRES_USER: al_ai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+    ports:
+      # Host port is configurable so a machine with a local PostgreSQL can
+      # still run the stack: set POSTGRES_HOST_PORT to any free port.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U al_ai -d al_ai"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  dashboard:
+    build:
+      context: ..
+      dockerfile: infra/dashboard.Dockerfile
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      # Inside the compose network the database is reached by service name.
+      DATABASE_URL: postgresql://al_ai:${POSTGRES_PASSWORD:-change_me}@postgres:5432/al_ai
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    build:
+      context: ..
+      dockerfile: infra/bot.Dockerfile
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql://al_ai:${POSTGRES_PASSWORD:-change_me}@postgres:5432/al_ai
+      DASHBOARD_URL: http://dashboard:3000
+      BOT_LOCK_FILE: /tmp/al-ai-bot.lock
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dashboard:
+        condition: service_started
+
+volumes:
+  postgres-data:

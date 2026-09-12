@@ -1,0 +1,11 @@
+{
+  "name": "@al-ai/core",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./browser": "./src/browser.ts"
+  },
+  "scripts": { "test": "tsx --test test/*.test.ts" },
+  "dependencies": { "tsx": "latest" }
+}
