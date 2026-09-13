@@ -7,7 +7,6 @@ import {
   ChevronsUpDown,
   CirclePlus,
   Copy,
-  EllipsisVertical,
   ExternalLink,
   FileClock,
   LayoutDashboard,
@@ -107,7 +106,7 @@ const navSections: { id: string; title: string | null; items: NavItem[] }[] = [
     id: "moderation",
     title: "الإشراف والحماية",
     items: [
-      { key: "commands", label: "أوامر المشرفين", icon: SquareTerminal, needs: "canManageCommands", requiresBot: true },
+      { key: "commands", label: "الأوامر", icon: SquareTerminal, needs: "canManageCommands", requiresBot: true },
       { key: "security", label: "الحماية والأمان", icon: ShieldAlert }
     ]
   },
@@ -157,7 +156,6 @@ export function AppShell({
   children
 }: ShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { copied, copy } = useCopy();
 
   const inviteUrl = `/api/guilds/${guild.id}/invite`;
 
@@ -244,16 +242,6 @@ export function AppShell({
             <RefreshCw className={cn(refreshing && "animate-spin")} />
             <span className="hidden sm:inline">تحديث</span>
           </Button>
-
-          <HeaderMenu
-            guild={guild}
-            inviteUrl={inviteUrl}
-            refreshing={refreshing}
-            copied={copied}
-            onRefresh={onRefresh}
-            onCopy={copy}
-            onLogout={onLogout}
-          />
         </header>
 
         <main className="min-w-0 flex-1 p-4 pb-24 lg:p-6">{children}</main>
@@ -504,66 +492,14 @@ function ProfileMenu({ user, guild, onLogout }: { user: SessionInfo["user"]; gui
 }
 
 /**
- * The header's overflow menu. Every entry performs a real action — nothing here
- * is decorative.
+ * The header's overflow menu is gone.
+ *
+ * Every entry it held is reachable somewhere the operator already is: refresh is
+ * its own button in the header, the guild id and the Discord link sit in the
+ * guild switcher, the invite is there too, and signing out is in the profile
+ * menu. A second copy behind a ⋮ button was one more place to look for the same
+ * action, and it competed with the refresh button right beside it.
  */
-function HeaderMenu({
-  guild,
-  inviteUrl,
-  refreshing,
-  copied,
-  onRefresh,
-  onCopy,
-  onLogout
-}: {
-  guild: Guild;
-  inviteUrl: string;
-  refreshing: boolean;
-  copied: string | null;
-  onRefresh: () => void;
-  onCopy: (value: string, key?: string) => Promise<boolean>;
-  onLogout: () => void;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label="خيارات">
-          <EllipsisVertical />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
-        <DropdownMenuLabel className="truncate">{guild.name}</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onRefresh} disabled={refreshing} className="gap-2">
-          <RefreshCw className={cn(refreshing && "animate-spin")} />
-          تحديث البيانات
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void onCopy(guild.id, "guild-id")} className="gap-2">
-          {copied === "guild-id" ? <Check className="size-4" /> : <Copy className="size-4" />}
-          نسخ معرّف السيرفر
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <a href={`https://discord.com/channels/${guild.id}`} target="_blank" rel="noreferrer" className="gap-2">
-            <ExternalLink className="size-4" />
-            فتح السيرفر في Discord
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <a href={inviteUrl} className="gap-2">
-            <CirclePlus className="size-4" />
-            {guild.botPresent ? "إعادة إضافة البوت" : "إضافة البوت"}
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onLogout} className="gap-2">
-          <LogOut className="size-4" />
-          تسجيل الخروج
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
 
 /* -------------------------------------------------------------------- *
  * Status

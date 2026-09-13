@@ -402,12 +402,25 @@ export function createDatabase(pool: pg.Pool) {
         minimum_tier: string | null;
         dm_on_action: boolean;
         delete_message_days: number;
-        custom_role_ids: string[] | null;
+        allowed_role_ids: string[] | null;
+        denied_role_ids: string[] | null;
+        allowed_channel_ids: string[] | null;
+        denied_channel_ids: string[] | null;
+        cooldown_seconds: number;
+        auto_delete_response_seconds: number;
+        require_reason: boolean;
+        default_duration: string;
+        preset_reasons: unknown;
       }>(
-        `SELECT command, enabled, minimum_tier, dm_on_action, delete_message_days, custom_role_ids
+        `SELECT command, enabled, minimum_tier, dm_on_action, delete_message_days,
+                allowed_role_ids, denied_role_ids, allowed_channel_ids, denied_channel_ids,
+                cooldown_seconds, auto_delete_response_seconds, require_reason, default_duration, preset_reasons
          FROM guild_command_flags WHERE guild_id = $1`,
         [guildId]
       );
+      // Values are passed through raw and cleaned by `normaliseCommandConfig`,
+      // which is the same function the bot reads through — so a row written by an
+      // older build cannot mean two different things on the two sides.
       return new Map<string, Partial<CommandConfig>>(
         rows.map(row => [
           row.command,
@@ -417,7 +430,15 @@ export function createDatabase(pool: pg.Pool) {
             ...(isTier(row.minimum_tier) ? { allowedLevel: row.minimum_tier } : {}),
             dmOnAction: row.dm_on_action,
             deleteMessageDays: row.delete_message_days,
-            customRoleIds: row.custom_role_ids ?? []
+            allowedRoleIds: row.allowed_role_ids ?? [],
+            deniedRoleIds: row.denied_role_ids ?? [],
+            allowedChannelIds: row.allowed_channel_ids ?? [],
+            deniedChannelIds: row.denied_channel_ids ?? [],
+            cooldownSeconds: row.cooldown_seconds,
+            autoDeleteResponseSeconds: row.auto_delete_response_seconds,
+            requireReason: row.require_reason,
+            defaultDuration: row.default_duration as CommandConfig["defaultDuration"],
+            presetReasons: Array.isArray(row.preset_reasons) ? (row.preset_reasons as CommandConfig["presetReasons"]) : []
           }
         ])
       );
@@ -425,14 +446,27 @@ export function createDatabase(pool: pg.Pool) {
 
     async saveCommandFlag(guildId: string, config: CommandConfig) {
       await pool.query(
-        `INSERT INTO guild_command_flags (guild_id, command, enabled, minimum_tier, dm_on_action, delete_message_days, custom_role_ids, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, now())
+        `INSERT INTO guild_command_flags (
+           guild_id, command, enabled, minimum_tier, dm_on_action, delete_message_days,
+           allowed_role_ids, denied_role_ids, allowed_channel_ids, denied_channel_ids,
+           cooldown_seconds, auto_delete_response_seconds, require_reason, default_duration, preset_reasons,
+           updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11, $12, $13, $14, $15::jsonb, now())
          ON CONFLICT (guild_id, command) DO UPDATE
            SET enabled = EXCLUDED.enabled,
                minimum_tier = EXCLUDED.minimum_tier,
                dm_on_action = EXCLUDED.dm_on_action,
                delete_message_days = EXCLUDED.delete_message_days,
-               custom_role_ids = EXCLUDED.custom_role_ids,
+               allowed_role_ids = EXCLUDED.allowed_role_ids,
+               denied_role_ids = EXCLUDED.denied_role_ids,
+               allowed_channel_ids = EXCLUDED.allowed_channel_ids,
+               denied_channel_ids = EXCLUDED.denied_channel_ids,
+               cooldown_seconds = EXCLUDED.cooldown_seconds,
+               auto_delete_response_seconds = EXCLUDED.auto_delete_response_seconds,
+               require_reason = EXCLUDED.require_reason,
+               default_duration = EXCLUDED.default_duration,
+               preset_reasons = EXCLUDED.preset_reasons,
                updated_at = now()`,
         [
           guildId,
@@ -441,7 +475,15 @@ export function createDatabase(pool: pg.Pool) {
           config.allowedLevel,
           config.dmOnAction,
           config.deleteMessageDays,
-          JSON.stringify(config.customRoleIds)
+          JSON.stringify(config.allowedRoleIds),
+          JSON.stringify(config.deniedRoleIds),
+          JSON.stringify(config.allowedChannelIds),
+          JSON.stringify(config.deniedChannelIds),
+          config.cooldownSeconds,
+          config.autoDeleteResponseSeconds,
+          config.requireReason,
+          config.defaultDuration,
+          JSON.stringify(config.presetReasons)
         ]
       );
     },

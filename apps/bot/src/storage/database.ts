@@ -163,12 +163,26 @@ export function createBotDatabase(databaseUrl: string) {
         minimum_tier: string | null;
         dm_on_action: boolean;
         delete_message_days: number;
-        custom_role_ids: string[] | null;
+        allowed_role_ids: string[] | null;
+        denied_role_ids: string[] | null;
+        allowed_channel_ids: string[] | null;
+        denied_channel_ids: string[] | null;
+        cooldown_seconds: number;
+        auto_delete_response_seconds: number;
+        require_reason: boolean;
+        default_duration: string;
+        preset_reasons: unknown;
       }>(
-        `SELECT command, enabled, minimum_tier, dm_on_action, delete_message_days, custom_role_ids
+        `SELECT command, enabled, minimum_tier, dm_on_action, delete_message_days,
+                allowed_role_ids, denied_role_ids, allowed_channel_ids, denied_channel_ids,
+                cooldown_seconds, auto_delete_response_seconds, require_reason, default_duration, preset_reasons
          FROM guild_command_flags WHERE guild_id = $1`,
         [guildId]
       );
+      // Every value is passed through raw and cleaned by `normaliseCommandConfig`
+      // — the same function the dashboard writes through — so a control the
+      // command does not support can never be honoured here even if a row
+      // somehow carries it.
       return new Map<string, Partial<CommandConfig>>(
         rows.map(row => [
           row.command,
@@ -178,7 +192,15 @@ export function createBotDatabase(databaseUrl: string) {
             ...(isTier(row.minimum_tier) ? { allowedLevel: row.minimum_tier } : {}),
             dmOnAction: row.dm_on_action,
             deleteMessageDays: row.delete_message_days,
-            customRoleIds: row.custom_role_ids ?? []
+            allowedRoleIds: row.allowed_role_ids ?? [],
+            deniedRoleIds: row.denied_role_ids ?? [],
+            allowedChannelIds: row.allowed_channel_ids ?? [],
+            deniedChannelIds: row.denied_channel_ids ?? [],
+            cooldownSeconds: row.cooldown_seconds,
+            autoDeleteResponseSeconds: row.auto_delete_response_seconds,
+            requireReason: row.require_reason,
+            defaultDuration: row.default_duration as CommandConfig["defaultDuration"],
+            presetReasons: Array.isArray(row.preset_reasons) ? (row.preset_reasons as CommandConfig["presetReasons"]) : []
           }
         ])
       );

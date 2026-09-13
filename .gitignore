@@ -16,3 +16,7 @@ coverage/
 # encrypted OAuth tokens in `oauth_sessions` — and belong next to the data
 # directory, not in history where they can never be removed.
 .workbuddy-ai/backups/
+
+# Generated screen previews (bundled JS + CSS + the throwaway generators that
+# build them). Regenerate on demand; never a source of truth.
+.workbuddy-ai/preview/

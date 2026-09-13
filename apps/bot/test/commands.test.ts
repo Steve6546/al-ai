@@ -122,23 +122,44 @@ test("every command that acts on a member accepts a target, and channel commands
   }
 });
 
-test("a command that demands a reason marks the option required", () => {
+test("the reason option is never hard-required, so the guild's setting decides", () => {
+  // Discord freezes `required` at registration time, but the operator can flip
+  // «السبب مطلوب» at any moment. A hard-required option would make turning the
+  // requirement OFF impossible — a switch that only works in one direction.
+  // The bot enforces the requirement instead, from the guild's configuration.
   const published = new Map(
     buildAllCommands().map(command => [
       (command as { name: string }).name,
-      command as { name: string; options?: { name: string; required?: boolean }[] }
+      command as { name: string; options?: { name: string; required?: boolean; autocomplete?: boolean }[] }
     ])
   );
 
   for (const definition of commandRegistry) {
-    const json = published.get(definition.name);
-    const reason = (json?.options ?? []).find(option => option.name === "reason");
-    if (definition.requiresReason) {
-      assert.equal(reason?.required, true, `${definition.name} marks reason as required`);
-    } else if (reason) {
-      assert.notEqual(reason.required, true, `${definition.name} does not force a reason`);
+    const reason = (published.get(definition.name)?.options ?? []).find(option => option.name === "reason");
+    if (!definition.supportsReason) {
+      assert.equal(reason, undefined, `${definition.name} publishes no reason option`);
+      continue;
     }
+    assert.notEqual(reason?.required, true, `${definition.name} leaves the reason optional for Discord`);
+    // Autocomplete is how the operator's ready-made reasons reach Discord
+    // without re-registering the command.
+    assert.equal(reason?.autocomplete, true, `${definition.name} offers preset reasons`);
   }
+});
+
+test("the registry's shipped reason requirement is preserved as a default", () => {
+  assert.equal(requireCommand("warn").requiresReason, true, "warn still demands a reason by default");
+  assert.equal(defaultCommandConfig(requireCommand("warn")).requireReason, true);
+  assert.equal(defaultCommandConfig(requireCommand("ban")).requireReason, false);
+});
+
+test("/al-status is an ordinary registered command", () => {
+  // It used to be answered before the configuration pipeline ran, which made its
+  // switch, cooldown and scopes impossible to honour.
+  const definition = requireCommand("al-status");
+  assert.equal(definition.category, "general");
+  assert.equal(definition.target, "none");
+  assert.equal(definition.minimumTier, "moderator");
 });
 
 test("the timeout duration stays inside Discord's accepted range", () => {
@@ -249,9 +270,9 @@ test("the purge window is clamped to what Discord accepts", () => {
 test("only real snowflake role IDs survive normalisation", () => {
   const definition = requireCommand("warn");
   const config = normaliseCommandConfig(definition, {
-    customRoleIds: ["123456789012345678", "not-a-role", "12345", "123456789012345678", 42 as unknown as string]
+    allowedRoleIds: ["123456789012345678", "not-a-role", "12345", "123456789012345678", 42 as unknown as string]
   });
-  assert.deepEqual(config.customRoleIds, ["123456789012345678"], "unknown shapes are dropped and duplicates collapsed");
+  assert.deepEqual(config.allowedRoleIds, ["123456789012345678"], "unknown shapes are dropped and duplicates collapsed");
 });
 
 test("an invalid tier falls back to the registry value rather than being stored", () => {

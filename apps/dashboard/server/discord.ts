@@ -9,7 +9,8 @@
  *   token to the browser.
  */
 
-import { BOT_INVITE_SCOPES } from "@al-ai/core";
+import { BOT_INVITE_SCOPES, type ChannelOption } from "@al-ai/core";
+import { TtlCache } from "./cache.js";
 
 const API = "https://discord.com/api/v10";
 export const USER_PERMISSIONS = {
@@ -211,12 +212,42 @@ export async function fetchUserGuilds(accessToken: string) {
  */
 const BOT_GUILD_CACHE_MS = 15_000;
 
-let botGuildCache: { ids: Set<string>; at: number } | null = null;
-let botGuildInFlight: Promise<Set<string>> | null = null;
+/**
+ * How long a guild's roles and channels are trusted.
+ *
+ * Roles and channels change on the scale of minutes, so 45 seconds removes
+ * nearly every repeat call without the operator ever seeing a stale screen: the
+ * one action that changes either list is performed in Discord, not here, and the
+ * screen that shows it is reloaded by hand.
+ */
+const GUILD_READ_CACHE_MS = 45_000;
+
+const botGuildCache = new TtlCache<string, Set<string>>(BOT_GUILD_CACHE_MS);
+const guildChannelCache = new TtlCache<string, ChannelOption[]>(GUILD_READ_CACHE_MS);
+const guildRoleCache = new TtlCache<string, DiscordRole[]>(GUILD_READ_CACHE_MS);
+
+const BOT_GUILD_KEY = "bot-guilds";
 
 /** Drop the memoised bot guild list. Used after an invite and by tests. */
 export function invalidateBotGuildCache() {
-  botGuildCache = null;
+  botGuildCache.clear();
+}
+
+/**
+ * Drop the memoised roles and channels for one guild, or for all of them.
+ *
+ * Nothing in the dashboard edits either list, so this exists for the screens
+ * that change what Discord would report next — and for tests, which must not
+ * inherit another case's cache.
+ */
+export function invalidateGuildReadCache(guildId?: string) {
+  if (guildId === undefined) {
+    guildChannelCache.clear();
+    guildRoleCache.clear();
+    return;
+  }
+  guildChannelCache.clear(guildId);
+  guildRoleCache.clear(guildId);
 }
 
 /**
@@ -227,33 +258,12 @@ export function invalidateBotGuildCache() {
  * every visit and every press of refresh. Together with the user's own guild
  * read that made two Discord calls per click, which tripped Discord's rate
  * limit within a few presses and surfaced to the operator as a 500.
- *
- * Concurrent callers share one in-flight request, so three tabs opening at once
- * cost one call rather than three.
- *
- * On failure a stale reading is returned in preference to an error. Guild
- * membership is stable, so an old answer is still a true one, and the
- * alternative is failing a screen that is otherwise perfectly answerable.
  */
 export async function fetchBotGuildIds(botToken: string): Promise<Set<string>> {
-  if (botGuildCache && Date.now() - botGuildCache.at < BOT_GUILD_CACHE_MS) return botGuildCache.ids;
-  if (botGuildInFlight) return botGuildInFlight;
-
-  botGuildInFlight = (async () => {
-    try {
-      const guilds = await request<{ id: string }[]>("/users/@me/guilds", { token: botToken });
-      const ids = new Set(guilds.map(guild => guild.id));
-      botGuildCache = { ids, at: Date.now() };
-      return ids;
-    } catch (error) {
-      if (botGuildCache) return botGuildCache.ids;
-      throw error;
-    } finally {
-      botGuildInFlight = null;
-    }
-  })();
-
-  return botGuildInFlight;
+  return botGuildCache.resolve(BOT_GUILD_KEY, async () => {
+    const guilds = await request<{ id: string }[]>("/users/@me/guilds", { token: botToken });
+    return new Set(guilds.map(guild => guild.id));
+  });
 }
 
 /** Read-only: the AL AI role IDs a user holds, used to resolve their tier. */
@@ -321,14 +331,25 @@ export async function fetchBotMember(botToken: string, guildId: string): Promise
   return request<BotMember>(`/guilds/${guildId}/members/${botUserId}`, { token: botToken }).catch(() => null);
 }
 
-/** Read-only: text channels the operator can pick as log destinations. */
-export async function fetchGuildChannels(botToken: string, guildId: string) {
-  const channels = await request<{ id: string; name: string; type: number; position: number }[]>(`/guilds/${guildId}/channels`, { token: botToken });
-  const typeOf = (type: number): "text" | "voice" | "category" => (type === 2 ? "voice" : type === 4 ? "category" : "text");
-  return channels
-    .filter(channel => channel.type === 0 || channel.type === 2 || channel.type === 5)
-    .sort((a, b) => a.position - b.position)
-    .map(channel => ({ id: channel.id, name: channel.name, type: typeOf(channel.type) }));
+/**
+ * Read-only: text channels the operator can pick as log destinations.
+ *
+ * Memoised for 45 seconds per guild. The same list is asked for by the logging
+ * screen, the command scopes and the anti-nuke quarantine picker, so switching
+ * between them used to fire the same request three times.
+ */
+export async function fetchGuildChannels(botToken: string, guildId: string): Promise<ChannelOption[]> {
+  return guildChannelCache.resolve(guildId, async () => {
+    const channels = await request<{ id: string; name: string; type: number; position: number }[]>(
+      `/guilds/${guildId}/channels`,
+      { token: botToken }
+    );
+    const typeOf = (type: number): ChannelOption["type"] => (type === 2 ? "voice" : type === 4 ? "category" : "text");
+    return channels
+      .filter(channel => channel.type === 0 || channel.type === 2 || channel.type === 5)
+      .sort((a, b) => a.position - b.position)
+      .map(channel => ({ id: channel.id, name: channel.name, type: typeOf(channel.type) }));
+  });
 }
 
 /**
@@ -387,29 +408,36 @@ export type DiscordRole = {
 };
 
 /**
- * Read-only: assignable roles, used by the tier configuration screen.
+ * Read-only: assignable roles, used by the tier screen, the command scopes and
+ * the anti-nuke quarantine picker.
+ *
  * `managed` roles belong to an integration and can never be granted to a human,
  * so they are excluded from the picker rather than offered and then rejected.
  *
  * The colour travels with the role so the picker can render each role the way
  * Discord does, instead of showing a flat list of names.
+ *
+ * Memoised for 45 seconds per guild, for the same reason as the channel list:
+ * three screens read the identical list and each one used to cost a call.
  */
-export async function fetchGuildRoles(botToken: string, guildId: string) {
-  const roles = await request<{ id: string; name: string; position: number; managed: boolean; color: number }[]>(
-    `/guilds/${guildId}/roles`,
-    { token: botToken }
-  );
-  return roles
-    .filter(role => !role.managed && role.id !== guildId)
-    .sort((a, b) => b.position - a.position)
-    .map<DiscordRole>(role => ({
-      id: role.id,
-      name: role.name,
-      position: role.position,
-      managed: role.managed,
-      isDefault: false,
-      color: role.color ?? 0
-    }));
+export async function fetchGuildRoles(botToken: string, guildId: string): Promise<DiscordRole[]> {
+  return guildRoleCache.resolve(guildId, async () => {
+    const roles = await request<{ id: string; name: string; position: number; managed: boolean; color: number }[]>(
+      `/guilds/${guildId}/roles`,
+      { token: botToken }
+    );
+    return roles
+      .filter(role => !role.managed && role.id !== guildId)
+      .sort((a, b) => b.position - a.position)
+      .map<DiscordRole>(role => ({
+        id: role.id,
+        name: role.name,
+        position: role.position,
+        managed: role.managed,
+        isDefault: false,
+        color: role.color ?? 0
+      }));
+  });
 }
 
 /**

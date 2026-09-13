@@ -16,7 +16,7 @@ import {
   type SlashCommandUserOption
 } from "discord.js";
 import type { LogDestination, Severity } from "@al-ai/core";
-import { groupPagesIntoMessages, planEmbedFields, SEVERITY_EMBED_COLOR } from "@al-ai/core";
+import { groupPagesIntoMessages, planEmbedFields, SEVERITY_EMBED_COLOR, TIMEOUT_MAX_SECONDS } from "@al-ai/core";
 
 // GOVERNANCE rule 2: This is the only file allowed to import discord.js.
 // Every Discord API call the bot makes must be expressed as a function here.
@@ -279,9 +279,16 @@ export async function listLoggableChannels(client: Client, guildId: string) {
  * published — the registry is the authority on what exists.
  * ------------------------------------------------------------------ */
 
-/** Discord's own ceiling for a timeout, and the minimum Discord accepts. */
+/**
+ * Discord's own ceiling for a timeout, and the minimum Discord accepts.
+ *
+ * The maximum is re-exported from `@al-ai/core` rather than repeated: the
+ * registry entry for `/timeout` carries it as `maxDurationSeconds`, and the
+ * dashboard reads the same constant to explain the cap. A second copy here is a
+ * second number to keep in step.
+ */
 export const TIMEOUT_MIN_SECONDS = 60;
-export const TIMEOUT_MAX_SECONDS = 28 * 24 * 60 * 60;
+export { TIMEOUT_MAX_SECONDS };
 
 /** `/clear` bounds. One message is the floor: Discord's bulk endpoint needs two. */
 export const CLEAR_MIN_COUNT = 1;
@@ -296,8 +303,22 @@ export function buildStatusCommand() {
 
 /** Shared option builders, so the same control is described identically everywhere. */
 const targetOption = (option: SlashCommandUserOption) => option.setName("user").setDescription("العضو").setRequired(true);
-const reasonOption = (option: SlashCommandStringOption, required = false) =>
-  option.setName("reason").setDescription("السبب").setRequired(required).setMaxLength(512);
+
+/**
+ * The shared `reason` option.
+ *
+ * Deliberately never marked `required`, even for `/warn`, whose registry entry
+ * ships with `requiresReason`. Discord freezes `required` at registration time
+ * while the guild's setting can change at any moment, so a hard-required option
+ * would make "السبب مطلوب" a switch that cannot be turned off — the exact
+ * "saved but not honoured" defect this project treats as its worst kind. The bot
+ * enforces the requirement instead, and says so in the reply.
+ *
+ * Autocomplete is on so the operator's ready-made reasons (with their paired
+ * durations) can be offered without re-registering the command.
+ */
+const reasonOption = (option: SlashCommandStringOption) =>
+  option.setName("reason").setDescription("السبب").setMaxLength(512).setAutocomplete(true);
 
 export function buildModerationCommands() {
   return [
@@ -332,8 +353,10 @@ export function buildModerationCommands() {
       .addIntegerOption(option =>
         option
           .setName("minutes")
-          .setDescription("المدة بالدقائق")
-          .setRequired(true)
+          .setDescription("المدة بالدقائق (اتركها فارغة لاستخدام المدة الافتراضية)")
+          // Optional so the guild's `defaultDuration` has something to fill in.
+          // A hard-required option would make that setting unreachable.
+          .setRequired(false)
           .setMinValue(1)
           .setMaxValue(TIMEOUT_MAX_SECONDS / 60)
       )
@@ -345,7 +368,10 @@ export function buildModerationCommands() {
       .setName("warn")
       .setDescription("تحذير عضو")
       .addUserOption(targetOption)
-      .addStringOption(option => reasonOption(option, true))
+      // Not `.setRequired(true)`: the registry ships `requiresReason` for `/warn`,
+      // but the guild owns that setting, and Discord freezes `required` at
+      // registration. The bot enforces it per guild instead.
+      .addStringOption(option => reasonOption(option))
       .setDefaultMemberPermissions(0n)
       .toJSON(),
 
@@ -720,20 +746,24 @@ function createActorResolver() {
 }
 
 export type BindOptions = {
-  /** Answers /al-status. Kept as a callback so handlers stay discord.js-free. */
-  onStatusCommand?: (context: {
-    guildId: string;
-    userId: string;
-    roleIds: string[];
-    isGuildOwner: boolean;
-    isAdministrator: boolean;
-  }) => Promise<string>;
   /**
    * Handles a moderation slash command. The orchestration (tier check,
    * hierarchy check, logging) lives outside this module; Discord-specific work
    * — reading options and replying — happens here.
    */
   onCommand?: (context: CommandContext) => Promise<void>;
+  /**
+   * Supplies the ready-made reasons for the focused option.
+   *
+   * Answers an autocomplete interaction, which Discord expects within three
+   * seconds — so the handler must read from a cache, never from Discord.
+   */
+  onAutocomplete?: (context: {
+    guildId: string;
+    commandName: string;
+    focusedOption: string;
+    focusedValue: string;
+  }) => Promise<{ name: string; value: string }[]>;
   /**
    * Short-lived cache that lets message.delete / message.edit recover the body.
    * Discord only sends content on messageCreate, so without this the log can
@@ -769,7 +799,14 @@ export type CommandContext = {
    */
   numbers: Record<string, number>;
   reason: string;
-  reply: (content: string) => Promise<void>;
+  /**
+   * Answers the interaction.
+   *
+   * `autoDeleteSeconds` is the guild's tidiness setting: when set, the reply is
+   * removed after that many seconds so a moderation channel does not fill up
+   * with bot confirmations.
+   */
+  reply: (content: string, options?: { autoDeleteSeconds?: number }) => Promise<void>;
 };
 
 /** Roles are a manager on a cached member and a raw array on an API payload. */
@@ -946,28 +983,45 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
   });
 
   client.on("interactionCreate", async interaction => {
-    if (!interaction.isChatInputCommand() || !interaction.guildId) return;
+    if (!interaction.guildId) return;
+
+    // Autocomplete arrives as its own interaction type, and Discord wants an
+    // answer within three seconds — so this is served from the caller's cached
+    // configuration and never reaches Discord.
+    if (interaction.isAutocomplete()) {
+      const focused = interaction.options.getFocused(true);
+      const choices = options.onAutocomplete
+        ? await options
+            .onAutocomplete({
+              guildId: interaction.guildId,
+              commandName: interaction.commandName,
+              focusedOption: focused.name,
+              focusedValue: String(focused.value ?? "")
+            })
+            .catch(() => [])
+        : [];
+      // Discord accepts at most 25 choices, and truncates silently beyond that.
+      await interaction.respond(choices.slice(0, 25)).catch(() => undefined);
+      return;
+    }
+
+    if (!interaction.isChatInputCommand()) return;
 
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
     const roleIds = roleIdsOf(interaction.member);
     const flags = memberFlagsOf(interaction);
 
+    if (!options.onCommand) return;
+
+    // `/al-status` used to be answered right here, before the configuration
+    // pipeline ran — which meant its switch, cooldown, scopes and preset reasons
+    // could not apply to it, and the dashboard could not honestly offer them.
+    // It is an ordinary command now and takes the same path as every other one;
+    // only the pipeline counter still needs its event.
     if (interaction.commandName === "al-status") {
       emit({ type: "interaction.status", guildId, userId, interactionId: interaction.id, roleIds });
-      // The handler's answer is the entire point of this command. Emitting the
-      // event and returning left Discord waiting until the interaction timed out,
-      // so the operator saw "the application did not respond" every time.
-      const content = options.onStatusCommand
-        ? await options
-            .onStatusCommand({ guildId, userId, roleIds, ...flags })
-            .catch(() => "تعذّر قراءة حالة AL AI حالياً.")
-        : "AL AI متصل.";
-      await interaction.reply({ content, ephemeral: true }).catch(() => undefined);
-      return;
     }
-
-    if (!options.onCommand) return;
 
     const target = interaction.options.getUser("user");
     // Read every integer option the interaction carries, whatever it is called,
@@ -990,9 +1044,18 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
       targetId: target?.id ?? interaction.options.getString("user_id") ?? null,
       numbers,
       reason: interaction.options.getString("reason") ?? "",
-      reply: async content => {
+      reply: async (content, replyOptions) => {
         // Ephemeral: a moderation reply is for the operator, not the channel.
         await interaction.reply({ content, ephemeral: true }).catch(() => undefined);
+        const seconds = replyOptions?.autoDeleteSeconds ?? 0;
+        if (seconds <= 0) return;
+        // Ephemeral replies are private to the caller, so removing one after a
+        // delay is a tidiness setting rather than a moderation action.
+        const timer = setTimeout(() => {
+          void interaction.deleteReply().catch(() => undefined);
+        }, seconds * 1000);
+        // Never hold the process open for a cosmetic cleanup.
+        timer.unref?.();
       }
     });
   });

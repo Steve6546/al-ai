@@ -2,6 +2,7 @@ import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { commandFlagsFor, defaultCommandConfig, requireCommand } from "@al-ai/core";
 import { createDatabase, createPool } from "../server/db.js";
 
 /**
@@ -181,4 +182,119 @@ test("the database refuses a limit of zero even if code lets one through", { ski
     pool!.query("INSERT INTO guild_security (guild_id, bans_per_minute) VALUES ($1, 0)", [GUILD_ID]),
     /guild_security_bans_check/
   );
+});
+
+/* ------------------------------------------------------------------ *
+ * Per-command configuration
+ *
+ * Every scope and switch on the Commands screen is stored here, and the CHECK
+ * constraints are what stop a value the bot cannot honour from being written at
+ * all. A pure unit test cannot prove that, because the guarantee lives in SQL.
+ * ------------------------------------------------------------------ */
+
+const commandDefaults = defaultCommandConfig(requireCommand("timeout"));
+
+test("a command with no stored row reads back as its registry defaults", { skip }, async () => {
+  await seedBotOwnedGuild();
+  await pool!.query("DELETE FROM guild_command_flags WHERE guild_id = $1", [GUILD_ID]);
+
+  const flags = await db!.getCommandFlags(GUILD_ID);
+  assert.equal(flags.size, 0, "nothing is stored until the operator changes something");
+  assert.deepEqual(commandFlagsFor(flags).find(command => command.name === "timeout"), {
+    ...commandDefaults,
+    category: "moderation",
+    description: "إسكات مؤقت",
+    minimumTier: "moderator",
+    target: "member",
+    supportsReason: true,
+    supportsPurge: true,
+    supportsNotify: true,
+    supportsDuration: true
+  });
+});
+
+test("every new command setting survives a round trip", { skip }, async () => {
+  await seedBotOwnedGuild();
+  await pool!.query("DELETE FROM guild_command_flags WHERE guild_id = $1", [GUILD_ID]);
+
+  const written = {
+    ...commandDefaults,
+    enabled: false,
+    allowedLevel: "admin" as const,
+    allowedRoleIds: ["111111111111111111"],
+    deniedRoleIds: ["222222222222222222"],
+    allowedChannelIds: ["333333333333333333"],
+    deniedChannelIds: ["444444444444444444"],
+    cooldownSeconds: 45,
+    autoDeleteResponseSeconds: 20,
+    requireReason: true,
+    defaultDuration: "6h" as const,
+    presetReasons: [
+      { id: "spam", label: "سبام", duration: "30m" as const },
+      { id: "ad", label: "إعلان", duration: null }
+    ]
+  };
+  await db!.saveCommandFlag(GUILD_ID, written);
+
+  const read = await db!.getCommandFlags(GUILD_ID);
+  const stored = commandFlagsFor(read).find(command => command.name === "timeout")!;
+
+  for (const [key, value] of Object.entries(written)) {
+    assert.deepEqual(stored[key as keyof typeof stored], value, `${key} survived the round trip`);
+  }
+});
+
+test("saving a command twice updates rather than duplicating", { skip }, async () => {
+  await seedBotOwnedGuild();
+  await pool!.query("DELETE FROM guild_command_flags WHERE guild_id = $1", [GUILD_ID]);
+
+  await db!.saveCommandFlag(GUILD_ID, commandDefaults);
+  await db!.saveCommandFlag(GUILD_ID, { ...commandDefaults, cooldownSeconds: 90 });
+
+  const { rows } = await pool!.query<{ count: string }>(
+    "SELECT count(*)::text AS count FROM guild_command_flags WHERE guild_id = $1",
+    [GUILD_ID]
+  );
+  assert.equal(rows[0]?.count, "1");
+  assert.equal((await db!.getCommandFlags(GUILD_ID)).get("timeout")?.cooldownSeconds, 90);
+});
+
+test("the database refuses a cooldown the code would never send", { skip }, async () => {
+  // The code clamps to an hour; the constraint is what makes that a guarantee
+  // rather than a habit. 4000 fits the column's own type, so this proves the
+  // CHECK is doing the refusing rather than an overflow.
+  await seedBotOwnedGuild();
+  await assert.rejects(
+    pool!.query("INSERT INTO guild_command_flags (guild_id, command, cooldown_seconds) VALUES ($1, 'ban', 4000)", [GUILD_ID]),
+    /guild_command_flags_cooldown_check/
+  );
+});
+
+test("the database refuses a duration the bot could not resolve", { skip }, async () => {
+  await seedBotOwnedGuild();
+  await assert.rejects(
+    pool!.query("INSERT INTO guild_command_flags (guild_id, command, default_duration) VALUES ($1, 'ban', 'forever')", [GUILD_ID]),
+    /guild_command_flags_duration_check/
+  );
+});
+
+test("the database refuses an auto-delete delay beyond the code's ceiling", { skip }, async () => {
+  await seedBotOwnedGuild();
+  await assert.rejects(
+    pool!.query(
+      "INSERT INTO guild_command_flags (guild_id, command, auto_delete_response_seconds) VALUES ($1, 'ban', 700)",
+      [GUILD_ID]
+    ),
+    /guild_command_flags_auto_delete_check/
+  );
+});
+
+test("the legacy allow-list column is gone, so one concept has one column", { skip }, async () => {
+  // Two columns meaning "roles allowed to run this command" is how the two sides
+  // of the database drift apart. The migration renames the old one; this asserts
+  // the rename actually happened rather than the new column being bolted on.
+  const { rows } = await pool!.query<{ column_name: string }>(
+    "SELECT column_name FROM information_schema.columns WHERE table_name = 'guild_command_flags' AND column_name IN ('custom_role_ids', 'allowed_role_ids')"
+  );
+  assert.deepEqual(rows.map(row => row.column_name), ["allowed_role_ids"]);
 });

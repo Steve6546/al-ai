@@ -12,7 +12,9 @@ import {
   assessRoleIconGate,
   BOT_HEARTBEAT_STALE_MS,
   commandFlagsFor,
-  commandModules,
+  commandCategories,
+  commandCategoryDescriptions,
+  commandCategoryLabels,
   decryptSecret,
   DEFAULT_EMBED_COLOR,
   DEFAULT_LOGGING_MODE,
@@ -36,6 +38,7 @@ import {
   widgetOnlineNote,
   type ActivityEntry,
   type AntiNukeConfig,
+  type ChannelOption,
   type CommandConfig,
   type CustomizationSettings,
   type GuildMetrics,
@@ -65,13 +68,16 @@ import {
   fetchUserGuilds,
   fetchWidgetPresence,
   invalidateBotGuildCache,
+  invalidateGuildReadCache,
   isAuthFailure,
   isRateLimited,
   USER_PERMISSIONS,
   userAvatarUrl,
   hasPermission,
-  type DiscordApiError
+  type DiscordApiError,
+  type DiscordRole
 } from "./discord.js";
+import { clientKey, RequestThrottle } from "./cache.js";
 import { describeGuildAccess, isAdministrable } from "./guild-access.js";
 
 const env = loadEnv();
@@ -79,6 +85,46 @@ const pool = createPool(env.databaseUrl);
 const db = createDatabase(pool);
 
 const app = Fastify({ logger: true, trustProxy: true });
+
+/* ------------------------------------------------------------------ *
+ * Request throttle
+ *
+ * A ceiling on how fast one client may hit the API, so a flood cannot consume
+ * the Discord budget AL AI needs for its own reads — a 429 from Discord is what
+ * makes the dashboard look broken, and the operator has no way to see why.
+ *
+ * The rule that matters most: **a signed-in session is never throttled.** The
+ * operator must not be locked out of their own dashboard by a protection meant
+ * for strangers. Requests carrying a session cookie are exempt, and that is not
+ * a loophole: the cookie is verified against the database by `requireSession`
+ * before any route reaches Discord, so a forged one buys a 401, not a free ride.
+ *
+ * `/internal/` is exempt for the same reason from the other side — it is the
+ * bot's own signed heartbeat, arriving every 30 seconds from loopback.
+ * ------------------------------------------------------------------ */
+const API_THROTTLE_WINDOW_MS = 60_000;
+const API_THROTTLE_MAX = 120;
+const throttle = new RequestThrottle(API_THROTTLE_WINDOW_MS, API_THROTTLE_MAX);
+
+app.addHook("onRequest", async (request, reply) => {
+  const url = request.url;
+  // Static assets are not throttled: a single page load legitimately fetches a
+  // handful of them, and none of them touch Discord.
+  if (!url.startsWith("/api/") && !url.startsWith("/auth/")) return;
+  if (url.startsWith("/internal/")) return;
+  if (typeof request.headers.cookie === "string" && request.headers.cookie.includes(`${SESSION_COOKIE_NAME}=`)) return;
+
+  const verdict = throttle.check(clientKey(request.headers as Record<string, unknown>, request.ip), Date.now());
+  if (verdict.allowed) return;
+
+  return reply
+    .code(429)
+    .header("retry-after", String(verdict.retryAfterSeconds))
+    .send({
+      error: "TOO_MANY_REQUESTS",
+      message: `عدد كبير من الطلبات. أعد المحاولة بعد ${verdict.retryAfterSeconds} ثانية.`
+    });
+});
 
 /* ------------------------------------------------------------------ *
  * Helpers
@@ -629,17 +675,43 @@ function normaliseSnowflake(value: unknown): string | null {
 }
 
 /* ------------------------------------------------------------------ *
- * General commands
+ * Commands
+ *
+ * One read feeds the whole screen: the registry joined to this guild's stored
+ * configuration, plus the two Discord lists the scopes are chosen from. The
+ * roles and channels come from the memoised reads in `discord.ts`, so opening
+ * the screen repeatedly — or alongside the tier screen — costs no Discord calls
+ * at all inside the TTL.
  * ------------------------------------------------------------------ */
 app.get("/api/guilds/:guildId/commands", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
   const context = await requireGuildAccess(request, reply, guildId);
   if (!context) return;
+
   const configured = await db.getCommandFlags(guildId);
+
+  // Both lists are advisory: a Discord outage must not stop the operator from
+  // seeing and editing the switches, which live entirely in our own database.
+  const [roles, channels] = env.botToken
+    ? await Promise.all([
+        fetchGuildRoles(env.botToken, guildId).catch(() => []),
+        fetchGuildChannels(env.botToken, guildId).catch(() => [])
+      ])
+    : [[] as DiscordRole[], [] as ChannelOption[]];
+
   // `commandFlagsFor` joins the registry to what the guild stored and fills
   // every gap with the shipped default, so the dashboard shows exactly what the
   // bot will do — including for a command nobody has ever touched.
-  return { modules: commandModules, commands: commandFlagsFor(configured) };
+  return {
+    categories: commandCategories.map(category => ({
+      id: category,
+      label: commandCategoryLabels[category],
+      description: commandCategoryDescriptions[category]
+    })),
+    commands: commandFlagsFor(configured),
+    roles,
+    channels
+  };
 });
 
 /**
@@ -909,6 +981,12 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
 
   const settings: CustomizationSettings = { nickname, roleColor, roleIconUrl };
   await db.saveCustomization(guildId, settings);
+
+  // AL AI's own role just changed colour, icon or name, so the memoised role
+  // list every picker reads is now stale. Dropping it here is what makes the
+  // tier and command screens show the new colour instead of waiting out the TTL.
+  invalidateGuildReadCache(guildId);
+
   await appendAudit(db, env, {
     guildId,
     severity: "warning",
@@ -1061,6 +1139,9 @@ app.setNotFoundHandler((request, reply) => {
  * ------------------------------------------------------------------ */
 const housekeeping = setInterval(async () => {
   try {
+    // Keys with nothing left in the window are dropped, so the throttle cannot
+    // grow one entry per address that has ever called the dashboard.
+    throttle.sweep(Date.now());
     const sessions = await db.purgeExpiredSessions();
     const nonces = await db.purgeExpiredNonces();
     if (sessions || nonces) app.log.info(`Purged ${sessions} expired sessions and ${nonces} expired nonces.`);

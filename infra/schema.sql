@@ -182,7 +182,7 @@ DELETE FROM guild_log_channels WHERE destination = 'role-log';
 ALTER TABLE guild_log_channels ADD CONSTRAINT guild_log_channels_destination_check
   CHECK (destination IN ('member-log','moderation-log','voice-log','message-log','server-log'));
 
--- Per-command configuration for the dashboard's General Commands section.
+-- Per-command configuration for the dashboard's Commands screen.
 CREATE TABLE IF NOT EXISTS guild_command_flags (
   guild_id TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
   command TEXT NOT NULL,
@@ -194,15 +194,94 @@ CREATE TABLE IF NOT EXISTS guild_command_flags (
   dm_on_action BOOLEAN NOT NULL DEFAULT false,
   -- Days of the target's recent messages to remove alongside the action. 0–7.
   delete_message_days SMALLINT NOT NULL DEFAULT 0,
-  -- Extra roles allowed to run this command, beyond the tier mapping.
-  custom_role_ids JSONB NOT NULL DEFAULT '[]',
+  -- Roles allowed to run this command, beyond the tier mapping.
+  allowed_role_ids JSONB NOT NULL DEFAULT '[]',
+  -- Roles barred from this command even when their tier would allow it. A deny
+  -- always beats an allow, which is the only way to carve an exception out of a
+  -- broad tier without splitting the tier in two.
+  denied_role_ids JSONB NOT NULL DEFAULT '[]',
+  -- When allowed_channel_ids is non-empty the command runs only in those
+  -- channels; denied_channel_ids is checked first and always wins.
+  allowed_channel_ids JSONB NOT NULL DEFAULT '[]',
+  denied_channel_ids JSONB NOT NULL DEFAULT '[]',
+  -- Seconds a member must wait between two runs of this command. 0 = no wait.
+  cooldown_seconds SMALLINT NOT NULL DEFAULT 0,
+  -- Seconds before the bot removes its own reply. 0 = keep it. Only the reply is
+  -- affected: a slash command leaves no command message for AL AI to delete.
+  auto_delete_response_seconds SMALLINT NOT NULL DEFAULT 0,
+  -- A reason is mandatory for this guild, overriding the registry's default.
+  require_reason BOOLEAN NOT NULL DEFAULT false,
+  -- The duration applied when the operator supplies none. Only meaningful for a
+  -- command that consumes one (Discord's timeout); forced back to 'permanent'
+  -- by the shared normaliser for every other command.
+  default_duration TEXT NOT NULL DEFAULT 'permanent',
+  -- Ready-made reasons offered in Discord, as [{ id, label, duration }].
+  preset_reasons JSONB NOT NULL DEFAULT '[]',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (guild_id, command)
 );
--- Idempotent upgrade for databases created before the per-command config object.
+-- `custom_role_ids` and `allowed_role_ids` are the same concept, and keeping
+-- both would leave two columns meaning "roles allowed to run this command" —
+-- exactly the drift this schema avoids elsewhere. PostgreSQL has no
+-- `RENAME COLUMN IF EXISTS`, so the rename is guarded by a catalog check.
+--
+-- ORDER MATTERS: this runs BEFORE the `ADD COLUMN` block below. The other way
+-- round the new column already exists by the time the guard is evaluated, the
+-- rename is skipped, and every operator's allow-list is stranded in an orphaned
+-- column that nothing reads.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'guild_command_flags'
+      AND column_name = 'custom_role_ids'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'guild_command_flags'
+      AND column_name = 'allowed_role_ids'
+  ) THEN
+    ALTER TABLE guild_command_flags RENAME COLUMN custom_role_ids TO allowed_role_ids;
+  END IF;
+END $$;
+
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS dm_on_action BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS delete_message_days SMALLINT NOT NULL DEFAULT 0;
-ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS custom_role_ids JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS allowed_role_ids JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS denied_role_ids JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS allowed_channel_ids JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS denied_channel_ids JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS cooldown_seconds SMALLINT NOT NULL DEFAULT 0;
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS auto_delete_response_seconds SMALLINT NOT NULL DEFAULT 0;
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS require_reason BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS default_duration TEXT NOT NULL DEFAULT 'permanent';
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS preset_reasons JSONB NOT NULL DEFAULT '[]';
+
+-- A database that ran an earlier build of this migration holds both columns.
+-- Carry the values across before dropping the orphan, so the allow-list survives
+-- the upgrade instead of being silently discarded.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'guild_command_flags'
+      AND column_name = 'custom_role_ids'
+  ) AND EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'guild_command_flags'
+      AND column_name = 'allowed_role_ids'
+  ) THEN
+    UPDATE guild_command_flags
+       SET allowed_role_ids = custom_role_ids
+     WHERE allowed_role_ids = '[]'::jsonb
+       AND custom_role_ids <> '[]'::jsonb;
+    ALTER TABLE guild_command_flags DROP COLUMN custom_role_ids;
+  END IF;
+END $$;
+
 -- Discord accepts 0–7 days; anything outside that would be silently clamped by
 -- the API, so it is refused here instead.
 ALTER TABLE guild_command_flags DROP CONSTRAINT IF EXISTS guild_command_flags_purge_days_check;
@@ -211,6 +290,20 @@ ALTER TABLE guild_command_flags ADD CONSTRAINT guild_command_flags_purge_days_ch
 ALTER TABLE guild_command_flags DROP CONSTRAINT IF EXISTS guild_command_flags_tier_check;
 ALTER TABLE guild_command_flags ADD CONSTRAINT guild_command_flags_tier_check
   CHECK (minimum_tier IN ('owner','admin','moderator'));
+-- The bounds mirror MAX_COOLDOWN_SECONDS and MAX_AUTO_DELETE_SECONDS in
+-- packages/core/src/command-registry.ts. A stored value outside them would mean
+-- the two sides disagree, so it cannot be written at all.
+ALTER TABLE guild_command_flags DROP CONSTRAINT IF EXISTS guild_command_flags_cooldown_check;
+ALTER TABLE guild_command_flags ADD CONSTRAINT guild_command_flags_cooldown_check
+  CHECK (cooldown_seconds >= 0 AND cooldown_seconds <= 3600);
+ALTER TABLE guild_command_flags DROP CONSTRAINT IF EXISTS guild_command_flags_auto_delete_check;
+ALTER TABLE guild_command_flags ADD CONSTRAINT guild_command_flags_auto_delete_check
+  CHECK (auto_delete_response_seconds >= 0 AND auto_delete_response_seconds <= 600);
+-- The list mirrors `commandDurations` in core. A value the bot cannot resolve
+-- would silently fall back to "permanent" at runtime, so it is refused here.
+ALTER TABLE guild_command_flags DROP CONSTRAINT IF EXISTS guild_command_flags_duration_check;
+ALTER TABLE guild_command_flags ADD CONSTRAINT guild_command_flags_duration_check
+  CHECK (default_duration IN ('permanent','5m','30m','1h','6h','12h','1d','3d','7d','14d','30d'));
 
 -- `/mute` is retired: a native timeout silences a member everywhere, including
 -- voice, and expires on its own. Any stored switch for it is removed so the

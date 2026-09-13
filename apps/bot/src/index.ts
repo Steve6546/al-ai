@@ -18,7 +18,17 @@ import {
   sendLogEmbedToWebhook,
   type LogEnvelope
 } from "./lib/discord.js";
-import { EMPTY_TIER_ROLES, normaliseCommandConfig, requireCommand, type CommandConfig } from "@al-ai/core";
+import {
+  assessCommandScope,
+  commandDurationSeconds,
+  CommandCooldowns,
+  cooldownKey,
+  EMPTY_TIER_ROLES,
+  normaliseCommandConfig,
+  requireCommand,
+  scopeReasonMessages,
+  type CommandConfig
+} from "@al-ai/core";
 import { checkHierarchy, hierarchyMessages } from "./permissions/permission-guard.js";
 import { createBotDatabase } from "./storage/database.js";
 import { ConfigCache } from "./storage/config-cache.js";
@@ -251,24 +261,50 @@ function channelSuccessMessages(commandName: string, removed: number | undefined
   return seconds === 0 ? "تم إيقاف الوضع البطيء." : `تم ضبط الوضع البطيء على ${seconds} ثانية.`;
 }
 
+/**
+ * Per-command cooldowns, keyed by guild, command and member.
+ *
+ * In memory on purpose: a cooldown guards against spam, not against an attacker,
+ * and losing it on restart costs nothing. Persisting it would add a write on
+ * every command for a rule that lasts seconds.
+ */
+const commandCooldowns = new CommandCooldowns();
+
+/** A preset reason's duration applies only when the operator gave no duration. */
+function presetDurationFor(config: CommandConfig, reason: string) {
+  const preset = config.presetReasons.find(entry => entry.label === reason);
+  return preset?.duration ?? null;
+}
+
 bindEvents(client, guardedDispatch, {
   messageCache,
-  onStatusCommand: async ({ guildId, roleIds, isGuildOwner, isAdministrator }) => {
-    // No mapping saved is no longer a lockout: the owner tier is automatic, so
-    // the guild owner and Administrators resolve even on a fresh guild.
-    const tiers = (await database.loadTierRoles(guildId)) ?? EMPTY_TIER_ROLES;
-    const outcome = check(roleCarrierOf(roleIds, { isGuildOwner, isAdministrator }), tiers, "moderator");
 
-    // GOVERNANCE rule 12: a failed attempt is the signal, so it is reported even
-    // though the user only ever sees a generic reply.
-    if (!outcome.allowed) {
-      const signal = detector.authorizationFailure({ guildId, actorId: roleIds[0] ?? "unknown", action: "al-status", reason: outcome.reason });
-      await raiseSecurityEvent(signal.id, signal.data, guildId);
-      return "AL AI متصل. لا تملك رتبة AL AI تسمح بعرض التفاصيل.";
+  /**
+   * Serves the operator's ready-made reasons to Discord's autocomplete.
+   *
+   * Read from the cached configuration, never from Discord: an autocomplete
+   * interaction has to be answered within three seconds or Discord shows the
+   * operator an error, and a round trip to fetch a role list would not fit.
+   */
+  onAutocomplete: async ({ guildId, commandName, focusedOption, focusedValue }) => {
+    if (focusedOption !== "reason") return [];
+    let definition;
+    try {
+      definition = requireCommand(commandName);
+    } catch {
+      return [];
     }
-
-    const stats = pipeline.stats();
-    return `AL AI متصل. رتبتك: ${outcome.tier}. أحداث آخر دقيقة: ${stats.eventsLastMinute}/${stats.ceiling}.`;
+    const configured = await database.loadCommandFlags(guildId).catch(() => new Map());
+    const config = normaliseCommandConfig(definition, configured.get(commandName));
+    const needle = focusedValue.trim().toLowerCase();
+    return config.presetReasons
+      .filter(preset => !needle || preset.label.toLowerCase().includes(needle))
+      .map(preset => ({
+        // Discord echoes the value back as the option's text, so it is the label
+        // the operator sees and the string the handler matches a duration on.
+        name: preset.duration ? `${preset.label} — ${preset.duration}` : preset.label,
+        value: preset.label
+      }));
   },
 
   /**
@@ -301,13 +337,17 @@ bindEvents(client, guardedDispatch, {
       const signal = detector.authorizationFailure({ guildId, actorId: userId, action: commandName, reason: detail });
       await raiseSecurityEvent(signal.id, signal.data, guildId);
       await logEvent("bot.command-failure", { guildId, actorId: userId, data: { command: commandName, reason: detail } }, runtime).catch(() => undefined);
-      await reply(message);
+      await reply(message, { autoDeleteSeconds });
     };
 
     const succeed = async (message: string) => {
       await logEvent("bot.command-success", { guildId, actorId: userId, data: { command: commandName } }, runtime).catch(() => undefined);
-      await reply(message);
+      await reply(message, { autoDeleteSeconds });
     };
+
+    // Raised as soon as the guild's configuration is known, so every reply —
+    // including the refusals — honours the operator's tidiness setting.
+    let autoDeleteSeconds = 0;
 
     // 1. The command must exist in the registry.
     let definition;
@@ -329,20 +369,61 @@ bindEvents(client, guardedDispatch, {
       return;
     }
 
+    // Every reply from here on honours the operator's tidiness setting.
+    autoDeleteSeconds = config.autoDeleteResponseSeconds;
+
     // 3. The actor must hold a tier that outranks the command's requirement, or
     //    one of the roles the operator attached to this specific command.
     //    An unmapped guild is not a lockout: the owner tier is automatic.
     const tiers = (await database.loadTierRoles(guildId)) ?? EMPTY_TIER_ROLES;
     const outcome = check(roleCarrierOf(roleIds, { isGuildOwner, isAdministrator }), tiers, config.allowedLevel);
-    const viaCustomRole = roleIds.some(id => config.customRoleIds.includes(id));
-    if (!outcome.allowed && !viaCustomRole) {
+    const viaAllowedRole = roleIds.some(id => config.allowedRoleIds.includes(id));
+    if (!outcome.allowed && !viaAllowedRole) {
       await reject("صلاحيتك لا تسمح بهذا الإجراء.", outcome.reason);
       return;
     }
 
+    // 4. The role and channel scopes, applied after the tier check so a member
+    //    without standing is told that, rather than being handed a hint about
+    //    which channels the command is restricted to.
+    const scope = assessCommandScope(config, { roleIds, channelId });
+    if (!scope.allowed) {
+      await reject(scopeReasonMessages[scope.reason], scope.reason);
+      return;
+    }
+
+    // 5. Cooldown. A plain refusal rather than an authorization signal: waiting
+    //    out a cooldown is impatience, and reporting it as a security event would
+    //    let an impatient moderator look like an intruder.
+    const wait = commandCooldowns.remainingSeconds(cooldownKey(guildId, commandName, userId), Date.now());
+    if (wait > 0) {
+      await logEvent("bot.command-failure", { guildId, actorId: userId, data: { command: commandName, reason: "COOLDOWN" } }, runtime).catch(() => undefined);
+      await reply(`انتظر ${wait} ثانية قبل استخدام هذا الأمر مجدداً.`, { autoDeleteSeconds });
+      return;
+    }
+    if (config.cooldownSeconds > 0) commandCooldowns.start(cooldownKey(guildId, commandName, userId), config.cooldownSeconds, Date.now());
+
     const trimmedReason = reason.trim();
-    if (definition.requiresReason && !trimmedReason) {
+    // The requirement is the guild's setting, not the registry's shipped default:
+    // the option is never marked required at Discord's end, so this is the only
+    // place that decides — and the only way the switch can be turned off again.
+    if (config.requireReason && !trimmedReason) {
       await reject("هذا الأمر يتطلب سبباً.", "MISSING_REASON");
+      return;
+    }
+
+    /* ---------------- Informational ---------------- */
+    // `/al-status` changes nothing, so it is answered here rather than through
+    // the success log: recording a read-only check as a command success would
+    // fill the operator's moderation log with noise.
+    if (commandName === "al-status") {
+      const stats = pipeline.stats();
+      // A member who got in through an allowed role rather than a tier has no
+      // tier to name, and reporting one would be a rank they do not hold.
+      const tierLabel = outcome.allowed ? outcome.tier : "رتبة مخصّصة";
+      await reply(`AL AI متصل. رتبتك: ${tierLabel}. أحداث آخر دقيقة: ${stats.eventsLastMinute}/${stats.ceiling}.`, {
+        autoDeleteSeconds
+      });
       return;
     }
 
@@ -439,13 +520,34 @@ bindEvents(client, guardedDispatch, {
       return;
     }
 
-    // 5. Apply the Discord mutation. The gateway logs it; we only report back.
+    // 6. Where a duration is not given, the guild's default applies — and a
+    //    preset reason carries its own length, which is the more specific
+    //    instruction. A permanent fallback is not a duration: Discord has no
+    //    permanent timeout, so it is refused with an explanation rather than
+    //    silently turned into a minute.
+    let timeoutMinutes: number | undefined;
+    if (commandName === "timeout") {
+      if (numbers.minutes !== undefined) {
+        timeoutMinutes = numbers.minutes;
+      } else {
+        const chosen = presetDurationFor(config, trimmedReason) ?? config.defaultDuration;
+        const seconds = commandDurationSeconds(definition, chosen);
+        if (seconds === null) {
+          await reject("حدّد مدة الإسكات بالدقائق، أو اضبط مدة افتراضية لهذا الأمر.", "MISSING_DURATION");
+          return;
+        }
+        // Discord takes whole minutes; anything shorter is still a minute.
+        timeoutMinutes = Math.max(1, Math.round(seconds / 60));
+      }
+    }
+
+    // 7. Apply the Discord mutation. The gateway logs it; we only report back.
     const applied = await applyModeration(client, {
       kind: commandName as "ban" | "unban" | "kick" | "timeout",
       guildId,
       targetId,
       reason: trimmedReason,
-      ...(commandName === "timeout" ? { minutes: numbers.minutes ?? 1 } : {}),
+      ...(timeoutMinutes !== undefined ? { minutes: timeoutMinutes } : {}),
       // `deleteMessageDays` is the operator's purge setting, converted to the
       // seconds Discord actually accepts. Ignored for commands without purge.
       ...(config.deleteMessageDays > 0 && commandName !== "kick" && commandName !== "unban"

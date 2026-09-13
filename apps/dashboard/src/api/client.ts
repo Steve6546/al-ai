@@ -3,9 +3,11 @@ import type {
   AntiNukeSettings,
   AuditEntry,
   ChannelOption,
+  CommandCategory,
   CommandConfig,
   CommandFlag,
   CustomizationSettings,
+  DiscordRole,
   Guild,
   GuildMetrics,
   HealthSnapshot,
@@ -100,7 +102,14 @@ export const saveTiers = (guildId: string, values: TierRoles) =>
  * Settings: commands
  * ------------------------------------------------------------------ */
 export const commands = (guildId: string) =>
-  call<{ modules: string[]; commands: CommandFlag[] }>(`/api/guilds/${guildId}/commands`);
+  call<{
+    /** The sections the screen groups commands into, in render order. */
+    categories: { id: CommandCategory; label: string; description: string }[];
+    commands: CommandFlag[];
+    /** Scopes are chosen from these. Read once, alongside the commands. */
+    roles: DiscordRole[];
+    channels: ChannelOption[];
+  }>(`/api/guilds/${guildId}/commands`);
 
 /**
  * One entry per changed command. Unchanged commands are not sent at all, and
