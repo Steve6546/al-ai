@@ -11,6 +11,7 @@ import {
   ExternalLink,
   FileClock,
   LayoutDashboard,
+  LayoutGrid,
   LogOut,
   Menu,
   Palette,
@@ -47,6 +48,28 @@ import { tierLabels, type Guild, type HealthSnapshot, type SessionInfo } from "@
  */
 
 export type ViewKey = "dashboard" | "commands" | "customization" | "roles" | "logs" | "audit" | "security";
+
+/**
+ * Every view key, in one place.
+ *
+ * The router accepts a view straight from the address bar, so it needs a way to
+ * tell a real screen from a typo. Deriving the list from the navigation below
+ * would be circular — the navigation needs the type, and this needs the values —
+ * so the values are stated once here and a test asserts they match the nav.
+ */
+export const viewKeys: readonly ViewKey[] = [
+  "dashboard",
+  "commands",
+  "customization",
+  "roles",
+  "logs",
+  "audit",
+  "security"
+] as const;
+
+export function isViewKey(value: unknown): value is ViewKey {
+  return typeof value === "string" && (viewKeys as readonly string[]).includes(value);
+}
 
 type NavItem = {
   key: ViewKey;
@@ -106,6 +129,8 @@ type ShellProps = {
   guild: Guild;
   selectedGuildId: string | null;
   onSelectGuild: (guildId: string) => void;
+  /** Returns to the guild selector. */
+  onBrowseAll: () => void;
   view: ViewKey;
   onView: (view: ViewKey) => void;
   health: HealthSnapshot | null;
@@ -121,6 +146,7 @@ export function AppShell({
   guild,
   selectedGuildId,
   onSelectGuild,
+  onBrowseAll,
   view,
   onView,
   health,
@@ -173,6 +199,7 @@ export function AppShell({
           guild={guild}
           selectedGuildId={selectedGuildId}
           onSelectGuild={onSelectGuild}
+          onBrowseAll={onBrowseAll}
           inviteUrl={inviteUrl}
         />
         <ScrollArea className="flex-1">{nav}</ScrollArea>
@@ -263,12 +290,14 @@ function GuildSwitcher({
   guild,
   selectedGuildId,
   onSelectGuild,
+  onBrowseAll,
   inviteUrl
 }: {
   guilds: Guild[];
   guild: Guild;
   selectedGuildId: string | null;
   onSelectGuild: (guildId: string) => void;
+  onBrowseAll: () => void;
   inviteUrl: string;
 }) {
   return (
@@ -287,6 +316,8 @@ function GuildSwitcher({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-64">
+          {/* Only guilds the bot is in are switchable here: the others have
+              nothing to show yet, and the selector is where they are invited. */}
           <DropdownMenuLabel>السيرفرات</DropdownMenuLabel>
           {guilds.map(item => (
             <DropdownMenuItem key={item.id} onSelect={() => onSelectGuild(item.id)} className="gap-2">
@@ -299,6 +330,10 @@ function GuildSwitcher({
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={onBrowseAll} className="gap-2">
+            <LayoutGrid className="size-4" />
+            كل السيرفرات
+          </DropdownMenuItem>
           <DropdownMenuItem asChild>
             <a href={inviteUrl} className="gap-2">
               <CirclePlus className="size-4" />

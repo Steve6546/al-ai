@@ -119,9 +119,11 @@ const NO_ROLE = "__none__";
 /**
  * The anti-nuke engine's settings.
  *
- * Every limit is a count of one action inside a minute. The engine ships
- * disarmed and says so plainly: mitigation strips a moderator's roles, and that
- * has to be the owner's decision rather than a default nobody read.
+ * Every limit is a count of one action inside a minute. The engine now ships
+ * armed, so a guild is protected from the moment AL AI joins it and this screen
+ * exists to tune the thresholds or to switch protection off deliberately. The
+ * banner below therefore only appears in the one case worth warning about: an
+ * operator has turned it off.
  */
 function AntiNukePanel({ guild }: { guild: Guild }) {
   const [loaded, setLoaded] = useState<AntiNukeSettings | null>(null);
@@ -203,7 +205,8 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
           <Alert>
             <ShieldOff />
             <AlertDescription>
-              المحرّك مبني وجاهز لكنه متوقف. لن يُحتوى أي عضو حتى تفعّله — لأن الاحتواء يسحب رتب المشرف، وهذا قرارك أنت.
+              الحماية متوقفة. لن يُرصد أي تخريب ولن يُحتوى أي عضو حتى تعيد التفعيل — التفعيل هو الوضع الافتراضي، فإيقافه
+              قرار واعٍ.
             </AlertDescription>
           </Alert>
         )}

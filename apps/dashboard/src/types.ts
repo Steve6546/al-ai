@@ -55,15 +55,24 @@ export type Guild = {
   name: string;
   /** Resolved on the server: the browser never builds a Discord CDN URL itself. */
   iconUrl: string | null;
-  memberCount: number;
+  /**
+   * Real member count, or `null` when it is not knowable.
+   *
+   * Only the bot can count members, so a guild it has not joined has no count —
+   * and showing `0` there would be a number the dashboard invented. The selector
+   * renders `null` as "غير محدد" rather than as a server with nobody in it.
+   */
+  memberCount: number | null;
   tier: Tier | null;
   botPresent: boolean;
+  /** The caller holds ADMINISTRATOR or MANAGE_GUILD in Discord. */
+  canManage: boolean;
   canManageIdentity: boolean;
   canManageLogging: boolean;
   canManageCommands: boolean;
   /** Owner-only: binding tiers decides who can do everything else. */
   canManageTiers: boolean;
-  canInvite?: boolean;
+  canInvite: boolean;
 };
 
 export type AuditEntry = {

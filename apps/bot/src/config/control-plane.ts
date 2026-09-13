@@ -14,11 +14,11 @@ export const CONFIG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".
 export type ControlPlane = {
   schemaVersion: number;
   instance: { name: string; sourceLayer: string };
-  intents: { warnAt: number; limit: number; renewalDays: number; renewedAt: string | null; _todo?: string };
-  retention: { auditDays: number | null; logDays: number | null; _todo?: string };
-  encryption: { keyRotationDays: number | null; _todo?: string };
+  intents: { warnAt: number; limit: number; renewalDays: number; renewedAt: string | null; _note?: string; _todo?: string };
+  retention: { auditDays: number | null; logDays: number | null; _note?: string; _todo?: string };
+  encryption: { keyRotationDays: number | null; _note?: string; _todo?: string };
   gateway: { ceilingPerMinute: number; voiceDebounceMs: number };
-  commands: { deployment: string; _todo?: string };
+  commands: { deployment: string; _note?: string; _todo?: string };
 };
 
 export type ChannelDeclaration = {
@@ -77,7 +77,10 @@ export function assertChannelsMatchSchema(declaration = loadChannelDeclaration()
 }
 
 /**
- * Values the owner must still decide. Empty in development, fatal in production.
+ * Values the owner must still decide. All four were settled for this instance,
+ * so this returns `[]` today — it stays as the guard rather than being deleted,
+ * because the moment someone adds a field as `null` a production boot must fail
+ * loudly instead of quietly inventing a policy. Development only warns.
  */
 export function undecidedSettings(plane = loadControlPlane()): string[] {
   const undecided: string[] = [];

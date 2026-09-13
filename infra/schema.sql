@@ -237,7 +237,12 @@ CREATE INDEX IF NOT EXISTS guild_warnings_guild_user_idx ON guild_warnings (guil
 -- behaves exactly like one that saved the defaults.
 CREATE TABLE IF NOT EXISTS guild_security (
   guild_id TEXT PRIMARY KEY REFERENCES guilds(id) ON DELETE CASCADE,
-  enabled BOOLEAN NOT NULL DEFAULT false,
+  -- Armed by default: a guild is protected from the moment AL AI joins, and the
+  -- operator disarms it deliberately if they want to. The column default only
+  -- governs rows created from now on, so an existing row that was written while
+  -- the engine shipped disarmed keeps its value until the operator changes it —
+  -- this file must not silently re-arm a protection somebody switched off.
+  enabled BOOLEAN NOT NULL DEFAULT true,
   channel_deletes_per_minute SMALLINT NOT NULL DEFAULT 3,
   bans_per_minute SMALLINT NOT NULL DEFAULT 5,
   role_changes_per_minute SMALLINT NOT NULL DEFAULT 3,
@@ -250,6 +255,12 @@ CREATE TABLE IF NOT EXISTS guild_security (
   CONSTRAINT guild_security_bans_check CHECK (bans_per_minute BETWEEN 1 AND 100),
   CONSTRAINT guild_security_role_changes_check CHECK (role_changes_per_minute BETWEEN 1 AND 100)
 );
+
+-- `CREATE TABLE IF NOT EXISTS` leaves an existing column's default alone, so the
+-- flip to armed has to be stated again for databases created before it. Changing
+-- a default never rewrites rows, which is what keeps this safe to re-run: a guild
+-- that has explicitly disarmed the engine stays disarmed.
+ALTER TABLE guild_security ALTER COLUMN enabled SET DEFAULT true;
 
 -- Bot tokens are retired (GOVERNANCE rule 19). AL AI runs on exactly one master
 -- token held in the server environment; the dashboard never accepts a credential

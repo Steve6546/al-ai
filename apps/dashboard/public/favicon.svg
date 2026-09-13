@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AL AI">
+  <!-- AL AI mark: a shield whose face is the bot. Legible down to 16px, so the
+       silhouette and the two eyes are the only detail that survives scaling. -->
+  <defs>
+    <linearGradient id="alai-shield" x1="0" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#818cf8" />
+      <stop offset="0.55" stop-color="#4f46e5" />
+      <stop offset="1" stop-color="#1d4ed8" />
+    </linearGradient>
+  </defs>
+
+  <rect width="64" height="64" rx="14" fill="#0b1020" />
+
+  <!-- Antenna: the one stroke that says "bot" rather than "security badge". -->
+  <path d="M32 13.5V9" stroke="#818cf8" stroke-width="2.6" stroke-linecap="round" />
+  <circle cx="32" cy="7" r="2.8" fill="#a5b4fc" />
+
+  <!-- Shield body -->
+  <path
+    d="M32 12.5 49.5 19v13.4c0 10.9-7.2 20.2-17.5 25.6-10.3-5.4-17.5-14.7-17.5-25.6V19z"
+    fill="url(#alai-shield)"
+  />
+
+  <!-- Eyes -->
+  <circle cx="25.2" cy="30.5" r="3.9" fill="#f8fafc" />
+  <circle cx="38.8" cy="30.5" r="3.9" fill="#f8fafc" />
+
+  <!-- Mouth -->
+  <rect x="26.4" y="39.4" width="11.2" height="3.2" rx="1.6" fill="#c7d2fe" />
+</svg>

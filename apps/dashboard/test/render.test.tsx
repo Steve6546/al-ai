@@ -37,6 +37,7 @@ const guild: Guild = {
   memberCount: 42,
   tier: "owner",
   botPresent: true,
+  canManage: true,
   canManageIdentity: true,
   canManageLogging: true,
   canManageCommands: true,
@@ -44,7 +45,7 @@ const guild: Guild = {
   canInvite: true
 };
 
-const absentGuild: Guild = { ...guild, botPresent: false, tier: null };
+const absentGuild: Guild = { ...guild, botPresent: false, tier: null, memberCount: null };
 
 const health: HealthSnapshot = {
   status: "healthy",
@@ -79,6 +80,7 @@ const screens: [string, () => ReactElement][] = [
         guild,
         selectedGuildId: guild.id,
         onSelectGuild: () => {},
+        onBrowseAll: () => {},
         view: "dashboard",
         onView: () => {},
         health,

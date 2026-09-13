@@ -63,11 +63,11 @@ import {
   fetchIdentity,
   fetchUserGuilds,
   fetchWidgetPresence,
-  guildIconUrl,
   USER_PERMISSIONS,
   userAvatarUrl,
   hasPermission
 } from "./discord.js";
+import { describeGuildAccess, isAdministrable } from "./guild-access.js";
 
 const env = loadEnv();
 const pool = createPool(env.databaseUrl);
@@ -90,8 +90,14 @@ async function requireSession(request: FastifyRequest, reply: FastifyReply) {
   return session;
 }
 
-/** Re-resolves the caller's tier on the server for every write. */
-async function requireTierForGuild(request: FastifyRequest, reply: FastifyReply, guildId: string, required: Tier = "admin") {
+/**
+ * Resolves the caller's membership of one guild, or answers the request itself.
+ *
+ * Shared by the read guard and the write guard so the two cannot disagree about
+ * who may reach a guild: a route that reads a guild and a route that writes to
+ * it must give the same answer to "does this caller belong here?".
+ */
+async function resolveGuildMembership(request: FastifyRequest, reply: FastifyReply, guildId: string) {
   const session = await requireSession(request, reply);
   if (!session) return null;
 
@@ -117,6 +123,37 @@ async function requireTierForGuild(request: FastifyRequest, reply: FastifyReply,
     reply.code(403).send({ error: "NOT_A_MEMBER", message: "لا تملك وصولاً إلى هذا السيرفر." });
     return null;
   }
+
+  return { session, membership };
+}
+
+/**
+ * Read guard for every guild-scoped route.
+ *
+ * Being signed in is not the same as being entitled to a guild. Without this,
+ * any authenticated account could read any guild's channels, audit trail and
+ * settings by pasting a guild id into the URL — the id is not a secret, it is
+ * visible in every invite link. The check is the same one the selector applies
+ * (`isAdministrable`), so a guild cannot be listed as manageable and then
+ * refuse to open, nor be openable while hidden from the list.
+ */
+async function requireGuildAccess(request: FastifyRequest, reply: FastifyReply, guildId: string) {
+  const context = await resolveGuildMembership(request, reply, guildId);
+  if (!context) return null;
+
+  if (!isAdministrable(context.membership.permissions)) {
+    reply.code(403).send({ error: "FORBIDDEN", message: "صلاحيتك لا تسمح بالوصول إلى هذا السيرفر." });
+    return null;
+  }
+
+  return context;
+}
+
+/** Re-resolves the caller's tier on the server for every write. */
+async function requireTierForGuild(request: FastifyRequest, reply: FastifyReply, guildId: string, required: Tier = "admin") {
+  const context = await resolveGuildMembership(request, reply, guildId);
+  if (!context) return null;
+  const { session, membership } = context;
 
   const tier = await resolveActorTier({
     db,
@@ -292,6 +329,23 @@ app.get("/auth/discord/callback", async (request, reply) => {
   try {
     const tokens = await exchangeCode({ clientId: env.clientId, clientSecret: env.clientSecret, redirectUri: env.redirectUri, code: query.code });
     const identity = await fetchIdentity(tokens.access_token);
+
+    // A sign-in always begins a new session. Any session the browser was still
+    // carrying is destroyed first, for two reasons: a second account must never
+    // inherit the first one's cached guild list, and an old row must not survive
+    // as a usable session once the operator has moved on. Destroying it even for
+    // the same account is the standard defence against a fixated session id.
+    const previous = await readSession(db, request as unknown as { headers: Record<string, unknown> });
+    if (previous) {
+      await destroySession(db, request as unknown as { headers: Record<string, unknown> }).catch(() => undefined);
+      if (previous.discordUserId !== identity.id) {
+        app.log.info(
+          { previousUserId: previous.discordUserId, nextUserId: identity.id },
+          "Discord account switched; the previous session was destroyed"
+        );
+      }
+    }
+
     const { id } = await issueSession(db, env, {
       discordUserId: identity.id,
       discordUsername: identity.globalName ?? identity.username,
@@ -315,6 +369,16 @@ app.post("/auth/logout", async (request, reply) => {
 
 /* ------------------------------------------------------------------ *
  * Guilds
+ *
+ * One endpoint feeds two screens: the selector lists what the caller may act on,
+ * and the shell uses the same rows for its guild switcher. Both need the same
+ * verdict, so the classification is decided here once rather than re-derived in
+ * the browser from a permission bitfield it should never have to interpret.
+ *
+ * A guild appears if the caller can administer it — ADMINISTRATOR or
+ * MANAGE_GUILD, and `hasPermission` already treats Administrator as holding
+ * everything. Guilds where the caller has no standing are dropped rather than
+ * listed and then refused: an entry that leads to a 403 is worse than no entry.
  * ------------------------------------------------------------------ */
 app.get("/api/guilds", async (request, reply) => {
   const session = await readSession(db, request as unknown as { headers: Record<string, unknown> });
@@ -329,40 +393,40 @@ app.get("/api/guilds", async (request, reply) => {
     env.botToken ? fetchBotGuildIds(env.botToken) : Promise.resolve(new Set<string>())
   ]);
 
-  // Only guilds where the account is present AND the bot is present are
-  // manageable from AL AI.
-  const managed = userGuilds.filter(guild => botGuildIds.has(guild.id) || guild.owner);
+  const administrable = userGuilds.filter(guild => isAdministrable(guild.permissions));
 
   const guilds = await Promise.all(
-    managed.map(async guild => {
-      // Seed only. The member count belongs to the bot, which is the only layer
-      // that can see it; writing a placeholder here would clobber it.
-      await db.ensureGuild({ id: guild.id, name: guild.name, iconUrl: guild.icon });
-      const tier = await resolveActorTier({
-        db,
-        botToken: env.botToken,
-        guildId: guild.id,
-        discordUserId: session.discordUserId,
-        userIsGuildOwner: guild.owner,
-        userIsAdministrator: hasPermission(guild.permissions, USER_PERMISSIONS.ADMINISTRATOR)
-      });
-      const record = await db.getGuild(guild.id);
-      return {
-        id: guild.id,
-        name: guild.name,
-        iconUrl: guildIconUrl(guild.id, guild.icon),
-        memberCount: record?.memberCount ?? 0,
-        tier,
-        botPresent: botGuildIds.has(guild.id),
-        canManageIdentity: tier !== null,
-        canManageLogging: tier !== null,
-        canManageCommands: tier !== null,
-        // Role mapping decides who can do everything else, so it needs the
-        // admin tier or above — a moderator must not be able to widen their own
-        // access by editing the list.
-        canManageTiers: tier === "owner" || tier === "admin",
-        canInvite: hasPermission(guild.permissions, USER_PERMISSIONS.MANAGE_GUILD)
-      };
+    administrable.map(async guild => {
+      const botPresent = botGuildIds.has(guild.id);
+
+      // The member count belongs to the bot, the only layer that can see it. It
+      // is `null` — "unknown", not zero — for a guild the bot has not joined,
+      // because reporting 0 would be a number we made up. Same reason no row is
+      // seeded here: a placeholder for a guild the bot has never seen would look
+      // like data on the next screen that reads it.
+      let memberCount: number | null = null;
+      if (botPresent) {
+        await db.ensureGuild({ id: guild.id, name: guild.name, iconUrl: guild.icon });
+        memberCount = (await db.getGuild(guild.id))?.memberCount ?? null;
+      }
+
+      // Resolved only where it can mean something. Without the bot in the guild
+      // there is no role list to resolve against, and the answer would be a
+      // "no tier" that says nothing about the operator's standing.
+      const tier = botPresent
+        ? await resolveActorTier({
+            db,
+            botToken: env.botToken,
+            guildId: guild.id,
+            discordUserId: session.discordUserId,
+            userIsGuildOwner: guild.owner,
+            userIsAdministrator: hasPermission(guild.permissions, USER_PERMISSIONS.ADMINISTRATOR)
+          })
+        : null;
+
+      // `describeGuildAccess` also re-asserts that an absent bot means no count
+      // and no tier, so the rule survives a caller that forgets it.
+      return describeGuildAccess({ guild, botPresent, memberCount, tier });
     })
   );
 
@@ -378,8 +442,8 @@ app.get("/api/guilds", async (request, reply) => {
  */
 app.get("/api/guilds/:guildId/invite", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
-  const session = await requireSession(request, reply);
-  if (!session) return;
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
   const target = normaliseSnowflake(guildId);
   if (!target) return reply.code(400).send({ error: "INVALID_GUILD_ID", message: "معرّف السيرفر غير صالح." });
   return reply.redirect(buildBotInviteUrl(env.clientId, target));
@@ -387,8 +451,8 @@ app.get("/api/guilds/:guildId/invite", async (request, reply) => {
 
 app.get("/api/guilds/:guildId/channels", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
-  const session = await requireSession(request, reply);
-  if (!session) return;
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
   if (!env.botToken) return reply.code(503).send({ error: "BOT_NOT_CONFIGURED", message: "البوت غير مهيأ لقراءة القنوات." });
   return { channels: await fetchGuildChannels(env.botToken, guildId) };
 });
@@ -475,8 +539,8 @@ function normaliseSnowflake(value: unknown): string | null {
  * ------------------------------------------------------------------ */
 app.get("/api/guilds/:guildId/commands", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
-  const session = await requireSession(request, reply);
-  if (!session) return;
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
   const configured = await db.getCommandFlags(guildId);
   // `commandFlagsFor` joins the registry to what the guild stored and fills
   // every gap with the shipped default, so the dashboard shows exactly what the
@@ -535,8 +599,8 @@ app.put("/api/guilds/:guildId/commands", async (request, reply) => {
  * ------------------------------------------------------------------ */
 app.get("/api/guilds/:guildId/audit", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
-  const session = await requireSession(request, reply);
-  if (!session) return;
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
   const rows = await db.listAudit(guildId, 100);
   const counts = await db.countAudit(guildId);
   return {
@@ -556,8 +620,8 @@ app.get("/api/guilds/:guildId/audit", async (request, reply) => {
 
 app.get("/api/guilds/:guildId/security", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
-  const session = await requireSession(request, reply);
-  if (!session) return;
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
   const rows = await db.listSecurityEvents(guildId, 50);
   return {
     events: rows.map(row => ({
@@ -574,16 +638,16 @@ app.get("/api/guilds/:guildId/security", async (request, reply) => {
 /* ------------------------------------------------------------------ *
  * Anti-nuke configuration
  *
- * The engine itself runs in the bot; this is only its settings. Reads are open
- * to any session so an operator can always see what is armed, while a write
- * needs the admin tier — disarming the engine is exactly the change an attacker
- * holding a moderator account would want to make.
+ * The engine itself runs in the bot; this is only its settings. Reading needs
+ * access to the guild and writing needs the admin tier — disarming the engine
+ * is exactly the change an attacker holding a moderator account would want to
+ * make, so the two are deliberately not the same check.
  * ------------------------------------------------------------------ */
 
 app.get("/api/guilds/:guildId/security/config", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
-  const session = await requireSession(request, reply);
-  if (!session) return;
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
 
   const config = await db.getSecurity(guildId);
 
@@ -652,8 +716,7 @@ app.put("/api/guilds/:guildId/security/config", async (request, reply) => {
  * ------------------------------------------------------------------ */
 app.get("/api/guilds/:guildId/customization", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
-  const session = await requireSession(request, reply);
-  if (!session) return;
+  if (!(await requireGuildAccess(request, reply, guildId))) return;
 
   const settings = await db.getCustomization(guildId);
   const token = env.botToken;
@@ -772,8 +835,7 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
  * ------------------------------------------------------------------ */
 app.get("/api/guilds/:guildId/metrics", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
-  const session = await requireSession(request, reply);
-  if (!session) return;
+  if (!(await requireGuildAccess(request, reply, guildId))) return;
 
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
@@ -836,8 +898,7 @@ function normaliseCategoryChannels(value: unknown): Partial<Record<LogDestinatio
 
 app.get("/api/guilds/:guildId/logging", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
-  const session = await requireSession(request, reply);
-  if (!session) return;
+  if (!(await requireGuildAccess(request, reply, guildId))) return;
   return { settings: await db.getLogging(guildId) };
 });
 

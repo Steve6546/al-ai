@@ -133,11 +133,11 @@ test("the metrics reader sees the bot's member count", { skip }, async () => {
  * CHECK constraints are part of that guarantee.
  * ------------------------------------------------------------------ */
 
-test("a guild with no security row reads as disarmed at the defaults", { skip }, async () => {
+test("a guild with no security row reads as armed at the defaults", { skip }, async () => {
   await pool!.query("DELETE FROM guild_security WHERE guild_id = $1", [GUILD_ID]);
   const config = await db!.getSecurity(GUILD_ID);
 
-  assert.equal(config.enabled, false, "mitigation must never be armed by an absent row");
+  assert.equal(config.enabled, true, "a guild without a saved row is protected, not exposed");
   assert.deepEqual(config.limits, { channelDeletesPerMinute: 3, bansPerMinute: 5, roleChangesPerMinute: 3 });
   assert.equal(config.quarantineRoleId, null);
 });

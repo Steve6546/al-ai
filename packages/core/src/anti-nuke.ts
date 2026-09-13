@@ -23,11 +23,15 @@ export type AntiNukeLimits = {
 
 export type AntiNukeConfig = {
   /**
-   * Off until the operator turns it on.
+   * Armed unless the operator disarms it.
    *
-   * Mitigation strips a moderator's roles, which is itself destructive. Arming
-   * that by default would mean the bot punishing staff on a server whose owner
-   * never asked for it — so the engine ships built, tested and disarmed.
+   * This was the other way round while the engine was being built: mitigation
+   * strips a moderator's roles, which is itself destructive, so it shipped
+   * disarmed until the owner had decided. The owner has now decided, so a guild
+   * is protected from the moment AL AI joins — the failure mode of a forgotten
+   * setting is a wiped server, and that is not a coin worth flipping.
+   *
+   * Disarming is one switch in the security screen, and it is honoured.
    */
   enabled: boolean;
   limits: AntiNukeLimits;
@@ -71,7 +75,7 @@ export const DEFAULT_ANTI_NUKE_LIMITS: AntiNukeLimits = {
 export const MAX_ANTI_NUKE_LIMIT = 100;
 
 export const DEFAULT_ANTI_NUKE_CONFIG: AntiNukeConfig = {
-  enabled: false,
+  enabled: true,
   limits: DEFAULT_ANTI_NUKE_LIMITS,
   quarantineRoleId: null
 };
@@ -90,6 +94,26 @@ function clampLimit(value: unknown, fallback: number): number {
   return Math.min(MAX_ANTI_NUKE_LIMIT, Math.max(1, Math.trunc(numeric)));
 }
 
+/**
+ * Reads the armed flag.
+ *
+ * The failure modes stopped being symmetric when the engine started shipping
+ * armed, so this is deliberately explicit rather than a truthiness test:
+ *
+ *   - An explicit `false` must survive in every shape it can arrive in — a JSON
+ *     body, a boolean column, or the string a form would produce. Losing an
+ *     opt-out would re-arm a protection the operator deliberately switched off.
+ *   - Anything unrecognised falls back to the documented default instead of
+ *     being read as consent. A stray `null` from an absent column must not be
+ *     interpreted as a decision either way.
+ */
+function normaliseEnabled(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (value === "false" || value === "0" || value === 0) return false;
+  if (value === "true" || value === "1" || value === 1) return true;
+  return DEFAULT_ANTI_NUKE_CONFIG.enabled;
+}
+
 /** Coerces an untrusted value — a JSON body, or a row read back from the database. */
 export function normaliseAntiNukeConfig(value: unknown): AntiNukeConfig {
   const source = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
@@ -97,7 +121,7 @@ export function normaliseAntiNukeConfig(value: unknown): AntiNukeConfig {
   const quarantineRoleId = typeof source.quarantineRoleId === "string" ? source.quarantineRoleId.trim() : "";
 
   return {
-    enabled: source.enabled === true,
+    enabled: normaliseEnabled(source.enabled),
     limits: {
       channelDeletesPerMinute: clampLimit(limits.channelDeletesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.channelDeletesPerMinute),
       bansPerMinute: clampLimit(limits.bansPerMinute, DEFAULT_ANTI_NUKE_LIMITS.bansPerMinute),

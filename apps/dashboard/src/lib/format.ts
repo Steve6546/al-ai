@@ -24,3 +24,25 @@ export function shortId(id: string, keep = 6): string {
   if (id.length <= keep * 2 + 1) return id;
   return `${id.slice(0, keep)}…${id.slice(-keep)}`;
 }
+
+/**
+ * Member count in Arabic, with the noun agreeing with the number.
+ *
+ * Arabic counts in three bands — a dual, a small plural, and a singular counted
+ * form — so `42 عضو` is wrong in the same way `1 members` is in English. This is
+ * display-only copy, which is why it lives here and not in the contract.
+ *
+ * `null` means the count is not knowable (the bot is not in the guild), which is
+ * a different statement from "nobody is in it" and must not be rendered as 0.
+ */
+export function formatMemberCount(count: number | null | undefined): string {
+  if (count === null || count === undefined) return "غير محدد";
+  if (!Number.isFinite(count) || count < 0) return "غير محدد";
+  const value = Math.trunc(count);
+  if (value === 0) return "لا أعضاء";
+  if (value === 1) return "عضو واحد";
+  if (value === 2) return "عضوان";
+  if (value <= 10) return `${value} أعضاء`;
+  if (value <= 99) return `${value} عضواً`;
+  return `${value} عضو`;
+}

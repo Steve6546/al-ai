@@ -352,6 +352,8 @@ test("the owner is told when no quarantine role is configured", () => {
   assert.match(message, /رتبة حجر/);
 });
 
-test("the default config is disarmed", () => {
-  assert.equal(DEFAULT_ANTI_NUKE_CONFIG.enabled, false);
+test("the default config is armed", () => {
+  // The owner decided the engine ships on: the cost of a forgotten setting is a
+  // wiped server, so protection is the default and disarming is deliberate.
+  assert.equal(DEFAULT_ANTI_NUKE_CONFIG.enabled, true);
 });

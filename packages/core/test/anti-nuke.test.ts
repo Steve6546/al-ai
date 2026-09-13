@@ -67,19 +67,35 @@ test("the assessment reports the count and the limit it was measured against", (
  * Normalisation
  * ------------------------------------------------------------------ */
 
-test("a guild with no saved settings is disarmed at the shipped defaults", () => {
+test("a guild with no saved settings is armed at the shipped defaults", () => {
   const config = normaliseAntiNukeConfig(undefined);
   assert.deepEqual(config, DEFAULT_ANTI_NUKE_CONFIG);
-  assert.equal(config.enabled, false, "mitigation must never be armed by accident");
+  assert.equal(config.enabled, true, "a guild is protected from the moment the bot joins it");
 });
 
-test("only an explicit true arms the engine", () => {
-  // A truthy string from a form body, or a null from an absent column, must not
-  // be read as consent to strip roles.
-  for (const value of ["true", 1, {}, null, undefined]) {
-    assert.equal(normaliseAntiNukeConfig({ enabled: value }).enabled, false, `enabled:${String(value)} armed the engine`);
+test("an explicit opt-out survives in every shape it can arrive in", () => {
+  // The engine ships armed, so `false` is now the value that must never be lost:
+  // dropping it would re-arm a protection the operator deliberately switched off.
+  for (const value of [false, "false", "0", 0]) {
+    assert.equal(
+      normaliseAntiNukeConfig({ enabled: value }).enabled,
+      false,
+      `enabled:${String(value)} was ignored and the engine stayed armed`
+    );
   }
   assert.equal(normaliseAntiNukeConfig({ enabled: true }).enabled, true);
+});
+
+test("an unreadable flag falls back to the default rather than counting as consent", () => {
+  // A null from an absent column, or an object from a malformed body, is not a
+  // decision in either direction — so the documented default is what stands.
+  for (const value of [null, undefined, {}, []]) {
+    assert.equal(
+      normaliseAntiNukeConfig({ enabled: value }).enabled,
+      DEFAULT_ANTI_NUKE_CONFIG.enabled,
+      `enabled:${String(value)} did not fall back to the default`
+    );
+  }
 });
 
 test("limits are clamped to the allowed range", () => {
