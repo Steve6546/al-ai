@@ -9,8 +9,9 @@
  *   token to the browser.
  */
 
-const API = "https://discord.com/api/v10";
+import { BOT_INVITE_SCOPES } from "@al-ai/core";
 
+const API = "https://discord.com/api/v10";
 export const USER_PERMISSIONS = {
   /**
    * Administrator (bit 3). Holders get the automatic owner tier, because Discord
@@ -25,6 +26,71 @@ export const USER_PERMISSIONS = {
 export type DiscordIdentity = { id: string; username: string; globalName: string | null; avatar: string | null };
 export type DiscordUserGuild = { id: string; name: string; icon: string | null; owner: boolean; permissions: bigint };
 
+/**
+ * A non-OK answer from Discord, carrying the status so callers can tell the
+ * three cases apart.
+ *
+ * They are not interchangeable, and the difference is what the operator feels:
+ *
+ * - **401** — Discord refused the stored token. Nothing can be done here; the
+ *   only way forward is a fresh sign-in.
+ * - **429** — AL AI asked too often. The session is perfectly valid and the
+ *   same request succeeds in a moment.
+ * - **anything else** — a transient fault on Discord's side.
+ *
+ * Collapsing them into one bare `Error` is what made a rate limit look like an
+ * expired session, and so logged the operator out for pressing refresh too
+ * quickly. The status has to survive to the caller for it to be handled right.
+ */
+export class DiscordApiError extends Error {
+  constructor(
+    public readonly status: number,
+    path: string,
+    body: string,
+    /** Seconds Discord asked us to wait, when it said so. */
+    public readonly retryAfterSeconds: number | null = null
+  ) {
+    super(`Discord ${path} failed with ${status}: ${body.slice(0, 200)}`);
+    this.name = "DiscordApiError";
+  }
+}
+
+/**
+ * True when Discord rejected the *credential* rather than the request.
+ *
+ * Only 401 counts. 403 is deliberately excluded: on these endpoints it means
+ * "this token may not call this route" (a permission problem) rather than "this
+ * token is dead", and treating it as an auth failure would sign the operator
+ * out over a misconfiguration that a new sign-in cannot fix.
+ */
+export function isAuthFailure(error: unknown): boolean {
+  return error instanceof DiscordApiError && error.status === 401;
+}
+
+/** True when Discord is asking us to slow down. */
+export function isRateLimited(error: unknown): boolean {
+  return error instanceof DiscordApiError && error.status === 429;
+}
+
+/**
+ * Discord's own "wait this long" hint.
+ *
+ * The JSON body carries `retry_after` in seconds; the header carries whole
+ * seconds and is the fallback when the body is not JSON (a proxy error page,
+ * for instance). Returning null means "no hint", which callers must not read as
+ * zero.
+ */
+function readRetryAfter(body: string, headers: Headers): number | null {
+  try {
+    const parsed = JSON.parse(body) as { retry_after?: unknown };
+    if (typeof parsed.retry_after === "number" && Number.isFinite(parsed.retry_after)) return parsed.retry_after;
+  } catch {
+    // Not JSON: fall through to the header.
+  }
+  const header = Number(headers.get("retry-after"));
+  return Number.isFinite(header) && header >= 0 ? header : null;
+}
+
 async function request<T>(path: string, init: RequestInit & { token: string; scheme?: "Bot" | "Bearer" }): Promise<T> {
   const { token, scheme = "Bot", ...rest } = init;
   const response = await fetch(`${API}${path}`, {
@@ -37,7 +103,8 @@ async function request<T>(path: string, init: RequestInit & { token: string; sch
   });
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(`Discord ${path} failed with ${response.status}: ${body.slice(0, 200)}`);
+    const retryAfter = response.status === 429 ? readRetryAfter(body, response.headers) : null;
+    throw new DiscordApiError(response.status, path, body, retryAfter);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -67,16 +134,36 @@ export const BOT_PERMISSIONS = "8";
  * The bot invite. When a guild is known the invite is pinned to it and Discord's
  * server picker is hidden, so the operator can only add AL AI to the guild they
  * are actually configuring — never to every guild their account can reach.
+ *
+ * Passing `redirectUri` is what closes the loop. Without it Discord shows its
+ * own "all done" page and strands the operator there, and the dashboard never
+ * learns the bot arrived — so the guild they just added it to still reads
+ * «غير مضاف». With it, Discord hands the browser back to the dashboard's OAuth
+ * callback along with the `guild_id` it just joined.
+ *
+ * `response_type=code` is required for that return leg, and `state` is the same
+ * CSRF guard the sign-in flow uses.
  */
-export function buildBotInviteUrl(clientId: string, guildId?: string) {
+export function buildBotInviteUrl(
+  clientId: string,
+  guildId?: string,
+  returnTo?: { redirectUri: string; state: string }
+) {
   const params = new URLSearchParams({
     client_id: clientId,
-    scope: "bot applications.commands",
+    // Read from the shared contract rather than repeated as a literal: the
+    // scopes are frozen there, and a second copy is a second thing to update.
+    scope: BOT_INVITE_SCOPES.join(" "),
     permissions: BOT_PERMISSIONS
   });
   if (guildId) {
     params.set("guild_id", guildId);
     params.set("disable_guild_select", "true");
+  }
+  if (returnTo) {
+    params.set("response_type", "code");
+    params.set("redirect_uri", returnTo.redirectUri);
+    params.set("state", returnTo.state);
   }
   return `https://discord.com/oauth2/authorize?${params}`;
 }
@@ -116,10 +203,57 @@ export async function fetchUserGuilds(accessToken: string) {
   }));
 }
 
-/** Read-only: which guilds the AL AI bot is actually a member of. */
-export async function fetchBotGuildIds(botToken: string) {
-  const guilds = await request<{ id: string }[]>("/users/@me/guilds", { token: botToken });
-  return new Set(guilds.map(guild => guild.id));
+/**
+ * How long the bot's guild list is trusted.
+ *
+ * Short on purpose: long enough to absorb a burst of refreshes, short enough
+ * that a bot invited a moment ago shows up on the next look.
+ */
+const BOT_GUILD_CACHE_MS = 15_000;
+
+let botGuildCache: { ids: Set<string>; at: number } | null = null;
+let botGuildInFlight: Promise<Set<string>> | null = null;
+
+/** Drop the memoised bot guild list. Used after an invite and by tests. */
+export function invalidateBotGuildCache() {
+  botGuildCache = null;
+}
+
+/**
+ * Read-only: which guilds the AL AI bot is actually a member of.
+ *
+ * Memoised because this changes only when the bot joins or leaves a guild, yet
+ * it was being fetched on *every* selector load — and the selector refetches on
+ * every visit and every press of refresh. Together with the user's own guild
+ * read that made two Discord calls per click, which tripped Discord's rate
+ * limit within a few presses and surfaced to the operator as a 500.
+ *
+ * Concurrent callers share one in-flight request, so three tabs opening at once
+ * cost one call rather than three.
+ *
+ * On failure a stale reading is returned in preference to an error. Guild
+ * membership is stable, so an old answer is still a true one, and the
+ * alternative is failing a screen that is otherwise perfectly answerable.
+ */
+export async function fetchBotGuildIds(botToken: string): Promise<Set<string>> {
+  if (botGuildCache && Date.now() - botGuildCache.at < BOT_GUILD_CACHE_MS) return botGuildCache.ids;
+  if (botGuildInFlight) return botGuildInFlight;
+
+  botGuildInFlight = (async () => {
+    try {
+      const guilds = await request<{ id: string }[]>("/users/@me/guilds", { token: botToken });
+      const ids = new Set(guilds.map(guild => guild.id));
+      botGuildCache = { ids, at: Date.now() };
+      return ids;
+    } catch (error) {
+      if (botGuildCache) return botGuildCache.ids;
+      throw error;
+    } finally {
+      botGuildInFlight = null;
+    }
+  })();
+
+  return botGuildInFlight;
 }
 
 /** Read-only: the AL AI role IDs a user holds, used to resolve their tier. */
@@ -398,21 +532,42 @@ export async function fetchWidgetPresence(guildId: string): Promise<WidgetPresen
  * ------------------------------------------------------------------ */
 
 /**
+ * Discord marks an animated asset by prefixing its hash with `a_`, and serves
+ * the animation only from the `.gif` extension.
+ *
+ * This matters more than it looks: asking for `.png` on an `a_` hash is a
+ * perfectly valid request that returns the **first frame**, so an animated
+ * avatar renders as a frozen still with no error anywhere. The operator sees
+ * "my animated picture is not moving" and nothing in the logs disagrees.
+ */
+function assetExtension(hash: string): "gif" | "png" {
+  return hash.startsWith("a_") ? "gif" : "png";
+}
+
+/**
  * A user's avatar. Accounts without a custom avatar get one of Discord's six
  * default images, chosen by `(id >> 22) % 6`.
+ *
+ * The default size is 128 because the avatar is drawn at up to 56 CSS pixels
+ * and a HiDPI screen needs two device pixels for each of them; 64 arrived
+ * visibly soft on any modern display.
  */
-export function userAvatarUrl(userId: string, avatarHash: string | null, size = 64): string {
-  if (avatarHash) return `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.png?size=${size}`;
+export function userAvatarUrl(userId: string, avatarHash: string | null, size = 128): string {
+  if (avatarHash) {
+    return `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.${assetExtension(avatarHash)}?size=${size}`;
+  }
   let index = 0;
   try {
     index = Number((BigInt(userId) >> 22n) % 6n);
   } catch {
     index = 0;
   }
+  // Discord's default avatars are fixed PNGs; they take no size parameter.
   return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
 }
 
-/** A guild's icon, or null when the guild has none set. */
+/** A guild's icon, or null when the guild has none set. Animated icons use `.gif`. */
 export function guildIconUrl(guildId: string, iconHash: string | null, size = 128): string | null {
-  return iconHash ? `https://cdn.discordapp.com/icons/${guildId}/${iconHash}.png?size=${size}` : null;
+  if (!iconHash) return null;
+  return `https://cdn.discordapp.com/icons/${guildId}/${iconHash}.${assetExtension(iconHash)}?size=${size}`;
 }

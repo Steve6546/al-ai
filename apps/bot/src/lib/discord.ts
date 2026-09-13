@@ -56,10 +56,6 @@ export type LogEnvelope = {
   data: Record<string, unknown>;
 };
 
-export function buildLogEmbed(envelope: LogEnvelope, colorOverride?: string) {
-  return buildLogEmbeds(envelope, colorOverride)[0];
-}
-
 /**
  * GOVERNANCE rule 11 — an oversized event is split, never truncated.
  * Every page keeps the same correlationId so the record can be reassembled,

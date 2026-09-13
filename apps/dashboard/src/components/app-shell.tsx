@@ -585,11 +585,3 @@ function StatusBadge({ health }: { health: HealthSnapshot | null }) {
 export function viewTitle(view: ViewKey): string {
   return navIndex.get(view)?.label ?? "لوحة التحكم";
 }
-
-/**
- * True when a view writes configuration that only the bot can apply. The shell
- * uses this to fall back to the dashboard if the bot leaves mid-session.
- */
-export function viewRequiresBot(view: ViewKey): boolean {
-  return navIndex.get(view)?.requiresBot ?? false;
-}

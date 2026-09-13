@@ -5,7 +5,7 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
 
 ## الأوامر والتحقق
 - `npm run verify` = lint + check:schema + test + build. استخدمه دائماً بدل تشغيل
-  الخطوات يدوياً. **342 اختباراً** (166 بوت + 79 لوحة + 97 core).
+  الخطوات يدوياً. **363 اختباراً** (166 بوت + 100 لوحة + 97 core).
 - **9 اختبارات لوحة «تتخطى بصمت» بلا قاعدة بيانات.** `test/storage.test.ts` يقرأ
   `DATABASE_URL` وإن لم يجد قاعدة حيّة يسجّل `{ skip: "no reachable database" }`،
   فيُخرج `verify` **330 نجاحاً + 9 تخطٍّ** بدل 339. هذا ليس فشلاً، لكنه يعني أن
@@ -43,6 +43,32 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
   (`boolean | null`). `null` = تعذّرت القراءة. تحويله إلى `false` يرفض عملية
   يستطيع البوت تنفيذها. مسار الكتابة يرفض فقط عند `false` مؤكدة.
 
+- **الأفاتار/الأيقونة المتحركة:** تجزئة تبدأ بـ`a_` تعني صورة متحركة، وطلبها
+  `.png` يعطي **الإطار الأول صامتاً** بلا خطأ. `assetExtension(hash)` تُرجع `gif`،
+  والحجم الافتراضي 128. لا تُرجع إلى 64 ولا تُثبّت الامتداد.
+- **دعوة البوت رحلة ذهاب وعودة، لا رابط أعمى:** `buildBotInviteUrl` تحمل
+  `response_type=code` + `redirect_uri` + `state` (كوكي CSRF يُكتب قبل الدعوة
+  ويُتحقق عند العودة). الـcallback يقبل `guild_id`، يُبطل كاش سيرفرات البوت
+  (`invalidateBotGuildCache`)، ويحوّل إلى `/?auth=bot_added` فيرجع المشغّل للقائمة.
+
+## تصنيف أخطاء Discord — غيابه كان يُتلف الجلسات
+- `DiscordApiError` (في `apps/dashboard/server/discord.ts`) تحمل `status` و
+  `retryAfterSeconds`، ومصنّفان صريحان: `isAuthFailure` (**401 فقط**) و
+  `isRateLimited` (**429 فقط**). **قبل ذلك كان كل خطأ Discord يُعامل «توكن منتهٍ»**
+  ⇒ حدّ المعدل (429) يُتلِف جلسة سليمة ويُرمي المشغّل لشاشة الدخول بلا سبب. كان هذا
+  أصل «الجليتش عند تكرار التحديث»: كل تحديث = نداءان = 429 أسرع = إتلاف = دخول.
+- `loadUserGuilds` هي **المصدر الوحيد** لقرار قائمة سيرفرات المستخدم:
+  401 ⇒ إتلاف + `SESSION_EXPIRED`، 429 ⇒ `429 RATE_LIMITED` + ترويسة `retry-after`
+  **والجلسة سليمة**، غير ذلك ⇒ `503 DISCORD_UNAVAILABLE`.
+- `/api/guilds` يستخدم **`Promise.allSettled` لا `Promise.all`**: فشل نداء ثانوي
+  (كاش سيرفرات البوت) يجب ألا يُسقط المسار كله ولا يكتب في `reply` بعد الرد
+  (`FST_ERR_REP_ALREADY_SENT`). خُذ `const guildList = userGuilds.value;` قبل
+  الاستخدام ليقبل TypeScript التضييق.
+- `fetchBotGuildIds` مكاشفة **15 ثانية** مع **دمج الطلبات الجارية**
+  (`botGuildInFlight`) و«القديم أفضل من الخطأ» عند فشل التحديث. العميل
+  (`src/api/client.ts`) يعيد المحاولة **مرة واحدة بالضبط** بعد
+  `min(retry_after*1000, 5000)`.
+
 ## قواعد معمارية يفرضها المشروع
 - `discord.js` يُستورد في ملف واحد فقط: `apps/bot/src/lib/discord.ts`.
   (GOVERNANCE rule 2)
@@ -77,7 +103,8 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
   وتُفرِّغ الكوكي وترد `SESSION_EXPIRED`. كان `/api/guilds` ينادي
   `fetchUserGuilds` مباشرة ⇒ 500 **مع إبقاء الجلسة حيّة**، والمشغّل يرى «خطأ غير
   متوقع» عند كل تحميل بلا طريق للخروج. أي نداء مباشر جديد للدالة الخام يُسقط
-  اختبار `route-guards.test.ts`.
+  اختبار `route-guards.test.ts`. **وهذا لا يشمل 429** — انظر «تصنيف أخطاء Discord»
+  أعلاه: 429 لا يُتلف الجلسة.
 
 ## اللوحة
 - `types.ts` يُعيد تصدير كل عقد مشترك من `@al-ai/core/browser`؛ لا تُكرّر شكلاً
@@ -88,6 +115,13 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
 - المنطق القابل للاختبار يُستخرج إلى دوال نقية في `@al-ai/core`
   (`deriveBotStatus`, `summarisePunishments`, `assessRoleHierarchy`,
   `assessRoleIconGate`, `assessNukeAction`) بدل حقنه في المسار.
+- **`notice` (داخل اللوحة) و`authNotice` (شاشة الدخول) منفصلان عمداً.** خلطهما
+  يُظهر «لا تملك صلاحية الوصول إلى هذا السيرفر» **على شاشة الدخول** — وهو عطل
+  رآه المستخدم فعلاً. `LoginScreen notice={authNotice ?? error}`.
+- **`--primary` يجب أن يبقى نيلياً** `oklch(0.511 0.262 276.966)`. كان
+  `oklch(0.922 0 0)` (شبه أبيض) فبدا زر الدخول **صندوقاً أبيض يُقرأ كنص مكتوب**
+  لا كزر — وهذا ما شكا منه المستخدم («ليش يطلع مثل نص مكتوب تسجيل دخول؟»).
+  عند تعديل الثيم، تحقّق أن الـCSS المبني لا يحوي `oklch(.922 0 0)`.
 
 ## البيئة (Windows)
 - PostgreSQL 17 في `C:\Program Files\PostgreSQL\17`. نسخة المشروع: data dir

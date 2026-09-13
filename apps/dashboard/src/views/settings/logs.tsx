@@ -416,6 +416,3 @@ function withoutKey(source: Record<string, string>, key: string, value: string |
   }
   return next;
 }
-
-/** Kept for callers that only need the mode labels. */
-export const loggingModeLabels: Record<LoggingMode, string> = { single: "مفرد", granular: "تفصيلي" };

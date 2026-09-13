@@ -76,8 +76,3 @@ export function loadEnv(): BffEnv {
     auditRetentionDays: read("AUDIT_RETENTION_DAYS") ? Number(read("AUDIT_RETENTION_DAYS")) : null
   };
 }
-
-export function requireBotToken(env: BffEnv) {
-  if (!env.botToken) throw new Error("BOT_TOKEN is required for this operation.");
-  return env.botToken;
-}

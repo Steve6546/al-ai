@@ -7,9 +7,15 @@
 :root {
   --radius: 0.7rem;
 
-  /* Neutral palette taken from shadcn/ui "new-york". Every hue is 0 (true grey)
-     so no violet/indigo tint survives from the old theme. Colour in this product
-     comes only from semantic states: success, warning, destructive. */
+  /* Dark-only palette. The neutrals are true grey (hue 0) so nothing competes
+     with the brand, and the brand itself is AL AI's indigo — the same #4f46e5
+     the favicon and the theme-color meta tag already declare.
+
+     `--primary` was left at shadcn's near-white default, which made every
+     primary button render as a white box with dark text: on a dark page that
+     reads as plain text rather than as the one action to take. Anything tinted
+     here must stay legible against `--background`, so the indigo sits at 600
+     (≈6:1 with white text) rather than a lighter step. */
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
 
@@ -19,9 +25,9 @@
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
 
-  /* Near-white primary: the library's own accent, not a brand colour. */
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  /* AL AI indigo (indigo-600). */
+  --primary: oklch(0.511 0.262 276.966);
+  --primary-foreground: oklch(0.985 0 0);
 
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
@@ -40,16 +46,17 @@
 
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  /* Focus rings carry the brand, so a keyboard user can see where they are. */
+  --ring: oklch(0.673 0.182 276.935);
 
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.922 0 0);
-  --sidebar-primary-foreground: oklch(0.205 0 0);
+  --sidebar-primary: oklch(0.511 0.262 276.966);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.673 0.182 276.935);
 }
 
 @theme inline {

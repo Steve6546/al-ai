@@ -23,6 +23,7 @@ import type { Guild, HealthSnapshot, SessionInfo } from "@/types";
 /** Messages the OAuth callback can hand back through `?auth=`. */
 const authMessages: Record<string, string> = {
   ok: "تم تسجيل الدخول.",
+  bot_added: "تمت إضافة AL AI إلى السيرفر.",
   denied: "لا تملك رتبة إدارية في أي سيرفر مضاف.",
   state_mismatch: "فشل التحقق من حالة OAuth.",
   failed: "تعذّر إكمال تسجيل الدخول."
@@ -40,6 +41,16 @@ export function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  /**
+   * The message the sign-in leg brought back, kept apart from `notice`.
+   *
+   * `notice` also carries in-app messages — "that guild is not yours", "the
+   * account changed" — and those are about the guild list, not about signing
+   * in. Showing one of them on the sign-in screen makes the sign-in itself look
+   * like the thing that failed, which is exactly how it read.
+   */
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
 
   /**
    * The Discord account the loaded guild list belongs to.
@@ -90,7 +101,9 @@ export function App() {
   useEffect(() => {
     const auth = new URLSearchParams(window.location.search).get("auth");
     if (auth) {
-      setNotice(authMessages[auth] ?? null);
+      const message = authMessages[auth] ?? null;
+      setNotice(message);
+      setAuthNotice(message);
       // Drop the query so a refresh does not re-announce a sign-in that already
       // happened. The path is left alone: the callback sends everyone to `/`.
       window.history.replaceState({}, "", window.location.pathname);
@@ -158,7 +171,7 @@ export function App() {
   }
 
   if (!session?.authenticated) {
-    return <LoginScreen notice={notice ?? error} />;
+    return <LoginScreen notice={authNotice ?? error} />;
   }
 
   // The selector is the signed-in home. It is also where every guard above

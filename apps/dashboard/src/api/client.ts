@@ -40,12 +40,35 @@ export class ApiError extends Error {
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
+  return request<T>(path, init, true);
+}
+
+/** Longest we will silently wait for a rate limit before giving the error back. */
+const MAX_RETRY_WAIT_MS = 5_000;
+
+/**
+ * One request, with a single retry when Discord is rate limiting us.
+ *
+ * The BFF forwards Discord's own `retry-after`, and a 429 here is momentary by
+ * definition — so waiting it out once turns "press refresh again in a second"
+ * into a load that simply succeeds. The wait is capped so a large
+ * `retry-after` can never freeze the screen, and the retry happens once only:
+ * a second 429 is real information and belongs in front of the operator.
+ */
+async function request<T>(path: string, init: RequestInit | undefined, mayRetry: boolean): Promise<T> {
   const response = await fetch(path, {
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     ...init
   });
+
   if (!response.ok) {
+    if (response.status === 429 && mayRetry) {
+      const hint = Number(response.headers.get("retry-after"));
+      const waitMs = Number.isFinite(hint) && hint > 0 ? Math.min(hint * 1000, MAX_RETRY_WAIT_MS) : 1_000;
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      return request<T>(path, init, false);
+    }
     const body = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
     throw new ApiError(body.error ?? "REQUEST_FAILED", body.message ?? "تعذّر إكمال الطلب.", response.status);
   }

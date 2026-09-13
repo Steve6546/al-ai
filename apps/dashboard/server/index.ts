@@ -43,7 +43,8 @@ import {
   type LoggingSettings,
   type HealthSnapshot,
   type PermissionStatus,
-  type Tier
+  type Tier,
+  LOGIN_SCOPES
 } from "@al-ai/core";
 import { loadEnv } from "./env.js";
 import { createDatabase, createPool } from "./db.js";
@@ -63,9 +64,13 @@ import {
   fetchIdentity,
   fetchUserGuilds,
   fetchWidgetPresence,
+  invalidateBotGuildCache,
+  isAuthFailure,
+  isRateLimited,
   USER_PERMISSIONS,
   userAvatarUrl,
-  hasPermission
+  hasPermission,
+  type DiscordApiError
 } from "./discord.js";
 import { describeGuildAccess, isAdministrable } from "./guild-access.js";
 
@@ -91,18 +96,23 @@ async function requireSession(request: FastifyRequest, reply: FastifyReply) {
 }
 
 /**
- * Reads the caller's Discord guild list, or answers the request itself when
- * Discord rejects the stored user token.
+ * Reads the caller's Discord guild list, or answers the request itself when the
+ * read cannot be satisfied.
  *
- * Discord can expire that token, or the operator can revoke the app's access,
- * at any moment. That is an authentication failure, not a server fault: letting
- * it escape as a 500 leaves the operator staring at "unexpected error" with no
- * way forward, and because the selector refetches this list on every load the
- * app would keep failing the same way until the cookie was cleared by hand.
- * Clearing the dead session instead sends the UI back to the sign-in screen.
+ * The three failures are answered differently, because they mean different
+ * things to the operator — and conflating them is what made pressing refresh
+ * too fast sign people out:
  *
- * Both the per-guild guards and the list route read through here so they cannot
- * disagree about what a dead token means.
+ * - **The token was refused (401).** Authentication is over. The session is
+ *   destroyed so the UI falls back to the sign-in screen instead of showing
+ *   "unexpected error" forever with no way forward.
+ * - **Discord is rate limiting us (429).** The session is perfectly valid and
+ *   the same request works in a moment. The session is deliberately **not**
+ *   touched; answering with a retry hint is the whole fix.
+ * - **Anything else.** A transient fault on Discord's side, reported as such.
+ *
+ * Every caller reads through here so the list route and the per-guild guards
+ * cannot disagree about what a given failure means.
  */
 async function loadUserGuilds(
   request: FastifyRequest,
@@ -111,12 +121,27 @@ async function loadUserGuilds(
 ) {
   try {
     return await fetchUserGuilds(sessionAccessToken(session, env));
-  } catch {
-    await destroySession(db, request as unknown as { headers: Record<string, unknown> }).catch(() => undefined);
-    reply
-      .code(401)
-      .header("set-cookie", clearedCookieHeader())
-      .send({ error: "SESSION_EXPIRED", message: "انتهت صلاحية الدخول عبر Discord. سجّل الدخول من جديد." });
+  } catch (error) {
+    if (isAuthFailure(error)) {
+      await destroySession(db, request as unknown as { headers: Record<string, unknown> }).catch(() => undefined);
+      reply
+        .code(401)
+        .header("set-cookie", clearedCookieHeader())
+        .send({ error: "SESSION_EXPIRED", message: "انتهت صلاحية الدخول عبر Discord. سجّل الدخول من جديد." });
+      return null;
+    }
+
+    if (isRateLimited(error)) {
+      const wait = Math.max(1, Math.ceil((error as DiscordApiError).retryAfterSeconds ?? 1));
+      reply
+        .code(429)
+        .header("retry-after", String(wait))
+        .send({ error: "RATE_LIMITED", message: `Discord يحدّ عدد الطلبات مؤقتاً. أعد المحاولة بعد ${wait} ثانية.` });
+      return null;
+    }
+
+    app.log.error(error, "Discord guild list read failed");
+    reply.code(503).send({ error: "DISCORD_UNAVAILABLE", message: "تعذّر الوصول إلى Discord. أعد المحاولة." });
     return null;
   }
 }
@@ -311,6 +336,24 @@ app.post("/internal/layer/health", async (request, reply) => {
 /* ------------------------------------------------------------------ *
  * Auth
  * ------------------------------------------------------------------ */
+
+/**
+ * The OAuth `state` cookie.
+ *
+ * Set on every leg that leaves for Discord — signing in and inviting the bot
+ * alike — and checked on the way back. `SameSite=Lax` is what lets it survive
+ * Discord's cross-site redirect while still being withheld from cross-site
+ * POSTs. The value is single-use in effect: the callback compares it and the
+ * next leg overwrites it.
+ */
+function stateCookieHeader(state: string) {
+  return `${SESSION_COOKIE_NAME}_state=${state}; Path=/; Max-Age=600; HttpOnly; SameSite=Lax`;
+}
+
+function newOAuthState() {
+  return randomBytes(16).toString("base64url");
+}
+
 app.get("/api/session", async request => {
   const session = await readSession(db, request as unknown as { headers: Record<string, unknown> });
   if (!session) return { authenticated: false, user: null };
@@ -327,16 +370,13 @@ app.get("/api/session", async request => {
 });
 
 app.get("/auth/discord/login", async (_request, reply) => {
-  const state = randomBytes(16).toString("base64url");
-  reply.header(
-    "Set-Cookie",
-    `${SESSION_COOKIE_NAME}_state=${state}; Path=/; Max-Age=600; HttpOnly; SameSite=Lax`
-  );
-  return reply.redirect(buildAuthorizeUrl({ clientId: env.clientId, redirectUri: env.redirectUri, state, scopes: ["identify", "guilds"] }));
+  const state = newOAuthState();
+  reply.header("Set-Cookie", stateCookieHeader(state));
+  return reply.redirect(buildAuthorizeUrl({ clientId: env.clientId, redirectUri: env.redirectUri, state, scopes: LOGIN_SCOPES }));
 });
 
 app.get("/auth/discord/callback", async (request, reply) => {
-  const query = request.query as { code?: string; state?: string; error?: string };
+  const query = request.query as { code?: string; state?: string; error?: string; guild_id?: string };
   if (query.error) return reply.redirect("/?auth=denied");
   const cookies = parseCookies(request.headers.cookie);
   if (!query.code || !query.state || cookies[`${SESSION_COOKIE_NAME}_state`] !== query.state) {
@@ -371,6 +411,15 @@ app.get("/auth/discord/callback", async (request, reply) => {
       scopes: tokens.scope
     });
     reply.header("Set-Cookie", sessionCookieHeader(id));
+
+    // Discord returns `guild_id` when this leg was a bot authorization rather
+    // than a sign-in. Two things follow: the memoised bot guild list is stale
+    // the instant the bot joins, and the selector has to refresh so the guild
+    // flips from «غير مضاف» to «نشط» instead of waiting for the TTL.
+    if (query.guild_id) {
+      invalidateBotGuildCache();
+      return reply.redirect("/?auth=bot_added");
+    }
     return reply.redirect("/?auth=ok");
   } catch (error) {
     app.log.error(error, "Discord OAuth callback failed");
@@ -405,15 +454,32 @@ app.get("/api/guilds", async (request, reply) => {
     return reply.code(401).send({ error: "UNAUTHENTICATED", message: "سجّل الدخول عبر Discord." });
   }
 
-  const [userGuilds, botGuildIds] = await Promise.all([
+  // `allSettled`, not `all`. The bot's guild list is an independent second read
+  // and its failure must not reject the route *after* `loadUserGuilds` has
+  // already answered the request — that produced a 500 and a "reply was already
+  // sent" error stacked on top of the real message, which is what made a rate
+  // limit look like a crash.
+  const [userGuilds, botGuilds] = await Promise.allSettled([
     loadUserGuilds(request, reply, session),
     env.botToken ? fetchBotGuildIds(env.botToken) : Promise.resolve(new Set<string>())
   ]);
 
-  // A rejected user token has already been answered as an expired session.
-  if (!userGuilds) return;
+  // A dead token or a rate limit has already been answered with its own status.
+  if (userGuilds.status === "rejected" || !userGuilds.value) return;
 
-  const administrable = userGuilds.filter(guild => isAdministrable(guild.permissions));
+  // Without the bot's guild list we cannot tell "AL AI is not here yet" from
+  // "AL AI is here". Guessing the former would badge a guild «غير مضاف» and
+  // offer an invite for a server the bot already sits in, so say we could not
+  // read it instead of inventing an answer.
+  if (botGuilds.status === "rejected") {
+    app.log.error(botGuilds.reason, "Discord bot guild list read failed");
+    return reply.code(503).send({ error: "DISCORD_UNAVAILABLE", message: "تعذّر الوصول إلى Discord. أعد المحاولة." });
+  }
+
+  const botGuildIds = botGuilds.value;
+  const guildList = userGuilds.value;
+
+  const administrable = guildList.filter(guild => isAdministrable(guild.permissions));
 
   const guilds = await Promise.all(
     administrable.map(async guild => {
@@ -459,6 +525,11 @@ app.get("/api/guilds", async (request, reply) => {
  * Redirects rather than returning JSON: this URL is used as a plain link in the
  * UI, so a JSON body would have shown the operator a raw payload instead of the
  * Discord authorise screen.
+ *
+ * It also opens the return leg. The `state` cookie is set here so the callback
+ * can verify the round trip, and Discord is told to hand the browser back to it
+ * once the bot is added — otherwise the operator finishes on Discord's own page
+ * and the guild they just added AL AI to still reads «غير مضاف».
  */
 app.get("/api/guilds/:guildId/invite", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
@@ -466,7 +537,10 @@ app.get("/api/guilds/:guildId/invite", async (request, reply) => {
   if (!context) return;
   const target = normaliseSnowflake(guildId);
   if (!target) return reply.code(400).send({ error: "INVALID_GUILD_ID", message: "معرّف السيرفر غير صالح." });
-  return reply.redirect(buildBotInviteUrl(env.clientId, target));
+
+  const state = newOAuthState();
+  reply.header("Set-Cookie", stateCookieHeader(state));
+  return reply.redirect(buildBotInviteUrl(env.clientId, target, { redirectUri: env.redirectUri, state }));
 });
 
 app.get("/api/guilds/:guildId/channels", async (request, reply) => {

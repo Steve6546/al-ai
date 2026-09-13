@@ -68,10 +68,6 @@ export function requireCommand(name: string) {
   return command;
 }
 
-export function commandsForModule(module: CommandModule) {
-  return commandRegistry.filter(entry => entry.module === module);
-}
-
 /* ------------------------------------------------------------------ *
  * Per-command configuration
  *
