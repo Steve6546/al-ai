@@ -1,16 +1,24 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import {
   applyBotAppearance,
+  applyChannelAction,
   applyModeration,
   bindEvents,
   createDiscordClient,
+  dmGuildOwner,
   ensureBotRole,
   listLoggableChannels,
+  notifyTarget,
+  quarantineMember,
   readBotHighestPosition,
   readMemberPositions,
-  sendLogEmbed
+  readMemberRoleIds,
+  sendLogEmbed,
+  sendLogEmbedToWebhook,
+  type LogEnvelope
 } from "./lib/discord.js";
-import { requireCommand } from "@al-ai/core";
+import { EMPTY_TIER_ROLES, normaliseCommandConfig, requireCommand, type CommandConfig } from "@al-ai/core";
 import { checkHierarchy, hierarchyMessages } from "./permissions/permission-guard.js";
 import { createBotDatabase } from "./storage/database.js";
 import { ConfigCache } from "./storage/config-cache.js";
@@ -21,6 +29,7 @@ import { acquireInstanceLock, startSupervisor } from "./runtime/supervisor.js";
 import { check, roleCarrierOf } from "./permissions/permission-guard.js";
 import { createWatchdog, WATCHED_COMPONENTS } from "./security/watchdog.js";
 import { createIntrusionDetector } from "./security/intrusion-detector.js";
+import { createAntiNukeEngine } from "./security/anti-nuke.js";
 import { guardAuditWrite } from "./security/audit-trail.js";
 import { createIntentUsageTracker } from "./compliance/intent-usage-tracker.js";
 import { createCustomizationSync } from "./runtime/customization-sync.js";
@@ -68,11 +77,24 @@ if (missing.length) {
   process.exit(0);
 }
 
+/**
+ * GOVERNANCE rule 19: the bot's credential comes from the environment and from
+ * nowhere else. There is no code path that reads a token from the database or
+ * accepts one over the wire — the dashboard authorises operators, it never
+ * carries a credential that can act as the bot.
+ */
 const token = process.env.BOT_TOKEN!;
 const databaseUrl = process.env.DATABASE_URL!;
 const hmacSecret = process.env.EVENT_HMAC_SECRET!;
 const encryptionKey = process.env.ENCRYPTION_KEY!;
 const dashboardUrl = process.env.DASHBOARD_URL?.trim() || null;
+/**
+ * Where AL AI's own errors and security events are delivered. Deliberately an
+ * environment value rather than a per-guild setting: a customer's server must
+ * never receive the bot's internals, and no guild should be able to redirect
+ * them. Unset means internal events are audited but not delivered anywhere.
+ */
+const developerWebhookUrl = process.env.DEVELOPER_WEBHOOK_URL?.trim() || null;
 
 const lock = acquireInstanceLock();
 const database = createBotDatabase(databaseUrl);
@@ -116,7 +138,15 @@ const runtime: LogRuntime = {
   hmacSecret,
   encryptionKey,
   sourceLayer: SOURCE_LAYER,
-  send: (channelId, envelope, colorOverride) => sendLogEmbed(client, channelId, envelope, colorOverride)
+  send: (channelId, envelope, colorOverride) => sendLogEmbed(client, channelId, envelope, colorOverride),
+  // Internal destinations (bot-log: the bot's own failures and every security.*
+  // event) go to the developer webhook, never to a customer's server.
+  ...(developerWebhookUrl
+    ? { sendToDeveloper: (envelope: LogEnvelope) => sendLogEmbedToWebhook(developerWebhookUrl, envelope) }
+    : {}),
+  // Backs the operator's role exclusions. Wired to the cached reader so a burst
+  // of events costs one member lookup rather than one per event.
+  resolveMemberRoles: (guildId, userId) => readMemberRoleIds(client, guildId, userId)
 };
 
 const dispatch = createDispatcher({
@@ -140,12 +170,94 @@ const dispatch = createDispatcher({
   }
 });
 
-bindEvents(client, dispatch, {
+/* ------------------------------------------------------------------ *
+ * Anti-nuke
+ *
+ * GOVERNANCE rule 12 — wired in front of the logger, never through it. A muted
+ * log channel cannot disarm the engine, and a failure inside it cannot stop an
+ * event from being logged.
+ * ------------------------------------------------------------------ */
+
+const securityConfigs = new ConfigCache(guildId => database.loadSecurity(guildId));
+
+const antiNuke = createAntiNukeEngine({
+  configFor: guildId => securityConfigs.get(guildId),
+  quarantine: (guildId, actorId, roleId) => quarantineMember(client, guildId, actorId, roleId),
+  notifyOwner: (guildId, message) => dmGuildOwner(client, guildId, message),
+  report: (incident, outcome) =>
+    logEvent(
+      "security.nuke-prevented",
+      {
+        guildId: incident.guildId,
+        actorId: incident.actorId,
+        data: {
+          actorId: incident.actorId,
+          action: incident.action,
+          count: incident.count,
+          limit: incident.limit,
+          // Recorded so the trail shows whether the actor was actually stopped,
+          // not merely detected.
+          quarantined: outcome.quarantined,
+          ownerNotified: outcome.ownerNotified
+        }
+      },
+      runtime
+    ).then(() => undefined),
+  selfId: () => client.user?.id ?? null
+});
+
+/**
+ * The sink the bot actually binds.
+ *
+ * The engine sees every event first, but does not delay it: `observe` is started
+ * and the event is dispatched immediately, so the Discord writes that mitigation
+ * performs can never slow the audit trail down.
+ */
+const guardedDispatch: typeof dispatch = event => {
+  void antiNuke.observe(event);
+  dispatch(event);
+};
+
+/* ------------------------------------------------------------------ *
+ * Command-handler helpers
+ * ------------------------------------------------------------------ */
+
+/**
+ * Sends the operator-configured DM, if they turned it on.
+ *
+ * Best-effort by design: a member with DMs closed must not turn a completed
+ * punishment into a reported failure, so the result is deliberately dropped.
+ */
+async function maybeNotify(config: CommandConfig, guildId: string, targetId: string, content: string) {
+  if (!config.dmOnAction) return;
+  await notifyTarget(client, guildId, targetId, content).catch(() => false);
+}
+
+/** Operator-facing wording for every way a channel action can fail. */
+const channelFailureMessages: Record<string, string> = {
+  GUILD_UNAVAILABLE: "تعذّر الوصول إلى السيرفر.",
+  CHANNEL_UNAVAILABLE: "تعذّر الوصول إلى القناة.",
+  NOT_A_TEXT_CHANNEL: "هذا الأمر يعمل في القنوات النصية فقط.",
+  MESSAGES_TOO_OLD: "لا يمكن حذف رسائل أقدم من 14 يوماً.",
+  ACTION_FAILED: "تعذّر تنفيذ الإجراء. تحقّق من صلاحيات البوت في هذه القناة.",
+  UNKNOWN_ACTION: "إجراء غير معروف."
+};
+
+function channelSuccessMessages(commandName: string, removed: number | undefined, numbers: Record<string, number>) {
+  if (commandName === "clear") return `تم حذف ${removed ?? 0} رسالة.`;
+  if (commandName === "lock") return "تم إغلاق القناة.";
+  if (commandName === "unlock") return "تم فتح القناة.";
+  const seconds = numbers.seconds ?? 0;
+  return seconds === 0 ? "تم إيقاف الوضع البطيء." : `تم ضبط الوضع البطيء على ${seconds} ثانية.`;
+}
+
+bindEvents(client, guardedDispatch, {
   messageCache,
-  onStatusCommand: async ({ guildId, roleIds }) => {
-    const tiers = await database.loadTierRoles(guildId);
-    if (!tiers) return "AL AI متصل، لكن لم تُضبط رتب الإدارة لهذا السيرفر بعد.";
-    const outcome = check(roleCarrierOf(roleIds), tiers, "moderator");
+  onStatusCommand: async ({ guildId, roleIds, isGuildOwner, isAdministrator }) => {
+    // No mapping saved is no longer a lockout: the owner tier is automatic, so
+    // the guild owner and Administrators resolve even on a fresh guild.
+    const tiers = (await database.loadTierRoles(guildId)) ?? EMPTY_TIER_ROLES;
+    const outcome = check(roleCarrierOf(roleIds, { isGuildOwner, isAdministrator }), tiers, "moderator");
 
     // GOVERNANCE rule 12: a failed attempt is the signal, so it is reported even
     // though the user only ever sees a generic reply.
@@ -163,8 +275,28 @@ bindEvents(client, dispatch, {
    * GOVERNANCE rule 3: the tier is resolved from configured Role IDs, never from
    * the caller's claim, and the decision is re-made here on every command —
    * the dashboard switch is a convenience, not an authority.
+   *
+   * A note on logging, because it is easy to get wrong: this handler logs a
+   * punishment only when nothing else can. Ban, unban, kick and timeout are
+   * reported once, by the gateway listener that reads Discord's own audit log —
+   * which also carries the reason and catches actions taken outside AL AI.
+   * Logging them here as well would put two entries in the operator's channel
+   * for one action. Warnings and clearing them are the exception: they are
+   * records, not Discord mutations, so nothing else reports them.
    */
-  onCommand: async ({ guildId, userId, roleIds, commandName, targetId, minutes, reason, reply }) => {
+  onCommand: async ({
+    guildId,
+    channelId,
+    userId,
+    roleIds,
+    isGuildOwner,
+    isAdministrator,
+    commandName,
+    targetId,
+    numbers,
+    reason,
+    reply
+  }) => {
     const reject = async (message: string, detail: string) => {
       const signal = detector.authorizationFailure({ guildId, actorId: userId, action: commandName, reason: detail });
       await raiseSecurityEvent(signal.id, signal.data, guildId);
@@ -172,7 +304,12 @@ bindEvents(client, dispatch, {
       await reply(message);
     };
 
-    // 1. The command must exist in the registry, and be enabled for this guild.
+    const succeed = async (message: string) => {
+      await logEvent("bot.command-success", { guildId, actorId: userId, data: { command: commandName } }, runtime).catch(() => undefined);
+      await reply(message);
+    };
+
+    // 1. The command must exist in the registry.
     let definition;
     try {
       definition = requireCommand(commandName);
@@ -181,36 +318,81 @@ bindEvents(client, dispatch, {
       return;
     }
 
-    const flags = await database.loadCommandFlags(guildId);
-    const flag = flags.get(commandName);
-    if (flag?.enabled === false) {
+    // 2. This guild's configuration, normalised against the definition so a
+    //    control the command does not support can never be honoured — a purge
+    //    setting on `/warn` would be a switch that does nothing.
+    const configured = await database.loadCommandFlags(guildId);
+    const config = normaliseCommandConfig(definition, configured.get(commandName));
+
+    if (!config.enabled) {
       await reject("هذا الأمر معطّل في هذا السيرفر.", "COMMAND_DISABLED");
       return;
     }
 
-    // The operator may raise or lower a command's tier from the dashboard; the
-    // stored override wins, and the registry value is only the fallback. Without
-    // this the minimum_tier column was written and never enforced.
-    const requiredTier = flag?.minimumTier ?? definition.minimumTier;
-
-    // 2. The actor must hold a tier that outranks the command's requirement.
-    const tiers = await database.loadTierRoles(guildId);
-    if (!tiers) {
-      await reject("لم تُضبط رتب الإدارة بعد.", "NO_TIER_CONFIG");
-      return;
-    }
-    const outcome = check(roleCarrierOf(roleIds), tiers, requiredTier);
-    if (!outcome.allowed) {
+    // 3. The actor must hold a tier that outranks the command's requirement, or
+    //    one of the roles the operator attached to this specific command.
+    //    An unmapped guild is not a lockout: the owner tier is automatic.
+    const tiers = (await database.loadTierRoles(guildId)) ?? EMPTY_TIER_ROLES;
+    const outcome = check(roleCarrierOf(roleIds, { isGuildOwner, isAdministrator }), tiers, config.allowedLevel);
+    const viaCustomRole = roleIds.some(id => config.customRoleIds.includes(id));
+    if (!outcome.allowed && !viaCustomRole) {
       await reject("صلاحيتك لا تسمح بهذا الإجراء.", outcome.reason);
       return;
     }
 
+    const trimmedReason = reason.trim();
+    if (definition.requiresReason && !trimmedReason) {
+      await reject("هذا الأمر يتطلب سبباً.", "MISSING_REASON");
+      return;
+    }
+
+    /* ---------------- Channel commands ---------------- */
+    if (definition.target !== "member") {
+      const action =
+        commandName === "clear"
+          ? { kind: "clear" as const, guildId, channelId, count: numbers.count ?? 1 }
+          : commandName === "lock"
+            ? { kind: "lock" as const, guildId, channelId, reason: trimmedReason || "إغلاق القناة" }
+            : commandName === "unlock"
+              ? { kind: "unlock" as const, guildId, channelId, reason: trimmedReason || "فتح القناة" }
+              : { kind: "slowmode" as const, guildId, channelId, seconds: numbers.seconds ?? 0, reason: trimmedReason || "الوضع البطيء" };
+
+      const result = await applyChannelAction(client, action);
+      if (!result.ok) {
+        await reject(channelFailureMessages[result.reason] ?? "تعذّر تنفيذ الإجراء.", result.reason);
+        return;
+      }
+      // No log call here: Discord reports the channel update and the bulk delete
+      // through the gateway, so the operator's log stays single-entry.
+      await succeed(channelSuccessMessages(commandName, result.removed, numbers));
+      return;
+    }
+
+    /* ---------------- Member commands ---------------- */
     if (!targetId) {
       await reject("حدّد العضو المطلوب.", "MISSING_TARGET");
       return;
     }
 
-    // 3. Discord's own hierarchy rules, checked before the API call.
+    // Reading a member's warnings and clearing them are records, not Discord
+    // mutations, so they run before the hierarchy check — a moderator looking up
+    // their own warnings must not be blocked by "you cannot act on yourself".
+    if (commandName === "warns") {
+      const warnings = await database.listWarnings(guildId, targetId, 10);
+      const total = await database.countWarnings(guildId, targetId);
+      if (warnings.length === 0) {
+        await succeed(`لا توجد تحذيرات مسجّلة على <@${targetId}>.`);
+        return;
+      }
+      const lines = warnings.map((warning, index) => {
+        const when = warning.createdAt.slice(0, 10);
+        return `**${index + 1}.** ${warning.reason} — <@${warning.moderatorId}> (${when})`;
+      });
+      await succeed(`تحذيرات <@${targetId}> (${total} إجمالاً، أحدث ${warnings.length}):\n${lines.join("\n")}`.slice(0, 1900));
+      return;
+    }
+
+    // 4. Discord's own hierarchy rules, checked before any member mutation.
     const [actorPositions, targetPositions, botPosition] = await Promise.all([
       readMemberPositions(client, guildId, userId),
       readMemberPositions(client, guildId, targetId),
@@ -236,13 +418,39 @@ bindEvents(client, dispatch, {
       return;
     }
 
-    // 4. Apply, then log. The reason is always an embed field, never a second entry.
+    if (commandName === "warn") {
+      await database.addWarning({ id: randomUUID(), guildId, userId: targetId, moderatorId: userId, reason: trimmedReason });
+      await logEvent("moderation.warn", { guildId, actorId: userId, data: { targetId, actorId: userId, reason: trimmedReason } }, runtime).catch(() => undefined);
+      await maybeNotify(config, guildId, targetId, `تلقّيت تحذيراً في السيرفر. السبب: ${trimmedReason}`);
+      const total = await database.countWarnings(guildId, targetId);
+      await succeed(`تم تحذير <@${targetId}>. إجمالي تحذيراته: ${total}.`);
+      return;
+    }
+
+    if (commandName === "clearwarns") {
+      const removed = await database.clearWarnings(guildId, targetId);
+      await logEvent(
+        "moderation.clearwarns",
+        { guildId, actorId: userId, data: { targetId, actorId: userId, removed, reason: trimmedReason || "—" } },
+        runtime
+      ).catch(() => undefined);
+      await maybeNotify(config, guildId, targetId, "تم مسح تحذيراتك في السيرفر.");
+      await succeed(removed ? `تم مسح ${removed} تحذيراً عن <@${targetId}>.` : `لا توجد تحذيرات مسجّلة على <@${targetId}>.`);
+      return;
+    }
+
+    // 5. Apply the Discord mutation. The gateway logs it; we only report back.
     const applied = await applyModeration(client, {
-      kind: commandName as "ban" | "unban" | "kick" | "timeout" | "mute" | "warn",
+      kind: commandName as "ban" | "unban" | "kick" | "timeout",
       guildId,
       targetId,
-      reason,
-      ...(minutes !== null ? { minutes } : {})
+      reason: trimmedReason,
+      ...(commandName === "timeout" ? { minutes: numbers.minutes ?? 1 } : {}),
+      // `deleteMessageDays` is the operator's purge setting, converted to the
+      // seconds Discord actually accepts. Ignored for commands without purge.
+      ...(config.deleteMessageDays > 0 && commandName !== "kick" && commandName !== "unban"
+        ? { deleteMessageSeconds: config.deleteMessageDays * 86_400 }
+        : {})
     } as Parameters<typeof applyModeration>[1]);
 
     if (!applied) {
@@ -250,14 +458,8 @@ bindEvents(client, dispatch, {
       return;
     }
 
-    await logEvent(
-      commandName === "warn" ? "moderation.warn" : `moderation.${commandName}`,
-      { guildId, actorId: userId, data: { targetId, actorId: userId, reason: reason || "—", ...(minutes !== null ? { minutes } : {}) } },
-      runtime
-    ).catch(() => undefined);
-
-    await logEvent("bot.command-success", { guildId, actorId: userId, data: { command: commandName } }, runtime).catch(() => undefined);
-    await reply("تم تنفيذ الإجراء.");
+    await maybeNotify(config, guildId, targetId, `تم تنفيذ إجراء إشرافي بحقك في السيرفر. السبب: ${trimmedReason || "غير محدد"}`);
+    await succeed("تم تنفيذ الإجراء.");
   }
 });
 
@@ -319,7 +521,11 @@ const supervisor = startSupervisor({
   dashboardUrl,
   hmacSecret,
   guildIds: () => [...client.guilds.cache.keys()],
-  uniqueUsers: () => intentUsage.stats().uniqueUsers
+  uniqueUsers: () => intentUsage.stats().uniqueUsers,
+  // `ws.ping` is the live gateway heartbeat — the only latency figure that
+  // describes the socket the bot actually runs on. It is -1 until the first
+  // heartbeat lands; the supervisor normalises that to null.
+  gatewayPingMs: () => client.ws.ping
 });
 
 /* ------------------------------------------------------------------ *

@@ -1,27 +1,48 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
 import { join } from "node:path";
 import {
+  assertDisjointTierRoles,
   assertUniqueChannelAssignment,
+  ANTI_NUKE_ACTION_LABELS,
+  ANTI_NUKE_ACTIONS,
+  ANTI_NUKE_LIMIT_KEYS,
+  assessRoleHierarchy,
+  assessRoleIconGate,
+  BOT_HEARTBEAT_STALE_MS,
+  commandFlagsFor,
   commandModules,
-  commandRegistry,
   decryptSecret,
   DEFAULT_EMBED_COLOR,
+  DEFAULT_LOGGING_MODE,
   describeVerification,
-  encryptSecret,
-  isTier,
+  deriveBotStatus,
+  isLoggingMode,
   LAYER_SIGNATURE_TTL_MS,
+  logDestinations,
   MAX_NICKNAME_LENGTH,
+  normaliseCommandConfig,
   normaliseHexColor,
   normaliseIconUrl,
   normaliseNickname,
+  normaliseRoleIds,
+  normaliseTierRoles,
+  normaliseAntiNukeConfig,
   requireCommand,
   SESSION_COOKIE_NAME,
+  summarisePunishments,
   verifyLayerRequest,
+  widgetOnlineNote,
+  type ActivityEntry,
+  type AntiNukeConfig,
+  type CommandConfig,
   type CustomizationSettings,
+  type GuildMetrics,
+  type LogDestination,
   type LoggingSettings,
   type HealthSnapshot,
+  type PermissionStatus,
   type Tier
 } from "@al-ai/core";
 import { loadEnv } from "./env.js";
@@ -35,10 +56,13 @@ import {
   exchangeCode,
   fetchBotGuildIds,
   fetchGuildChannels,
+  fetchGuildHierarchy,
+  fetchGuildPremiumTier,
   fetchGuildRoles,
   fetchBotHighestRolePosition,
   fetchIdentity,
   fetchUserGuilds,
+  fetchWidgetPresence,
   guildIconUrl,
   USER_PERMISSIONS,
   userAvatarUrl,
@@ -71,7 +95,23 @@ async function requireTierForGuild(request: FastifyRequest, reply: FastifyReply,
   const session = await requireSession(request, reply);
   if (!session) return null;
 
-  const userGuilds = await fetchUserGuilds(sessionAccessToken(session, env));
+  // Discord can reject the stored user token: it expires, or the operator
+  // revoked the app's access. That is an authentication failure, not a server
+  // fault, and letting it escape as a 500 leaves the operator staring at
+  // "unexpected error" with no way forward. Clear the dead session so the UI
+  // falls back to the sign-in screen.
+  let userGuilds;
+  try {
+    userGuilds = await fetchUserGuilds(sessionAccessToken(session, env));
+  } catch {
+    await destroySession(db, request as unknown as { headers: Record<string, unknown> }).catch(() => undefined);
+    reply
+      .code(401)
+      .header("set-cookie", clearedCookieHeader())
+      .send({ error: "SESSION_EXPIRED", message: "انتهت صلاحية الدخول عبر Discord. سجّل الدخول من جديد." });
+    return null;
+  }
+
   const membership = userGuilds.find(guild => guild.id === guildId);
   if (!membership) {
     reply.code(403).send({ error: "NOT_A_MEMBER", message: "لا تملك وصولاً إلى هذا السيرفر." });
@@ -83,7 +123,10 @@ async function requireTierForGuild(request: FastifyRequest, reply: FastifyReply,
     botToken: env.botToken,
     guildId,
     discordUserId: session.discordUserId,
-    userIsGuildOwner: membership.owner
+    userIsGuildOwner: membership.owner,
+    // Discord's own permission bitfield, not a claim from the browser: an
+    // Administrator holds the top tier with no configuration.
+    userIsAdministrator: hasPermission(membership.permissions, USER_PERMISSIONS.ADMINISTRATOR)
   });
 
   try {
@@ -118,14 +161,6 @@ function safeDecrypt(ciphertext: string, key: string): Record<string, unknown> |
   } catch {
     return null;
   }
-}
-
-/** A stored token is never displayed again: only this masked fingerprint is. */
-function maskToken(token: string) {
-  const [id, , signature] = token.split(".");
-  const head = id ? id.slice(0, 6) : token.slice(0, 6);
-  const tail = signature ? signature.slice(-4) : token.slice(-4);
-  return `${head}••••••••${tail}`;
 }
 
 app.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) => {
@@ -167,17 +202,32 @@ app.get("/api/health", async (): Promise<HealthSnapshot> => {
   let database: "reachable" | "unreachable" = "reachable";
   let guildCount = 0;
   let uniqueUsers = 0;
+  let heartbeatAt: Date | null = null;
   try {
     await db.ping();
     guildCount = await db.countGuilds();
     uniqueUsers = await db.countUniqueUsers();
+    heartbeatAt = await db.latestHeartbeatAt();
   } catch {
     database = "unreachable";
   }
+
+  // A configured token says the bot *could* run; only a heartbeat inside the
+  // staleness window says it *is* running. Deriving this from `env.botToken`
+  // alone is how this endpoint used to report "connected" for a bot that had
+  // been gone for hours — the same class of lie as a ping of 0.
+  const heartbeatFresh =
+    heartbeatAt !== null && Date.now() - heartbeatAt.getTime() < BOT_HEARTBEAT_STALE_MS;
+  const bot: HealthSnapshot["bot"] = !env.botToken
+    ? "awaiting_secret"
+    : heartbeatFresh
+      ? "connected"
+      : "configured";
+
   return {
     status: database === "reachable" ? "healthy" : "degraded",
     dashboard: "online",
-    bot: env.botToken ? "connected" : "awaiting_secret",
+    bot,
     database,
     gateway: { eventsLastMinute: 0, ceiling: 120 },
     // Discord's review threshold counts guilds, while its warning threshold counts
@@ -285,13 +335,16 @@ app.get("/api/guilds", async (request, reply) => {
 
   const guilds = await Promise.all(
     managed.map(async guild => {
-      await db.upsertGuild({ id: guild.id, name: guild.name, iconUrl: guild.icon, memberCount: 0, botPresent: botGuildIds.has(guild.id) });
+      // Seed only. The member count belongs to the bot, which is the only layer
+      // that can see it; writing a placeholder here would clobber it.
+      await db.ensureGuild({ id: guild.id, name: guild.name, iconUrl: guild.icon });
       const tier = await resolveActorTier({
         db,
         botToken: env.botToken,
         guildId: guild.id,
         discordUserId: session.discordUserId,
-        userIsGuildOwner: guild.owner
+        userIsGuildOwner: guild.owner,
+        userIsAdministrator: hasPermission(guild.permissions, USER_PERMISSIONS.ADMINISTRATOR)
       });
       const record = await db.getGuild(guild.id);
       return {
@@ -304,7 +357,10 @@ app.get("/api/guilds", async (request, reply) => {
         canManageIdentity: tier !== null,
         canManageLogging: tier !== null,
         canManageCommands: tier !== null,
-        canManageTiers: tier === "owner",
+        // Role mapping decides who can do everything else, so it needs the
+        // admin tier or above — a moderator must not be able to widen their own
+        // access by editing the list.
+        canManageTiers: tier === "owner" || tier === "admin",
         canInvite: hasPermission(guild.permissions, USER_PERMISSIONS.MANAGE_GUILD)
       };
     })
@@ -338,16 +394,19 @@ app.get("/api/guilds/:guildId/channels", async (request, reply) => {
 });
 
 /* ------------------------------------------------------------------ *
- * Tier roles — GOVERNANCE rule 3
+ * Role mapping — GOVERNANCE rule 3
  *
- * Tiers bind to Role IDs, never User IDs. Until this is configured every actor
- * resolves to null and the dashboard denies access, so this screen is the one
- * that makes the rest of the product usable. It is therefore Owner-only, and
- * the Discord guild owner always passes (resolveActorTier short-circuits).
+ * Tiers bind to Role IDs, never User IDs. Only two lists are configurable:
+ * `admin` and `moderator`. The `owner` tier has no list at all — it is derived
+ * from Discord's own guild ownership and the Administrator permission, so a
+ * fresh guild works immediately and there is nothing to leave unconfigured.
+ *
+ * Editable at the admin tier and above, because this screen decides who can do
+ * everything else.
  * ------------------------------------------------------------------ */
 app.get("/api/guilds/:guildId/tiers", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
-  const context = await requireTierForGuild(request, reply, guildId, "owner");
+  const context = await requireTierForGuild(request, reply, guildId, "admin");
   if (!context) return;
 
   const configured = await db.getTierRoles(guildId);
@@ -371,42 +430,36 @@ app.get("/api/guilds/:guildId/tiers", async (request, reply) => {
 
 app.put("/api/guilds/:guildId/tiers", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
-  const context = await requireTierForGuild(request, reply, guildId, "owner");
+  const context = await requireTierForGuild(request, reply, guildId, "admin");
   if (!context) return;
 
-  const body = request.body as Partial<Record<Tier, string | null>> | undefined;
+  const body = request.body as { adminRoleIds?: unknown; moderatorRoleIds?: unknown } | undefined;
   if (!body || typeof body !== "object") {
-    return reply.code(400).send({ error: "INVALID_BODY", message: "يتطلب تعيين الرتب الأربع." });
+    return reply.code(400).send({ error: "INVALID_BODY", message: "يتطلب قائمتي رتب الإدارة والمشرفين." });
   }
 
-  const tiers = {
-    owner: normaliseSnowflake(body.owner),
-    head_admin: normaliseSnowflake(body.head_admin),
-    admin: normaliseSnowflake(body.admin),
-    moderator: normaliseSnowflake(body.moderator)
-  };
+  // Normalised with the same helper the bot uses on read, so a stored list
+  // cannot mean two different things on the two sides of the database.
+  const roles = normaliseTierRoles(body);
 
-  if (!tiers.owner) {
-    return reply.code(400).send({ error: "OWNER_ROLE_REQUIRED", message: "رتبة المالك إلزامية." });
+  // A role in both lists would resolve to admin and leave the moderator entry
+  // dead in a way the operator cannot see. Rejected rather than silently hidden.
+  try {
+    assertDisjointTierRoles(roles);
+  } catch {
+    return reply.code(400).send({ error: "DUPLICATE_ROLE", message: "الرتبة نفسها لا تُسند إلى مجموعتين." });
   }
 
-  // One role cannot hold two tiers: the resolution order would silently hide one.
-  const assigned = (Object.entries(tiers) as [Tier, string | null][]).filter(([, id]) => id);
-  const duplicates = assigned.filter(([, id], index) => assigned.findIndex(([, other]) => other === id) !== index);
-  if (duplicates.length) {
-    return reply.code(400).send({ error: "DUPLICATE_ROLE", message: "الرتبة نفسها لا تُسند إلى مستويين." });
-  }
-
-  await db.saveTierRoles(guildId, tiers);
+  await db.saveTierRoles(guildId, roles);
   await appendAudit(db, env, {
     guildId,
     severity: "warning",
     eventId: "role.update",
     actorId: context.session!.discordUserId,
-    payload: { action: "tier.assign", tiers }
+    payload: { action: "tier.assign", ...roles }
   });
 
-  return { configured: tiers };
+  return { configured: roles };
 });
 
 /** Discord snowflakes are numeric strings; anything else is treated as unset. */
@@ -424,46 +477,46 @@ app.get("/api/guilds/:guildId/commands", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
   const session = await requireSession(request, reply);
   if (!session) return;
-  const flags = await db.getCommandFlags(guildId);
-  return {
-    modules: commandModules,
-    commands: commandRegistry.map(command => ({ ...command, enabled: flags.get(command.name) ?? true }))
-  };
+  const configured = await db.getCommandFlags(guildId);
+  // `commandFlagsFor` joins the registry to what the guild stored and fills
+  // every gap with the shipped default, so the dashboard shows exactly what the
+  // bot will do — including for a command nobody has ever touched.
+  return { modules: commandModules, commands: commandFlagsFor(configured) };
 });
 
 /**
  * Applies a batch of command changes.
  *
- * The body carries only the commands the operator actually edited. Both fields
- * are validated here: an unknown command name is rejected against the shared
- * registry, and the minimum tier is narrowed to a real tier so the stored value
- * can never be something the bot cannot interpret.
+ * The body carries only the commands the operator actually edited. Each change
+ * is normalised against its registry definition, which is what keeps a control
+ * the command does not support from being stored and then silently ignored —
+ * a purge setting on `/warn` would be a switch that does nothing.
  */
 app.put("/api/guilds/:guildId/commands", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
   const context = await requireTierForGuild(request, reply, guildId);
   if (!context) return;
 
-  const body = request.body as { changes?: { command?: string; enabled?: boolean; minimumTier?: string }[] } | undefined;
+  const body = request.body as { changes?: Partial<CommandConfig>[] } | undefined;
   const changes = body?.changes;
   if (!Array.isArray(changes) || changes.length === 0) {
     return reply.code(400).send({ error: "INVALID_BODY", message: "أرسل قائمة التغييرات المطلوبة." });
   }
 
-  const accepted: { name: string; enabled: boolean; minimumTier: Tier }[] = [];
+  const accepted: CommandConfig[] = [];
   for (const change of changes) {
-    if (typeof change?.command !== "string" || typeof change.enabled !== "boolean" || !isTier(change.minimumTier)) {
-      return reply.code(400).send({ error: "INVALID_CHANGE", message: "كل تغيير يحتاج اسماً وحالة ورتبة صحيحة." });
+    if (typeof change?.name !== "string") {
+      return reply.code(400).send({ error: "INVALID_CHANGE", message: "كل تغيير يحتاج اسم أمر صحيح." });
     }
     try {
-      accepted.push({ name: requireCommand(change.command).name, enabled: change.enabled, minimumTier: change.minimumTier });
+      accepted.push(normaliseCommandConfig(requireCommand(change.name), change));
     } catch {
       return reply.code(400).send({ error: "UNKNOWN_COMMAND", message: "هذا الأمر غير مسجل في AL AI." });
     }
   }
 
   for (const change of accepted) {
-    await db.saveCommandFlag(guildId, change.name, change.enabled, change.minimumTier);
+    await db.saveCommandFlag(guildId, change);
   }
 
   await appendAudit(db, env, {
@@ -519,64 +572,74 @@ app.get("/api/guilds/:guildId/security", async (request, reply) => {
 });
 
 /* ------------------------------------------------------------------ *
- * Bot tokens: write-only. A stored token is never returned again.
+ * Anti-nuke configuration
+ *
+ * The engine itself runs in the bot; this is only its settings. Reads are open
+ * to any session so an operator can always see what is armed, while a write
+ * needs the admin tier — disarming the engine is exactly the change an attacker
+ * holding a moderator account would want to make.
  * ------------------------------------------------------------------ */
-app.get("/api/tokens", async (request, reply) => {
+
+app.get("/api/guilds/:guildId/security/config", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
   const session = await requireSession(request, reply);
   if (!session) return;
-  const rows = await db.listTokens();
+
+  const config = await db.getSecurity(guildId);
+
+  // The quarantine role is chosen from roles that exist, so the picker is fed
+  // from Discord rather than free text — a stored ID matching nothing would
+  // leave mitigation silently doing half its job.
+  const roles = env.botToken ? await fetchGuildRoles(env.botToken, guildId).catch(() => []) : [];
+
   return {
-    tokens: rows.map(row => ({
-      id: row.id,
-      label: row.label,
-      masked: row.fingerprint,
-      guildIds: row.guild_ids,
-      createdAt: row.created_at
+    config,
+    roles,
+    actions: ANTI_NUKE_ACTIONS.map(action => ({
+      action,
+      label: ANTI_NUKE_ACTION_LABELS[action],
+      limit: config.limits[ANTI_NUKE_LIMIT_KEYS[action]]
     }))
   };
 });
 
-app.post("/api/tokens", async (request, reply) => {
-  const session = await requireSession(request, reply);
-  if (!session) return;
-  const body = request.body as { label?: string; token?: string; guildIds?: string[] } | undefined;
-  const label = (body?.label ?? "").trim();
-  const token = (body?.token ?? "").trim();
-  if (!label || !token) return reply.code(400).send({ error: "INVALID_BODY", message: "يتطلب اسماً وتوكن." });
+app.put("/api/guilds/:guildId/security/config", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
 
-  const guildIds = Array.isArray(body?.guildIds) ? body!.guildIds!.filter(Boolean) : [];
-  await db.createToken({
-    id: randomUUID(),
-    label,
-    ciphertext: encryptSecret(token, env.encryptionKey),
-    fingerprint: maskToken(token),
-    guildIds
-  });
+  const body = request.body as Partial<AntiNukeConfig> | undefined;
+  // Normalised, not trusted: the same helper the bot reads through, so a value
+  // that survives here means the same thing on both sides of the database.
+  const config = normaliseAntiNukeConfig(body);
+
+  // Arming the engine without a quarantine role is allowed — it still detects,
+  // notifies and logs — but the operator is told plainly what it will not do.
+  await db.saveSecurity(guildId, config);
   await appendAudit(db, env, {
-    guildId: guildIds[0] ?? null,
+    guildId,
     severity: "warning",
     eventId: "bot.command-success",
-    actorId: session.discordUserId,
-    payload: { action: "token.create", label }
+    actorId: context.session!.discordUserId,
+    payload: {
+      action: "security.config.save",
+      enabled: config.enabled,
+      quarantineRoleId: config.quarantineRoleId,
+      limits: config.limits
+    }
   });
-  return { created: true };
+
+  return { config, savedAt: new Date().toISOString() };
 });
 
-app.delete("/api/tokens/:tokenId", async (request, reply) => {
-  const session = await requireSession(request, reply);
-  if (!session) return;
-  const { tokenId } = request.params as { tokenId: string };
-  const removed = await db.deleteToken(tokenId);
-  if (!removed) return reply.code(404).send({ error: "NOT_FOUND" });
-  await appendAudit(db, env, {
-    guildId: null,
-    severity: "warning",
-    eventId: "bot.command-success",
-    actorId: session.discordUserId,
-    payload: { action: "token.delete" }
-  });
-  return { deleted: true };
-});
+/* ------------------------------------------------------------------ *
+ * Bot tokens — retired
+ *
+ * The dashboard used to accept additional bot tokens from the operator and
+ * store them encrypted. That is gone by design, not by accident: AL AI runs on
+ * exactly one master token held in the server environment (BOT_TOKEN), and no
+ * endpoint may accept a credential from the browser. See GOVERNANCE rule 19.
+ * ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ *
  * Customization — the bot's per-guild identity
@@ -591,9 +654,38 @@ app.get("/api/guilds/:guildId/customization", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
   const session = await requireSession(request, reply);
   if (!session) return;
+
   const settings = await db.getCustomization(guildId);
-  const permissions = env.botToken ? await botIdentityPermissionStatus(env.botToken, guildId) : [];
-  return { settings, permissions };
+  const token = env.botToken;
+
+  // Each of these is advisory. A Discord outage must not stop the operator from
+  // seeing their saved settings, so every read degrades to "unknown" instead of
+  // failing the request — and an unknown never becomes a warning about a problem
+  // that may not exist.
+  const [permissions, premiumTier, hierarchy] = token
+    ? await Promise.all([
+        botIdentityPermissionStatus(token, guildId).catch((): PermissionStatus[] => []),
+        fetchGuildPremiumTier(token, guildId).catch(() => null),
+        fetchGuildHierarchy(token, guildId).catch(() => null)
+      ])
+    : [[] as PermissionStatus[], null, null];
+
+  const tierRoles = await db.getTierRoles(guildId).catch(() => null);
+  const managedRoleIds = [...(tierRoles?.adminRoleIds ?? []), ...(tierRoles?.moderatorRoleIds ?? [])];
+  // A configured role the bot can no longer see (deleted, or renamed away) is
+  // skipped rather than counted as position 0, which would report a false pass.
+  const managedPositions = hierarchy
+    ? managedRoleIds
+        .map(roleId => hierarchy.rolePositions.get(roleId))
+        .filter((position): position is number => position !== undefined)
+    : [];
+
+  return {
+    settings,
+    permissions,
+    hierarchy: hierarchy ? assessRoleHierarchy(hierarchy.botPosition, managedPositions) : null,
+    roleIcon: assessRoleIconGate(premiumTier)
+  };
 });
 
 app.put("/api/guilds/:guildId/customization", async (request, reply) => {
@@ -625,11 +717,35 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
     return reply.code(400).send({ error: "INVALID_ROLE_ICON", message: "أيقونة الرتبة يجب أن تكون رابط HTTPS صالحاً." });
   }
 
-  // Refuse instead of performing an operation that is guaranteed to fail.
+  // The screen locks this field below boost level 2, but that lock is a
+  // courtesy, not a guarantee — a hand-crafted request would still reach Discord
+  // and come back as an opaque 400. Refuse it here, with a reason the operator
+  // can act on.
+  //
+  // Only a *change* is doomed. Re-sending the icon already stored is a no-op,
+  // and rejecting that would strand the operator: the field is locked, so they
+  // could not clear it either. An unreadable boost level fails open, matching
+  // the gate.
+  if (env.botToken) {
+    const current = await db.getCustomization(guildId);
+    if (roleIconUrl && roleIconUrl !== current.roleIconUrl) {
+      const premiumTier = await fetchGuildPremiumTier(env.botToken, guildId).catch(() => null);
+      const gate = assessRoleIconGate(premiumTier);
+      if (gate.locked) {
+        return reply.code(409).send({ error: "ROLE_ICON_REQUIRES_BOOST", message: gate.reason });
+      }
+    }
+  }
+
+  // Refuse instead of performing an operation that is guaranteed to fail — but
+  // only on a *known* absence. `null` means the permission read failed, and
+  // blocking on that would make an unreadable permission indistinguishable from
+  // a missing one, refusing saves the bot can perform. The bot re-checks before
+  // it writes and reports Discord's own error if the permission really is absent.
   if (env.botToken) {
     const statuses = await botIdentityPermissionStatus(env.botToken, guildId);
     const nicknamePermission = statuses.find(status => status.key === "change_nickname");
-    if (nicknamePermission && !nicknamePermission.granted) {
+    if (nicknamePermission?.granted === false) {
       return reply.code(409).send({ error: "MISSING_PERMISSION", message: "البوت لا يملك صلاحية «تغيير الاسم المستعار» في هذا السيرفر." });
     }
   }
@@ -647,8 +763,77 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
 });
 
 /* ------------------------------------------------------------------ *
+ * Overview metrics
+ *
+ * Everything here is a real value: Discord's own gateway heartbeat reported by
+ * the bot, Discord's aggregate widget presence, and counts read from the
+ * append-only audit trail. Nothing is estimated or carried over from the
+ * dashboard's own internals.
+ * ------------------------------------------------------------------ */
+app.get("/api/guilds/:guildId/metrics", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const session = await requireSession(request, reply);
+  if (!session) return;
+
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const [health, counts, rows, widget, record] = await Promise.all([
+    db.getGuildHealth(guildId).catch(() => null),
+    db.countPunishmentsSince(guildId, since).catch(() => []),
+    db.listRecentModeration(guildId, 8).catch(() => []),
+    // The widget is unauthenticated and independent of our bot token.
+    fetchWidgetPresence(guildId).catch(() => ({ online: null, reason: "unavailable" }) as const),
+    db.getGuild(guildId).catch(() => null)
+  ]);
+
+  const metrics: GuildMetrics = {
+    bot: deriveBotStatus(health, Date.now()),
+    members: {
+      total: record?.memberCount ?? 0,
+      online: widget.online,
+      onlineNote: widgetOnlineNote(widget)
+    },
+    punishments24h: summarisePunishments(counts),
+    recentActivity: rows.map(row => {
+      const payload = safeDecrypt(row.payload_ciphertext, env.encryptionKey) as Record<string, unknown> | null;
+      const text = (value: unknown) => (typeof value === "string" && value && value !== "—" ? value : null);
+      return {
+        id: row.id,
+        eventId: row.event_id,
+        severity: (row.severity === "critical" || row.severity === "warning" ? row.severity : "info") as ActivityEntry["severity"],
+        actorId: text(payload?.actorId) ?? text(payload?.moderatorId),
+        targetId: text(payload?.targetId) ?? text(payload?.memberId),
+        reason: text(payload?.reason),
+        createdAt: row.created_at.toISOString()
+      };
+    })
+  };
+
+  return metrics;
+});
+
+/* ------------------------------------------------------------------ *
  * Logging
  * ------------------------------------------------------------------ */
+
+/**
+ * Keeps only the destinations an operator is allowed to bind a channel to.
+ *
+ * `bot-log` is internal — it is delivered to the developer webhook, so a value
+ * arriving for it is either a stale client or a hand-crafted request. Either
+ * way it must not reach the routing table, where it would let a customer
+ * redirect AL AI's own errors into their server.
+ */
+function normaliseCategoryChannels(value: unknown): Partial<Record<LogDestination, string>> {
+  if (!value || typeof value !== "object") return {};
+  const result: Partial<Record<LogDestination, string>> = {};
+  for (const destination of logDestinations) {
+    const channelId = (value as Record<string, unknown>)[destination];
+    if (typeof channelId === "string" && channelId) result[destination] = channelId;
+  }
+  return result;
+}
+
 app.get("/api/guilds/:guildId/logging", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
   const session = await requireSession(request, reply);
@@ -664,11 +849,15 @@ app.put("/api/guilds/:guildId/logging", async (request, reply) => {
   const body = request.body as Partial<LoggingSettings> | undefined;
   const settings: LoggingSettings = {
     enabled: Boolean(body?.enabled),
+    mode: isLoggingMode(body?.mode) ? body.mode : DEFAULT_LOGGING_MODE,
     globalChannelId: body?.globalChannelId ?? null,
     ignoredChannelIds: Array.isArray(body?.ignoredChannelIds) ? body.ignoredChannelIds : [],
+    // Only snowflake-shaped IDs are kept: anything else would be written to the
+    // database and then silently never match a role the bot sees.
+    ignoredRoleIds: normaliseRoleIds(body?.ignoredRoleIds),
     embedColor: /^#[0-9a-f]{6}$/i.test(body?.embedColor ?? "") ? body!.embedColor! : DEFAULT_EMBED_COLOR,
     eventFlags: body?.eventFlags ?? {},
-    categoryChannels: body?.categoryChannels ?? {}
+    categoryChannels: normaliseCategoryChannels(body?.categoryChannels)
   };
 
   // One destination may never resolve to two channels.
@@ -690,7 +879,13 @@ app.put("/api/guilds/:guildId/logging", async (request, reply) => {
     severity: "warning",
     eventId: "bot.command-success",
     actorId: context.session!.discordUserId,
-    payload: { action: "logging.save", enabled: settings.enabled, destinations: Object.keys(settings.categoryChannels).length }
+    payload: {
+      action: "logging.save",
+      enabled: settings.enabled,
+      mode: settings.mode,
+      destinations: Object.keys(settings.categoryChannels).length,
+      ignoredRoles: settings.ignoredRoleIds.length
+    }
   });
   return { settings, savedAt: new Date().toISOString() };
 });

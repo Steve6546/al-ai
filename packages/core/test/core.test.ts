@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  allDestinations,
+  assertDisjointTierRoles,
   assertUniqueChannelAssignment,
   canManage,
   decryptSecret,
@@ -10,6 +12,7 @@ import {
   encryptSecret,
   eventSchema,
   eventsByCategory,
+  INTERNAL_DESTINATIONS,
   layerSignature,
   logDestinations,
   MAX_NICKNAME_LENGTH,
@@ -18,7 +21,10 @@ import {
   normaliseHexColor,
   normaliseIconUrl,
   normaliseNickname,
+  normaliseRoleIds,
+  normaliseTierRoles,
   requireEvent,
+  resolveTier,
   SESSION_COOKIE_OPTIONS,
   SESSION_MAX_AGE_SECONDS,
   signActor,
@@ -29,10 +35,49 @@ import {
 
 /* ---------------- permissions ---------------- */
 
-test("admin cannot manage head admin", () => assert.equal(canManage("admin", "head_admin"), false));
 test("owner can manage admin", () => assert.equal(canManage("owner", "admin"), true));
+test("admin cannot manage owner", () => assert.equal(canManage("admin", "owner"), false));
+test("admin cannot manage another admin", () => assert.equal(canManage("admin", "admin"), false));
+test("moderator cannot manage admin", () => assert.equal(canManage("moderator", "admin"), false));
 test("a tier cannot manage its own tier", () => assert.equal(canManage("moderator", "moderator"), false));
-test("head admin cannot manage owner", () => assert.equal(canManage("head_admin", "owner"), false));
+
+/* ---------------- the access model ---------------- */
+
+const noRoles = { adminRoleIds: [], moderatorRoleIds: [] };
+
+test("the guild owner holds the top tier with nothing configured", () =>
+  assert.equal(resolveTier({ roleIds: new Set(), isGuildOwner: true }, noRoles), "owner"));
+
+test("an Administrator holds the top tier with nothing configured", () =>
+  assert.equal(resolveTier({ roleIds: new Set(), isAdministrator: true }, noRoles), "owner"));
+
+test("a member with no matching role and no Discord grant resolves to nothing", () =>
+  assert.equal(resolveTier({ roleIds: new Set(["unrelated"]) }, noRoles), null));
+
+test("the higher of two held tiers wins", () =>
+  assert.equal(
+    resolveTier({ roleIds: new Set(["r-mod", "r-admin"]) }, { adminRoleIds: ["r-admin"], moderatorRoleIds: ["r-mod"] }),
+    "admin"
+  ));
+
+test("role IDs that are not snowflakes are dropped, not stored", () =>
+  assert.deepEqual(normaliseRoleIds(["1540515175826985080", "not-an-id", "", 42, null]), ["1540515175826985080"]));
+
+test("duplicate role IDs collapse instead of being stored twice", () =>
+  assert.deepEqual(normaliseRoleIds(["1540515175826985080", "1540515175826985080"]), ["1540515175826985080"]));
+
+test("a role cannot be both an admin role and a moderator role", () =>
+  assert.throws(() => assertDisjointTierRoles({ adminRoleIds: ["1540515175826985080"], moderatorRoleIds: ["1540515175826985080"] })));
+
+test("disjoint role lists are accepted", () =>
+  assert.doesNotThrow(() =>
+    assertDisjointTierRoles({ adminRoleIds: ["1540515175826985080"], moderatorRoleIds: ["1540515175826985081"] })
+  ));
+
+test("normaliseTierRoles tolerates a missing or malformed body", () => {
+  assert.deepEqual(normaliseTierRoles(undefined), noRoles);
+  assert.deepEqual(normaliseTierRoles({ adminRoleIds: "nope" }), noRoles);
+});
 
 /* ---------------- event schema ---------------- */
 
@@ -46,10 +91,37 @@ test("every event ID is unique and uses the domain.action form", () => {
   for (const id of ids) assert.match(id, /^[a-z]+(\.[a-z-]+)+$/);
 });
 
-test("all seven destinations have at least one registered event", () => {
-  for (const destination of logDestinations) {
+test("every destination has at least one registered event", () => {
+  // The internal `bot-log` counts too: it carries the security surface.
+  for (const destination of allDestinations) {
     assert.ok(eventsByCategory(destination).length > 0, `${destination} has no events`);
   }
+});
+
+test("the operator sees five destinations and the internal one is hidden", () => {
+  // `bot-log` is delivered to the developer webhook, so it must never appear in
+  // the list the dashboard offers channels for.
+  assert.equal(logDestinations.length, 5);
+  assert.equal(allDestinations.length, 6);
+  assert.ok(!logDestinations.includes("bot-log"));
+  assert.deepEqual([...INTERNAL_DESTINATIONS], ["bot-log"]);
+});
+
+test("the retired role-log destination is gone from the schema", () => {
+  assert.ok(!allDestinations.includes("role-log" as never));
+  // Its events did not disappear; they moved to server-log.
+  const serverEvents = eventsByCategory("server-log");
+  for (const id of ["role.create", "role.update", "role.delete"]) {
+    assert.ok(serverEvents.includes(id), `${id} travels with server-log`);
+  }
+});
+
+test("a warning and its removal are both registered moderation events", () => {
+  // These are the two the command handler writes itself, because nothing in the
+  // gateway reports them: a warning is a record, not a Discord mutation.
+  assert.equal(requireEvent("moderation.warn").category, "moderation-log");
+  assert.equal(requireEvent("moderation.clearwarns").category, "moderation-log");
+  assert.equal(requireEvent("moderation.clearwarns").severity, "warning");
 });
 
 test("duplicate channel assignment across destinations is rejected", () => {

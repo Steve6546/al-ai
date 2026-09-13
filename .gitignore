@@ -11,3 +11,8 @@ coverage/
 
 # AL AI runtime artifacts
 .al-ai-bot.lock
+
+# Database dumps. They are a point-in-time copy of live rows — including the
+# encrypted OAuth tokens in `oauth_sessions` — and belong next to the data
+# directory, not in history where they can never be removed.
+.workbuddy-ai/backups/

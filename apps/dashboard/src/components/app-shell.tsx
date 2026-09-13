@@ -10,7 +10,6 @@ import {
   EllipsisVertical,
   ExternalLink,
   FileClock,
-  KeyRound,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -47,7 +46,7 @@ import { tierLabels, type Guild, type HealthSnapshot, type SessionInfo } from "@
  * into. It owns navigation and identity only — no view-specific state lives here.
  */
 
-export type ViewKey = "dashboard" | "commands" | "customization" | "roles" | "logs" | "audit" | "security" | "tokens";
+export type ViewKey = "dashboard" | "commands" | "customization" | "roles" | "logs" | "audit" | "security";
 
 type NavItem = {
   key: ViewKey;
@@ -61,8 +60,11 @@ type NavItem = {
 
 /**
  * Navigation is data, not markup, so adding a screen means adding one entry.
- * Sections keep configuration (what the operator changes) separate from
- * monitoring (what the operator reads).
+ *
+ * The four sections mirror the operator's mental model rather than the code
+ * layout: what the server is doing now (Overview), what you configure once
+ * (General Settings), what protects the server day to day (Moderation &
+ * Protection), and what happened in the past (Logs & Monitoring).
  */
 const navSections: { id: string; title: string | null; items: NavItem[] }[] = [
   {
@@ -71,22 +73,27 @@ const navSections: { id: string; title: string | null; items: NavItem[] }[] = [
     items: [{ key: "dashboard", label: "لوحة التحكم", icon: LayoutDashboard }]
   },
   {
-    id: "settings",
-    title: "الإعدادات",
+    id: "general",
+    title: "الإعدادات العامة",
     items: [
-      { key: "roles", label: "رتب الإدارة", icon: UserCog, needs: "canManageTiers", requiresBot: true },
-      { key: "commands", label: "الأوامر", icon: SquareTerminal, needs: "canManageCommands", requiresBot: true },
-      { key: "customization", label: "هوية البوت", icon: Palette, needs: "canManageIdentity", requiresBot: true },
-      { key: "logs", label: "السجلات", icon: ScrollText, needs: "canManageLogging", requiresBot: true }
+      { key: "roles", label: "رتب الإدارة والمشرفين", icon: UserCog, needs: "canManageTiers", requiresBot: true },
+      { key: "customization", label: "هوية البوت بالسيرفر", icon: Palette, needs: "canManageIdentity", requiresBot: true }
+    ]
+  },
+  {
+    id: "moderation",
+    title: "الإشراف والحماية",
+    items: [
+      { key: "commands", label: "أوامر المشرفين", icon: SquareTerminal, needs: "canManageCommands", requiresBot: true },
+      { key: "security", label: "الحماية والأمان", icon: ShieldAlert }
     ]
   },
   {
     id: "monitoring",
-    title: "المراقبة",
+    title: "السجلات والمراقبة",
     items: [
-      { key: "audit", label: "سجل التدقيق", icon: FileClock },
-      { key: "security", label: "كشف الاختراق", icon: ShieldAlert },
-      { key: "tokens", label: "التوكنات", icon: KeyRound }
+      { key: "logs", label: "سجلات السيرفر", icon: ScrollText, needs: "canManageLogging", requiresBot: true },
+      { key: "audit", label: "سجل تدقيق اللوحة", icon: FileClock }
     ]
   }
 ];
@@ -317,7 +324,7 @@ function SidebarNav({
   denyReason: (item: NavItem) => string | null;
   onView: (key: ViewKey) => void;
 }) {
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({ settings: true, monitoring: true });
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({ general: true, moderation: true, monitoring: true });
 
   return (
     <nav className="space-y-3 px-3 pb-4">

@@ -56,7 +56,20 @@ npm run start --workspace=@al-ai/bot         # Discord client
 ```
 
 The bot loads `.env` from its working directory. When it runs from the repository
-root it picks up the root `.env`; the dashboard reads the process environment.
+root it picks up the root `.env`; the dashboard reads the process environment
+only, so point it at the same file explicitly:
+
+```bash
+cd apps/dashboard
+../../node_modules/.bin/tsx --env-file=../../.env server/index.ts
+```
+
+Calling the local `tsx` binary directly rather than through `npx` skips a wrapper
+process per service, which is worth roughly 70 MB per service while running.
+
+The dashboard binds `0.0.0.0:3000`; set `PORT` to move it. The bot holds a lock
+file (`.al-ai-bot.lock`) and refuses to start if another instance owns it, so a
+bot killed uncleanly has to have its stale lock removed before it will boot.
 
 ## 4. Deploy slash commands
 
@@ -70,18 +83,21 @@ npm run deploy-commands --workspace=@al-ai/bot
 ## 5. Verify
 
 ```bash
-npm test     # 169 tests across three workspaces
+npm test     # 296 tests across three workspaces
 npm run lint # type checks across all workspaces
+npm run verify   # lint + schema parse + tests + build, in that order
 ```
 
 | Suite | Covers |
 |---|---|
-| `apps/bot/test` (112) | crypto, nonces, routing, permissions, pipeline, customization sync, governance |
-| `apps/dashboard/test` (16) | every screen renders without throwing |
-| `packages/core/test` (41) | event schema, tiers, session policy, appearance normalisation |
+| `apps/bot/test` (162) | crypto, nonces, routing, permissions, pipeline, customization sync, governance, anti-nuke |
+| `apps/dashboard/test` (38) | every screen renders without throwing; Discord read shapes; storage round-trips |
+| `packages/core/test` (96) | event schema, tiers, session policy, appearance normalisation, metrics, hierarchy, anti-nuke limits |
 
 The dashboard suite is a render smoke test: `vite build` proves the modules
 resolve, but only executing a component catches the blank-page class of crash.
+The Discord read tests exist because a wrong request shape there fails *silently*
+— the error is swallowed into a `null` and the feature simply reports nothing.
 
 ## Behaviour worth knowing
 

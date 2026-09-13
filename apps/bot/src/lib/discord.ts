@@ -1,4 +1,5 @@
 import {
+  ApplicationCommandOptionType,
   AuditLogEvent,
   ChannelType,
   Client,
@@ -8,7 +9,11 @@ import {
   REST,
   Routes,
   SlashCommandBuilder,
-  type Guild
+  type ChatInputCommandInteraction,
+  type Guild,
+  type GuildChannel,
+  type SlashCommandStringOption,
+  type SlashCommandUserOption
 } from "discord.js";
 import type { LogDestination, Severity } from "@al-ai/core";
 import { groupPagesIntoMessages, planEmbedFields, SEVERITY_EMBED_COLOR } from "@al-ai/core";
@@ -93,6 +98,57 @@ export async function sendLogEmbed(client: Client, channelId: string, envelope: 
     if (batch.length) await channel.send({ embeds: batch });
   }
   return true;
+}
+
+/**
+ * Delivers an internal event to the developer webhook.
+ *
+ * A webhook rather than a channel, because AL AI's own failures and security
+ * events must never land in a customer's server: the operator did not ask for
+ * them and cannot act on them. The URL comes from the environment, so no guild
+ * can redirect AL AI's internals somewhere of its own choosing.
+ */
+export async function sendLogEmbedToWebhook(webhookUrl: string, envelope: LogEnvelope, colorOverride?: string) {
+  for (const batch of groupPagesIntoMessages(buildLogEmbeds(envelope, colorOverride))) {
+    if (!batch.length) continue;
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ embeds: batch.map(embed => embed.toJSON()) })
+    }).catch(() => null);
+    // A dead webhook is a failed delivery, not a reason to throw: the audit
+    // trail already holds the event and the caller only records the outcome.
+    if (!response?.ok) return false;
+  }
+  return true;
+}
+
+/**
+ * A member's role IDs, cached briefly.
+ *
+ * The log router asks for this on every event once a guild has role exclusions,
+ * and a busy guild emits far more events than its members change roles. Five
+ * seconds is short enough that a role change is reflected almost immediately and
+ * long enough to collapse a burst into a single lookup.
+ */
+const ROLE_CACHE_TTL_MS = 5_000;
+const memberRoleCache = new Map<string, { roleIds: string[]; expiresAt: number }>();
+
+export async function readMemberRoleIds(client: Client, guildId: string, userId: string): Promise<string[]> {
+  const key = `${guildId}:${userId}`;
+  const cached = memberRoleCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.roleIds;
+
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return [];
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (!member) return [];
+
+  const roleIds = [...member.roles.cache.keys()];
+  // Bounded, so a large guild cannot turn this into an unbounded cache.
+  if (memberRoleCache.size > 5_000) memberRoleCache.clear();
+  memberRoleCache.set(key, { roleIds, expiresAt: Date.now() + ROLE_CACHE_TTL_MS });
+  return roleIds;
 }
 
 /** Name of the role AL AI creates for itself, shown next to its name in the member list. */
@@ -231,17 +287,29 @@ export async function listLoggableChannels(client: Client, guildId: string) {
 export const TIMEOUT_MIN_SECONDS = 60;
 export const TIMEOUT_MAX_SECONDS = 28 * 24 * 60 * 60;
 
+/** `/clear` bounds. One message is the floor: Discord's bulk endpoint needs two. */
+export const CLEAR_MIN_COUNT = 1;
+export const CLEAR_MAX_COUNT = 100;
+
+/** `/slowmode` bounds, in seconds. Discord's own maximum is six hours. */
+export const SLOWMODE_MAX_SECONDS = 6 * 60 * 60;
+
 export function buildStatusCommand() {
   return new SlashCommandBuilder().setName("al-status").setDescription("عرض حالة AL AI").toJSON();
 }
+
+/** Shared option builders, so the same control is described identically everywhere. */
+const targetOption = (option: SlashCommandUserOption) => option.setName("user").setDescription("العضو").setRequired(true);
+const reasonOption = (option: SlashCommandStringOption, required = false) =>
+  option.setName("reason").setDescription("السبب").setRequired(required).setMaxLength(512);
 
 export function buildModerationCommands() {
   return [
     new SlashCommandBuilder()
       .setName("ban")
       .setDescription("حظر عضو")
-      .addUserOption(option => option.setName("user").setDescription("العضو").setRequired(true))
-      .addStringOption(option => option.setName("reason").setDescription("السبب").setMaxLength(512))
+      .addUserOption(targetOption)
+      .addStringOption(option => reasonOption(option))
       .setDefaultMemberPermissions(0n)
       .toJSON(),
 
@@ -249,22 +317,22 @@ export function buildModerationCommands() {
       .setName("unban")
       .setDescription("رفع الحظر عن مستخدم")
       .addStringOption(option => option.setName("user_id").setDescription("معرّف المستخدم").setRequired(true))
-      .addStringOption(option => option.setName("reason").setDescription("السبب").setMaxLength(512))
+      .addStringOption(option => reasonOption(option))
       .setDefaultMemberPermissions(0n)
       .toJSON(),
 
     new SlashCommandBuilder()
       .setName("kick")
       .setDescription("طرد عضو")
-      .addUserOption(option => option.setName("user").setDescription("العضو").setRequired(true))
-      .addStringOption(option => option.setName("reason").setDescription("السبب").setMaxLength(512))
+      .addUserOption(targetOption)
+      .addStringOption(option => reasonOption(option))
       .setDefaultMemberPermissions(0n)
       .toJSON(),
 
     new SlashCommandBuilder()
       .setName("timeout")
       .setDescription("إسكات مؤقت")
-      .addUserOption(option => option.setName("user").setDescription("العضو").setRequired(true))
+      .addUserOption(targetOption)
       .addIntegerOption(option =>
         option
           .setName("minutes")
@@ -273,23 +341,75 @@ export function buildModerationCommands() {
           .setMinValue(1)
           .setMaxValue(TIMEOUT_MAX_SECONDS / 60)
       )
-      .addStringOption(option => option.setName("reason").setDescription("السبب").setMaxLength(512))
-      .setDefaultMemberPermissions(0n)
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("mute")
-      .setDescription("كتم عضو في القنوات الصوتية")
-      .addUserOption(option => option.setName("user").setDescription("العضو").setRequired(true))
-      .addStringOption(option => option.setName("reason").setDescription("السبب").setMaxLength(512))
+      .addStringOption(option => reasonOption(option))
       .setDefaultMemberPermissions(0n)
       .toJSON(),
 
     new SlashCommandBuilder()
       .setName("warn")
       .setDescription("تحذير عضو")
-      .addUserOption(option => option.setName("user").setDescription("العضو").setRequired(true))
-      .addStringOption(option => option.setName("reason").setDescription("السبب").setRequired(true).setMaxLength(512))
+      .addUserOption(targetOption)
+      .addStringOption(option => reasonOption(option, true))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("warns")
+      .setDescription("عرض تحذيرات عضو")
+      .addUserOption(targetOption)
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("clearwarns")
+      .setDescription("مسح تحذيرات عضو")
+      .addUserOption(targetOption)
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    // Channel commands. They act on the channel the command is typed in, so they
+    // take no target — Discord's own `Manage Messages` / `Manage Channels`
+    // permission is what the operator grants, and AL AI layers its tier on top.
+    new SlashCommandBuilder()
+      .setName("clear")
+      .setDescription("حذف عدد من الرسائل في هذه القناة")
+      .addIntegerOption(option =>
+        option
+          .setName("count")
+          .setDescription("عدد الرسائل")
+          .setRequired(true)
+          .setMinValue(CLEAR_MIN_COUNT)
+          .setMaxValue(CLEAR_MAX_COUNT)
+      )
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("lock")
+      .setDescription("إغلاق القناة أمام الأعضاء")
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("unlock")
+      .setDescription("فتح القناة أمام الأعضاء")
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("slowmode")
+      .setDescription("ضبط الوضع البطيء للقناة")
+      .addIntegerOption(option =>
+        option
+          .setName("seconds")
+          .setDescription("الفاصل بالثواني، و0 لإيقافه")
+          .setRequired(true)
+          .setMinValue(0)
+          .setMaxValue(SLOWMODE_MAX_SECONDS)
+      )
       .setDefaultMemberPermissions(0n)
       .toJSON()
   ];
@@ -325,14 +445,12 @@ export async function readBotHighestPosition(client: Client, guildId: string) {
 }
 
 export type ModerationAction =
-  | { kind: "ban"; guildId: string; targetId: string; reason: string }
+  | { kind: "ban"; guildId: string; targetId: string; reason: string; deleteMessageSeconds?: number }
   | { kind: "unban"; guildId: string; targetId: string; reason: string }
   | { kind: "kick"; guildId: string; targetId: string; reason: string }
-  | { kind: "timeout"; guildId: string; targetId: string; minutes: number; reason: string }
-  | { kind: "mute"; guildId: string; targetId: string; reason: string }
-  | { kind: "warn"; guildId: string; targetId: string; reason: string };
+  | { kind: "timeout"; guildId: string; targetId: string; minutes: number; reason: string; deleteMessageSeconds?: number };
 
-/** Applies one moderation action. Returns false when Discord refused it. */
+/** Applies one member action. Returns false when Discord refused it. */
 export async function applyModeration(client: Client, action: ModerationAction) {
   const guild = await client.guilds.fetch(action.guildId).catch(() => null);
   if (!guild) return false;
@@ -340,7 +458,10 @@ export async function applyModeration(client: Client, action: ModerationAction) 
   try {
     switch (action.kind) {
       case "ban":
-        await guild.bans.create(action.targetId, { reason: action.reason });
+        await guild.bans.create(action.targetId, {
+          reason: action.reason,
+          ...(action.deleteMessageSeconds ? { deleteMessageSeconds: action.deleteMessageSeconds } : {})
+        });
         return true;
       case "unban":
         await guild.bans.remove(action.targetId, action.reason);
@@ -356,21 +477,152 @@ export async function applyModeration(client: Client, action: ModerationAction) 
         await member.timeout(seconds * 1000, action.reason);
         return true;
       }
-      case "mute": {
-        const member = await guild.members.fetch(action.targetId);
-        await member.voice.setMute(true, action.reason);
-        return true;
-      }
-      case "warn":
-        // A warning is a record, not a Discord mutation: it is written to the
-        // moderation log by the caller and needs no API call here.
-        return true;
       default:
         return false;
     }
   } catch {
     return false;
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Channel actions
+ *
+ * `/clear`, `/lock`, `/unlock` and `/slowmode` act on the channel they are
+ * typed in, so they carry no member target and take no part in the role
+ * hierarchy. They are kept separate from `applyModeration` precisely so that
+ * distinction is visible in the types rather than buried in a branch.
+ * ------------------------------------------------------------------ */
+
+export type ChannelAction =
+  | { kind: "clear"; guildId: string; channelId: string; count: number }
+  | { kind: "lock"; guildId: string; channelId: string; reason: string }
+  | { kind: "unlock"; guildId: string; channelId: string; reason: string }
+  | { kind: "slowmode"; guildId: string; channelId: string; seconds: number; reason: string };
+
+export type ChannelActionResult = { ok: true; removed?: number } | { ok: false; reason: string };
+
+/**
+ * A guild channel that carries permission overwrites.
+ *
+ * `GuildBasedChannel` is a union that includes threads, which have no
+ * overwrites of their own. Narrowing structurally here is what lets `/lock`
+ * work on a text channel and be refused on a thread, without casting the
+ * union away and hoping.
+ */
+type OverwritableChannel = GuildChannel;
+
+function isOverwritable(channel: unknown): channel is OverwritableChannel {
+  return Boolean(channel) && typeof (channel as OverwritableChannel).permissionOverwrites?.edit === "function";
+}
+
+/** Applies one channel action. Reports *why* it failed so the operator is not left guessing. */
+export async function applyChannelAction(client: Client, action: ChannelAction): Promise<ChannelActionResult> {
+  const guild = await client.guilds.fetch(action.guildId).catch(() => null);
+  if (!guild) return { ok: false, reason: "GUILD_UNAVAILABLE" };
+
+  const channel = await guild.channels.fetch(action.channelId).catch(() => null);
+  if (!channel) return { ok: false, reason: "CHANNEL_UNAVAILABLE" };
+
+  try {
+    switch (action.kind) {
+      case "clear": {
+        if (!channel.isTextBased() || channel.isDMBased()) return { ok: false, reason: "NOT_A_TEXT_CHANNEL" };
+        // Discord's bulk endpoint refuses anything under two messages, so a
+        // single-message request falls back to a direct delete.
+        const deleted =
+          action.count === 1
+            ? await channel.bulkDelete(1, true).then(batch => batch.size).catch(() => -1)
+            : await channel.bulkDelete(Math.min(action.count, CLEAR_MAX_COUNT), true).then(batch => batch.size);
+        if (deleted < 0) return { ok: false, reason: "MESSAGES_TOO_OLD" };
+        return { ok: true, removed: deleted };
+      }
+      case "lock":
+        // Denying SendMessages on the @everyone overwrite is what Discord's own
+        // "Lock Channel" does; it leaves other roles untouched.
+        if (!isOverwritable(channel)) return { ok: false, reason: "NOT_A_TEXT_CHANNEL" };
+        await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: false }, { reason: action.reason });
+        return { ok: true };
+      case "unlock":
+        // `null` clears the overwrite rather than setting it to allow, so a
+        // channel that was locked by a role rule goes back to inheriting.
+        if (!isOverwritable(channel)) return { ok: false, reason: "NOT_A_TEXT_CHANNEL" };
+        await channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: null }, { reason: action.reason });
+        return { ok: true };
+      case "slowmode":
+        if (!("setRateLimitPerUser" in channel) || typeof channel.setRateLimitPerUser !== "function") {
+          return { ok: false, reason: "NOT_A_TEXT_CHANNEL" };
+        }
+        await channel.setRateLimitPerUser(Math.min(Math.max(action.seconds, 0), SLOWMODE_MAX_SECONDS), action.reason);
+        return { ok: true };
+      default:
+        return { ok: false, reason: "UNKNOWN_ACTION" };
+    }
+  } catch {
+    return { ok: false, reason: "ACTION_FAILED" };
+  }
+}
+
+/**
+ * Direct-messages a member about an action taken against them.
+ * Best-effort on purpose: a closed DM is not a failed moderation action.
+ */
+export async function notifyTarget(client: Client, guildId: string, userId: string, content: string) {
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return false;
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (!member) return false;
+  return member.send({ content }).then(() => true).catch(() => false);
+}
+
+/**
+ * Direct-messages the guild owner.
+ *
+ * Best-effort: a closed DM must not stop a quarantine, so a failure here is
+ * reported and not thrown. The owner is identified by Discord, not by a stored
+ * ID, so a server that changed hands notifies the right person.
+ */
+export async function dmGuildOwner(client: Client, guildId: string, content: string) {
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return false;
+  const owner = await guild.fetchOwner().catch(() => null);
+  if (!owner) return false;
+  return owner.send({ content }).then(() => true).catch(() => false);
+}
+
+/**
+ * Replaces every role a member holds with the quarantine role.
+ *
+ * Returns how many roles were removed, or null when the member could not be
+ * changed at all — the caller must be able to tell "quarantined and stripped
+ * four roles" from "the quarantine did not happen", because only the second is
+ * an incident worth escalating.
+ *
+ * Roles at or above the bot's own position are refused by Discord, which is why
+ * this returns null rather than a count when the write fails: a partial
+ * quarantine reported as success would be the worst outcome of all.
+ */
+export async function quarantineMember(client: Client, guildId: string, userId: string, quarantineRoleId: string) {
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return null;
+
+  // Discord refuses role changes on the owner, and the owner is the person we
+  // are about to notify — never the attacker.
+  if (guild.ownerId === userId) return null;
+
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (!member) return null;
+
+  const removable = member.roles.cache.filter(
+    role => role.id !== guild.roles.everyone.id && role.id !== quarantineRoleId
+  );
+
+  const applied = await member.roles
+    .set([quarantineRoleId])
+    .then(() => true)
+    .catch(() => false);
+
+  return applied ? removable.size : null;
 }
 
 /**
@@ -397,10 +649,10 @@ export type BotEvent =
   | { type: "member.nickname-change"; guildId: string; memberId: string; before: string; after: string }
   | { type: "member.role-add"; guildId: string; memberId: string; roleId: string }
   | { type: "member.role-remove"; guildId: string; memberId: string; roleId: string }
-  | { type: "moderation.ban"; guildId: string; targetId: string; actorId: string }
-  | { type: "moderation.unban"; guildId: string; targetId: string; actorId: string }
-  | { type: "moderation.kick"; guildId: string; targetId: string; actorId: string }
-  | { type: "moderation.timeout"; guildId: string; targetId: string; actorId: string }
+  | { type: "moderation.ban"; guildId: string; targetId: string; actorId: string; reason?: string }
+  | { type: "moderation.unban"; guildId: string; targetId: string; actorId: string; reason?: string }
+  | { type: "moderation.kick"; guildId: string; targetId: string; actorId: string; reason?: string }
+  | { type: "moderation.timeout"; guildId: string; targetId: string; actorId: string; reason?: string }
   | { type: "voice.join"; guildId: string; memberId: string; toChannelId: string }
   | { type: "voice.leave"; guildId: string; memberId: string; fromChannelId: string }
   | { type: "voice.move"; guildId: string; memberId: string; fromChannelId: string; toChannelId: string }
@@ -435,29 +687,51 @@ export type EventSink = (event: BotEvent) => void;
  * Falls back to "unknown" when the bot lacks VIEW_AUDIT_LOG.
  */
 function createActorResolver() {
-  const cache = new Map<string, { actorId: string; expiresAt: number }>();
+  const cache = new Map<string, { actorId: string; reason: string; expiresAt: number }>();
 
-  return async function resolveActor(guild: Guild, type: AuditLogEvent, targetId: string, now = Date.now()) {
+  /**
+   * Resolves who performed an action *and* why, from Discord's own audit log.
+   *
+   * The reason matters: a moderator types one into `/ban`, Discord stores it on
+   * the audit entry, and without reading it back the log would show the
+   * punishment with no explanation. Reading it here is also what lets the
+   * command handler stop logging punishments itself — one entry, complete.
+   */
+  async function resolveAudit(guild: Guild, type: AuditLogEvent, targetId: string, now = Date.now()) {
     const key = `${guild.id}:${type}:${targetId}`;
     const cached = cache.get(key);
-    if (cached && cached.expiresAt > now) return cached.actorId;
+    if (cached && cached.expiresAt > now) return cached;
 
     let actorId = "unknown";
+    let reason = "";
     try {
       const logs = await guild.fetchAuditLogs({ type, limit: 5 });
       const entry = logs.entries.find(item => item.targetId === targetId) ?? logs.entries.first();
       if (entry?.executorId) actorId = entry.executorId;
+      if (entry?.reason) reason = entry.reason;
     } catch {
       // Missing VIEW_AUDIT_LOG is not fatal: the event still gets logged.
     }
-    cache.set(key, { actorId, expiresAt: now + 5_000 });
-    return actorId;
-  };
+    const result = { actorId, reason, expiresAt: now + 5_000 };
+    cache.set(key, result);
+    return result;
+  }
+
+  const resolveActor = async (guild: Guild, type: AuditLogEvent, targetId: string) =>
+    (await resolveAudit(guild, type, targetId)).actorId;
+
+  return { resolveActor, resolveAudit };
 }
 
 export type BindOptions = {
   /** Answers /al-status. Kept as a callback so handlers stay discord.js-free. */
-  onStatusCommand?: (context: { guildId: string; userId: string; roleIds: string[] }) => Promise<string>;
+  onStatusCommand?: (context: {
+    guildId: string;
+    userId: string;
+    roleIds: string[];
+    isGuildOwner: boolean;
+    isAdministrator: boolean;
+  }) => Promise<string>;
   /**
    * Handles a moderation slash command. The orchestration (tier check,
    * hierarchy check, logging) lives outside this module; Discord-specific work
@@ -479,11 +753,25 @@ export type BindOptions = {
 export type CommandContext = {
   interactionId: string;
   guildId: string;
+  /** The channel the command was typed in. Channel commands act on it. */
+  channelId: string;
   userId: string;
   roleIds: string[];
+  /**
+   * Discord's own verdict on this member, needed for the automatic owner tier.
+   * The dashboard never supplies these — they are read here, from Discord.
+   */
+  isGuildOwner: boolean;
+  isAdministrator: boolean;
   commandName: string;
+  /** The member the command acts on. Null for channel commands and `/unban`. */
   targetId: string | null;
-  minutes: number | null;
+  /**
+   * Every integer option the command declared, keyed by its name — `minutes`,
+   * `count`, `seconds`. Kept generic so adding a command does not mean adding a
+   * field to this type, which is how `minutes` used to work.
+   */
+  numbers: Record<string, number>;
   reason: string;
   reply: (content: string) => Promise<void>;
 };
@@ -497,8 +785,21 @@ function roleIdsOf(member: unknown): string[] {
   return cache ? [...cache.keys()] : [];
 }
 
+/**
+ * The two facts the automatic owner tier rests on, read from Discord rather than
+ * from anything the caller claims: guild ownership, and the Administrator
+ * permission bit. `memberPermissions` is already computed by discord.js, so this
+ * costs no extra API call.
+ */
+function memberFlagsOf(interaction: ChatInputCommandInteraction): { isGuildOwner: boolean; isAdministrator: boolean } {
+  return {
+    isGuildOwner: interaction.guild?.ownerId === interaction.user.id,
+    isAdministrator: interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator) ?? false
+  };
+}
+
 export function bindEvents(client: Client, sink: EventSink, options: BindOptions = {}) {
-  const resolveActor = createActorResolver();
+  const { resolveActor, resolveAudit } = createActorResolver();
   const cache = options.messageCache;
   const emit = (event: BotEvent) => {
     try {
@@ -528,20 +829,33 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
     }
   });
 
-  client.on("guildBanAdd", async ban => emit({ type: "moderation.ban", guildId: ban.guild.id, targetId: ban.user.id, actorId: await resolveActor(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id) }));
-  client.on("guildBanRemove", async ban => emit({ type: "moderation.unban", guildId: ban.guild.id, targetId: ban.user.id, actorId: await resolveActor(ban.guild, AuditLogEvent.MemberBanRemove, ban.user.id) }));
+  // Moderation is reported once, from Discord's audit log — never twice.
+  // The audit log is the only source that also sees actions taken outside AL AI
+  // (an admin banning from the Discord client), and it carries the reason the
+  // moderator typed, so the command handler deliberately does not log these.
+  client.on("guildBanAdd", async ban => {
+    const { actorId, reason } = await resolveAudit(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id);
+    emit({ type: "moderation.ban", guildId: ban.guild.id, targetId: ban.user.id, actorId, ...(reason ? { reason } : {}) });
+  });
+
+  client.on("guildBanRemove", async ban => {
+    const { actorId, reason } = await resolveAudit(ban.guild, AuditLogEvent.MemberBanRemove, ban.user.id);
+    emit({ type: "moderation.unban", guildId: ban.guild.id, targetId: ban.user.id, actorId, ...(reason ? { reason } : {}) });
+  });
 
   client.on("guildMemberRemove", async member => {
-    const actorId = await resolveActor(member.guild, AuditLogEvent.MemberKick, member.id);
-    if (actorId !== "unknown") emit({ type: "moderation.kick", guildId: member.guild.id, targetId: member.id, actorId });
+    const { actorId, reason } = await resolveAudit(member.guild, AuditLogEvent.MemberKick, member.id);
+    if (actorId !== "unknown") {
+      emit({ type: "moderation.kick", guildId: member.guild.id, targetId: member.id, actorId, ...(reason ? { reason } : {}) });
+    }
   });
 
   client.on("guildMemberUpdate", (before, after) => {
     const wasTimedOut = Boolean(before.communicationDisabledUntilTimestamp);
     const isTimedOut = Boolean(after.communicationDisabledUntilTimestamp);
     if (!wasTimedOut && isTimedOut) {
-      void resolveActor(after.guild, AuditLogEvent.MemberUpdate, after.id).then(actorId =>
-        emit({ type: "moderation.timeout", guildId: after.guild.id, targetId: after.id, actorId })
+      void resolveAudit(after.guild, AuditLogEvent.MemberUpdate, after.id).then(({ actorId, reason }) =>
+        emit({ type: "moderation.timeout", guildId: after.guild.id, targetId: after.id, actorId, ...(reason ? { reason } : {}) })
       );
     }
   });
@@ -641,25 +955,44 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
     const guildId = interaction.guildId;
     const userId = interaction.user.id;
     const roleIds = roleIdsOf(interaction.member);
+    const flags = memberFlagsOf(interaction);
 
     if (interaction.commandName === "al-status") {
       emit({ type: "interaction.status", guildId, userId, interactionId: interaction.id, roleIds });
+      // The handler's answer is the entire point of this command. Emitting the
+      // event and returning left Discord waiting until the interaction timed out,
+      // so the operator saw "the application did not respond" every time.
+      const content = options.onStatusCommand
+        ? await options
+            .onStatusCommand({ guildId, userId, roleIds, ...flags })
+            .catch(() => "تعذّر قراءة حالة AL AI حالياً.")
+        : "AL AI متصل.";
+      await interaction.reply({ content, ephemeral: true }).catch(() => undefined);
       return;
     }
 
     if (!options.onCommand) return;
 
     const target = interaction.options.getUser("user");
-    const minutes = interaction.options.getInteger("minutes");
+    // Read every integer option the interaction carries, whatever it is called,
+    // so the handler can support a new command without a new field here.
+    const numbers: Record<string, number> = {};
+    for (const option of interaction.options.data) {
+      if (option.type === ApplicationCommandOptionType.Integer && typeof option.value === "number") {
+        numbers[option.name] = option.value;
+      }
+    }
 
     await options.onCommand({
       interactionId: interaction.id,
       guildId,
+      channelId: interaction.channelId,
       userId,
       roleIds,
+      ...flags,
       commandName: interaction.commandName,
       targetId: target?.id ?? interaction.options.getString("user_id") ?? null,
-      minutes,
+      numbers,
       reason: interaction.options.getString("reason") ?? "",
       reply: async content => {
         // Ephemeral: a moderation reply is for the operator, not the channel.

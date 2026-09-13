@@ -3,13 +3,23 @@
   "private": true,
   "version": "0.1.0",
   "packageManager": "npm@10",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev:dashboard": "npm run dev --workspace=@al-ai/dashboard",
     "dev:bot": "npm run dev --workspace=@al-ai/bot",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present"
+    "lint": "npm run lint --workspaces --if-present",
+    "check:schema": "node scripts/parse-schema.mjs infra/schema.sql",
+    "verify": "npm run lint && npm run check:schema && npm test && npm run build"
   },
-  "engines": { "node": ">=22" }
+  "devDependencies": {
+    "pgsql-ast-parser": "^12.0.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }

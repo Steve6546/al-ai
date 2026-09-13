@@ -45,8 +45,8 @@ const priorityOf: Record<BotEvent["type"], Priority> = {
  * Events that carry no guild context and are therefore not routed as logs.
  *
  * `guild.joined` is lifecycle, not an activity: the role the bot creates for
- * itself is what shows up in role-log via Discord's own audit log, so logging the
- * join as well would duplicate it.
+ * itself is what shows up in server-log via Discord's own audit log, so logging
+ * the join as well would duplicate it.
  */
 const nonLoggable = new Set<BotEvent["type"]>(["client.ready", "client.error", "guild.joined", "interaction.status"]);
 

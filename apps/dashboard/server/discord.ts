@@ -12,6 +12,11 @@
 const API = "https://discord.com/api/v10";
 
 export const USER_PERMISSIONS = {
+  /**
+   * Administrator (bit 3). Holders get the automatic owner tier, because Discord
+   * already treats them as fully trusted in that guild.
+   */
+  ADMINISTRATOR: 0x8n,
   MANAGE_GUILD: 0x20n,
   MANAGE_NICKNAMES: 0x8000000n,
   CHANGE_NICKNAME: 0x4000000n
@@ -123,6 +128,65 @@ export async function fetchMemberRoleIds(botToken: string, guildId: string, user
   return new Set(member.roles ?? []);
 }
 
+/* ------------------------------------------------------------------ *
+ * The bot's own member object
+ *
+ * "Which roles and permissions do I myself hold in this guild?" is needed by
+ * three screens: the tier picker (which roles can I assign), the customization
+ * form (may I rename myself) and the hierarchy warning (am I above the roles I
+ * am asked to manage).
+ *
+ * Discord answers that question only if the bot's own snowflake is in the path.
+ * Two plausible-looking shortcuts are both dead ends, and both fail *quietly*
+ * when their error is swallowed:
+ *   - `GET /guilds/{id}/members/@me`        → 400 NUMBER_TYPE_COERCE
+ *                                             ("Value \"@me\" is not snowflake")
+ *   - `GET /users/@me/guilds/{id}/member`   → 403 "Bots cannot use this endpoint"
+ *                                             (that route is OAuth2-only)
+ * So the ID is resolved from `GET /users/@me` — the one `@me` route that does
+ * accept a Bot token — and the plain member route is used with it.
+ * ------------------------------------------------------------------ */
+
+let cachedBotUserId: string | null = null;
+
+/**
+ * The bot application's own user ID.
+ *
+ * This is a property of the token rather than of any request, so it is memoised
+ * for the life of the process. Rotating the token restarts the process.
+ */
+export async function resolveBotUserId(botToken: string): Promise<string> {
+  if (cachedBotUserId) return cachedBotUserId;
+  const me = await request<{ id: string }>("/users/@me", { token: botToken });
+  cachedBotUserId = me.id;
+  return me.id;
+}
+
+/** Test seam: drop the memoised bot user ID so a fake token is re-resolved. */
+export function resetBotUserIdCache() {
+  cachedBotUserId = null;
+}
+
+export type BotMember = {
+  /** Role IDs the bot holds. `@everyone` is omitted by Discord. */
+  roles: string[];
+  /** The bot's permission bitfield, as a decimal string. */
+  permissions: string;
+};
+
+/**
+ * Read-only: the bot's own member object, carrying both its role list and its
+ * permission bitfield — so the screens above need one Discord call, not two.
+ *
+ * Returns null when the read fails, letting callers say "unknown" rather than
+ * invent a position or a permission set.
+ */
+export async function fetchBotMember(botToken: string, guildId: string): Promise<BotMember | null> {
+  const botUserId = await resolveBotUserId(botToken).catch(() => null);
+  if (!botUserId) return null;
+  return request<BotMember>(`/guilds/${guildId}/members/${botUserId}`, { token: botToken }).catch(() => null);
+}
+
 /** Read-only: text channels the operator can pick as log destinations. */
 export async function fetchGuildChannels(botToken: string, guildId: string) {
   const channels = await request<{ id: string; name: string; type: number; position: number }[]>(`/guilds/${guildId}/channels`, { token: botToken });
@@ -133,10 +197,48 @@ export async function fetchGuildChannels(botToken: string, guildId: string) {
     .map(channel => ({ id: channel.id, name: channel.name, type: typeOf(channel.type) }));
 }
 
-/** Read-only: the bot's own permission bitfield inside a guild. */
-export async function fetchBotPermissions(botToken: string, guildId: string) {
-  const member = await request<{ permissions: string }>(`/users/@me/guilds/${guildId}/member`, { token: botToken });
-  return BigInt(member.permissions ?? "0");
+/**
+ * Read-only: the bot's own base permissions inside a guild.
+ *
+ * Null means "could not be read", which is deliberately distinct from `0n`
+ * ("read successfully, holds nothing"). Callers must not collapse the two: a
+ * failed read reported as an empty bitfield turns into a false "the bot lacks
+ * this permission" warning, and — for the customization form — a save that is
+ * refused for a reason that was never true.
+ */
+export async function fetchBotPermissions(botToken: string, guildId: string): Promise<bigint | null> {
+  const [member, roles] = await Promise.all([
+    fetchBotMember(botToken, guildId),
+    request<{ id: string; permissions: string }[]>(`/guilds/${guildId}/roles`, { token: botToken }).catch(() => null)
+  ]);
+  if (!member || !roles) return null;
+  return computeBasePermissions(guildId, roles, member.roles ?? []);
+}
+
+/**
+ * Discord's base-permission calculation for a member of a guild.
+ *
+ * The member object's own `permissions` field cannot be used for this. Discord
+ * leaves it at `0` on a bot-token member read — including for a bot holding
+ * Administrator — so it reports nothing rather than something, and trusting it
+ * is what made the dashboard declare an Administrator bot permissionless.
+ *
+ * The base set is the union of `@everyone` and every role the member holds,
+ * which is why the role list has to be read alongside the member.
+ */
+export function computeBasePermissions(
+  guildId: string,
+  roles: { id: string; permissions: string }[],
+  memberRoleIds: readonly string[]
+): bigint {
+  const held = new Set(memberRoleIds);
+  let bits = 0n;
+  for (const role of roles) {
+    // `@everyone` carries the guild's own ID and is never listed in member.roles.
+    if (role.id !== guildId && !held.has(role.id)) continue;
+    bits |= BigInt(role.permissions ?? "0");
+  }
+  return bits;
 }
 
 export type DiscordRole = {
@@ -146,21 +248,34 @@ export type DiscordRole = {
   managed: boolean;
   /** True for the @everyone role, which cannot carry a tier. */
   isDefault: boolean;
+  /** Discord's packed RGB integer. 0 means "no colour" (the default grey). */
+  color: number;
 };
 
 /**
  * Read-only: assignable roles, used by the tier configuration screen.
  * `managed` roles belong to an integration and can never be granted to a human,
  * so they are excluded from the picker rather than offered and then rejected.
+ *
+ * The colour travels with the role so the picker can render each role the way
+ * Discord does, instead of showing a flat list of names.
  */
 export async function fetchGuildRoles(botToken: string, guildId: string) {
-  const roles = await request<{ id: string; name: string; position: number; managed: boolean }[]>(`/guilds/${guildId}/roles`, {
-    token: botToken
-  });
+  const roles = await request<{ id: string; name: string; position: number; managed: boolean; color: number }[]>(
+    `/guilds/${guildId}/roles`,
+    { token: botToken }
+  );
   return roles
     .filter(role => !role.managed && role.id !== guildId)
     .sort((a, b) => b.position - a.position)
-    .map<DiscordRole>(role => ({ id: role.id, name: role.name, position: role.position, managed: role.managed, isDefault: false }));
+    .map<DiscordRole>(role => ({
+      id: role.id,
+      name: role.name,
+      position: role.position,
+      managed: role.managed,
+      isDefault: false,
+      color: role.color ?? 0
+    }));
 }
 
 /**
@@ -170,17 +285,108 @@ export async function fetchGuildRoles(botToken: string, guildId: string) {
  */
 export async function fetchBotHighestRolePosition(botToken: string, guildId: string) {
   const [member, roles] = await Promise.all([
-    request<{ roles: string[] }>(`/guilds/${guildId}/members/@me`, { token: botToken }).catch(() => null),
-    request<{ id: string; position: number }[]>(`/guilds/${guildId}/roles`, { token: botToken })
+    fetchBotMember(botToken, guildId),
+    request<{ id: string; position: number }[]>(`/guilds/${guildId}/roles`, { token: botToken }).catch(() => null)
   ]);
-  if (!member) return null;
+  if (!member || !roles) return null;
   const byId = new Map(roles.map(role => [role.id, role.position]));
-  const positions = member.roles.map(id => byId.get(id) ?? 0);
+  const positions = (member.roles ?? []).map(id => byId.get(id) ?? 0);
   return positions.length ? Math.max(...positions) : 0;
 }
 
+/**
+ * Whether a permission bitfield grants a permission.
+ *
+ * ADMINISTRATOR is tested first because it supersedes every other permission:
+ * Discord gives its holder the entire set, yet the bitfield itself only has bit
+ * 3 set. A plain `bits & permission` test therefore answers "no" for a user or
+ * bot that can in fact do anything — which is how the dashboard came to tell an
+ * Administrator bot that it lacked MANAGE_GUILD and refused its saves.
+ */
 export function hasPermission(bits: bigint, permission: bigint) {
+  if ((bits & USER_PERMISSIONS.ADMINISTRATOR) === USER_PERMISSIONS.ADMINISTRATOR) return true;
   return (bits & permission) === permission;
+}
+
+export type GuildHierarchy = {
+  /** Position of the bot's own highest role in this guild. */
+  botPosition: number;
+  /** Every role in the guild, by ID, with its position. */
+  rolePositions: Map<string, number>;
+};
+
+/**
+ * Read-only: the bot's standing plus every role position, in one round trip.
+ *
+ * The customization screen needs both — the bot's position to warn about the
+ * hierarchy, and each configured admin/moderator role's position to compare
+ * against it. Fetching the role list once and reusing it keeps that screen to
+ * two Discord calls instead of one per configured role.
+ *
+ * Returns null when either read fails, so the caller can say "unknown" rather
+ * than guess a position and warn about a problem that may not exist.
+ */
+export async function fetchGuildHierarchy(botToken: string, guildId: string): Promise<GuildHierarchy | null> {
+  const [member, roles] = await Promise.all([
+    fetchBotMember(botToken, guildId),
+    request<{ id: string; position: number }[]>(`/guilds/${guildId}/roles`, { token: botToken }).catch(() => null)
+  ]);
+  if (!member || !roles) return null;
+
+  const rolePositions = new Map(roles.map(role => [role.id, role.position]));
+  // `@everyone` is not listed in a member's role array, so an empty result means
+  // the bot holds no role — position 0, which every configured role outranks.
+  const positions = (member.roles ?? []).map(id => rolePositions.get(id) ?? 0);
+  return {
+    botPosition: positions.length ? Math.max(...positions) : 0,
+    rolePositions
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Metrics reads
+ * ------------------------------------------------------------------ */
+
+/**
+ * Read-only: the guild's boost level, which gates the role-icon feature.
+ *
+ * Discord rejects a role icon with a 400 when the guild is below level 2, so the
+ * dashboard checks this before offering the field instead of letting the
+ * operator fill it in and fail on save. The threshold itself lives in
+ * `@al-ai/core` as `ROLE_ICON_MIN_PREMIUM_TIER`, next to the gate that applies
+ * it, so the two can never disagree.
+ */
+export async function fetchGuildPremiumTier(botToken: string, guildId: string) {
+  const guild = await request<{ premium_tier?: number }>(`/guilds/${guildId}`, { token: botToken });
+  return guild.premium_tier ?? 0;
+}
+
+export type WidgetPresence = { online: number } | { online: null; reason: "widget-disabled" | "unavailable" };
+
+/**
+ * Read-only: how many members Discord itself reports as online.
+ *
+ * GOVERNANCE rule 8 forbids the GUILD_PRESENCES intent, so AL AI never tracks a
+ * member's own presence. The guild widget is a different thing: Discord
+ * publishes one aggregate number that anyone may read, with no intent and no
+ * per-member state. When the operator has not enabled the widget Discord answers
+ * 403 and this returns null with a reason, so the screen can explain itself
+ * rather than show a misleading zero.
+ */
+export async function fetchWidgetPresence(guildId: string): Promise<WidgetPresence> {
+  try {
+    const response = await fetch(`https://discord.com/api/v10/guilds/${guildId}/widget.json`, {
+      headers: { "User-Agent": "AL-AI-Dashboard" }
+    });
+    // 403 is Discord's answer when the Server Widget is switched off.
+    if (response.status === 403) return { online: null, reason: "widget-disabled" };
+    if (!response.ok) return { online: null, reason: "unavailable" };
+    const body = (await response.json()) as { presence_count?: number };
+    if (typeof body.presence_count !== "number") return { online: null, reason: "unavailable" };
+    return { online: body.presence_count };
+  } catch {
+    return { online: null, reason: "unavailable" };
+  }
 }
 
 /* ------------------------------------------------------------------ *

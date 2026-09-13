@@ -12,10 +12,9 @@ import { AuditView } from "../src/views/audit";
 import { DashboardView } from "../src/views/dashboard";
 import { SecurityView } from "../src/views/security";
 import { CommandsView } from "../src/views/settings/commands";
-import { CustomizationView } from "../src/views/settings/customization";
+import { CustomizationView, HierarchyWarning } from "../src/views/settings/customization";
 import { LogsView } from "../src/views/settings/logs";
 import { RolesView } from "../src/views/settings/roles";
-import { TokensView } from "../src/views/settings/tokens";
 import type { Guild, HealthSnapshot, SessionInfo } from "../src/types";
 
 /**
@@ -64,15 +63,14 @@ const screens: [string, () => ReactElement][] = [
   ["EmptyState", () => createElement(EmptyState, { icon: ServerOff, title: "لا يوجد سيرفر", description: "أضف البوت أولاً.", action: null })],
   ["SaveBar", () => createElement(SaveBar, { onSave: async () => {}, onCancel: () => {} })],
   ["InviteBotPanel", () => createElement(InviteBotPanel, { guild: absentGuild, refreshing: false, onRefresh: () => {} })],
-  ["DashboardView", () => createElement(DashboardView, { guild, health })],
-  ["DashboardView without health", () => createElement(DashboardView, { guild: absentGuild, health: null })],
+  ["DashboardView", () => createElement(DashboardView, { guild })],
+  ["DashboardView on a guild without the bot", () => createElement(DashboardView, { guild: absentGuild })],
   ["AuditView", () => createElement(AuditView, { guild })],
   ["SecurityView", () => createElement(SecurityView, { guild })],
   ["CommandsView", () => createElement(CommandsView, { guild })],
   ["RolesView", () => createElement(RolesView, { guild })],
   ["CustomizationView", () => createElement(CustomizationView, { guild })],
   ["LogsView", () => createElement(LogsView, { guild })],
-  ["TokensView", () => createElement(TokensView, { guilds: [guild] })],
   [
     "AppShell",
     () =>
@@ -88,7 +86,7 @@ const screens: [string, () => ReactElement][] = [
         refreshing: false,
         onRefresh: () => {},
         onLogout: () => {},
-        children: createElement(DashboardView, { guild, health })
+        children: createElement(DashboardView, { guild })
       })
   ]
 ];
@@ -100,8 +98,19 @@ for (const [name, element] of screens) {
   });
 }
 
+/**
+ * Looks a screen up by name rather than by array position. An index keeps
+ * compiling after a screen is added or removed, and silently starts asserting
+ * against a different screen — which is how this test was written before.
+ */
+function screen(name: string) {
+  const found = screens.find(([entry]) => entry === name);
+  assert.ok(found, `screen ${name} is registered`);
+  return found![1];
+}
+
 test("the shell renders the operator's real identity, not a placeholder", () => {
-  const html = renderToString(screens[13][1]());
+  const html = renderToString(screen("AppShell")());
   assert.match(html, /owner/, "the signed-in username is shown");
   assert.match(html, /سيرفر الاختبار/, "the selected guild name is shown");
 });
@@ -109,4 +118,40 @@ test("the shell renders the operator's real identity, not a placeholder", () => 
 test("a guild without the bot explains what to do instead of showing settings", () => {
   const html = renderToString(createElement(InviteBotPanel, { guild: absentGuild, refreshing: false, onRefresh: () => {} }));
   assert.match(html, /إضافة AL AI/, "the invite action is offered");
+});
+
+/* ------------------------------------------------------------------ *
+ * Role-hierarchy advisory
+ *
+ * The three states have to be distinguishable in the markup, because the
+ * difference between "the bot is fine" and "we could not read the roles" is
+ * exactly the difference between saying nothing and inventing a warning.
+ * ------------------------------------------------------------------ */
+
+const blockedVerdict = {
+  botPosition: 3,
+  highestManagedPosition: 9,
+  blocked: true,
+  message: "رتبة AL AI في المرتبة 3، وأعلى رتبة إدارية في المرتبة 9."
+};
+
+test("a blocked hierarchy shows the advisory and the bot's standing", () => {
+  const html = renderToString(createElement(HierarchyWarning, { verdict: blockedVerdict }));
+  assert.match(html, /ترتيب الرتب يمنع البوت من العمل/);
+  assert.match(html, /المرتبة 3/, "the bot's own position is shown");
+  assert.match(html, /المرتبة 9/, "the role it cannot outrank is shown");
+  assert.match(html, /الرتب/, "the fix is described");
+});
+
+test("a healthy hierarchy renders nothing", () => {
+  const html = renderToString(
+    createElement(HierarchyWarning, { verdict: { ...blockedVerdict, blocked: false, message: null } })
+  );
+  assert.equal(html, "", "no warning when there is nothing to warn about");
+});
+
+test("an unreadable hierarchy renders nothing rather than guessing", () => {
+  // Null means Discord could not be reached. Showing the advisory here would
+  // tell the operator to fix a problem that may not exist.
+  assert.equal(renderToString(createElement(HierarchyWarning, { verdict: null })), "");
 });

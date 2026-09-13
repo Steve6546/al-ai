@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "note": "الوجهات السبع ثابتة. هذا الملف هو المرجع الثابت للأسماء؛ أما ربط القنوات فعلياً فيتم لكل سيرفر في جدول guild_log_channels.",
+  "schemaVersion": 2,
+  "note": "الوجهات الست ثابتة: خمس يراها المشغّل في اللوحة (member/moderation/voice/message/server) وواحدة داخلية (bot-log). هذا الملف هو المرجع الثابت للأسماء؛ أما ربط القنوات فعلياً فيتم لكل سيرفر في جدول guild_log_channels. حُذفت role-log في الإصدار 2: إنشاء الرتب وتعديلها صار مع server-log، وإسناد الرتب لعضو بقي في member-log.",
   "destinations": [
     {
       "id": "member-log",
@@ -11,7 +11,7 @@
     {
       "id": "moderation-log",
       "label": "الإشراف",
-      "subCategories": ["moderation.ban", "moderation.unban", "moderation.kick", "moderation.timeout", "moderation.warn"],
+      "subCategories": ["moderation.ban", "moderation.unban", "moderation.kick", "moderation.timeout", "moderation.warn", "moderation.clearwarns"],
       "required": false,
       "note": "يشمل أحداث الإشراف الحساسة المحصورة بالمديرين."
     },
@@ -21,12 +21,6 @@
       "subCategories": ["voice.join", "voice.leave", "voice.move", "voice.state-change"],
       "required": false,
       "note": "أي انتقال أسرع من 2000ms يُجمَع في حدث واحد."
-    },
-    {
-      "id": "role-log",
-      "label": "الرتب",
-      "subCategories": ["role.create", "role.update", "role.delete"],
-      "required": false
     },
     {
       "id": "message-log",
@@ -44,13 +38,17 @@
         "server.channel-delete",
         "server.invite-create",
         "server.expression-create",
-        "server.expression-delete"
+        "server.expression-delete",
+        "role.create",
+        "role.update",
+        "role.delete"
       ],
-      "required": false
+      "required": false,
+      "note": "يشمل تغييرات بنية السيرفر: القنوات والدعوات والتعبيرات، وأيضاً إنشاء الرتب وتعديلها وحذفها (كانت سابقاً في role-log)."
     },
     {
       "id": "bot-log",
-      "label": "البوت",
+      "label": "البوت (داخلي)",
       "subCategories": [
         "bot.command-success",
         "bot.command-failure",
@@ -62,10 +60,11 @@
         "security.abnormal-request",
         "security.revoked-credential",
         "security.audit-tamper",
-        "security.watchdog-down"
+        "security.watchdog-down",
+        "security.nuke-prevented"
       ],
       "required": false,
-      "note": "يستقبل كل أحداث security.* — وهي critical دائماً، وتُكتب في سجل التدقيق معه."
+      "note": "وجهة داخلية: لا تُربط بقناة في سيرفر العميل، بل تُسلَّم إلى DEVELOPER_WEBHOOK_URL. تستقبل كل أحداث security.* — وهي critical دائماً، وتُكتب في سجل التدقيق معها."
     }
   ]
 }

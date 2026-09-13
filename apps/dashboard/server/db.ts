@@ -1,6 +1,6 @@
 import pg from "pg";
-import type { LoggingSettings, CustomizationSettings } from "@al-ai/core";
-import { DEFAULT_CUSTOMIZATION, DEFAULT_EMBED_COLOR, SESSION_MAX_AGE_SECONDS } from "@al-ai/core";
+import type { AntiNukeConfig, LoggingSettings, CustomizationSettings, CommandConfig, TierRoles } from "@al-ai/core";
+import { DEFAULT_ANTI_NUKE_CONFIG, DEFAULT_CUSTOMIZATION, DEFAULT_EMBED_COLOR, DEFAULT_LOGGING_MODE, isLoggingMode, isTier, normaliseAntiNukeConfig, normaliseTierRoles, PUNISHMENT_EVENT_IDS, SESSION_MAX_AGE_SECONDS } from "@al-ai/core";
 
 const { Pool } = pg;
 
@@ -30,17 +30,22 @@ export function createDatabase(pool: pg.Pool) {
       return true;
     },
 
-    async upsertGuild(guild: { id: string; name: string; iconUrl: string | null; memberCount: number; botPresent: boolean }) {
+    /**
+     * Seeds a guild row without touching the columns the bot owns.
+     *
+     * The dashboard discovers guilds through the operator's OAuth token, but
+     * that endpoint returns no member count — so the dashboard has no real
+     * value to write. Routing this through `upsertGuild` with a placeholder 0
+     * meant every dashboard load overwrote the count the bot had reported,
+     * which is why the overview showed "0 members" for a populated server.
+     * `DO NOTHING` creates the row only when it is genuinely absent.
+     */
+    async ensureGuild(guild: { id: string; name: string; iconUrl: string | null }) {
       await pool.query(
         `INSERT INTO guilds (id, name, icon_url, member_count, bot_present, updated_at)
-         VALUES ($1, $2, $3, $4, $5, now())
-         ON CONFLICT (id) DO UPDATE
-           SET name = EXCLUDED.name,
-               icon_url = EXCLUDED.icon_url,
-               member_count = EXCLUDED.member_count,
-               bot_present = EXCLUDED.bot_present,
-               updated_at = now()`,
-        [guild.id, guild.name, guild.iconUrl, guild.memberCount, guild.botPresent]
+         VALUES ($1, $2, $3, 0, false, now())
+         ON CONFLICT (id) DO NOTHING`,
+        [guild.id, guild.name, guild.iconUrl]
       );
     },
 
@@ -54,37 +59,31 @@ export function createDatabase(pool: pg.Pool) {
       return { id: row.id, name: row.name, iconUrl: row.icon_url, memberCount: row.member_count, botPresent: row.bot_present };
     },
 
-    async getTierRoles(guildId: string) {
-      const { rows } = await pool.query<{ owner_role_id: string; head_admin_role_id: string; admin_role_id: string; moderator_role_id: string }>(
-        `SELECT owner_role_id, head_admin_role_id, admin_role_id, moderator_role_id FROM guild_role_tiers WHERE guild_id = $1`,
+    async getTierRoles(guildId: string): Promise<TierRoles | null> {
+      const { rows } = await pool.query<{ admin_role_ids: string[] | null; moderator_role_ids: string[] | null }>(
+        `SELECT admin_role_ids, moderator_role_ids FROM guild_role_tiers WHERE guild_id = $1`,
         [guildId]
       );
       const row = rows[0];
       if (!row) return null;
-      return {
-        owner: row.owner_role_id,
-        head_admin: row.head_admin_role_id,
-        admin: row.admin_role_id,
-        moderator: row.moderator_role_id
-      } as Record<"owner" | "head_admin" | "admin" | "moderator", string>;
+      return normaliseTierRoles({ adminRoleIds: row.admin_role_ids, moderatorRoleIds: row.moderator_role_ids });
     },
 
     /**
-     * GOVERNANCE rule 3: tiers are bound to configurable Role IDs, never to User
-     * IDs. Until this row exists every actor resolves to `null` and the
-     * dashboard denies access by default.
+     * GOVERNANCE rule 3: the configurable tiers bind to Role IDs, never to User
+     * IDs. `owner` has no row at all — it is derived from Discord's own guild
+     * ownership and the Administrator permission, so it cannot be misconfigured
+     * and cannot be granted to the wrong role by a stale form.
      */
-    async saveTierRoles(guildId: string, tiers: Record<"owner" | "head_admin" | "admin" | "moderator", string | null>) {
+    async saveTierRoles(guildId: string, roles: TierRoles) {
       await pool.query(
-        `INSERT INTO guild_role_tiers (guild_id, owner_role_id, head_admin_role_id, admin_role_id, moderator_role_id, updated_at)
-         VALUES ($1, $2, $3, $4, $5, now())
+        `INSERT INTO guild_role_tiers (guild_id, admin_role_ids, moderator_role_ids, updated_at)
+         VALUES ($1, $2::jsonb, $3::jsonb, now())
          ON CONFLICT (guild_id) DO UPDATE
-           SET owner_role_id = EXCLUDED.owner_role_id,
-               head_admin_role_id = EXCLUDED.head_admin_role_id,
-               admin_role_id = EXCLUDED.admin_role_id,
-               moderator_role_id = EXCLUDED.moderator_role_id,
+           SET admin_role_ids = EXCLUDED.admin_role_ids,
+               moderator_role_ids = EXCLUDED.moderator_role_ids,
                updated_at = now()`,
-        [guildId, tiers.owner, tiers.head_admin, tiers.admin, tiers.moderator]
+        [guildId, JSON.stringify(roles.adminRoleIds), JSON.stringify(roles.moderatorRoleIds)]
       );
     },
 
@@ -121,22 +120,89 @@ export function createDatabase(pool: pg.Pool) {
 
     async getLogging(guildId: string): Promise<LoggingSettings> {
       const { rows } = await pool.query(
-        `SELECT enabled, global_channel_id, ignored_channel_ids, embed_color, event_flags, category_channels
+        `SELECT enabled, mode, global_channel_id, ignored_channel_ids, ignored_role_ids, embed_color, event_flags, category_channels
          FROM guild_logging WHERE guild_id = $1`,
         [guildId]
       );
       const row = rows[0];
       if (!row) {
-        return { enabled: false, globalChannelId: null, ignoredChannelIds: [], embedColor: DEFAULT_EMBED_COLOR, eventFlags: {}, categoryChannels: {} };
+        return {
+          enabled: false,
+          mode: DEFAULT_LOGGING_MODE,
+          globalChannelId: null,
+          ignoredChannelIds: [],
+          ignoredRoleIds: [],
+          embedColor: DEFAULT_EMBED_COLOR,
+          eventFlags: {},
+          categoryChannels: {}
+        };
       }
       return {
         enabled: row.enabled,
+        // A row written before the mode column existed has no value; the shipped
+        // default applies rather than an undefined leaking into the router.
+        mode: isLoggingMode(row.mode) ? row.mode : DEFAULT_LOGGING_MODE,
         globalChannelId: row.global_channel_id,
         ignoredChannelIds: row.ignored_channel_ids ?? [],
+        ignoredRoleIds: row.ignored_role_ids ?? [],
         embedColor: row.embed_color,
         eventFlags: row.event_flags ?? {},
         categoryChannels: row.category_channels ?? {}
       };
+    },
+
+    /**
+     * The anti-nuke settings for a guild.
+     *
+     * Read through the same `normaliseAntiNukeConfig` the bot uses, so a stored
+     * value the dashboard would refuse can never reach the engine — and a guild
+     * with no row renders exactly as the bot behaves: disarmed at the defaults.
+     */
+    async getSecurity(guildId: string): Promise<AntiNukeConfig> {
+      const { rows } = await pool.query<{
+        enabled: boolean;
+        channel_deletes_per_minute: number;
+        bans_per_minute: number;
+        role_changes_per_minute: number;
+        quarantine_role_id: string | null;
+      }>(
+        `SELECT enabled, channel_deletes_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id
+         FROM guild_security WHERE guild_id = $1`,
+        [guildId]
+      );
+      const row = rows[0];
+      if (!row) return DEFAULT_ANTI_NUKE_CONFIG;
+      return normaliseAntiNukeConfig({
+        enabled: row.enabled,
+        quarantineRoleId: row.quarantine_role_id,
+        limits: {
+          channelDeletesPerMinute: row.channel_deletes_per_minute,
+          bansPerMinute: row.bans_per_minute,
+          roleChangesPerMinute: row.role_changes_per_minute
+        }
+      });
+    },
+
+    async saveSecurity(guildId: string, config: AntiNukeConfig) {
+      await pool.query(
+        `INSERT INTO guild_security (guild_id, enabled, channel_deletes_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, now())
+         ON CONFLICT (guild_id) DO UPDATE
+           SET enabled = EXCLUDED.enabled,
+               channel_deletes_per_minute = EXCLUDED.channel_deletes_per_minute,
+               bans_per_minute = EXCLUDED.bans_per_minute,
+               role_changes_per_minute = EXCLUDED.role_changes_per_minute,
+               quarantine_role_id = EXCLUDED.quarantine_role_id,
+               updated_at = now()`,
+        [
+          guildId,
+          config.enabled,
+          config.limits.channelDeletesPerMinute,
+          config.limits.bansPerMinute,
+          config.limits.roleChangesPerMinute,
+          config.quarantineRoleId
+        ]
+      );
     },
 
     async saveLogging(guildId: string, settings: LoggingSettings) {
@@ -144,12 +210,14 @@ export function createDatabase(pool: pg.Pool) {
       try {
         await client.query("BEGIN");
         await client.query(
-          `INSERT INTO guild_logging (guild_id, enabled, global_channel_id, ignored_channel_ids, embed_color, event_flags, category_channels, updated_at)
-           VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7::jsonb, now())
+          `INSERT INTO guild_logging (guild_id, enabled, mode, global_channel_id, ignored_channel_ids, ignored_role_ids, embed_color, event_flags, category_channels, updated_at)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9::jsonb, now())
            ON CONFLICT (guild_id) DO UPDATE
              SET enabled = EXCLUDED.enabled,
+                 mode = EXCLUDED.mode,
                  global_channel_id = EXCLUDED.global_channel_id,
                  ignored_channel_ids = EXCLUDED.ignored_channel_ids,
+                 ignored_role_ids = EXCLUDED.ignored_role_ids,
                  embed_color = EXCLUDED.embed_color,
                  event_flags = EXCLUDED.event_flags,
                  category_channels = EXCLUDED.category_channels,
@@ -157,8 +225,10 @@ export function createDatabase(pool: pg.Pool) {
           [
             guildId,
             settings.enabled,
+            settings.mode,
             settings.globalChannelId,
             JSON.stringify(settings.ignoredChannelIds),
+            JSON.stringify(settings.ignoredRoleIds),
             settings.embedColor,
             JSON.stringify(settings.eventFlags),
             JSON.stringify(settings.categoryChannels)
@@ -296,27 +366,143 @@ export function createDatabase(pool: pg.Pool) {
       return Number(rows[0]?.count ?? 0);
     },
 
+    /**
+     * The newest heartbeat across every guild, or null when the bot has never
+     * reported one.
+     *
+     * `/api/health` needs this to answer "is the bot actually running?". The
+     * answer cannot come from the presence of a token — a configured token says
+     * the bot *could* run, not that it is. Only a heartbeat timestamp proves it,
+     * and only while that timestamp is still inside the staleness window.
+     */
+    async latestHeartbeatAt(): Promise<Date | null> {
+      const { rows } = await pool.query<{ checked_at: Date | null }>(
+        `SELECT max(checked_at) AS checked_at FROM guild_health WHERE bot_present`
+      );
+      const value = rows[0]?.checked_at ?? null;
+      return value ? new Date(value) : null;
+    },
+
     async listGuildIds() {
       const { rows } = await pool.query<{ id: string }>(`SELECT id FROM guilds`);
       return rows.map(row => row.id);
     },
 
+    /**
+     * This guild's stored command configuration, keyed by command name.
+     *
+     * Only the commands the operator has actually touched appear here; the
+     * caller fills the gaps with the registry defaults, so an untouched command
+     * is described identically by the dashboard and by the bot.
+     */
     async getCommandFlags(guildId: string) {
-      const { rows } = await pool.query<{ command: string; enabled: boolean }>(
-        `SELECT command, enabled FROM guild_command_flags WHERE guild_id = $1`,
+      const { rows } = await pool.query<{
+        command: string;
+        enabled: boolean;
+        minimum_tier: string | null;
+        dm_on_action: boolean;
+        delete_message_days: number;
+        custom_role_ids: string[] | null;
+      }>(
+        `SELECT command, enabled, minimum_tier, dm_on_action, delete_message_days, custom_role_ids
+         FROM guild_command_flags WHERE guild_id = $1`,
         [guildId]
       );
-      return new Map(rows.map(row => [row.command, row.enabled]));
+      return new Map<string, Partial<CommandConfig>>(
+        rows.map(row => [
+          row.command,
+          {
+            name: row.command,
+            enabled: row.enabled,
+            ...(isTier(row.minimum_tier) ? { allowedLevel: row.minimum_tier } : {}),
+            dmOnAction: row.dm_on_action,
+            deleteMessageDays: row.delete_message_days,
+            customRoleIds: row.custom_role_ids ?? []
+          }
+        ])
+      );
     },
 
-    async saveCommandFlag(guildId: string, command: string, enabled: boolean, minimumTier: string) {
+    async saveCommandFlag(guildId: string, config: CommandConfig) {
       await pool.query(
-        `INSERT INTO guild_command_flags (guild_id, command, enabled, minimum_tier, updated_at)
-         VALUES ($1, $2, $3, $4, now())
+        `INSERT INTO guild_command_flags (guild_id, command, enabled, minimum_tier, dm_on_action, delete_message_days, custom_role_ids, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, now())
          ON CONFLICT (guild_id, command) DO UPDATE
-           SET enabled = EXCLUDED.enabled, minimum_tier = EXCLUDED.minimum_tier, updated_at = now()`,
-        [guildId, command, enabled, minimumTier]
+           SET enabled = EXCLUDED.enabled,
+               minimum_tier = EXCLUDED.minimum_tier,
+               dm_on_action = EXCLUDED.dm_on_action,
+               delete_message_days = EXCLUDED.delete_message_days,
+               custom_role_ids = EXCLUDED.custom_role_ids,
+               updated_at = now()`,
+        [
+          guildId,
+          config.name,
+          config.enabled,
+          config.allowedLevel,
+          config.dmOnAction,
+          config.deleteMessageDays,
+          JSON.stringify(config.customRoleIds)
+        ]
       );
+    },
+
+    /**
+     * The bot's last reported state for one guild, including its gateway ping.
+     *
+     * `ping_ms` is nullable on purpose: a guild the bot has never reported on
+     * returns null rather than 0, so the screen can say "—" instead of "0 ms".
+     */
+    async getGuildHealth(guildId: string) {
+      const { rows } = await pool.query<{
+        state: string;
+        bot_present: boolean;
+        ping_ms: number | null;
+        checked_at: Date;
+      }>(`SELECT state, bot_present, ping_ms, checked_at FROM guild_health WHERE guild_id = $1`, [guildId]);
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        state: row.state,
+        botPresent: row.bot_present,
+        pingMs: row.ping_ms,
+        checkedAt: row.checked_at.toISOString()
+      };
+    },
+
+    /**
+     * Punishment counts over a window, straight from the append-only trail.
+     *
+     * Counted in SQL rather than by reading rows and tallying in JavaScript, so
+     * the number stays correct once the trail is longer than any page size.
+     */
+    async countPunishmentsSince(guildId: string, since: Date) {
+      const { rows } = await pool.query<{ event_id: string; count: string }>(
+        `SELECT event_id, count(*)::text AS count
+         FROM audit_trail
+         WHERE guild_id = $1 AND created_at >= $2 AND event_id = ANY($3::text[])
+         GROUP BY event_id`,
+        [guildId, since, [...PUNISHMENT_EVENT_IDS]]
+      );
+      return rows.map(row => ({ eventId: row.event_id, count: Number(row.count) }));
+    },
+
+    /** The most recent moderation rows, for the activity feed. */
+    async listRecentModeration(guildId: string, limit = 8) {
+      const { rows } = await pool.query<{
+        id: string;
+        event_id: string;
+        severity: string;
+        payload_ciphertext: string;
+        created_at: Date;
+      }>(
+        `SELECT id, event_id, severity, payload_ciphertext, created_at
+         FROM audit_trail
+         WHERE guild_id = $1 AND event_id LIKE 'moderation.%'
+         ORDER BY created_at DESC
+         LIMIT $2`,
+        [guildId, limit]
+      );
+      return rows;
     },
 
     /**
@@ -358,43 +544,6 @@ export function createDatabase(pool: pg.Pool) {
         [guildId, limit]
       );
       return rows;
-    },
-
-    async listTokens() {
-      const { rows } = await pool.query<{ id: string; label: string; fingerprint: string; created_at: Date; guild_ids: string[] }>(
-        `SELECT t.id, t.label, t.fingerprint, t.created_at,
-                COALESCE(array_agg(g.guild_id) FILTER (WHERE g.guild_id IS NOT NULL), '{}') AS guild_ids
-         FROM bot_tokens t
-         LEFT JOIN bot_token_guilds g ON g.token_id = t.id
-         GROUP BY t.id
-         ORDER BY t.created_at DESC`
-      );
-      return rows;
-    },
-
-    async createToken(input: { id: string; label: string; ciphertext: string; fingerprint: string; guildIds: string[] }) {
-      const client = await pool.connect();
-      try {
-        await client.query("BEGIN");
-        await client.query(
-          `INSERT INTO bot_tokens (id, label, token_ciphertext, fingerprint) VALUES ($1, $2, $3, $4)`,
-          [input.id, input.label, input.ciphertext, input.fingerprint]
-        );
-        for (const guildId of input.guildIds) {
-          await client.query(`INSERT INTO bot_token_guilds (token_id, guild_id) VALUES ($1, $2)`, [input.id, guildId]);
-        }
-        await client.query("COMMIT");
-      } catch (error) {
-        await client.query("ROLLBACK");
-        throw error;
-      } finally {
-        client.release();
-      }
-    },
-
-    async deleteToken(id: string) {
-      const { rowCount } = await pool.query(`DELETE FROM bot_tokens WHERE id = $1`, [id]);
-      return (rowCount ?? 0) > 0;
     },
 
     async countAudit(guildId: string) {

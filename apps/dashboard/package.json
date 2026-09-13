@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "start": "tsx server/index.ts",
-    "test": "tsx --test test/*.test.tsx",
+    "test": "tsx --test test/*.test.ts test/*.test.tsx",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

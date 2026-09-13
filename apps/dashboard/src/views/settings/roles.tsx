@@ -1,23 +1,27 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, ShieldCheck, TriangleAlert, UserCog } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Check, Info, Loader2, ShieldCheck, TriangleAlert, UserCog } from "lucide-react";
 import { api } from "@/api";
+import { SaveBar } from "@/components/save-bar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { SaveBar } from "@/components/save-bar";
-import { tierDescriptions, tierLabels, tierOrder, type Guild, type TierConfig, type TierRoles } from "@/types";
-
-const NONE = "__none__";
+import { tierDescriptions, tierLabels, type DiscordRole, type Guild, type TierConfig, type TierRoles } from "@/types";
 
 /**
- * GOVERNANCE rule 3 — tiers bind to Role IDs, never User IDs.
+ * Role mapping — GOVERNANCE rule 3.
  *
- * This screen is Owner-only because it decides who can do everything else.
- * Until a row is saved every actor resolves to null and the dashboard denies
- * access, so an empty state here is a real blocker, not an empty table.
+ * Two multi-select lists, both of Role IDs. There is no "owner" field because
+ * there is nothing to configure: Discord already knows who owns the guild and
+ * who it grants Administrator, so those members hold the top tier from the
+ * moment they sign in. The old screen demanded four roles before anything
+ * worked, which meant a freshly added bot locked its own owner out.
+ *
+ * Each list is a checkbox group rather than a dropdown because an operator
+ * usually grants several roles at once, and a closed dropdown hides what is
+ * already selected.
  */
 export function RolesView({ guild }: { guild: Guild }) {
   const [config, setConfig] = useState<TierConfig | null>(null);
@@ -29,14 +33,7 @@ export function RolesView({ guild }: { guild: Guild }) {
     try {
       const result = await api.tiers(guild.id);
       setConfig(result);
-      setDraft(
-        result.configured ?? {
-          owner: null,
-          head_admin: null,
-          admin: null,
-          moderator: null
-        }
-      );
+      setDraft(result.configured ?? EMPTY_TIERS);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذّر التحميل.");
     }
@@ -47,14 +44,6 @@ export function RolesView({ guild }: { guild: Guild }) {
     setDraft(null);
     void load();
   }, [load]);
-
-  const unassignable = useMemo(() => new Set(config?.unassignable ?? []), [config]);
-
-  const dirty = useMemo(() => {
-    if (!config || !draft) return false;
-    const saved = config.configured ?? { owner: null, head_admin: null, admin: null, moderator: null };
-    return tierOrder.some(tier => saved[tier] !== draft[tier]);
-  }, [config, draft]);
 
   if (error) {
     return (
@@ -73,18 +62,37 @@ export function RolesView({ guild }: { guild: Guild }) {
     );
   }
 
-  const isConfigured = config.configured !== null;
+  const dirty = JSON.stringify(normalise(config.configured ?? EMPTY_TIERS)) !== JSON.stringify(normalise(draft));
+
+  /**
+   * Assigning a role to one list removes it from the other. A role in both lists
+   * would resolve to admin and leave the moderator entry silently dead, so the
+   * server rejects it — moving it here is friendlier than a save-time error.
+   */
+  const assign = (tier: keyof TierRoles, roleId: string, checked: boolean) => {
+    setDraft(current => {
+      if (!current) return current;
+      const next: TierRoles = { ...current, [tier]: toggle(current[tier], roleId, checked) };
+      if (checked) {
+        const other: keyof TierRoles = tier === "adminRoleIds" ? "moderatorRoleIds" : "adminRoleIds";
+        next[other] = next[other].filter(id => id !== roleId);
+      }
+      return next;
+    });
+  };
+
+  const unassignable = new Set(config.unassignable ?? []);
 
   return (
     <div className="space-y-4">
-      {!isConfigured && (
-        <Alert>
-          <TriangleAlert />
-          <AlertDescription>
-            لم تُضبط رتب الإدارة بعد — لا أحد يستطيع الدخول أو استخدام الأوامر حتى تحفظ رتبة المالك.
-          </AlertDescription>
-        </Alert>
-      )}
+      {/* The automatic tier is stated plainly, because "where do I configure the
+          owner?" is the first question this screen used to raise. */}
+      <Alert>
+        <ShieldCheck />
+        <AlertDescription>
+          <span className="font-medium">{tierLabels.owner}</span> — {tierDescriptions.owner}
+        </AlertDescription>
+      </Alert>
 
       {config.warning && (
         <Alert variant="destructive">
@@ -92,72 +100,43 @@ export function RolesView({ guild }: { guild: Guild }) {
         </Alert>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <UserCog className="size-4" />
-            رتب الإدارة
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-1">
-          {tierOrder.map((tier, index) => {
-            const value = draft[tier] ?? NONE;
-            const selected = config.roles.find(role => role.id === value);
-            const blocked = selected ? unassignable.has(selected.id) : false;
+      {config.roles.length === 0 ? (
+        <Alert variant="destructive">
+          <TriangleAlert />
+          <AlertDescription>
+            تعذّر قراءة رتب السيرفر. تأكّد من أن AL AI مضاف إلى السيرفر وأنه يملك صلاحية إدارة الرتب.
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <RolePicker
+            title={tierLabels.admin}
+            description={tierDescriptions.admin}
+            roles={config.roles}
+            selected={draft.adminRoleIds}
+            unassignable={unassignable}
+            onToggle={(roleId, checked) => assign("adminRoleIds", roleId, checked)}
+          />
+          <RolePicker
+            title={tierLabels.moderator}
+            description={tierDescriptions.moderator}
+            roles={config.roles}
+            selected={draft.moderatorRoleIds}
+            unassignable={unassignable}
+            onToggle={(roleId, checked) => assign("moderatorRoleIds", roleId, checked)}
+          />
+        </div>
+      )}
 
-            return (
-              <div key={tier}>
-                {index > 0 && <Separator className="my-1" />}
-                <div className="flex flex-wrap items-center gap-3 py-3">
-                  <div className="min-w-48 flex-1">
-                    <p className="text-sm font-medium">{tierLabels[tier]}</p>
-                    <p className="text-xs text-muted-foreground">{tierDescriptions[tier]}</p>
-                  </div>
-
-                  {blocked && (
-                    <Badge variant="destructive" className="shrink-0">
-                      أعلى من رتبة البوت
-                    </Badge>
-                  )}
-
-                  <Select
-                    value={value}
-                    onValueChange={next =>
-                      setDraft(current => (current ? { ...current, [tier]: next === NONE ? null : next } : current))
-                    }
-                  >
-                    <SelectTrigger className="w-56">
-                      <SelectValue placeholder="بدون" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>بدون</SelectItem>
-                      {config.roles.map(role => (
-                        <SelectItem key={role.id} value={role.id}>
-                          {role.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            );
-          })}
-
-          <Separator className="my-1" />
-          <p className="flex items-center gap-2 pt-2 text-xs text-muted-foreground">
-            <ShieldCheck className="size-3.5" />
-            الرتبة نفسها لا تُسند إلى مستويين، وكل عملية تُعاد المصادقة عليها على الخادم.
-          </p>
-        </CardContent>
-      </Card>
+      <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+        <Info className="mt-0.5 size-3.5 shrink-0" />
+        تُقرأ هذه الرتب من Discord مباشرة، وتُفحص على الخادم عند كل إجراء — لا تعتمد الواجهة على نفسها في المصادقة. الرتبة
+        التي تعلو رتبة البوت لا يمكن منحها، وتظهر هنا بعلامة تحذير.
+      </p>
 
       {dirty && (
         <SaveBar
-          onCancel={() =>
-            setDraft(
-              config.configured ?? { owner: null, head_admin: null, admin: null, moderator: null }
-            )
-          }
+          onCancel={() => setDraft(config.configured ?? EMPTY_TIERS)}
           onSave={async () => {
             const result = await api.saveTiers(guild.id, draft);
             setConfig(current => (current ? { ...current, configured: result.configured } : current));
@@ -167,5 +146,88 @@ export function RolesView({ guild }: { guild: Guild }) {
         />
       )}
     </div>
+  );
+}
+
+const EMPTY_TIERS: TierRoles = { adminRoleIds: [], moderatorRoleIds: [] };
+
+/** Sorted copies, so a reordered list is not mistaken for a change. */
+function normalise(roles: TierRoles): TierRoles {
+  return {
+    adminRoleIds: [...roles.adminRoleIds].sort(),
+    moderatorRoleIds: [...roles.moderatorRoleIds].sort()
+  };
+}
+
+function toggle(list: readonly string[], id: string, checked: boolean): string[] {
+  return checked ? [...list, id] : list.filter(entry => entry !== id);
+}
+
+function RolePicker({
+  title,
+  description,
+  roles,
+  selected,
+  unassignable,
+  onToggle
+}: {
+  title: string;
+  description: string;
+  roles: DiscordRole[];
+  selected: readonly string[];
+  unassignable: ReadonlySet<string>;
+  onToggle: (roleId: string, checked: boolean) => void;
+}) {
+  const chosen = new Set(selected);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <UserCog className="size-4" />
+            {title}
+          </CardTitle>
+          <Badge variant={chosen.size ? "secondary" : "outline"} className="tabular">
+            {chosen.size}
+          </Badge>
+        </div>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ScrollArea className="h-72 rounded-md border border-border p-2">
+          <div className="space-y-0.5">
+            {roles.map(role => {
+              const blocked = unassignable.has(role.id);
+              return (
+                <label
+                  key={role.id}
+                  className="flex cursor-pointer items-center gap-2.5 rounded px-1.5 py-1.5 text-sm transition-colors hover:bg-accent"
+                >
+                  <Checkbox
+                    checked={chosen.has(role.id)}
+                    onCheckedChange={checked => onToggle(role.id, checked === true)}
+                  />
+                  <span
+                    className="size-2.5 shrink-0 rounded-full border border-border"
+                    style={role.color ? { backgroundColor: `#${role.color.toString(16).padStart(6, "0")}` } : undefined}
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1 truncate">{role.name}</span>
+                  {blocked && (
+                    <Badge variant="destructive" className="shrink-0 text-[10px]">
+                      أعلى من رتبة البوت
+                    </Badge>
+                  )}
+                  {chosen.has(role.id) && !blocked && <Check className="size-3.5 shrink-0 text-muted-foreground" />}
+                </label>
+              );
+            })}
+          </div>
+        </ScrollArea>
+        <Separator className="my-3" />
+        <p className="text-xs text-muted-foreground">{chosen.size === 0 ? "لا رتب مختارة." : `${chosen.size} رتبة مختارة.`}</p>
+      </CardContent>
+    </Card>
   );
 }

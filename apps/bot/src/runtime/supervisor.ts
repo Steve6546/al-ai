@@ -64,6 +64,15 @@ export type SupervisorDeps = {
    * count — is what the dashboard must compare them against.
    */
   uniqueUsers?: () => number;
+  /**
+   * Discord's own gateway heartbeat, in milliseconds.
+   *
+   * Only the bot can read this, and it is the one latency figure that means
+   * something to an operator: it is the live socket, not a REST round-trip.
+   * Returning null is honest and renders as "—"; a fabricated 0 would read as
+   * "0 ms" and look perfect while the connection is dead.
+   */
+  gatewayPingMs?: () => number | null;
   intervalMs?: number;
 };
 
@@ -89,8 +98,9 @@ export function startSupervisor(deps: SupervisorDeps) {
     const guildIds = deps.guildIds();
     const state = database === "reachable" ? "online" : "degraded";
     const uniqueUsers = Math.max(0, Math.trunc(deps.uniqueUsers?.() ?? 0) || 0);
+    const pingMs = normalisePing(deps.gatewayPingMs?.() ?? null);
     for (const guildId of guildIds) {
-      await deps.database.upsertHealth(guildId, state, true, stats.eventsLastMinute, uniqueUsers).catch(() => undefined);
+      await deps.database.upsertHealth(guildId, state, true, stats.eventsLastMinute, uniqueUsers, pingMs).catch(() => undefined);
     }
 
     if (!deps.dashboardUrl) return;
@@ -100,7 +110,8 @@ export function startSupervisor(deps: SupervisorDeps) {
         state,
         botPresent: true,
         gatewayEvents: stats.eventsLastMinute,
-        uniqueUsers
+        uniqueUsers,
+        pingMs
       }).catch(() => undefined);
     }
   };
@@ -116,10 +127,26 @@ export function startSupervisor(deps: SupervisorDeps) {
   };
 }
 
+/**
+ * Discord reports -1 before the first heartbeat completes. That is "no reading
+ * yet", not a negative latency, so it is normalised to null.
+ */
+function normalisePing(value: number | null): number | null {
+  if (value === null || !Number.isFinite(value) || value < 0) return null;
+  return Math.round(value);
+}
+
 async function pushHealth(
   dashboardUrl: string,
   secret: string,
-  payload: { guildId: string; state: string; botPresent: boolean; gatewayEvents: number; uniqueUsers: number }
+  payload: {
+    guildId: string;
+    state: string;
+    botPresent: boolean;
+    gatewayEvents: number;
+    uniqueUsers: number;
+    pingMs: number | null;
+  }
 ) {
   const body = JSON.stringify(payload);
   const nonce = newNonce();

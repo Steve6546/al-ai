@@ -1,4 +1,4 @@
-import { requireTier, type PermissionStatus, type Tier } from "@al-ai/core";
+import { EMPTY_TIER_ROLES, requireTier, resolveTier, type PermissionStatus, type Tier } from "@al-ai/core";
 import type { Database } from "./db.js";
 import { fetchMemberRoleIds, fetchBotPermissions, hasPermission, USER_PERMISSIONS } from "./discord.js";
 
@@ -21,12 +21,19 @@ export async function resolveActorTier(input: {
   guildId: string;
   discordUserId: string;
   userIsGuildOwner: boolean;
+  /** Discord's own verdict: this member holds Administrator in the guild. */
+  userIsAdministrator: boolean;
 }): Promise<Tier | null> {
-  if (input.userIsGuildOwner) return "owner";
+  // Zero-config access: Discord already knows who owns a guild and whom it
+  // trusts with Administrator, so those members hold the top tier immediately.
+  // Re-declaring that in a second place only created a way for the two answers
+  // to disagree, and left a fresh guild locked out of its own dashboard.
+  if (input.userIsGuildOwner || input.userIsAdministrator) return "owner";
   if (!input.botToken) return null;
 
-  const tiers = await input.db.getTierRoles(input.guildId);
-  if (!tiers) return null;
+  // A guild with no saved mapping is not a lockout — it simply has no extra
+  // admin or moderator roles beyond Discord's own.
+  const roles = (await input.db.getTierRoles(input.guildId)) ?? EMPTY_TIER_ROLES;
 
   let roleIds: Set<string>;
   try {
@@ -35,8 +42,7 @@ export async function resolveActorTier(input: {
     return null; // Not a member, or the bot lost access: deny by default.
   }
 
-  const order: Tier[] = ["owner", "head_admin", "admin", "moderator"];
-  return order.find(tier => roleIds.has(tiers[tier])) ?? null;
+  return resolveTier({ roleIds }, roles);
 }
 
 /** Throws unless the actor's tier strictly outranks the required tier. */
@@ -51,23 +57,27 @@ export function assertTier(actor: Tier | null, required: Tier) {
 /**
  * Reports the bot's own Discord permissions for the actions the dashboard
  * offers, so the UI can disable an action instead of letting it fail.
+ *
+ * A failed read yields `granted: null` ("unknown"), never `false`. The two are
+ * not interchangeable: `false` is a claim about the bot, and callers act on it
+ * by blocking writes. Turning an outage into `false` would refuse a save the bot
+ * is perfectly able to perform, and would do so with a message naming a missing
+ * permission that is in fact present.
  */
 export async function botIdentityPermissionStatus(botToken: string, guildId: string): Promise<PermissionStatus[]> {
-  let bits: bigint;
-  try {
-    bits = await fetchBotPermissions(botToken, guildId);
-  } catch {
-    return [
-      { key: "change_nickname", label: "تغيير الاسم المستعار", granted: false },
-      { key: "manage_guild", label: "إدارة السيرفر", granted: false }
-    ];
-  }
+  const bits = await fetchBotPermissions(botToken, guildId);
   return [
     {
       key: "change_nickname",
       label: "تغيير الاسم المستعار",
-      granted: hasPermission(bits, USER_PERMISSIONS.CHANGE_NICKNAME) || hasPermission(bits, USER_PERMISSIONS.MANAGE_NICKNAMES)
+      granted: bits === null
+        ? null
+        : hasPermission(bits, USER_PERMISSIONS.CHANGE_NICKNAME) || hasPermission(bits, USER_PERMISSIONS.MANAGE_NICKNAMES)
     },
-    { key: "manage_guild", label: "إدارة السيرفر", granted: hasPermission(bits, USER_PERMISSIONS.MANAGE_GUILD) }
+    {
+      key: "manage_guild",
+      label: "إدارة السيرفر",
+      granted: bits === null ? null : hasPermission(bits, USER_PERMISSIONS.MANAGE_GUILD)
+    }
   ];
 }

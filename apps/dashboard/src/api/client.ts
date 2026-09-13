@@ -1,17 +1,22 @@
 import type {
+  AntiNukeConfig,
+  AntiNukeSettings,
   AuditEntry,
   ChannelOption,
+  CommandConfig,
   CommandFlag,
   CustomizationSettings,
   Guild,
+  GuildMetrics,
   HealthSnapshot,
   LoggingSettings,
   PermissionStatus,
+  RoleHierarchyVerdict,
+  RoleIconGate,
   SecurityEvent,
   SessionInfo,
   TierConfig,
-  TierRoles,
-  TokenRecord
+  TierRoles
 } from "@/types";
 
 /**
@@ -59,6 +64,7 @@ export const guilds = () => call<{ guilds: Guild[] }>("/api/guilds");
  * Per-guild reads
  * ------------------------------------------------------------------ */
 export const channels = (guildId: string) => call<{ channels: ChannelOption[] }>(`/api/guilds/${guildId}/channels`);
+export const metrics = (guildId: string) => call<GuildMetrics>(`/api/guilds/${guildId}/metrics`);
 
 /* ------------------------------------------------------------------ *
  * Settings: tiers
@@ -73,8 +79,12 @@ export const saveTiers = (guildId: string, values: TierRoles) =>
 export const commands = (guildId: string) =>
   call<{ modules: string[]; commands: CommandFlag[] }>(`/api/guilds/${guildId}/commands`);
 
-/** One entry per changed command. Unchanged commands are not sent at all. */
-export type CommandChange = { command: string; enabled: boolean; minimumTier: string };
+/**
+ * One entry per changed command. Unchanged commands are not sent at all, and
+ * the server normalises each one against its registry definition — a control
+ * the command does not support is dropped rather than stored and ignored.
+ */
+export type CommandChange = Partial<CommandConfig> & { name: string };
 
 export const saveCommands = (guildId: string, changes: CommandChange[]) =>
   call<{ saved: number }>(`/api/guilds/${guildId}/commands`, { method: "PUT", body: JSON.stringify({ changes }) });
@@ -83,7 +93,13 @@ export const saveCommands = (guildId: string, changes: CommandChange[]) =>
  * Settings: customization
  * ------------------------------------------------------------------ */
 export const customization = (guildId: string) =>
-  call<{ settings: CustomizationSettings; permissions: PermissionStatus[] }>(`/api/guilds/${guildId}/customization`);
+  call<{
+    settings: CustomizationSettings;
+    permissions: PermissionStatus[];
+    /** Null when the guild's roles could not be read, so no verdict is claimed. */
+    hierarchy: RoleHierarchyVerdict | null;
+    roleIcon: RoleIconGate;
+  }>(`/api/guilds/${guildId}/customization`);
 export const saveCustomization = (guildId: string, settings: CustomizationSettings) =>
   call<{ settings: CustomizationSettings; savedAt: string }>(`/api/guilds/${guildId}/customization`, {
     method: "PUT",
@@ -101,17 +117,20 @@ export const saveLogging = (guildId: string, settings: LoggingSettings) =>
   });
 
 /* ------------------------------------------------------------------ *
- * Settings: bot tokens
- * ------------------------------------------------------------------ */
-export const tokens = () => call<{ tokens: TokenRecord[] }>("/api/tokens");
-export const createToken = (label: string, token: string, guildIds: string[]) =>
-  call<{ created: boolean }>("/api/tokens", { method: "POST", body: JSON.stringify({ label, token, guildIds }) });
-export const deleteToken = (tokenId: string) => call<{ deleted: boolean }>(`/api/tokens/${tokenId}`, { method: "DELETE" });
-
-/* ------------------------------------------------------------------ *
  * Read-only views
  * ------------------------------------------------------------------ */
 export const audit = (guildId: string) =>
   call<{ counts: { total: number; critical: number }; entries: AuditEntry[] }>(`/api/guilds/${guildId}/audit`);
 export const security = (guildId: string) =>
   call<{ events: SecurityEvent[] }>(`/api/guilds/${guildId}/security`);
+
+/* ------------------------------------------------------------------ *
+ * Settings: anti-nuke
+ * ------------------------------------------------------------------ */
+export const securityConfig = (guildId: string) =>
+  call<AntiNukeSettings>(`/api/guilds/${guildId}/security/config`);
+export const saveSecurityConfig = (guildId: string, config: AntiNukeConfig) =>
+  call<{ config: AntiNukeConfig; savedAt: string }>(`/api/guilds/${guildId}/security/config`, {
+    method: "PUT",
+    body: JSON.stringify(config)
+  });

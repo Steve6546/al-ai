@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, ImageOff, Info, Loader2, Palette, RotateCcw, ShieldCheck, X } from "lucide-react";
+import { Check, CircleHelp, ImageOff, Info, Loader2, Lock, Palette, RotateCcw, ShieldCheck, TriangleAlert, X } from "lucide-react";
 import { DEFAULT_CUSTOMIZATION, MAX_NICKNAME_LENGTH } from "@al-ai/core/browser";
 import { api } from "@/api";
 import { SaveBar } from "@/components/save-bar";
@@ -10,7 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import type { CustomizationSettings, Guild, PermissionStatus } from "@/types";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { CustomizationSettings, Guild, PermissionStatus, RoleHierarchyVerdict, RoleIconGate } from "@/types";
 
 /**
  * Per-guild bot identity.
@@ -27,12 +28,16 @@ export function CustomizationView({ guild }: { guild: Guild }) {
   const [saved, setSaved] = useState<CustomizationSettings | null>(null);
   const [draft, setDraft] = useState<CustomizationSettings | null>(null);
   const [permissions, setPermissions] = useState<PermissionStatus[]>([]);
+  const [hierarchy, setHierarchy] = useState<RoleHierarchyVerdict | null>(null);
+  const [roleIcon, setRoleIcon] = useState<RoleIconGate | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setSaved(null);
     setDraft(null);
+    setHierarchy(null);
+    setRoleIcon(null);
     setError(null);
     api
       .customization(guild.id)
@@ -41,6 +46,8 @@ export function CustomizationView({ guild }: { guild: Guild }) {
         setSaved(result.settings);
         setDraft(result.settings);
         setPermissions(result.permissions);
+        setHierarchy(result.hierarchy);
+        setRoleIcon(result.roleIcon);
       })
       .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
     return () => {
@@ -66,12 +73,20 @@ export function CustomizationView({ guild }: { guild: Guild }) {
 
   const dirty = JSON.stringify(saved) !== JSON.stringify(draft);
   const nicknamePermission = permissions.find(item => item.key === "change_nickname");
-  const canSave = guild.canManageIdentity && (nicknamePermission?.granted ?? true) && draft.nickname.length <= MAX_NICKNAME_LENGTH;
+  // Only a *known* absence blocks the save. `granted` is null when the permission
+  // read failed, and treating that as a refusal would disable Save for every
+  // guild whenever Discord had a hiccup.
+  const canSave = guild.canManageIdentity && nicknamePermission?.granted !== false && draft.nickname.length <= MAX_NICKNAME_LENGTH;
+  // Every permission unknown means the read itself failed, not that the bot is
+  // missing everything — say so once, above the list, instead of six times in it.
+  const permissionsUnreadable = permissions.length > 0 && permissions.every(permission => permission.granted === null);
   const patch = (next: Partial<CustomizationSettings>) => setDraft({ ...draft, ...next });
 
   return (
     <div className="space-y-4">
       <BotIdentityPreview guild={guild} settings={draft} />
+
+      <HierarchyWarning verdict={hierarchy} />
 
       <Card>
         <CardHeader>
@@ -82,7 +97,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
           <CardDescription>هذه الصلاحيات تأتي مع رتبة AL AI التي ينشئها البوت عند دخوله.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
-          {permissions.length === 0 ? (
+          {permissions.length === 0 || permissionsUnreadable ? (
             <p className="text-xs text-muted-foreground">
               تعذّر قراءة صلاحيات البوت. أعد إضافة AL AI بصلاحيات Administrator ليتمكن من تعديل هويته.
             </p>
@@ -90,15 +105,20 @@ export function CustomizationView({ guild }: { guild: Guild }) {
             permissions.map(permission => (
               <div key={permission.key} className="flex items-center justify-between gap-3 text-sm">
                 <span className="text-muted-foreground">{permission.label}</span>
-                {permission.granted ? (
+                {permission.granted === true ? (
                   <Badge variant="secondary" className="gap-1">
                     <Check className="size-3" />
                     متاحة
                   </Badge>
-                ) : (
+                ) : permission.granted === false ? (
                   <Badge variant="destructive" className="gap-1">
                     <X className="size-3" />
                     مفقودة
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="gap-1">
+                    <CircleHelp className="size-3" />
+                    غير معروفة
                   </Badge>
                 )}
               </div>
@@ -175,19 +195,41 @@ export function CustomizationView({ guild }: { guild: Guild }) {
           <Separator />
 
           <div className="space-y-2">
-            <Label htmlFor="role-icon">أيقونة الرتبة</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Label htmlFor="role-icon">أيقونة الرتبة</Label>
+              {roleIcon?.locked && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex cursor-help items-center gap-1 rounded-md bg-warning/15 px-2 py-0.5 text-xs text-warning">
+                      <Lock className="size-3" />
+                      مقفلة
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs text-right leading-relaxed">{roleIcon.reason}</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
             <Input
               id="role-icon"
               dir="ltr"
               placeholder="https://…/icon.png"
               value={draft.roleIconUrl ?? ""}
+              disabled={roleIcon?.locked}
               onChange={event => patch({ roleIconUrl: event.target.value.trim() || null })}
             />
-            <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-              <Info className="mt-0.5 size-3.5 shrink-0" />
-              رابط HTTPS لصورة مربعة. لأن صورة حساب البوت عامة لكل السيرفرات، فإن الصورة الخاصة بكل سيرفر تظهر على
-              رتبة AL AI بدلاً من الحساب.
-            </p>
+            {roleIcon?.locked ? (
+              <p className="flex items-start gap-1.5 text-xs leading-relaxed text-warning">
+                <Lock className="mt-0.5 size-3.5 shrink-0" />
+                {roleIcon.reason}
+              </p>
+            ) : (
+              <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <Info className="mt-0.5 size-3.5 shrink-0" />
+                رابط HTTPS لصورة مربعة. لأن صورة حساب البوت عامة لكل السيرفرات، فإن الصورة الخاصة بكل سيرفر تظهر على
+                رتبة AL AI بدلاً من الحساب.
+                {roleIcon?.unknown && " تعذّر قراءة مستوى تعزيز السيرفر الآن، وسيتحقق البوت عند التطبيق."}
+              </p>
+            )}
           </div>
 
           <Alert>
@@ -210,6 +252,34 @@ export function CustomizationView({ guild }: { guild: Guild }) {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * The advisory shown when the bot's own role sits at or below a role it is
+ * expected to manage.
+ *
+ * This is the single most common reason a correctly configured bot silently
+ * does nothing, and Discord reports it only as a failed API call. Saying it on
+ * the screen turns an unexplained no-op into a fixable problem.
+ *
+ * Exported for its render test: a null verdict (roles unreadable) and a passing
+ * verdict both render nothing, so the test can prove the warning is not shown
+ * speculatively.
+ */
+export function HierarchyWarning({ verdict }: { verdict: RoleHierarchyVerdict | null }) {
+  if (!verdict?.blocked) return null;
+  return (
+    <div className="flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning/10 p-3">
+      <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
+      <div className="space-y-1">
+        <p className="text-sm font-medium">ترتيب الرتب يمنع البوت من العمل</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">{verdict.message}</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          افتح إعدادات السيرفر ← الرتب، واسحب رتبة AL AI إلى ما فوق أعلى رتبة إدارية.
+        </p>
+      </div>
     </div>
   );
 }

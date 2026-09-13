@@ -1,22 +1,32 @@
-import { requireTier, type Tier } from "@al-ai/core";
+import { requireTier, resolveTier as resolveTierFromRoles, type Tier, type TierHolder, type TierRoles } from "@al-ai/core";
 
 // GOVERNANCE rule 3: all authorization decisions route through this guard.
 // It never imports discord.js and never hard-codes a user or role ID — tiers are
-// resolved from configurable Role IDs supplied by the caller.
+// resolved from configurable Role IDs supplied by the caller, plus the automatic
+// owner tier that Discord's own permission bitfield already expresses.
 
-export type RoleCarrier = { roleIds: ReadonlySet<string> };
+export type RoleCarrier = TierHolder;
 
-export function roleCarrierOf(roleIds: Iterable<string>): RoleCarrier {
-  return { roleIds: new Set(roleIds) };
+/**
+ * Builds the member shape the guard needs.
+ *
+ * `isGuildOwner` and `isAdministrator` are optional so a caller that only has
+ * role IDs still works — but passing them is what makes the automatic owner tier
+ * function, so the event path supplies both whenever Discord gave them to it.
+ */
+export function roleCarrierOf(
+  roleIds: Iterable<string>,
+  flags: { isGuildOwner?: boolean; isAdministrator?: boolean } = {}
+): RoleCarrier {
+  return { roleIds: new Set(roleIds), ...flags };
 }
 
-export function resolveTier(member: RoleCarrier, tiers: Record<Tier, string>): Tier | null {
-  const order: Tier[] = ["owner", "head_admin", "admin", "moderator"];
-  return order.find(tier => member.roleIds.has(tiers[tier])) ?? null;
+export function resolveTier(member: RoleCarrier, roles: TierRoles): Tier | null {
+  return resolveTierFromRoles(member, roles);
 }
 
-export function authorize(member: RoleCarrier, tiers: Record<Tier, string>, required: Tier) {
-  const actor = resolveTier(member, tiers);
+export function authorize(member: RoleCarrier, roles: TierRoles, required: Tier) {
+  const actor = resolveTier(member, roles);
   requireTier(actor, required);
   return actor;
 }
@@ -24,8 +34,8 @@ export function authorize(member: RoleCarrier, tiers: Record<Tier, string>, requ
 export type GuardOutcome = { allowed: true; tier: Tier } | { allowed: false; reason: "NO_TIER" | "TIER_TOO_LOW" };
 
 /** Non-throwing variant used on the event path. */
-export function check(member: RoleCarrier, tiers: Record<Tier, string>, required: Tier): GuardOutcome {
-  const actor = resolveTier(member, tiers);
+export function check(member: RoleCarrier, roles: TierRoles, required: Tier): GuardOutcome {
+  const actor = resolveTier(member, roles);
   if (!actor) return { allowed: false, reason: "NO_TIER" };
   try {
     requireTier(actor, required);

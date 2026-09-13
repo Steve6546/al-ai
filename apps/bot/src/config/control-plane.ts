@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { eventsByCategory, logDestinations, type LogDestination } from "@al-ai/core";
+import { allDestinations, eventsByCategory, type LogDestination } from "@al-ai/core";
 
 /**
  * GOVERNANCE rule 15 — operational state lives in `config/`, never in code and
@@ -50,11 +50,14 @@ export function loadChannelDeclaration(): ChannelDeclaration {
  */
 export function assertChannelsMatchSchema(declaration = loadChannelDeclaration()) {
   const declared = declaration.destinations.map(destination => destination.id);
-  const expected = [...logDestinations];
+  // Every destination, including the internal one: the config file is the
+  // registry of what exists, while `logDestinations` is only what an operator
+  // is offered.
+  const expected = [...allDestinations];
 
   if (declared.length !== expected.length || expected.some(id => !declared.includes(id))) {
     throw new Error(
-      `config/channels.json does not declare the seven destinations exactly. Expected ${expected.join(", ")}; got ${declared.join(", ")}.`
+      `config/channels.json does not declare the destinations exactly. Expected ${expected.join(", ")}; got ${declared.join(", ")}.`
     );
   }
 

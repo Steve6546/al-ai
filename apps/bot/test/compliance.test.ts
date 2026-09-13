@@ -87,8 +87,9 @@ test("a drifted channels.json is rejected rather than silently accepted", () => 
 
 test("a channels.json that drops a destination is rejected", () => {
   const declaration = loadChannelDeclaration();
-  const drifted = { ...declaration, destinations: declaration.destinations.slice(0, 6) };
-  assert.throws(() => assertChannelsMatchSchema(drifted), /seven destinations/);
+  // One fewer than the schema declares: the internal `bot-log` falls off the end.
+  const drifted = { ...declaration, destinations: declaration.destinations.slice(0, -1) };
+  assert.throws(() => assertChannelsMatchSchema(drifted), /does not declare the destinations exactly/);
 });
 
 test("undecided settings are reported instead of being invented", () => {

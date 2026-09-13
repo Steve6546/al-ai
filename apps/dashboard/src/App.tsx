@@ -7,7 +7,7 @@ import { InviteBotPanel } from "@/components/invite-bot";
 import { LoginScreen } from "@/components/login-screen";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { AuditView, CommandsView, CustomizationView, DashboardView, LogsView, RolesView, SecurityView, TokensView } from "@/views";
+import { AuditView, CommandsView, CustomizationView, DashboardView, LogsView, RolesView, SecurityView } from "@/views";
 import type { Guild, HealthSnapshot, SessionInfo } from "@/types";
 
 /**
@@ -161,14 +161,13 @@ export function App() {
         <InviteBotPanel guild={guild} refreshing={refreshing} onRefresh={() => void refresh()} />
       ) : (
         <>
-          {view === "dashboard" && <DashboardView guild={guild} health={health} />}
+          {view === "dashboard" && <DashboardView guild={guild} />}
           {view === "commands" && <CommandsView guild={guild} />}
           {view === "roles" && <RolesView guild={guild} />}
           {view === "customization" && <CustomizationView guild={guild} />}
           {view === "logs" && <LogsView guild={guild} />}
           {view === "audit" && <AuditView guild={guild} />}
           {view === "security" && <SecurityView guild={guild} />}
-          {view === "tokens" && <TokensView guilds={guilds} />}
         </>
       )}
     </AppShell>

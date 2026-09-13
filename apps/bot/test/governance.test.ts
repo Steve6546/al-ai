@@ -104,12 +104,12 @@ const governance = readFileSync(governancePath, "utf8");
 /** Rule numbers declared in docs/GOVERNANCE.md, e.g. "1. **Slash commands only.**" */
 const declaredRules = [...governance.matchAll(/^(\d+)\.\s+\*\*/gm)].map(match => Number(match[1]));
 
-test("docs/GOVERNANCE.md declares exactly eighteen rules", () => {
-  assert.equal(declaredRules.length, 18, `found ${declaredRules.length} numbered rules`);
+test("docs/GOVERNANCE.md declares exactly nineteen rules", () => {
+  assert.equal(declaredRules.length, 19, `found ${declaredRules.length} numbered rules`);
   assert.deepEqual(
     declaredRules,
-    Array.from({ length: 18 }, (_, index) => index + 1),
-    "rules are numbered 1..18 with no gaps"
+    Array.from({ length: 19 }, (_, index) => index + 1),
+    "rules are numbered 1..19 with no gaps"
   );
 });
 
@@ -131,9 +131,22 @@ test("the rule numbers actually used cover the rules that need code", () => {
   }
   // Rules 1, 4, 6, 8 and 9 are enforced structurally by the other tests above
   // and by the deploy/registry modules; the rest must be cited where they live.
-  for (const rule of [2, 3, 5, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18]) {
+  for (const rule of [2, 3, 5, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]) {
     assert.ok(cited.has(rule), `rule ${rule} is not cited anywhere in src`);
   }
+});
+
+/* ------------------------------------------------------------------ *
+ * GOVERNANCE rule 19 — no credential enters through the dashboard.
+ * ------------------------------------------------------------------ */
+
+test("no bot module reads a token from anywhere but the environment", () => {
+  // The only permitted sources are process.env and the config loader. A token
+  // arriving from the database or an HTTP body is the defect this rule names.
+  const offenders = files
+    .filter(file => /bot_tokens|token_ciphertext|tokenCiphertext/.test(codeOf(file.source)))
+    .map(file => file.relativePath);
+  assert.deepEqual(offenders, [], "the retired token store is never read back");
 });
 
 /* ------------------------------------------------------------------ *
