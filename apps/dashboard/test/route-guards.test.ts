@@ -77,3 +77,36 @@ test("every guild-scoped write requires the admin tier, not merely access", () =
     );
   }
 });
+
+/**
+ * A rejected Discord user token is an expired session, not a server fault.
+ *
+ * `fetchUserGuilds` throws when Discord refuses the stored token — it expired,
+ * or the operator revoked the app's access. A route that lets that escape
+ * answers 500 and, worse, leaves the session alive. The selector refetches this
+ * list on every load, so the operator would sit on "unexpected error" forever
+ * with no way back to the sign-in screen; `/api/guilds` did exactly that, while
+ * the per-guild guards handled the same failure correctly.
+ *
+ * So the read has exactly one call site, inside `loadUserGuilds`, which clears
+ * the dead session and answers 401. A second call site is a route that will
+ * answer 500 on a dead token.
+ */
+test("the caller's guild list is read only through loadUserGuilds", () => {
+  const callSites = lines
+    .map((line, index) => ({ number: index + 1, text: line }))
+    .filter(entry => /fetchUserGuilds\(/.test(entry.text));
+
+  assert.equal(
+    callSites.length,
+    1,
+    `expected exactly one fetchUserGuilds call site, found ${callSites.length} (lines ${callSites.map(s => s.number).join(", ")})`
+  );
+
+  const owner = lines.findIndex(line => /function loadUserGuilds\b/.test(line)) + 1;
+  assert.ok(owner > 0, "loadUserGuilds is defined");
+  assert.ok(
+    callSites[0]!.number > owner,
+    `the only fetchUserGuilds call (line ${callSites[0]!.number}) must live inside loadUserGuilds (line ${owner}), which maps a rejected token to 401 rather than a 500`
+  );
+});

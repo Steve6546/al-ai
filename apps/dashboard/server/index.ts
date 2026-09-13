@@ -91,6 +91,37 @@ async function requireSession(request: FastifyRequest, reply: FastifyReply) {
 }
 
 /**
+ * Reads the caller's Discord guild list, or answers the request itself when
+ * Discord rejects the stored user token.
+ *
+ * Discord can expire that token, or the operator can revoke the app's access,
+ * at any moment. That is an authentication failure, not a server fault: letting
+ * it escape as a 500 leaves the operator staring at "unexpected error" with no
+ * way forward, and because the selector refetches this list on every load the
+ * app would keep failing the same way until the cookie was cleared by hand.
+ * Clearing the dead session instead sends the UI back to the sign-in screen.
+ *
+ * Both the per-guild guards and the list route read through here so they cannot
+ * disagree about what a dead token means.
+ */
+async function loadUserGuilds(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  session: NonNullable<Awaited<ReturnType<typeof readSession>>>
+) {
+  try {
+    return await fetchUserGuilds(sessionAccessToken(session, env));
+  } catch {
+    await destroySession(db, request as unknown as { headers: Record<string, unknown> }).catch(() => undefined);
+    reply
+      .code(401)
+      .header("set-cookie", clearedCookieHeader())
+      .send({ error: "SESSION_EXPIRED", message: "انتهت صلاحية الدخول عبر Discord. سجّل الدخول من جديد." });
+    return null;
+  }
+}
+
+/**
  * Resolves the caller's membership of one guild, or answers the request itself.
  *
  * Shared by the read guard and the write guard so the two cannot disagree about
@@ -101,22 +132,8 @@ async function resolveGuildMembership(request: FastifyRequest, reply: FastifyRep
   const session = await requireSession(request, reply);
   if (!session) return null;
 
-  // Discord can reject the stored user token: it expires, or the operator
-  // revoked the app's access. That is an authentication failure, not a server
-  // fault, and letting it escape as a 500 leaves the operator staring at
-  // "unexpected error" with no way forward. Clear the dead session so the UI
-  // falls back to the sign-in screen.
-  let userGuilds;
-  try {
-    userGuilds = await fetchUserGuilds(sessionAccessToken(session, env));
-  } catch {
-    await destroySession(db, request as unknown as { headers: Record<string, unknown> }).catch(() => undefined);
-    reply
-      .code(401)
-      .header("set-cookie", clearedCookieHeader())
-      .send({ error: "SESSION_EXPIRED", message: "انتهت صلاحية الدخول عبر Discord. سجّل الدخول من جديد." });
-    return null;
-  }
+  const userGuilds = await loadUserGuilds(request, reply, session);
+  if (!userGuilds) return null;
 
   const membership = userGuilds.find(guild => guild.id === guildId);
   if (!membership) {
@@ -389,9 +406,12 @@ app.get("/api/guilds", async (request, reply) => {
   }
 
   const [userGuilds, botGuildIds] = await Promise.all([
-    fetchUserGuilds(sessionAccessToken(session, env)),
+    loadUserGuilds(request, reply, session),
     env.botToken ? fetchBotGuildIds(env.botToken) : Promise.resolve(new Set<string>())
   ]);
+
+  // A rejected user token has already been answered as an expired session.
+  if (!userGuilds) return;
 
   const administrable = userGuilds.filter(guild => isAdministrable(guild.permissions));
 

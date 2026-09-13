@@ -5,7 +5,7 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
 
 ## الأوامر والتحقق
 - `npm run verify` = lint + check:schema + test + build. استخدمه دائماً بدل تشغيل
-  الخطوات يدوياً. **341 اختباراً** (166 بوت + 78 لوحة + 97 core).
+  الخطوات يدوياً. **342 اختباراً** (166 بوت + 79 لوحة + 97 core).
 - **9 اختبارات لوحة «تتخطى بصمت» بلا قاعدة بيانات.** `test/storage.test.ts` يقرأ
   `DATABASE_URL` وإن لم يجد قاعدة حيّة يسجّل `{ skip: "no reachable database" }`،
   فيُخرج `verify` **330 نجاحاً + 9 تخطٍّ** بدل 339. هذا ليس فشلاً، لكنه يعني أن
@@ -72,6 +72,12 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
   سراً (في كل رابط دعوة)، فـ`requireSession` وحده يعني أن أي حساب مسجَّل يقرأ
   أي سيرفر بلصق معرّفه. `test/route-guards.test.ts` يفحص جدول المسارات نصياً
   لأن نمط الفشل **استدعاء غائب** لا نتيجة خاطئة.
+- **التوكن المرفوض من Discord = جلسة منتهية (401)، لا عطل خادم (500).**
+  `loadUserGuilds` هي المصدر الوحيد لقراءة قائمة سيرفرات المستخدم: تُتلف الجلسة
+  وتُفرِّغ الكوكي وترد `SESSION_EXPIRED`. كان `/api/guilds` ينادي
+  `fetchUserGuilds` مباشرة ⇒ 500 **مع إبقاء الجلسة حيّة**، والمشغّل يرى «خطأ غير
+  متوقع» عند كل تحميل بلا طريق للخروج. أي نداء مباشر جديد للدالة الخام يُسقط
+  اختبار `route-guards.test.ts`.
 
 ## اللوحة
 - `types.ts` يُعيد تصدير كل عقد مشترك من `@al-ai/core/browser`؛ لا تُكرّر شكلاً
