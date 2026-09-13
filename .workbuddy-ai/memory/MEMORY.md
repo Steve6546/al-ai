@@ -5,12 +5,11 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
 
 ## الأوامر والتحقق
 - `npm run verify` = lint + check:schema + test + build. استخدمه دائماً بدل تشغيل
-  الخطوات يدوياً. **363 اختباراً** (166 بوت + 100 لوحة + 97 core).
+  الخطوات يدوياً. **423 اختباراً** (168 بوت + 127 لوحة + 128 core).
 - **9 اختبارات لوحة «تتخطى بصمت» بلا قاعدة بيانات.** `test/storage.test.ts` يقرأ
-  `DATABASE_URL` وإن لم يجد قاعدة حيّة يسجّل `{ skip: "no reachable database" }`،
-  فيُخرج `verify` **330 نجاحاً + 9 تخطٍّ** بدل 339. هذا ليس فشلاً، لكنه يعني أن
-  «339/339 ناجحاً» **لا يتحقق إلا وPostgreSQL شغّالة على 55432**. شغّل القاعدة قبل
-  أي ادّعاء عن نسبة النجاح، واقرأ `# skipped` في المخرجات لا `# pass` وحدها.
+  `DATABASE_URL` وإن لم يجد قاعدة حيّة يسجّل `{ skip: "no reachable database" }`.
+  `verify` يرجع **exit 0** رغم ذلك، فلا أحد يلاحظ. اقرأ `# skipped` لا `# pass`،
+  وشغّل PostgreSQL على 55432 قبل أي ادّعاء عن نسبة النجاح.
 - `npm run check:schema` يحلّل `infra/schema.sql` بمحلّل PostgreSQL حقيقي
   (`pgsql-ast-parser`). أسرع من الترحيل الفعلي، ويبقى مفيداً كفحص نحوي.
 - `apps/dashboard` لا يحمّل `.env` بنفسه. شغّله بـ:
@@ -68,6 +67,63 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
   (`botGuildInFlight`) و«القديم أفضل من الخطأ» عند فشل التحديث. العميل
   (`src/api/client.ts`) يعيد المحاولة **مرة واحدة بالضبط** بعد
   `min(retry_after*1000, 5000)`.
+
+## منع 429 من الأصل — كاش + دمج + خنّاق
+`apps/dashboard/server/cache.ts` (لا تعالجه بإعادة محاولة في العميل وحدها؛ الانفجار
+نفسه هو المشكلة — ثلاث تابات معاً تطلق 3 نداءات متطابقة في اللحظة نفسها).
+- **`TtlCache.resolve(key, load)`**: إصابة طازجة من الذاكرة، **دمج الطلبات الجارية**
+  (نداء ثانٍ لنفس المفتاح ينتظر الوعد القائم — **هذا ما يقتل الانفجار لا الـTTL**)،
+  و«القديم أفضل من الخطأ» عند فشل التحديث، و`finally` تُحرّر خانة الـin-flight
+  (بدونها يُسمّم أول فشل كل النداءات اللاحقة للأبد).
+- `GUILD_READ_CACHE_MS = 45_000` للقنوات والرتب، `BOT_GUILD_CACHE_MS = 15_000`.
+  **`invalidateGuildReadCache(guildId)` بعد أي كتابة** وإلا بقي العرض قديماً 45 ثانية.
+- **`RequestThrottle` نافذة منزلقة لا ثابتة** — الثابتة تسمح بضعف الحصة عبر حدّها.
+  الطوابع تُقلَّم عند كل فحص فتبقى الذاكرة محدودة، و`housekeeping` ينادي `sweep()`.
+- الخطّاف يستثني الجلسات الموثَّقة و`/internal/`. **ليس ثغرة:** كوكي مزوّر يعطي
+  `401 UNAUTHENTICATED` لا مروراً مجانياً — افحص الرقم الثالث دائماً.
+
+## محرّك الأوامر — العقد الجديد
+- **`CommandCategory`** = `moderation | channels | general` (كان `CommandModule`).
+  **`/al-status` داخل السجل الآن** — كان **يتجاوز خط أنابيب التكوين كله**، ولهذا لم
+  يكن ممكناً عرض مفتاح تفعيل له بصدق (ثغرة حوكمة أُغلقت).
+- **كل قسم في بطاقة التخصيص مُبوَّب على راية قدرة حقيقية** (`supportsReason`,
+  `supportsDuration`, `maxDurationSeconds`, `supportsPurge`, `supportsNotify`).
+  `/ban` يعرض «السبب مطلوب» و**لا** يعرض المدة المقترنة — `supportsDuration`
+  لـ`/timeout` وحده. لا تعرض مفتاحاً لا يستطيع الأمر تنفيذه.
+- **المدد الـ11:** `permanent/5m/30m/1h/6h/12h/1d/3d/7d/14d/30d`.
+  **`permanent` قيمته `null` لا `0`** — الصفر يُقرأ «بلا مدة» فينهار إلى ثانية.
+  `TIMEOUT_MAX_SECONDS` (28 يوماً) تُقصّ **عند التحويل إلى ثوانٍ فقط**، فلا يُعاد
+  كتابة اختيار المشغّل.
+- `CommandConfig` الجديد: `allowedRoleIds` (كان `customRoleIds`)، `deniedRoleIds`،
+  `allowedChannelIds`، `deniedChannelIds`، `cooldownSeconds`،
+  `autoDeleteResponseSeconds`، `requireReason`، `defaultDuration`،
+  `presetReasons: {id,label,duration}[]`.
+- `assessCommandScope`: **المنع يتقدّم على السماح** في الرتب والقنوات معاً.
+- **⛔ لا تفرض في Discord ما يجب أن يقرّره المشغّل.** `required` في خيار Slash
+  **يُجمَّد وقت التسجيل** ⇒ أي «مطلوب» من جهة Discord يجعل الإعداد **باتجاه واحد**.
+  لذلك خيار السبب **غير مطلوب أبداً** و`/timeout`'s `minutes` كذلك. الفرض في البوت.
+
+## ⚠️ فخّ ترتيب الترحيل: `ADD COLUMN` قبل حارس `RENAME` يُبطله **بصمت**
+`ADD COLUMN IF NOT EXISTS allowed_role_ids` **قبل** كتلة إعادة التسمية المحروسة
+يعني أن العمود موجود حين يُقيَّم الشرط، **فيُتخطّى `RENAME COLUMN` ويبقى
+`custom_role_ids` يتيماً وقوائم السماح كلها مُتجاهَلة — بلا أي خطأ.** الترتيب
+**حمولة (load-bearing) لا تنظيم**. الإصلاح: التسمية أولاً، ثم `ADD COLUMN`، ثم كتلة
+إصلاح تنقل القيم وتحذف اليتيم. **الفحص الوحيد الذي يلتقط هذا هو قاعدة جديدة من
+الصفر** — إعادة التطبيق على قاعدة سليمة تنجح دائماً ولا تكشف شيئاً.
+
+## عرض الشاشات للمستخدم (بلا متصفح ولا OAuth)
+- **`renderToString` لا يكفي:** Radix **لا يُثبّت محتوى `Collapsible` المطويّ**،
+  فبطاقة داخل أكورديون **لا تظهر أبداً** في معاينة ثابتة، ولا ينفع سكربت نقر (لا
+  React runtime). لمعاينة تفاعلية: مُدخل مؤقت يستدعي `createRoot`، **يستورد
+  `./src/index.css`** (بدونه لا CSS إطلاقاً)، من `@al-ai/core/browser`،
+  و`vite build` بـ`input` = المُدخل و`outDir` خارج `dist/`.
+- **لا تفتح المعاينة بـ`file://`** (وحدة ES مع `crossorigin` تفشل) — اخدمها بـ
+  `python -m http.server`. واكتب المخرجات في `.workbuddy-ai/preview/` لأن
+  `npm run build` ينظّف `dist/`.
+- **افحصها بـjsdom قبل عرضها** (النقاط العملية في مهارة `al-ai-stack-verify`).
+- **فخّان في التأكيد:** قيمة عنصر نموذج **ليست `textContent`** (اقرأ `el.value`)،
+  وRadix يرسم قيمة `Select` في **portal** (أكّد على `aria-label`).
+  **وتأكّد أن الغياب مقصود:** اكتب التأكيد بالاتجاهين — غائب حيث يجب، وحاضر حيث يجب.
 
 ## قواعد معمارية يفرضها المشروع
 - `discord.js` يُستورد في ملف واحد فقط: `apps/bot/src/lib/discord.ts`.
@@ -144,3 +200,7 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
   التوكن الحقيقي.
 - **ملفات `.workbuddy-ai/memory/*.md` مُتتبَّعة ومرفوعة إلى المستودع العام**
   (`Steve6546/al-ai`). لا أسرار فيها، لكنها ملاحظات داخلية — أُبلغ المستخدم.
+  `.workbuddy-ai/backups/` و`.workbuddy-ai/preview/` **مُتجاهَلان** (الأول فيه
+  `pg_dump` بصفوف حيّة، والثاني حزم معاينة مولَّدة).
+- **التحقق من الدفع بـ`git ls-remote` لا بـ`git status`** — مراجع التتبّع لا تُحفظ
+  هنا فيظل `status` يقول «ahead» بعد دفع ناجح.
