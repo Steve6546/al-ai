@@ -5,6 +5,7 @@ import { renderToString } from "react-dom/server";
 import { ServerOff } from "lucide-react";
 import { AppShell } from "../src/components/app-shell";
 import { EmptyState } from "../src/components/empty-state";
+import { GuildSelector } from "../src/components/guild-selector";
 import { InviteBotPanel } from "../src/components/invite-bot";
 import { LoginScreen } from "../src/components/login-screen";
 import { SaveBar } from "../src/components/save-bar";
@@ -64,6 +65,21 @@ const screens: [string, () => ReactElement][] = [
   ["EmptyState", () => createElement(EmptyState, { icon: ServerOff, title: "لا يوجد سيرفر", description: "أضف البوت أولاً.", action: null })],
   ["SaveBar", () => createElement(SaveBar, { onSave: async () => {}, onCancel: () => {} })],
   ["InviteBotPanel", () => createElement(InviteBotPanel, { guild: absentGuild, refreshing: false, onRefresh: () => {} })],
+  [
+    "GuildSelector",
+    () =>
+      createElement(GuildSelector, {
+        user,
+        guilds: [guild, absentGuild],
+        health,
+        notice: null,
+        error: null,
+        refreshing: false,
+        onRefresh: () => {},
+        onSelect: () => {},
+        onLogout: () => {}
+      })
+  ],
   ["DashboardView", () => createElement(DashboardView, { guild })],
   ["DashboardView on a guild without the bot", () => createElement(DashboardView, { guild: absentGuild })],
   ["AuditView", () => createElement(AuditView, { guild })],
@@ -115,6 +131,36 @@ test("the shell renders the operator's real identity, not a placeholder", () => 
   const html = renderToString(screen("AppShell")());
   assert.match(html, /owner/, "the signed-in username is shown");
   assert.match(html, /سيرفر الاختبار/, "the selected guild name is shown");
+});
+
+/**
+ * The selector is the first screen after sign-in, so a crash inside it is a
+ * blank page in front of every operator. The helpers below it are covered by
+ * `guild-selector.test.tsx`; this pins the markup those helpers feed, including
+ * the two sections, the search field and both actions.
+ */
+test("the selector offers the welcome, the search and both guild sections", () => {
+  // React splits interpolated text with `<!-- -->` markers, so "مرحباً، {name}!"
+  // arrives as three nodes. Strip the markers to assert on the sentence a person
+  // actually reads.
+  const html = renderToString(screen("GuildSelector")()).replace(/<!-- -->/g, "");
+
+  assert.match(html, /مرحباً، owner! 👑/, "the welcome names the operator");
+  assert.match(html, /اختر سيرفراً لإدارة إعدادات البوت/, "the subtitle explains the screen");
+  assert.match(html, /ابحث عن سيرفر\.\.\. 🔭/, "the instant search is present");
+
+  assert.match(html, /السيرفرات النشطة/, "guilds with the bot are grouped");
+  assert.match(html, /سيرفرات أخرى مؤهلة/, "guilds without the bot are grouped");
+  assert.match(html, /نشط/, "a guild with the bot is badged active");
+  assert.match(html, /غير مضاف/, "a guild without the bot is badged absent");
+
+  assert.match(html, /إدارة/, "an active guild offers the dashboard");
+  assert.match(html, /إضافة البوت/, "an eligible guild offers the invite");
+
+  // A guild the bot has not joined must never advertise a member count it
+  // cannot know; "غير محدد" is the honest reading.
+  assert.match(html, /42 عضو/, "a known member count is rendered");
+  assert.match(html, /غير محدد/, "an unknown member count is not rendered as zero");
 });
 
 test("a guild without the bot explains what to do instead of showing settings", () => {

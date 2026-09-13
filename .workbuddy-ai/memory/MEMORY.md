@@ -5,7 +5,12 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
 
 ## الأوامر والتحقق
 - `npm run verify` = lint + check:schema + test + build. استخدمه دائماً بدل تشغيل
-  الخطوات يدوياً. **296 اختباراً** (162 بوت + 38 لوحة + 96 core).
+  الخطوات يدوياً. **341 اختباراً** (166 بوت + 78 لوحة + 97 core).
+- **9 اختبارات لوحة «تتخطى بصمت» بلا قاعدة بيانات.** `test/storage.test.ts` يقرأ
+  `DATABASE_URL` وإن لم يجد قاعدة حيّة يسجّل `{ skip: "no reachable database" }`،
+  فيُخرج `verify` **330 نجاحاً + 9 تخطٍّ** بدل 339. هذا ليس فشلاً، لكنه يعني أن
+  «339/339 ناجحاً» **لا يتحقق إلا وPostgreSQL شغّالة على 55432**. شغّل القاعدة قبل
+  أي ادّعاء عن نسبة النجاح، واقرأ `# skipped` في المخرجات لا `# pass` وحدها.
 - `npm run check:schema` يحلّل `infra/schema.sql` بمحلّل PostgreSQL حقيقي
   (`pgsql-ast-parser`). أسرع من الترحيل الفعلي، ويبقى مفيداً كفحص نحوي.
 - `apps/dashboard` لا يحمّل `.env` بنفسه. شغّله بـ:
@@ -57,8 +62,16 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
   من اللوحة — كان يصفّر العدد عند كل فتح.
 - **لا تعرض رقماً لا تعرفه:** `pingMs`/`online` تُشتق من نبضة حديثة، لا من وجود
   توكن. `members.online` من ودجت السيرفر فقط (قاعدة 8 تمنع `GUILD_PRESENCES`).
-- **محرّك مضاد التخريب مُسلَّح لكنه متوقف افتراضياً** — الاحتواء يسحب رتب مشرف،
-  وهذا قرار المالك.
+- **محرّك مضاد التخريب مُسلَّح افتراضياً** (`enabled: true` في core وفي السكيما).
+  تغيير الـdefault **لا يعيد كتابة الصفوف**، فمن أطفأه عمداً يبقى مطفيّاً.
+  `normaliseEnabled` تُبقي `false` صريحاً في كل الأشكال.
+- **`CREATE TABLE IF NOT EXISTS` لا يُحدِّث default قائماً** — أي قلب لافتراضي
+  يحتاج `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT` صريحاً في `infra/schema.sql`.
+- **كل مسار مرتبط بسيرفر يجب أن يتحقق من الوصول للسيرفر نفسه، لا من الجلسة فقط.**
+  `requireGuildAccess` للقراءة، `requireTierForGuild` للكتابة. معرّف السيرفر ليس
+  سراً (في كل رابط دعوة)، فـ`requireSession` وحده يعني أن أي حساب مسجَّل يقرأ
+  أي سيرفر بلصق معرّفه. `test/route-guards.test.ts` يفحص جدول المسارات نصياً
+  لأن نمط الفشل **استدعاء غائب** لا نتيجة خاطئة.
 
 ## اللوحة
 - `types.ts` يُعيد تصدير كل عقد مشترك من `@al-ai/core/browser`؛ لا تُكرّر شكلاً
@@ -85,3 +98,9 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
 - `scripts/dev-issue-session.mts` يصدر جلسة حقيقية لفحص المسارات المحمية.
   **يجب أن يكون `.mts`** (الجذر بلا `"type": "module"` فـ`.ts` يُترجم CJS).
   مسارات **الكتابة** لا تُفحص به لأنها تحتاج توكن OAuth حقيقي.
+  **التوكن المزروع وهمي (`probe-token`)** ⇒ كل مسار يقرأ من Discord يُرجع
+  `401 SESSION_EXPIRED` ويحذف الجلسة. مفيد لإثبات أن الحارس يعمل (كان `200`
+  قبل إصلاح §2)، لكن **لا يمكن الوصول إلى `403 NOT_A_MEMBER` به** — لذلك يحتاج
+  التوكن الحقيقي.
+- **ملفات `.workbuddy-ai/memory/*.md` مُتتبَّعة ومرفوعة إلى المستودع العام**
+  (`Steve6546/al-ai`). لا أسرار فيها، لكنها ملاحظات داخلية — أُبلغ المستخدم.
