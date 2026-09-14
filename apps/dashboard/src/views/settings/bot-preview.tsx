@@ -1,5 +1,5 @@
 import { Globe, Server } from "lucide-react";
-import { botStatusDurations } from "@al-ai/core/browser";
+import { activityTypeLabels, botStatusDurations, botStatusLabels } from "@al-ai/core/browser";
 import { STATUS_COLORS, StatusDot } from "@/components/status-picker";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -24,10 +24,18 @@ export type PreviewIdentity = {
   username: string;
   avatarDataUrl: string | null;
   bannerDataUrl: string | null;
-  bio: string;
-  status: BotStatus;
-  activityType: ActivityType;
-  activityText: string;
+  /**
+   * The text fields are nullable because a stored row is the input here, and a
+   * stored row is not a validated type: `bio` and `activity_text` are columns
+   * that can hold NULL, and `status` is a column that can hold a value a later
+   * version of Discord no longer recognises. Typing them as plain `string`
+   * pushed the check onto the reader, where the cost of forgetting it is a
+   * black screen rather than a blank line. They are normalised once below.
+   */
+  bio: string | null;
+  status: BotStatus | null;
+  activityType: ActivityType | null;
+  activityText: string | null;
   /**
    * The chosen window, so the preview can show that a status is temporary.
    *
@@ -47,29 +55,14 @@ export type PreviewGuild = {
 };
 
 /**
- * Discord spells the activity as a verb, not an enum name.
+ * How a status and an activity are spelled.
  *
- * Kept as a lookup rather than a switch so the preview and any other reader
- * cannot disagree about an activity type added later.
+ * Both come from `@al-ai/core/browser`, which is where the status picker beside
+ * this preview already reads them. They used to be re-declared here, and the
+ * two copies had already drifted: the preview said «لا تزعجني» and «غير مرئي»
+ * while the menu two inches away said «لا تُزعجني» and «غير ظاهر». One status,
+ * two words, on one screen — which is exactly what a second copy buys you.
  */
-const ACTIVITY_LABELS: Record<ActivityType, string> = {
-  playing: "يلعب",
-  listening: "يستمع إلى",
-  watching: "يشاهد",
-  competing: "يتنافس في"
-};
-
-const STATUS_LABELS: Record<BotStatus, string> = {
-  online: "متصل",
-  idle: "خامل",
-  dnd: "لا تزعجني",
-  invisible: "غير مرئي"
-};
-
-/** The dot Discord paints on the avatar — same colours, same meaning. */
-// The colours live in `status-picker.tsx` beside the glyphs that draw them.
-// A second copy here would be a second place to mistype `#23a55a`, and the
-// preview and the menu could then disagree about what "online" looks like.
 
 /**
  * How the chosen window reads beside the status.
@@ -83,21 +76,41 @@ function durationLabel(duration: BotStatusDuration | null | undefined): string |
   return botStatusDurations.find(entry => entry.id === duration)?.label ?? null;
 }
 
+/**
+ * A status Discord still recognises, or `online`.
+ *
+ * A stored row can carry a value a later version of Discord dropped, and this
+ * value is used as a lookup key for both the colour and the label. Resolving it
+ * once keeps those two from disagreeing — and stops an unknown string from
+ * indexing a record that has no entry for it.
+ */
+function knownStatus(value: BotStatus | null | undefined): BotStatus {
+  return value && value in botStatusLabels ? value : "online";
+}
+
 export function statusLabel(status: BotStatus): string {
-  return STATUS_LABELS[status] ?? STATUS_LABELS.online;
+  return botStatusLabels[status] ?? botStatusLabels.online;
 }
 
 export function activityLabel(type: ActivityType): string {
-  return ACTIVITY_LABELS[type] ?? ACTIVITY_LABELS.playing;
+  return activityTypeLabels[type] ?? activityTypeLabels.playing;
 }
 
 export function BotLivePreview({ identity, guild }: { identity: PreviewIdentity; guild: PreviewGuild }) {
+  // Normalised once, at the point a stored row meets the DOM. `status` is read
+  // as a lookup key and `bio`/`activityText` are trimmed, so a missing value
+  // would be a TypeError rather than a blank line — and a presentational
+  // component that throws takes the whole screen with it.
+  const status = knownStatus(identity.status);
+  const activityType = identity.activityType ?? "playing";
+  const bio = (identity.bio ?? "").trim();
+  const activityText = (identity.activityText ?? "").trim();
+
   // A nickname of only spaces is not a nickname: Discord stores it but draws
   // nothing, so the row would read as an unnamed bot.
   const nickname = guild.nickname.trim();
   const displayName = nickname || identity.username;
   const roleColor = guild.roleColor && /^#[0-9a-f]{6}$/i.test(guild.roleColor) ? guild.roleColor : null;
-  const activityText = identity.activityText.trim();
 
   return (
     <div className="space-y-4">
@@ -127,15 +140,15 @@ export function BotLivePreview({ identity, guild }: { identity: PreviewIdentity;
               </Avatar>
               <span
                 className="absolute end-1 bottom-1 size-5 rounded-full border-[3px] border-card"
-                style={{ backgroundColor: STATUS_COLORS[identity.status] ?? STATUS_COLORS.online }}
-                title={statusLabel(identity.status)}
+                style={{ backgroundColor: STATUS_COLORS[status] }}
+                title={statusLabel(status)}
               />
             </div>
             <Badge variant="secondary" className="mb-1 gap-1">
               {/* The same glyph the picker draws, so the preview cannot show a
                   green disc for a status the menu renders as a crescent. */}
-              <StatusDot status={identity.status} size={9} maskColor="currentColor" />
-              {statusLabel(identity.status)}
+              <StatusDot status={status} size={9} maskColor="currentColor" />
+              {statusLabel(status)}
               {durationLabel(identity.statusDuration) ? (
                 <span className="text-muted-foreground">· {durationLabel(identity.statusDuration)}</span>
               ) : null}
@@ -148,17 +161,17 @@ export function BotLivePreview({ identity, guild }: { identity: PreviewIdentity;
             </p>
             {activityText ? (
               <p className="text-sm text-muted-foreground">
-                {activityLabel(identity.activityType)} <span className="text-foreground">{activityText}</span>
+                {activityLabel(activityType)} <span className="text-foreground">{activityText}</span>
               </p>
             ) : (
               <p className="text-sm text-muted-foreground">لا يوجد نشاط ظاهر</p>
             )}
           </div>
 
-          {identity.bio.trim() ? (
+          {bio ? (
             <>
               <Separator className="my-3" />
-              <p className="text-sm whitespace-pre-wrap text-muted-foreground">{identity.bio}</p>
+              <p className="text-sm whitespace-pre-wrap text-muted-foreground">{bio}</p>
             </>
           ) : null}
         </div>
@@ -179,7 +192,7 @@ export function BotLivePreview({ identity, guild }: { identity: PreviewIdentity;
             </Avatar>
             <span
               className="absolute -end-0.5 -bottom-0.5 size-3 rounded-full border-2 border-card"
-              style={{ backgroundColor: STATUS_COLORS[identity.status] ?? STATUS_COLORS.online }}
+              style={{ backgroundColor: STATUS_COLORS[status] }}
             />
           </div>
           <span className="truncate text-sm font-medium" style={{ color: roleColor ?? undefined }}>

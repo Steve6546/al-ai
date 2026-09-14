@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { api, ApiError } from "@/api";
-import { AppShell, isViewKey, type ViewKey } from "@/components/app-shell";
+import { AppShell, isViewKey, viewTitle, type ViewKey } from "@/components/app-shell";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { GuildSelector } from "@/components/guild-selector";
 import { InviteBotPanel } from "@/components/invite-bot";
 import { LoginScreen } from "@/components/login-screen";
@@ -218,7 +219,10 @@ export function App() {
       {!guild.botPresent ? (
         <InviteBotPanel guild={guild} refreshing={refreshing} onRefresh={() => void refresh()} />
       ) : (
-        <>
+        /* A render error inside one screen used to unmount the entire app and
+           leave a black page. The boundary keeps it to the screen that failed,
+           and `resetKey` releases the latch when the operator navigates. */
+        <ErrorBoundary resetKey={`${guild.id}:${view}`} scope={viewTitle(view)}>
           {view === "dashboard" && <DashboardView guild={guild} />}
           {view === "commands" && <CommandsView guild={guild} />}
           {view === "roles" && <RolesView guild={guild} />}
@@ -226,7 +230,7 @@ export function App() {
           {view === "logs" && <LogsView guild={guild} />}
           {view === "audit" && <AuditView guild={guild} />}
           {view === "security" && <SecurityView guild={guild} />}
-        </>
+        </ErrorBoundary>
       )}
     </AppShell>
   );

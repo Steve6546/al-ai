@@ -98,6 +98,7 @@ import {
   applyAppearance,
   changedAppearanceFields,
   describeAppearanceFailure,
+  invalidateAppearanceSnapshot,
   readAppearanceSnapshot,
   type AppearanceField,
   type AppearanceSnapshot,
@@ -1182,6 +1183,11 @@ app.put("/api/bot/identity", async (request, reply) => {
   // accept a second later. The response says plainly what did not land, so
   // "stored" and "applied" never get conflated.
   await db.saveBotIdentity(next);
+
+  // The snapshot cache would otherwise keep showing the previous avatar and
+  // bio for up to a minute after a save that already succeeded — the "saved
+  // but nothing changed" reading this project treats as a defect.
+  invalidateAppearanceSnapshot();
 
   const response = appearanceResponse(reply, outcomes, attempted, "Global bot identity saved");
   if (!response) return;

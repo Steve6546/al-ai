@@ -160,6 +160,34 @@ export function CustomizationView({ guild }: { guild: Guild }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guild.id]);
 
+  /* ---------------------------------------------------------------- *
+   * The preview source
+   *
+   * Every hook in this component must run on *every* render, including the
+   * loading one, and this one sits above the two early returns below for
+   * exactly that reason. Placed after them — where it reads more naturally —
+   * the loading pass calls 15 hooks and the loaded pass calls 16, and React
+   * answers with "Rendered more hooks than during the previous render". That
+   * error unmounts the tree: the operator clicks "هوية البوت", the spinner
+   * shows, and the screen goes black the instant the data lands.
+   * ---------------------------------------------------------------- */
+  /** Whatever the preview should draw: the draft when there is one, else stored. */
+  const previewIdentity = useMemo(() => {
+    const source = identityDraft ?? savedIdentity ?? DEFAULT_BOT_IDENTITY;
+    return {
+      username: snapshot?.username ?? "AL AI",
+      // The draft's data URL wins while cropping; otherwise fall back to the CDN
+      // address Discord serves, so the preview shows what actually exists today.
+      avatarDataUrl: source.avatarDataUrl ?? snapshot?.avatarUrl ?? null,
+      bannerDataUrl: source.bannerDataUrl ?? snapshot?.bannerUrl ?? null,
+      bio: source.bio,
+      status: source.status,
+      activityType: source.activityType,
+      activityText: source.activityText,
+      statusDuration: source.statusDuration
+    };
+  }, [identityDraft, savedIdentity, snapshot]);
+
   if (error) {
     return (
       <Alert variant="destructive">
@@ -198,23 +226,6 @@ export function CustomizationView({ guild }: { guild: Guild }) {
   const patchGuild = (next: Partial<CustomizationSettings>) => setGuildDraft({ ...guildDraft, ...next });
   const patchIdentity = (next: Partial<BotIdentitySettings>) =>
     setIdentityDraft(current => (current ? { ...current, ...next } : current));
-
-  /** Whatever the preview should draw: the draft when there is one, else stored. */
-  const previewIdentity = useMemo(() => {
-    const source = identityDraft ?? savedIdentity ?? DEFAULT_BOT_IDENTITY;
-    return {
-      username: snapshot?.username ?? "AL AI",
-      // The draft's data URL wins while cropping; otherwise fall back to the CDN
-      // address Discord serves, so the preview shows what actually exists today.
-      avatarDataUrl: source.avatarDataUrl ?? snapshot?.avatarUrl ?? null,
-      bannerDataUrl: source.bannerDataUrl ?? snapshot?.bannerUrl ?? null,
-      bio: source.bio,
-      status: source.status,
-      activityType: source.activityType,
-      activityText: source.activityText,
-      statusDuration: source.statusDuration
-    };
-  }, [identityDraft, savedIdentity, snapshot]);
 
   /* ---------------------------------------------------------------- *
    * Image picking

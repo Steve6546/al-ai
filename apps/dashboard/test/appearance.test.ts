@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_BOT_IDENTITY, DEFAULT_CUSTOMIZATION } from "@al-ai/core";
-import { changedAppearanceFields, describeAppearanceFailure, type AppearancePlan } from "../server/appearance.js";
+import {
+  changedAppearanceFields,
+  describeAppearanceFailure,
+  invalidateAppearanceSnapshot,
+  readAppearanceSnapshot,
+  type AppearancePlan
+} from "../server/appearance.js";
 import { DiscordApiError } from "../server/discord.js";
 
 /**
@@ -167,4 +173,100 @@ test("every failure message names its own field", () => {
       `${field}'s message must name it — got: ${failure.message}`
     );
   }
+});
+
+/* ------------------------------------------------------------------ *
+ * The profile read's cache
+ *
+ * `GET /api/bot/identity` reads the bot's own profile from Discord on every
+ * call, and that endpoint is rate-limited per application rather than per
+ * route — so the burst these tests pin is the one that produces the "Discord
+ * يحدّ عدد الطلبات" bar. The cache is the fix, and it is invisible in the
+ * response: without a test, a later refactor could delete it and the only
+ * symptom would be a 429 an operator sees.
+ * ------------------------------------------------------------------ */
+
+
+/** Counts Discord calls and answers the two endpoints the profile read needs. */
+function stubDiscord() {
+  const calls: string[] = [];
+  (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
+    const url = typeof input === "string" ? input : String((input as { url?: string }).url ?? input);
+    const path = url.replace("https://discord.com/api/v10", "");
+    calls.push(path);
+    const body = path === "/applications/@me" ? { description: "نبذة" } : { username: "AL AI", avatar: "abc", banner: null };
+    return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  return calls;
+}
+
+test.beforeEach(() => {
+  // Module-level state: without this the first test would answer every later
+  // one from its own cache and the counts below would all read zero.
+  invalidateAppearanceSnapshot();
+});
+
+test("the profile read costs two Discord calls", async () => {
+  const calls = stubDiscord();
+  const snapshot = await readAppearanceSnapshot("token");
+
+  assert.equal(snapshot?.username, "AL AI");
+  assert.equal(snapshot?.bio, "نبذة");
+  assert.deepEqual(calls.sort(), ["/applications/@me", "/users/@me"]);
+});
+
+test("a second read inside the TTL costs nothing", async () => {
+  const calls = stubDiscord();
+  await readAppearanceSnapshot("token");
+  const before = calls.length;
+
+  await readAppearanceSnapshot("token");
+
+  assert.equal(calls.length, before, "the cached profile was served from memory");
+});
+
+test("concurrent reads share one request rather than racing", async () => {
+  // This is the property that actually kills the burst — a TTL alone does not.
+  // Two screens opening in the same tick both find an empty cache, so without
+  // coalescing they both reach Discord.
+  const calls = stubDiscord();
+  await Promise.all([readAppearanceSnapshot("token"), readAppearanceSnapshot("token")]);
+
+  assert.equal(calls.length, 2, "one /users/@me and one /applications/@me, not two of each");
+});
+
+test("a save drops the memoised profile", async () => {
+  // Without the invalidation the preview would keep showing the old avatar for
+  // a minute after a save that succeeded.
+  const calls = stubDiscord();
+  await readAppearanceSnapshot("token");
+  invalidateAppearanceSnapshot();
+  await readAppearanceSnapshot("token");
+
+  assert.equal(calls.length, 4, "the read ran again after the write");
+});
+
+test("a failed read with an emptied cache answers null rather than guessing", async () => {
+  const calls = stubDiscord();
+  await readAppearanceSnapshot("token");
+
+  (globalThis as unknown as { fetch: unknown }).fetch = async () => {
+    calls.push("failed");
+    throw new TypeError("fetch failed");
+  };
+  // Invalidating drops the entry, so there is genuinely nothing to fall back
+  // on. The honest answer is null — a preview that invents a profile is worse
+  // than one that says it could not read it. (The "serve the stale value"
+  // branch of `TtlCache.resolve` needs an *expired* entry to reach, which this
+  // file cannot produce without waiting out the minute-long TTL.)
+  invalidateAppearanceSnapshot();
+
+  assert.equal(await readAppearanceSnapshot("token"), null, "no cached value means no answer, not a guess");
+});
+
+test("a read that fails with nothing cached answers null rather than throwing", async () => {
+  (globalThis as unknown as { fetch: unknown }).fetch = async () => {
+    throw new TypeError("fetch failed");
+  };
+  assert.equal(await readAppearanceSnapshot("token"), null);
 });

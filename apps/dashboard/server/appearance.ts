@@ -28,6 +28,7 @@ import {
   type CustomizationSettings
 } from "@al-ai/core";
 import { DiscordApiError, fetchGuildRoles, requestJson } from "./discord.js";
+import { TtlCache } from "./cache.js";
 
 /** Discord's ceiling for a role icon. Anything larger is refused by the API. */
 const MAX_ROLE_ICON_BYTES = 256 * 1024;
@@ -373,23 +374,71 @@ export type AppearanceSnapshot = {
  * avatar rule (`a_` hashes need `.gif`) would get forgotten in one of the two
  * places. The route resolves them on the way out.
  */
+export async function fetchAppearanceSnapshot(token: string): Promise<AppearanceSnapshot> {
+  const user = await requestJson<{ username: string; avatar: string | null; banner: string | null }>("/users/@me", {
+    token,
+    method: "GET"
+  });
+  // Advisory: the description is one field of the snapshot, and losing it must
+  // not cost the caller the avatar and banner that did arrive.
+  const application = await requestJson<{ description: string | null }>("/applications/@me", {
+    token,
+    method: "GET"
+  }).catch(() => ({ description: null }));
+  return {
+    username: user.username,
+    avatar: user.avatar,
+    banner: user.banner,
+    bio: application.description ?? ""
+  };
+}
+
+/**
+ * How long the bot's own profile is trusted.
+ *
+ * This read used to run on *every* `GET /api/bot/identity` with no cache at
+ * all — two Discord calls, on an endpoint Discord rate-limits per application
+ * rather than per route. Opening the identity screen fires that route beside
+ * the per-guild one, and a second look (another tab, a refresh, a remount) paid
+ * the same two calls again. That is the burst the 429 bar is made of.
+ *
+ * The values only change when the operator saves, and the save invalidates this
+ * entry explicitly — so a minute is free correctness-wise, and the interval is
+ * measured against the rate-limit window rather than against how fast the
+ * profile can change.
+ */
+const APPEARANCE_CACHE_MS = 60_000;
+
+/**
+ * Keyed by bot token, because the token is what the request is authenticated
+ * with. There is one bot today, but keying on the credential rather than on a
+ * constant means a rotated token cannot be served the previous token's answer.
+ */
+const appearanceSnapshotCache = new TtlCache<string, AppearanceSnapshot>(APPEARANCE_CACHE_MS);
+
+/**
+ * The bot's profile, cached and coalesced.
+ *
+ * Returns null only when the read failed *and* nothing is cached. A failure
+ * deliberately does not overwrite the cache: `TtlCache.resolve` serves the last
+ * known snapshot and rethrows only when there is nothing to serve, so a
+ * momentary Discord hiccup cannot blank the preview for a minute.
+ */
 export async function readAppearanceSnapshot(token: string): Promise<AppearanceSnapshot | null> {
   try {
-    const user = await requestJson<{ username: string; avatar: string | null; banner: string | null }>("/users/@me", {
-      token,
-      method: "GET"
-    });
-    const application = await requestJson<{ description: string | null }>("/applications/@me", {
-      token,
-      method: "GET"
-    }).catch(() => ({ description: null }));
-    return {
-      username: user.username,
-      avatar: user.avatar,
-      banner: user.banner,
-      bio: application.description ?? ""
-    };
+    return await appearanceSnapshotCache.resolve(token, () => fetchAppearanceSnapshot(token));
   } catch {
     return null;
   }
+}
+
+/**
+ * Drop the memoised profile after a write.
+ *
+ * Without this the screen would keep showing the old avatar for up to a minute
+ * after a successful save — the "saved but not applied" confusion this project
+ * treats as a defect, arriving from the cache instead of from Discord.
+ */
+export function invalidateAppearanceSnapshot() {
+  appearanceSnapshotCache.clear();
 }

@@ -281,12 +281,13 @@ const BOT_GUILD_CACHE_MS = 15_000;
 /**
  * How long a guild's roles and channels are trusted.
  *
- * Roles and channels change on the scale of minutes, so 45 seconds removes
- * nearly every repeat call without the operator ever seeing a stale screen: the
- * one action that changes either list is performed in Discord, not here, and the
- * screen that shows it is reloaded by hand.
+ * Roles and channels change on the scale of minutes, so a minute removes nearly
+ * every repeat call without the operator ever seeing a stale screen: the one
+ * action that changes either list is performed in Discord, not here, and the
+ * screen that shows it is reloaded by hand. `invalidateGuildReadCache` runs
+ * after every dashboard write, so the dashboard's own edits are never stale.
  */
-const GUILD_READ_CACHE_MS = 45_000;
+const GUILD_READ_CACHE_MS = 60_000;
 
 const botGuildCache = new TtlCache<string, Set<string>>(BOT_GUILD_CACHE_MS);
 const guildChannelCache = new TtlCache<string, ChannelOption[]>(GUILD_READ_CACHE_MS);

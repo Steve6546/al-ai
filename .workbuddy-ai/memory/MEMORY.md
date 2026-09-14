@@ -1,296 +1,237 @@
-# AL AI — مشروع Discord bot + لوحة تحكم
+# AL AI — Discord bot + لوحة تحكم
 
 Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RTL)
-+ `packages/core` (المصدر الوحيد لكل عقد مشترك).
++ `packages/core` (المصدر الوحيد لكل عقد مشترك). **491 اختباراً** (165/189/137).
 
-## الأوامر والتحقق
-- `npm run verify` = lint + check:schema + test + build. استخدمه دائماً.
-  حالياً **457 اختباراً** (158 بوت + 171 لوحة + 128 core).
-- **اقرأ `# skipped` لا `# pass`.** `dashboard/test/storage.test.ts` يسجّل
-  `{ skip: "no reachable database" }` بلا قاعدة حيّة، و`verify` يرجع **exit 0**
-  رغم ذلك. شغّل PostgreSQL على 55432 قبل أي ادّعاء عن النجاح.
-- **تشغيل اللوحة** (`apps/dashboard` لا يحمّل `.env` بنفسه):
-  `cd apps/dashboard && ../../node_modules/.bin/tsx --env-file=../../.env server/index.ts`
-  (البوت يحمّله عبر `import "dotenv/config"`). مسار `tsx` المحلي مباشرة —
-  `npx tsx` يضيف عملية وسيطة تكلّف ~70MB لكل خدمة.
-- **`node server/index.ts` مباشرة لا يعمل** (Node 22.22 `typescript === "strip"`):
-  الكود يستورد `./env.js` والملف `env.ts` — هذه ميزة tsx/esbuild لا type-stripping.
-- **`tsx` لا يعيد التحميل الحارّ.** حرّر كود الخادم ⇒ أعد تشغيل العملية وإلا
-  خدّمت المسارات القديمة (الجديدة ترجع 404) وأنت تظن أن الإصلاح لم ينجح.
-- `check:schema` فحص نحوي سريع بـ`pgsql-ast-parser`، وليس بديلاً عن الترحيل الفعلي.
-  **لفحص تخزين حقيقي:** ملف `.mts` مؤقت في `apps/dashboard/test/` يستدعي
-  `createDatabase(createPool(process.env.DATABASE_URL!))`. لاحظ أن
-  `db.getBotIdentity` **methods على الكائن لا exports على المديول**.
+## التشغيل والتحقق
+- `npm run verify` = lint + check:schema + test + build. **اقرأ `# skipped` لا `# pass`**:
+  `storage.test.ts` يتخطّى بصمت بلا قاعدة حيّة و`verify` يرجع **exit 0**.
+- اللوحة: `cd apps/dashboard && ../../node_modules/.bin/tsx --env-file=../../.env server/index.ts`
+  (مسار `tsx` المحلي — `npx` يضيف ~70MB). **`node server/index.ts` لا يعمل**:
+  يستورد `./env.js` والملف `env.ts`، وtype-stripping لا يعيد كتابة الامتداد.
+  وكذلك أي `node` على ملف يستورد `server/*.ts` ⇒ `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`.
+- **`tsx` لا يعيد التحميل الحارّ** — أعد تشغيل العملية بعد كل تعديل خلفي وإلا خدمت
+  مسارات قديمة (الجديدة 404) وأنت تظن الإصلاح فشل.
+- فحص تخزين حقيقي: `.mts` مؤقت في `apps/dashboard/test/` يستدعي
+  `createDatabase(createPool(process.env.DATABASE_URL!))`. `db.getBotIdentity`
+  **methods على الكائن لا exports على المديول**.
+- **عرض الملفات:** `present_files` بمسار مطلق عند كل تسليم، وإلا لا يرى المستخدم شيئاً.
+  **إثبات وصول الواجهة:** طابق اسم الحزمة المخدومة مع `dist/assets/` ثم `grep`
+  العلامات الجديدة **على الحزمة المخدومة نفسها**.
 
-## ⚠️ عرض الملفات على المستخدم
-- **تجاوز الخطّافات والنصوص المُبرمَجة لا يعرض الملف.** لعرض ملف: استدعِ
-  `present_files` بمسار **مطلق** عند **كل** تسليم. بدونها لا يرى المستخدم شيئاً.
-  استدعاء واحد بأولوية عرض، بعد انتهاء العمل — لا لملف قرأته ولا لنتيجة جزئية.
-- **إثبات أن الواجهة وصلت المستخدم:** `grep` المخرجات الجديدة على
-  `dist/assets/index-*.js` **وعلى الحزمة المخدومة** `GET /assets/…` من الخادم الحيّ.
-  المصدر النظيف لا يعني أن الحزمة المخدومة حديثة.
+## 🔴 مخاطر Git — اقرأ أولاً
+`.git` مشترك مع مشروع آخر: `origin` → `Steve6546/al-ai`، و`glyph-agent` →
+`Steve6546/glyph-weaver-forge`.
+- **⛔ لا `git rm`** (جرّ 46 ملفاً وأتلف 4 غير متعقَّبة نهائياً). احذف بـ`rm`،
+  **`git add -A` قبل أي حذف**، وافحص `git status` قبل أن تكمل.
+- **⛔ لا `git stash`** (أفقد 88 blob و`HEAD`). **لإثبات انحدار:** انسخ الملف إلى
+  `.workbuddy-ai/` ثم `cp` عكسي.
+- **مراجع التتبّع لا تُحفظ:** `git status` يقول «ahead N» بعد دفع ناجح ⇒ **تحقّق
+  بـ`git ls-remote origin refs/heads/main` فقط.** والحلّ: اكتب
+  `.git/refs/remotes/origin/main` يدوياً **آخر شيء** (أي `git update-ref` بعده يحذفه).
+- **`git push` قد يتعلّق على مطالبة الاعتماد** ويُقتل بـSIGTERM بلا مخرجات ⇒
+  `gh auth setup-git` مرة. **مخزن معطوب:** مهارة `al-ai-git-recovery`.
 
-## 🔴 مخاطر المستودع — اقرأ هذا أولاً
-`.git` في هذا المشروع **مشترك مع مشروع آخر تماماً**، وفيه فخّان أتلفا عملاً فعلاً:
-- **ريموتان في `.git/config`:** `origin` → `Steve6546/al-ai` (مشروعنا) و
-  **`glyph-agent` → `Steve6546/glyph-weaver-forge`** (مشروع آخر، `main = 4fdbe11`).
-  هذا الخلط جعل مخزن الكائنات يبدو «تالفاً» من منظور AL AI.
-- **⛔ لا `git rm`.** `git rm -f` على **ملف واحد** جرّ 46 ملفاً متعقَّباً وأتلف
-  **4 ملفات غير متعقَّبة نهائياً** (لا `stash` ولا `fsck --lost-found` يعيدها —
-  الملفات غير المتعقَّبة لا نسخة لها في أي مكان).
-  1. احذف بـ`rm` عادي، وافحص `git status` **قبل** أن تكمل.
-  2. **`git add -A` قبل أي حذف** — لو كان الملف مُفهرَساً لاستُعيد.
-  3. `git checkout -- <dir>` يستعيد المتعقَّب **لحالة HEAD لا لحالتك المحسّنة**.
-- **⛔ لا `git stash`.** `git stash push -- <ملف>` **أتلف مخزن الكائنات**:
-  `HEAD` صار غير قابل للحلّ، و`refs/heads/` اختفى، و**88 blob مفقوداً**، مع بقاء
-  `pack-*.idx` **بلا `.pack`** بجانبه. (لم يُفقد أي ملف مصدر — شجرة العمل والريموت
-  سلِيمان.)
-  **لإثبات أن اختباراً يكشف انحداراً:** انسخ الملف إلى `.workbuddy-ai/` بدل تخزينه.
-- **إصلاح مخزن كائنات معطوب** (نجح فعلاً؛ `git fetch` العادي **يفشل** بـ
-  `error: Could not read <sha>` لأن التفاوض يمشي على الرسم البياني المحلي المعطوب):
-  1. احذف `*.idx` اليتيم و`multi-pack-index` من `.git/objects/pack/`.
-  2. `git init --bare` **في مستودع منفصل نظيف**، ثم
-     `git fetch https://github.com/Steve6546/al-ai.git +refs/heads/main:refs/heads/main`
-     ⇒ التاريخ الكامل يقرأ حتى الجذر.
-  3. انسخ `pack-*.pack` و`pack-*.idx` إلى `.git/objects/pack/` في المشروع.
-  4. تحقّق: `git fsck` **صامت**، و`git ls-files -s | while read ...` بلا أي missing.
-- **مراجع التتبّع لا تُحفظ هنا.** `git fetch` و`git update-ref` يطبعان نجاحاً
-  ويخرجان 0، لكن `packed-refs` يبقى على قيمة قديمة. الأثر: `git status` يقول
-  «ahead N» بعد دفع ناجح.
-  - **التحقق من الدفع بـ`git ls-remote origin refs/heads/main` — لا بـ`git status`.**
-  - **العملية التي تنجح:** `mkdir -p .git/refs/remotes/origin` و
-    `printf '<sha>\n' > .git/refs/remotes/origin/main`، **آخر شيء** ولا تشغّل أي
-    أمر git بعده (أي `git update-ref` لاحق **يحذف** المرجع المكتوب يدوياً).
-    تحقّق بـ`git rev-parse refs/remotes/origin/main` لا بـ`cat`.
-  - **`git push` عبر HTTPS قد يتعلّق أبداً على مطالبة بيانات الاعتماد** ويُقتل
-    بـ`SIGTERM` بلا مخرجات. الإصلاح: `gh auth setup-git` مرة واحدة ثم ادفع.
+## Discord API — مصائد صامتة
+- **لا اختصار `@me` في مسار عضو السيرفر** (`GET` ⇒ 400/403). الصحيح: معرّف البوت من
+  `GET /users/@me` ثم `GET /guilds/{id}/members/{botUserId}` (يعطي الأدوار والصلاحيات).
+  استثناء: **`PATCH /guilds/{id}/members/@me` يقبله** Discord (مُتحقَّق حياً).
+- **`permissions` في كائن العضو = `0` لرمز بوت** حتى مع Administrator. ابنِها من
+  `@everyone` (يحمل **معرّف السيرفر نفسه**) + أدوار العضو. **افحص 0x8 أولاً.**
+- **«مجهول» ليس `false`:** `granted` ثلاثي القيمة؛ ارفض الكتابة فقط عند `false` مؤكدة.
+- كل قراءة مُغلَّفة بـ`.catch(() => null)` تفشل **بصمت** ⇒ `discord.test.ts` يثبّت
+  **شكل الطلب** لا النتيجة. **والخطّاف يطابق بـ`includes`** ⇒ رتّب المسارات الأكثر
+  تحديداً أولاً (`/guilds/{id}` يبتلع `/guilds/{id}/channels`).
+- **تجزئة `a_` = أفاتار متحرك** ⇒ اطلب `.gif` (`assetExtension`)، وإلا الإطار الأول.
+- **النبذة عبر `PATCH /applications/@me {description}`** — `PATCH /users/@me {bio}`
+  يُقبل بـ200 ثم يُهمَل صامتاً.
+- **`Presence Intent` ممنوع** (حوكمة 8) — لا تُفعّله.
 
-## Discord API — مصائد صامتة (كلّفتنا 3 ميزات ميتة)
-- **لا يوجد اختصار `@me` في مسار عضو السيرفر.** `GET /guilds/{id}/members/@me`
-  ⇒ **400** `NUMBER_TYPE_COERCE`، و`GET /users/@me/guilds/{id}/member` ⇒ **403**
-  `"Bots cannot use this endpoint"` (خاص بـOAuth2). الصحيح لرمز بوت: احلّ معرّف
-  البوت من `GET /users/@me` ثم `GET /guilds/{id}/members/{botUserId}` — وهذا يعطي
-  **الأدوار والصلاحيات معاً**.
-- **حقل `permissions` في كائن العضو يُرجع `0` لرمز بوت** حتى مع Administrator.
-  ابنِ الصلاحيات من اتحاد `@everyone` + أدوار العضو (`computeBasePermissions`).
-- **Administrator (0x8) يتقدّم على كل صلاحية** — أي فحص بتّي ساذج يقول «مفقودة».
-  افحص 0x8 أولاً (`hasPermission`).
-- **«مجهول» ليس `false`:** `PermissionStatus.granted` ثلاثي القيمة. `null` = تعذّرت
-  القراءة، وتحويله إلى `false` يرفض عملية يستطيع البوت تنفيذها.
-- **الدروس العام:** كل قراءة Discord تُغلَّف بـ`.catch(() => null)` تفشل **بصمت**،
-  لذلك `test/discord.test.ts` يثبّت **شكل الطلب** (الـURL) لا النتيجة فقط.
-  **وخطّاف الاختبار يطابق بـ`includes`** ⇒ مسار `/guilds/{id}` العاري يبتلع
-  `/guilds/{id}/channels` (`channels.filter is not a function`). رتّب الأكثر
-  تحديداً أولاً.
-- **الأفاتار المتحرك:** تجزئة `a_` ⇒ طلبها `.png` يعطي **الإطار الأول صامتاً**.
-  `assetExtension(hash)` تُرجع `gif`، والحجم الافتراضي 128.
-- **دعوة البوت رحلة ذهاب وعودة** لا رابط أعمى: `response_type=code` +
-  `redirect_uri` + `state` (كوكي CSRF)، والـcallback يُبطل `invalidateBotGuildCache`.
-- **`Presence Intent` ممنوع** (حوكمة 8) و`AL_AI_INTENTS` لا يطلبه. **لا تُفعّله** في
-  بوابة المطوّر وإن طُلب منك — يوسّع سطح البيانات بلا فائدة.
+## تصنيف أخطاء Discord
+`DiscordApiError` تحمل `status` و`retryAfterSeconds`؛ `isAuthFailure` (**401 فقط**)
+و`isRateLimited` (**429 فقط**). قبل ذلك كان كل خطأ «توكن منتهٍ» ⇒ 429 يُتلف جلسة سليمة.
+- `loadUserGuilds` **المصدر الوحيد** لقائمة سيرفرات المستخدم: 401 ⇒ إتلاف +
+  `SESSION_EXPIRED` / 429 ⇒ `429 RATE_LIMITED` + `retry-after` **والجلسة سليمة** /
+  غير ذلك ⇒ 503. أي نداء مباشر جديد لـ`fetchUserGuilds` يُسقط `route-guards.test.ts`.
+- `/api/guilds` يستخدم **`Promise.allSettled`** (ولا كتابة في `reply` بعد الرد ⇒
+  `FST_ERR_REP_ALREADY_SENT`). خُذ `const list = x.value;` أولاً لتضييق TS.
 
-## تصنيف أخطاء Discord — غيابه كان يُتلف الجلسات
-- `DiscordApiError` (في `server/discord.ts`) تحمل `status` و`retryAfterSeconds`،
-  ومصنّفان صريحان: `isAuthFailure` (**401 فقط**) و`isRateLimited` (**429 فقط**).
-  **قبل ذلك كان كل خطأ يُعامل «توكن منتهٍ»** ⇒ 429 يُتلِف جلسة سليمة.
-- `loadUserGuilds` هي **المصدر الوحيد** لقائمة سيرفرات المستخدم: 401 ⇒ إتلاف +
-  `SESSION_EXPIRED`، 429 ⇒ `429 RATE_LIMITED` + `retry-after` **والجلسة سليمة**،
-  غير ذلك ⇒ `503 DISCORD_UNAVAILABLE`. أي نداء مباشر جديد لـ`fetchUserGuilds`
-  يُسقط `route-guards.test.ts`.
-- `/api/guilds` يستخدم **`Promise.allSettled` لا `Promise.all`** (فشل نداء ثانوي
-  يجب ألا يُسقط المسار كله ولا يكتب في `reply` بعد الرد ⇒ `FST_ERR_REP_ALREADY_SENT`).
-  خُذ `const list = x.value;` قبل الاستخدام ليقبل TypeScript التضييق.
-
-## منع 429 — كاش + دمج + خنّاق (الوضع مُصلَح ومُتحقَّق)
-`apps/dashboard/server/cache.ts`. إعادة المحاولة في العميل وحدها لا تكفي — الانفجار
-نفسه هو المشكلة (ثلاث تابات = 3 نداءات متطابقة في اللحظة نفسها).
+## منع 429 — كاش + دمج + خنّاق
+`server/cache.ts`. **الانفجار نفسه هو المشكلة**، لا التكرار.
 - **`TtlCache.resolve(key, load)`**: إصابة طازجة، **دمج الطلبات الجارية** (نداء ثانٍ
   ينتظر الوعد القائم — **هذا ما يقتل الانفجار لا الـTTL**)، «القديم أفضل من الخطأ»،
-  و`finally` تُحرّر خانة الـin-flight (بدونها يُسمّم أول فشل كل النداءات اللاحقة).
-- **فخّ يتكرّر: الكاش على النتيجة المُحوَّلة لا على القراءة الخام المشتركة.** شاشة
-  تخصيص واحدة كلّفت **7 نداءات**، ثلاثة منها `/guilds/{id}/roles` **متطابقة**، لأن
-  كل مستهلك (فحص الصلاحيات، الهرم، منتقي الرتب، أعلى رتبة) قرأها بنفسه. الإصلاح
-  `guildRoleListCache` + `fetchGuildRoleList` ⇒ **5 نداءات، كل نقطة مرة واحدة**.
-  **القاعدة: كاش على الحمولة الخام، وكل مستهلك يُسقط عليها سؤاله.**
-- **المذكرة على الوعد لا على النتيجة.** `if (cached) return cached` **لا يمنع**
-  نداءين في نفس التكة من كلٍّ رؤية `null`. أمسك الوعد (`botUserIdInFlight`) وحرّره
-  في `finally` (وعد مرفوض محتفَظ به يسمّم كل نداء لاحق للأبد).
-- **كائن العضو: دمج بلا TTL عن قصد** (`fetchBotMemberShared`). هو يجيب فحص الصلاحية
-  على **مسار كتابة**، وبتة قديمة تحوّل «البوت فقد الصلاحية» إلى «البوت يملكها».
-- `GUILD_READ_CACHE_MS = 45_000` / `BOT_GUILD_CACHE_MS = 15_000`.
-  **`invalidateGuildReadCache(guildId)` بعد أي كتابة** وإلا بقي العرض قديماً 45 ثانية.
-  `resetGuildReadCaches()` منفذ اختبار — **نادِه في `beforeEach`** وإلا تسرّبت
-  الحالة بين الاختبارات. (سقوط اختبار فور إدخال كاش جديد = **سببه الكاش غالباً**،
-  والاختبار محقّ. صلّح الكاش لا التأكيد.)
-- **`RequestThrottle` نافذة منزلقة لا ثابتة** — الثابتة تسمح بضعف الحصة عبر حدّها.
-- الخطّاف يستثني الجلسات الموثَّقة و`/internal/`. **ليس ثغرة:** كوكي مزوّر يعطي
-  `401 UNAUTHENTICATED` — افحص الرقم الثالث دائماً.
+  و`finally` تُحرّر خانة الـin-flight.
+- **الفخّ 1: الكاش على النتيجة المُحوَّلة لا الحمولة الخام.** شاشة واحدة كلّفت 7 نداءات
+  وثلاثة منها `/roles` متطابقة ⇒ `guildRoleListCache`. **القاعدة: كاش على الحمولة
+  الخام، وكل مستهلك يُسقط عليها سؤاله.**
+- **الفخّ 2: نسيت الحارس.** `loadUserGuilds` → `fetchUserGuilds` في كل مسار مرتبط
+  بسيرفر ⇒ `fetchUserGuildsCached`. **مُدخل القياس يحاكي المسار من أوله بحارسه.**
+- **الفخّ 3: قراءة بلا كاش على مسار يُفتح دائماً** (أُصلح 2026-09-14):
+  `GET /api/bot/identity` كان ينادي `/users/@me` و`/applications/@me` بلا كاش، وهو
+  حدّ **لكل تطبيق لا لكل مسار** ⇒ `appearanceSnapshotCache` (TTL 60s، مفتاح = التوكن)
+  + `invalidateAppearanceSnapshot()` بعد الحفظ. **قيس حياً: 2.400s ← 0.415s.**
+  الدرس: أي قراءة تجلب نفس البيانات في كل فتح شاشة يجب أن تُخزَّن.
+- **الفخّ 4: المذكرة على النتيجة لا على الوعد** ⇒ نداءان في نفس التكة كلٌّ يرى `null`.
+  أمسك الوعد وحرّره في `finally`.
+- `GUILD_READ_CACHE_MS = 60_000` / `BOT_GUILD_CACHE_MS = 15_000` /
+  `USER_GUILD_CACHE_MS = 20_000`. **`invalidateGuildReadCache(guildId)` بعد أي كتابة.**
+  `resetGuildReadCaches()` في `beforeEach`. (اختبار يسقط فور إدخال كاش = **سببه الكاش**،
+  صلّح الكاش لا التأكيد.)
+- **`fetchBotMemberShared` بلا TTL عن قصد**: بتة صلاحية قديمة تحوّل «البوت فقد
+  الصلاحية» إلى «البوت يملكها». **لذلك فتح شاشة ثانٍ كلّف 2 نداءات (member + guild)
+  ولو بعد كل الكاش — مقصود لا عطل.** (8 نداءات بارد، +2 للفتحة الثانية.)
+- **`RequestThrottle` نافذة منزلقة.** الخطّاف يستثني الجلسات الموثَّقة و`/internal/`
+  — **ليس ثغرة:** كوكي مزوّر يعطي `401 UNAUTHENTICATED`.
 
-## عقود المسارات — مفتاح ردّ لا يقرأه أحد = عطل صامت
-- **كل مسار إعدادات يجيب `{ settings, ... }`.** لا استثناء ولا اسم بديل.
-  `GET/PUT /api/bot/identity` أجابا `{ identity }` بينما العميل يقرأ `result.settings`
-  ⇒ المسودة بقيت `null` ⇒ **شاشة سوداء** على `Object.keys(null)`. الحالة كانت
-  **200 سليمة** تحمل مفتاحاً لا يقرأه أحد: لا 500، ولا سطر في السجل.
-- **أي انحراف بين اسم مفتاح الخادم وحقل العميل يظهر كخطأ عميل لا كخطأ خادم.**
-  عند إضافة مسار: افتح `src/api/client.ts` وطابق الاسم حرفياً.
+## 🔴 الشاشة السوداء = hook بعد early return (2026-09-14)
+**العَرَض:** «هوية البوت» ⇒ «جارٍ التحميل» ثم **صفحة سوداء تماماً**.
+**السبب:** `customization.tsx` نادى `useMemo` (`previewIdentity`) **بعد**
+`if (error) return` و`if (!savedGuild || !guildDraft) return` ⇒ تمريرة التحميل 15 hook
+وتمريرة البيانات 16 ⇒ `Rendered more hooks than during the previous render` — وهذا
+**يُزيل الشجرة كلها** لا يتدهور.
+- **الإصلاح:** كل hook فوق كل early return.
+- **لماذا لم يكتشفه اختبار:** `renderToString` **لا ينفّذ التأثيرات** ⇒ كل شاشة تجلب
+  بيانات تُختبر في حالة التحميل فقط، والتمريرة الثانية (العطل) لا تُنفَّذ أبداً.
+- **الحارس:** `test/mount.test.tsx` (jsdom + `createRoot` + `StrictMode` + شبكة
+  موهومة) يركّب الشاشات السبع في حالتها **المُحمَّلة**. **أُثبت أنه يكشف الانحدار:**
+  بإعادة العطل فشلت 3 اختبارات بالتحديد.
+- **فخّ في الحزام:** اقرأ `innerHTML` **قبل** `root.unmount()` — الـunmount يُفرّغ الحاوية.
+- **الحماية:** `src/components/error-boundary.tsx` يلفّ محتوى الشاشة في `App.tsx`
+  بـ`resetKey={guild.id:view}`. **والـfallback بعناصر HTML عارية لا بـ`ui/`** — حدّ
+  يحرس شجرة لا يجوز أن يعتمد عليها.
+
+## عقود المسارات
+- **كل مسار إعدادات يجيب `{ settings, ... }`.** `GET/PUT /api/bot/identity` أجابا
+  `{ identity }` والعميل يقرأ `result.settings` ⇒ مسودة `null` ⇒ شاشة سوداء، والحالة
+  **200 سليمة** بلا 500 ولا سطر سجل. **أي انحراف يظهر كخطأ عميل لا خادم** ⇒ طابق
+  `src/api/client.ts` حرفياً عند إضافة مسار.
 
 ## محرّك الأوامر
-- **`CommandCategory`** = `moderation | channels | general` (كان `CommandModule`).
-  `/al-status` **داخل السجل الآن** — كان يتجاوز خط أنابيب التكوين كله.
-- **كل قسم مُبوَّب على راية قدرة حقيقية** (`supportsReason`, `supportsDuration`,
-  `maxDurationSeconds`, `supportsPurge`, `supportsNotify`). لا تعرض مفتاحاً لا
-  يستطيع الأمر تنفيذه.
-- **المدد الـ11:** `permanent/5m/30m/1h/6h/12h/1d/3d/7d/14d/30d`.
-  **`permanent` قيمته `null` لا `0`** — الصفر يُقرأ «بلا مدة» فينهار إلى ثانية.
-  `TIMEOUT_MAX_SECONDS` (28 يوماً) تُقصّ **عند التحويل إلى ثوانٍ فقط**.
+- `CommandCategory` = `moderation | channels | general`. `/al-status` داخل السجل.
+  كل قسم مُبوَّب على راية قدرة حقيقية (`supportsReason/Duration/Purge/Notify`).
+- **المدد الـ11:** `permanent/5m/30m/1h/6h/12h/1d/3d/7d/14d/30d`. **`permanent` =
+  `null` لا `0`.** `TIMEOUT_MAX_SECONDS` تُقصّ **عند التحويل إلى ثوانٍ فقط**.
 - `CommandConfig`: `allowedRoleIds` (كان `customRoleIds`)، `deniedRoleIds`،
   `allowedChannelIds`، `deniedChannelIds`، `cooldownSeconds`،
   `autoDeleteResponseSeconds`، `requireReason`، `defaultDuration`، `presetReasons`.
-- `assessCommandScope`: **المنع يتقدّم على السماح** في الرتب والقنوات معاً.
-- **⛔ لا تفرض في Discord ما يجب أن يقرّره المشغّل.** `required` في خيار Slash
-  **يُجمَّد وقت التسجيل** ⇒ يجعل الإعداد **باتجاه واحد**. خيار السبب و`minutes`
-  غير مطلوبَين أبداً. الفرض في البوت.
-- `command-registry.ts` هو سلطة الأوامر؛ كل أمر مُسجَّل **يجب** أن يكون له builder
-  في `buildModerationCommands`. ومفتاح غير مدعوم يُجبَر على الافتراضي في
-  `normaliseCommandConfig`.
-- `config/channels.json` يجب أن يطابق السكيما **بالضبط** وإلا رفض البوت الإقلاع
-  (rule 15). أضف حدثاً → حدّث الملفَين معاً.
+  `assessCommandScope`: **المنع يتقدّم على السماح**.
+- **⛔ لا تفرض في Discord ما يقرّره المشغّل:** `required` **يُجمَّد وقت التسجيل** ⇒
+  إعداد باتجاه واحد. الفرض في البوت.
+- `command-registry.ts` السلطة: كل أمر مُسجَّل له builder، ومفتاح غير مدعوم يُجبَر على
+  الافتراضي. `config/channels.json` يطابق السكيما **بالضبط** (rule 15) وإلا رفض الإقلاع.
+- `/mute` ملغاة. معالج الأوامر **لا يسجّل العقوبات** (الـgateway يفعل) عدا
+  `warn`/`clearwarns`. السبب من `AuditLogEntry.reason`.
 
-## تخصيص البوت — نطاقان + كاتب واحد
-- **الهوية العامة** في `bot_identity` (صف واحد، `id BOOLEAN PRIMARY KEY CHECK (id)`)
-  = أفاتار/بانر/نبذة + **الحالة والنشاط**. **هوية لكل سيرفر** في
-  `guild_customization` = اسم مستعار/لون رتبة/أيقونة رتبة.
-- **اللوحة هي الكاتب الوحيد لكل حقل ظهور، والبوت لا يكتب الظهور إطلاقاً** —
-  كتابته الوحيدة **النبضة عبر الـgateway** (`presence-sync.ts`، كل 15 ثانية؛
-  `customization-sync.ts` **حُذف**). مثبَّت في `governance.test.ts`.
-- **`server/appearance.ts` هو الكاتب الوحيد في اللوحة:** `PATCH /guilds/{id}/members/`
-  (الاسم)، `/guilds/{id}/roles/{role}` (اللون والأيقونة)، `/users/@me` (الأفاتار
-  والبانر)، `/applications/@me` (النبذة). **النبضة لا تُكتب هنا.**
-- **`FieldOutcome` تُبلَّغ لكل حقل ولا تُبلع أبداً.** الحفظ يحدث **حتى لو رفض
-  Discord** — والرد يفصل «محفوظ» عن «منفّذ» صراحةً. جوهر «محفوظ ≠ منفّذ».
-- **`changedAppearanceFields` ترسل المتغيّر فقط**؛ مسح قيمة يُحتسب تغييراً والنبضة
-  مستثناة. **`resolveRoleIcon()`** تمرّر `data:` كما هي وتجلب `https:` فقط
-  (`undefined` = اتركها).
-- **أرسل قيمة فشلت التحقق كـ400 لا كـ`null` صامت** — الصمت يمحو صورة أراد
-  المشغّل استبدالها ويبدو النموذج محفوظاً.
-- **الشاشة بعمودين:** النموذج (`الهوية العالمية` + `هذا السيرفر فقط` + الصلاحيات)،
-  وعمود لاصق (`lg:sticky`) يحمل `ImageCropper` و`BotLivePreview`. النطاقان
-  **يُحفظان بمسارين ويُبلَّغان منفصلين** لأن لكل نطاق كاتباً مختلفاً.
-- **`dirty` بمقارنة حقلاً حقلاً لا `JSON.stringify`** — ترتيب المفاتيح وحده يجعل
-  نموذجاً لم يُلمس يبدو معدّلاً فيظهر شريط التحذير بلا سبب.
-- `MAX_IMAGE_DATA_URL_LENGTH = 500_000`، `IMAGE_TARGET_SIZES = { avatar: 256×256,
-  banner: 600×240, roleIcon: 128×128 }`، `BOT_ROLE_NAME = "AL AI"`،
-  `MAX_BIO_LENGTH = 400`، `MAX_ACTIVITY_TEXT_LENGTH = 128`.
-- أدوات الواجهة **بلا اعتماديات خارجية**: `image-cropper.tsx` (Canvas)،
-  `color-picker.tsx` (HSV)، `toaster.tsx` (الفشل `role="alert"` ولا يختفي)،
-  `bot-preview.tsx` (معاينة حيّة) — كلها في `src/components/` و`src/views/settings/`.
+## تخصيص البوت
+- **الهوية العامة** في `bot_identity` (صف واحد) = أفاتار/بانر/نبذة + الحالة والنشاط.
+  **لكل سيرفر** في `guild_customization` = اسم مستعار/لون/أيقونة رتبة.
+- **اللوحة الكاتب الوحيد لكل حقل ظهور؛ البوت لا يكتب الظهور** — كتابته الوحيدة
+  **النبضة عبر الـgateway** (`presence-sync.ts`). `server/appearance.ts` هو الكاتب.
+- **`FieldOutcome` تُبلَّغ لكل حقل ولا تُبلع**؛ الحفظ يحدث **حتى لو رفض Discord**
+  والرد يفصل «محفوظ» عن «منفّذ». `changedAppearanceFields` ترسل المتغيّر فقط.
+- **`resolveRoleIcon()`:** `data:` تمر كما هي، `https:` تُجلب، **`undefined` = اتركها
+  و`null` = امسحها** (الخلط يمحو أيقونة المشغّل). **قيمة فشلت التحقق ⇒ 400 لا `null`.**
+- **`dirty` بمقارنة حقلاً حقلاً لا `JSON.stringify`.**
+- `MAX_IMAGE_DATA_URL_LENGTH = 500_000`، `IMAGE_TARGET_SIZES = avatar 256×256 /
+  banner 600×240 / roleIcon 128×128`، `BOT_ROLE_NAME = "AL AI"`، `MAX_BIO_LENGTH = 400`،
+  `MAX_ACTIVITY_TEXT_LENGTH = 128`.
+- **⚠️ نسخ ثوابت الحالة تباعدت فعلاً (أُصلح):** `bot-preview.tsx` كان يُعيد تعريف
+  `STATUS_LABELS`/`ACTIVITY_LABELS` بينما core يملك `botStatusLabels`/
+  `activityTypeLabels` ويستعملها منتقي الحالة **في الشاشة نفسها** ⇒ المعاينة «لا تزعجني»
+  و«غير مرئي» والقائمة «لا تُزعجني» و«غير ظاهر». حُذفت النسختان. **لا تُعِد تعريف ثابت
+  موجود في core.** و`knownStatus()` تُسقط أي قيمة لا Discord يعرفها إلى `online`.
+- **`hsvToRgb` كان يُبدّل لون المشغّل بصمت** (الدرجة بلا `((h%360)+360)%360` وبلا تقريب).
+  اختبار: كل `DISCORD_ROLE_SWATCHES` تنجو من `rgbToHex(hsvToRgb(rgbToHsv(x)))`.
 
-### ⚠️ تحويل HSV كان يُبدّل لون المشغّل بصمت (أُصلح 2026-09-14)
-`hsvToRgb` استخدم `(h / 60) % 6` بلا التفاف، و`rgbToHsv` كان **يقرّب الدرجة إلى عدد
-صحيح**. المنتقي يستدعي `rgbToHsv` لتغذية حالته ⇒ المشغّل يضغط لون Discord ثم يحرّك
-التشبّع فيحصل على **لون آخر**: 8 من 20 سواش لم تنجُ، و`#e74c3c`→`#e74d3c`.
-الإصلاح: `((h % 360) + 360) % 360`، وترك الدرجة **بلا تقريب**.
-الاختبار الحارس: كل `DISCORD_ROLE_SWATCHES` تنجو من `rgbToHex(hsvToRgb(rgbToHsv(x)))`.
-**`#e91e63` لا يمكن الوصول إليها من درجة 340** ⇒ أكّد على **ثبات الدورة** لا على قيمة
-حدسية. و`hsvToRgb(rgb)` بوسيط خاطئ يعطي `#NaNNaNNaN` بدل خطأ.
-
-## ⚠️ فخّ ترتيب الترحيل: `ADD COLUMN` قبل حارس `RENAME` يُبطله **بصمت**
-`ADD COLUMN IF NOT EXISTS allowed_role_ids` **قبل** كتلة إعادة التسمية المحروسة
-يعني أن العمود موجود حين يُقيَّم الشرط، **فيُتخطّى `RENAME COLUMN` ويبقى
-`custom_role_ids` يتيماً وقوائم السماح مُتجاهَلة — بلا أي خطأ.** الترتيب **حمولة
-(load-bearing) لا تنظيم**. الإصلاح: التسمية أولاً، ثم `ADD COLUMN`، ثم كتلة إصلاح.
-**الفحص الوحيد الذي يلتقط هذا هو قاعدة جديدة من الصفر** — إعادة التطبيق على قاعدة
-سليمة تنجح دائماً ولا تكشف شيئاً.
-- `CREATE TABLE IF NOT EXISTS` **لا يُحدِّث default قائماً** — قلب افتراضي يحتاج
-  `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT` صريحاً.
-- **`FOR EACH ROW` لا يعمل على `TRUNCATE`** (عبارة statement) ولا على جدول فارغ.
-  جدول «append-only» يحتاج مشغّلاً ثانياً `BEFORE TRUNCATE ... FOR EACH STATEMENT`
-  مع `REVOKE TRUNCATE ... FROM PUBLIC`، وإلا فالضمان شكليّ.
+## الترحيل
+- **`ADD COLUMN` قبل كتلة `RENAME` المحروسة يُبطلها بصمت** (العمود موجود فيُتخطّى
+  الـRENAME ويبقى العمود اليتيم وقوائم السماح مُتجاهَلة، بلا خطأ). **الترتيب حمولة لا
+  تنظيم. والفحص الوحيد الذي يلتقطه: قاعدة جديدة من الصفر.**
+- `CREATE TABLE IF NOT EXISTS` **لا يُحدِّث default قائماً** ⇒ `ALTER COLUMN ... SET DEFAULT`.
+- **`FOR EACH ROW` لا يعمل على `TRUNCATE`** ولا على جدول فارغ ⇒
+  `BEFORE TRUNCATE ... FOR EACH STATEMENT` + `REVOKE TRUNCATE ... FROM PUBLIC`.
 
 ## قواعد معمارية
-- `discord.js` يُستورد في ملف واحد فقط: `apps/bot/src/lib/discord.ts` (rule 2).
-- معالج الأوامر **لا يسجّل العقوبات** — الـgateway يسجّلها من audit log.
-  الاستثناء: `moderation.warn`/`clearwarns` لأنهما سجلان لا تعديل Discord.
-- السبب يُقرأ من `AuditLogEntry.reason` في `createActorResolver` لا من خيار الأمر.
-- **ملكية البيانات:** البوت يملك `guilds.member_count` و`ping_ms`؛ اللوحة تبذر
-  الصف فقط (`ensureGuild` = `ON CONFLICT DO NOTHING`). لا تستخدم `upsertGuild` من
-  اللوحة — كان يصفّر العدد عند كل فتح.
+- **`discord.js` في ملف واحد فقط:** `apps/bot/src/lib/discord.ts` (rule 2)، وبثوابته
+  الرسمية (`GatewayIntentBits`, `ChannelType`, `AuditLogEvent`, `PermissionsBitField`,
+  `ActivityType`, `Routes`) — مُتحقَّق. `activityTypeNumbers` في core تحمل أرقام Discord.
 - **لا تعرض رقماً لا تعرفه:** `pingMs`/`online` من نبضة حديثة لا من وجود توكن.
   `members.online` من ودجت السيرفر فقط (rule 8 تمنع `GUILD_PRESENCES`).
-- **محرّك مضاد التخريب مُسلَّح افتراضياً.** تغيير الـdefault **لا يعيد كتابة
-  الصفوف**؛ `normaliseEnabled` تُبقي `false` صريحاً.
-- **كل مسار مرتبط بسيرفر يتحقق من الوصول للسيرفر نفسه لا من الجلسة فقط.**
-  `requireGuildAccess` للقراءة و`requireTierForGuild` للكتابة. معرّف السيرفر ليس
-  سراً ⇒ `requireSession` وحده يعني أن أي حساب مسجَّل يقرأ أي سيرفر.
-  **مسار الهوية العامة يحمل `guildId` في الجسم** لحاجة الحارس.
-  `route-guards.test.ts` يفحص الجدول نصياً لأن نمط الفشل **استدعاء غائب**.
-- **`BotIdentitySettings` مقابل `RawBotIdentity`:** `normaliseBotIdentity` تأخذ
-  `RawBotIdentity` (حقول `unknown`) — تضييقها يسبب `TS2322` في كل قارئ.
+- **ملكية البيانات:** البوت يملك `guilds.member_count`/`ping_ms`؛ اللوحة تبذر الصف فقط
+  (`ensureGuild` = `ON CONFLICT DO NOTHING`) — `upsertGuild` من اللوحة كان يصفّر العدد.
+- **مضاد التخريب مُسلَّح افتراضياً؛** تغيير الـdefault **لا يعيد كتابة الصفوف**.
+  `tripped` عندما `count > limit`. الأرضية 1 والسقف 100. الاحتواء قبل الإشعار.
+- **كل مسار مرتبط بسيرفر يتحقق من الوصول للسيرفر لا من الجلسة فقط**
+  (`requireGuildAccess` للقراءة / `requireTierForGuild` للكتابة). مسار الهوية العامة
+  يحمل `guildId` في الجسم. `route-guards.test.ts` يفحص الجدول نصياً.
+- **`normaliseBotIdentity` تأخذ `RawBotIdentity`** (حقول `unknown`) — تضييقها يسبب
+  `TS2322` في كل قارئ.
+- **السجلات:** 6 وجهات (خمس للمشغّل + `bot-log` داخلية لا تُربط بقناة). كتابة التدقيق
+  **قبل** أي كتم (rule 12). الوضع `single` يتجاهل `categoryChannels` عمداً.
 
 ## اللوحة
-- `types.ts` يُعيد تصدير كل عقد مشترك من `@al-ai/core/browser`؛ لا تُكرّر شكلاً
-  موجوداً في core (انحراف سابق: `CommandFlag` في مكانين).
-- `logCategories` تُشتق من `eventsByCategory`. `bot-log` وجهة **داخلية** لا تظهر
-  للمشغّل ولا تُربط بقناة (يفلترها `normaliseCategoryChannels`).
+- `types.ts` يُعيد تصدير عقود `@al-ai/core/browser`؛ **لا تُكرّر شكلاً موجوداً في core**.
 - المنطق القابل للاختبار يُستخرج إلى دوال نقية في core (`deriveBotStatus`,
   `summarisePunishments`, `assessRoleHierarchy`, `assessRoleIconGate`,
-  `assessNukeAction`, `describeAppearanceResult`) بدل حقنه في المسار.
-- **`notice` و`authNotice` منفصلان عمداً.** خلطهما يُظهر «لا تملك صلاحية الوصول
-  إلى هذا السيرفر» **على شاشة الدخول** — عطل رآه المستخدم فعلاً.
-- **`--primary` يجب أن يبقى نيلياً** `oklch(0.511 0.262 276.966)`. كان شبه أبيض
-  فبدا زر الدخول **صندوقاً أبيض يُقرأ كنص مكتوب**. عند تعديل الثيم تحقّق أن الـCSS
-  لا يحوي `oklch(.922 0 0)`.
+  `assessNukeAction`, `describeAppearanceResult`).
+- **`notice` و`authNotice` منفصلان** — خلطهما يُظهر «لا تملك صلاحية» على شاشة الدخول.
+- **`--primary` يبقى نيلياً** `oklch(0.511 0.262 276.966)`؛ تحقّق أن الـCSS لا يحوي
+  `oklch(.922 0 0)`.
+- **`ErrorBoundary` يلفّ محتوى الشاشة فقط لا الـshell** لتبقى القائمة صالحة.
 
 ## المعاينة والفحص بلا متصفح
-- **`renderToString` لا يكفي:** Radix **لا يُثبّت محتوى `Collapsible` المطويّ**،
-  و**التأثيرات لا تجري** ⇒ أي شاشة تجلب بيانات ترسم حالة التحميل فقط. لذلك اختبر
-  **الأجزاء النقية منفصلة** — نمط متبع في `render.test.tsx`.
-- **بناء معاينة تفاعلية:** مُدخل مؤقت يستدعي `createRoot`، **يستورد
-  `./src/index.css`** (بدونه لا CSS إطلاقاً)، و`vite build` بـ`input` = المُدخل
-  و`outDir` خارج `dist/` مع `emptyOutDir: false`.
-  - **مصيدة البناء:** `@vitejs/plugin-react` مثبّت في `apps/dashboard/node_modules`
-    لا الجذر ⇒ إعداد vite في `.workbuddy-ai/preview/` **لا يستطيع استيراده**
-    (`ERR_MODULE_NOT_FOUND`). انسخ الإعداد والمُدخل **إلى `apps/dashboard/`**،
-    شغّل من هناك، **ثم احذف الملفين المؤقتين**.
-- **لا تفتح المعاينة بـ`file://`** (ES + `crossorigin` يفشل) — اخدمها بـ
-  `python -m http.server`. اكتب في `.workbuddy-ai/preview/` لأن البناء ينظّف `dist/`.
-- **قياس نداءات Discord:** اعترض `globalThis.fetch` في مُدخل المعاينة وعدّ لكل نقطة
-  (`.workbuddy-ai/preview/count-calls.mjs`) — هذه الأداة هي التي أثبتت 7→5.
-- **فخّان في التأكيد:** قيمة عنصر نموذج **ليست `textContent`** (اقرأ `el.value`)،
-  وRadix يرسم `Select` في **portal** (أكّد على `aria-label`). **وأكّد الاتجاهين.**
-- **أكّد على ما يراه المستعمل لا على الافتراضي في المكوّن.** `ColorPicker` افتراضيه
-  `unsetLabel = "بلا لون"` والشاشة تمرّر `"لون Discord الافتراضي"`.
+- **`renderToString` لا يكفي:** التأثيرات لا تجري وRadix لا يُثبّت محتوى `Collapsible`
+  المطويّ ⇒ شاشة تجلب بيانات تُرسم في حالة التحميل فقط، **ولهذا لا يكشف انهيار التمريرة
+  الثانية.** للشاشات الجالبة: `mount.test.tsx` (jsdom)، والأجزاء النقية منفصلة.
+- **jsdom الآن devDependency في `apps/dashboard`** (مع `@types/jsdom`). التركيب: انسخ
+  كل خصائص `window` غير الموجودة في `globalThis` (التعداد اليدوي يفشل بـ
+  `HTMLFormElement is not defined`)، و`window`/`document`/`navigator` عبر
+  `defineProperty` (getter فقط في Node 22)، و`IS_REACT_ACT_ENVIRONMENT = true`.
+- **🔴 ترتيب الاستيراد حامل للحمل:** الإعداد يسكن `test/dom-env.ts` ويُستورد
+  **أول سطر** (`import { dom } from "./dom-env.js";`) قبل `App` وقبل `react`.
+  إعداده **داخل** ملف الاختبار لا يعمل: استيرادات الملف تُقيَّم أولاً ⇒ React يبدأ
+  بلا DOM، والنتيجة **صامتة ومضلّلة**: القائمة تُعلن `data-state="open"` بينما
+  `document.querySelector('[role="menu"]')` يجد **صفراً** (الـportal لا يُثبَّت).
+  تُقرأ كـ«القائمة معطوبة» لا كـ«الهارنس مرتَّب خطأ».
+- **مُنشِئات DOM من jsdom لا من Node:** حلقة النسخ تتخطّى ما هو موجود في
+  `globalThis`، وNode 22 يُعرّف `Event`/`CustomEvent`/… ⇒ `CustomEvent` من Node
+  **ليس** `Event` من jsdom، و`dispatchEvent` يرمي
+  «parameter 1 is not of type 'Event'» — هكذا انكسرت طبقة Radix الـdismissable.
+  أعد تعريف: `Event`, `CustomEvent`, `UIEvent`, `MouseEvent`, `PointerEvent`,
+  `KeyboardEvent`, `FocusEvent`, `Node`, `Element`, `HTMLElement`, `DocumentFragment`, …
+- **فتح قائمة Radix في اختبار:** مسار الـhover خلف مؤقّت 100ms مشروط بـ
+  `pointerType === "mouse"`، أما **مسار النقر** (`onClick` → `onOpenChange(true)`)
+  يفتح **فوراً** ⇒ استخدم `.click()` على `[aria-label]` لا `pointerdown`.
+- **`createElement` مع مكوّن يشترط `children`:** مرّرها **داخل كائن الخصائص** لا
+  كوسيط ثالث وإلا `TS2769`.
+- **فخّان في التأكيد:** قيمة عنصر نموذج **ليست `textContent`** (اقرأ `el.value`)، وRadix
+  يرسم `Select` في **portal** (أكّد على `aria-label`). **وأكّد الاتجاهين.**
+- **قياس نداءات Discord:** اعترض `globalThis.fetch` وعدّ لكل نقطة
+  (`.workbuddy-ai/preview/count-screen-calls.mjs`) — أثبتت 4→2.
+- **بناء معاينة تفاعلية:** مُدخل مؤقت يستدعي `createRoot` ويستورد `./src/index.css`،
+  و`vite build` بـ`input` = المُدخل و`outDir` خارج `dist/`. **مصيدة:**
+  `@vitejs/plugin-react` في `apps/dashboard/node_modules` لا الجذر ⇒ انسخ الإعداد
+  والمُدخل **إلى `apps/dashboard/`**، شغّل، **ثم احذف المؤقتين**. **لا تفتح بـ`file://`**
+  — اخدم بـ`python -m http.server`. اكتب في `.workbuddy-ai/preview/` (البناء ينظّف `dist/`).
 
 ## البيئة (Windows)
-- PostgreSQL 17 في `C:\Program Files\PostgreSQL\17`. data dir:
-  `C:\Users\dlwta\.al-ai\pgdata` (خارج المستودع)، منفذ **55432**.
-  `psql` **ليس على `PATH`** — استخدم مساراً كاملاً.
-- **`pg_ctl start` يُقتل** مع انتهاء أمر Bash. **الحل: `postgres.exe` كمهمة خلفية**
-  (`run_in_background: true`). الإقلاع ~30 ثانية و`pg_isready` يقول "rejecting" خلالها.
-  المنفذ **5432 مشغول بتثبيت آخر — لا تلمسه**.
-- **أي `curl` لعنوان محلي يحتاج `--noproxy '*'`** — وإلا مرّ عبر الوكيل ورجع
-  **502 مضلِّل** حتى مع عدم وجود مستمع. و`000` + exit 7 هو «رفض الاتصال» الحقيقي.
-- **لا تقرأ `curl -o /dev/null -w '%{size_download}'`** — يرجع **0** هنا حتى مع
-  200 وجسم حقيقي. عُدّ بالـ`grep -c` على المحتوى، أو `content-length` من `curl -I`.
-  وانتهاء الجلسة (exit 23) عند قطع الأنبوب بـ`head` ليس عطلاً.
-- **`psql` يتعلّق بلا `-w` و`< /dev/null`** في Git Bash (يُقتل بلا مخرجات).
-- **لا تُطلق curl في `node -e`** لأي شيء موثَّق: ترويسة تُبنى من `$(cat file)` قد
-  تصل فارغة والخادم يردّ 401 بلا سبب. اكتب `.mjs` يستعمل `fetch` بترويسات صريحة.
-- Docker CLI موجود لكن الـdaemon متوقف؛ WSL محجوب بسياسة أمنية.
-- **`/tmp` يعمل** في Git Bash هنا، لكن `node /tmp/x.mjs` يفشل بـMODULE_NOT_FOUND
-  (يترجم إلى `C:\tmp`) — استخدم `node "$(cygpath -w /tmp/x.mjs)"`.
-- `scripts/dev-issue-session.mts` يصدر جلسة حقيقية (**يجب أن يكون `.mts`**).
-  مسارات **الكتابة** لا تُفحص به. **التوكن المزروع وهمي (`probe-token`)** ⇒ يرجع
-  `401 SESSION_EXPIRED`؛ مفيد لإثبات أن الحارس يعمل، لكن **لا يمكن الوصول إلى
-  `403 NOT_A_MEMBER` به**.
-- **مسار صحة محوّل التكامل `GET /ping` لا `/health`** — `/health` يرجع
-  `404 UNKNOWN_ENDPOINT` وهذا **سلوك سليم**. ولا تختبره بـ`x-forwarded-for`؛
-  الفحص على `remoteAddress` الحقيقي.
-- **`.workbuddy-ai/memory/*.md` مُتتبَّعة ومرفوعة إلى المستودع العام**
-  (`Steve6546/al-ai`) — لا أسرار، لكنها ملاحظات داخلية. `backups/` و`preview/`
-  **مُتجاهَلان**.
-- **عملية خلفية بـ`&` داخل أمر تنتهي بقتلها عند رجوع الأمر.** استخدم
-  `run_in_background: true` لتحصل على `task_id` يعيش عبر النداءات.
-- **`npx tsc` يُحلّ لكل مجلد.** قد يُثبّت الـworkspace إصداراً مختلفاً تماماً عن
-  الجذر (5.2.2 مقابل 7.0.2). شغّل `npx tsc --version` من داخل الحزمة أولاً.
-  **TS 7 أزال `baseUrl`** — أبقِ `paths` فقط (تُحلّ نسبةً إلى tsconfig).
+- PostgreSQL 17 في `C:\Program Files\PostgreSQL\17`، data dir
+  `C:\Users\dlwta\.al-ai\pgdata`، منفذ **55432**. `psql` ليس على `PATH`.
+- **`pg_ctl start` يُقتل** مع انتهاء أمر Bash ⇒ شغّل `postgres.exe` بـ
+  `run_in_background: true`. الإقلاع ~30s و`pg_isready` يقول "rejecting" خلالها.
+  **5432 مشغول بتثبيت آخر — لا تلمسه.**
+- **كل `curl` لعنوان محلي يحتاج `--noproxy '*'`** وإلا رجع **502 مضلِّل**. و`000` +
+  exit 7 هو «رفض الاتصال» الحقيقي. **لا تقرأ `-w '%{size_download}'`** (يرجع 0 حتى مع
+  200) — عُدّ بـ`grep -c` أو `content-length`. و**`psql` يتعلّق بلا `-w` و`< /dev/null`**.
+- **لا تُطلق curl في `node -e`** لشيء موثَّق — اكتب `.mjs` بـ`fetch` بترويسات صريحة.
+- **`/tmp` يترجم إلى `C:\tmp` لـnode** ⇒ `node "$(cygpath -w /tmp/x.mjs)"` أو داخل المستودع.
+- `scripts/dev-issue-session.mts` (**يجب أن يكون `.mts`**) يصدر جلسة حقيقية، لكن
+  **التوكن وهمي** ⇒ `401 SESSION_EXPIRED` (يُثبت أن الحارس يعمل بـ401 لا 500)، **ولا
+  يمكن فحص مسار سيرفر حقيقي به** (الحارس يقرأ `/users/@me/guilds` فيفشل).
+  **قيود الفحص الحيّ تُقال صراحة.**
+- **مسار صحة محوّل التكامل `GET /ping` لا `/health`** (`/health` ⇒ `404` وهذا سليم).
+- **`.workbuddy-ai/memory/*.md` مُتتبَّعة ومرفوعة إلى مستودع عام** — لا أسرار.
+  `backups/` و`preview/` **مُتجاهَلان**.
+- **عملية خلفية بـ`&` تُقتل عند رجوع الأمر** ⇒ `run_in_background: true`.
+- **`npx tsc` يُحلّ لكل مجلد** (الجذر قد يكون TS 5 والحزمة TS 7). **TS 7 أزال
+  `baseUrl`** — أبقِ `paths` فقط.
