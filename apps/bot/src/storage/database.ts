@@ -1,6 +1,7 @@
 import pg from "pg";
 import {
   DEFAULT_ANTI_NUKE_CONFIG,
+  DEFAULT_BOT_IDENTITY,
   DEFAULT_CUSTOMIZATION,
   DEFAULT_EMBED_COLOR,
   DEFAULT_LOGGING_MODE,
@@ -8,10 +9,12 @@ import {
   isLoggingMode,
   isTier,
   normaliseAntiNukeConfig,
+  normaliseBotIdentity,
   normaliseCustomization,
   normaliseTierRoles,
   signActor,
   type AntiNukeConfig,
+  type BotIdentitySettings,
   type CommandConfig,
   type CustomizationSettings,
   type LogDestination,
@@ -145,6 +148,34 @@ export function createBotDatabase(databaseUrl: string) {
         nickname: row?.nickname ?? DEFAULT_CUSTOMIZATION.nickname,
         roleColor: row?.role_color ?? DEFAULT_CUSTOMIZATION.roleColor,
         roleIconUrl: row?.role_icon_url ?? DEFAULT_CUSTOMIZATION.roleIconUrl
+      });
+    },
+
+    /**
+     * The global bot identity: the fields that are the same in every guild.
+     *
+     * The bot reads only the presence slice from this (status and activity); the
+     * dashboard applies the images and the bio over REST. The row is single, so
+     * there is no per-guild argument — see the note on `bot_identity` in core.
+     */
+    async loadBotIdentity(): Promise<BotIdentitySettings> {
+      const { rows } = await pool.query<{
+        avatar_data_url: string | null;
+        banner_data_url: string | null;
+        bio: string | null;
+        status: string | null;
+        activity_type: string | null;
+        activity_text: string | null;
+      }>(`SELECT avatar_data_url, banner_data_url, bio, status, activity_type, activity_text FROM bot_identity WHERE id = true`);
+      const row = rows[0];
+      // No row means nothing has been customised yet, so the shipped defaults apply.
+      return normaliseBotIdentity({
+        avatarDataUrl: row?.avatar_data_url ?? DEFAULT_BOT_IDENTITY.avatarDataUrl,
+        bannerDataUrl: row?.banner_data_url ?? DEFAULT_BOT_IDENTITY.bannerDataUrl,
+        bio: row?.bio ?? DEFAULT_BOT_IDENTITY.bio,
+        status: row?.status ?? DEFAULT_BOT_IDENTITY.status,
+        activityType: row?.activity_type ?? DEFAULT_BOT_IDENTITY.activityType,
+        activityText: row?.activity_text ?? DEFAULT_BOT_IDENTITY.activityText
       });
     },
 

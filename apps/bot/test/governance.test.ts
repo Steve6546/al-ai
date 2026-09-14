@@ -104,12 +104,12 @@ const governance = readFileSync(governancePath, "utf8");
 /** Rule numbers declared in docs/GOVERNANCE.md, e.g. "1. **Slash commands only.**" */
 const declaredRules = [...governance.matchAll(/^(\d+)\.\s+\*\*/gm)].map(match => Number(match[1]));
 
-test("docs/GOVERNANCE.md declares exactly nineteen rules", () => {
-  assert.equal(declaredRules.length, 19, `found ${declaredRules.length} numbered rules`);
+test("docs/GOVERNANCE.md declares exactly twenty-three rules", () => {
+  assert.equal(declaredRules.length, 23, `found ${declaredRules.length} numbered rules`);
   assert.deepEqual(
     declaredRules,
-    Array.from({ length: 19 }, (_, index) => index + 1),
-    "rules are numbered 1..19 with no gaps"
+    Array.from({ length: 23 }, (_, index) => index + 1),
+    "rules are numbered 1..23 with no gaps"
   );
 });
 
@@ -204,22 +204,49 @@ test("no bot module reads or writes a per-guild avatar or banner", () => {
   assert.deepEqual(offenders, [], "a per-guild bot image cannot be applied, so it is never stored");
 });
 
-test("the customization sync applies the whole appearance, not just the nickname", () => {
-  const sync = files.find(file => file.relativePath === "src/runtime/customization-sync.ts");
-  assert.ok(sync, "the sync module exists");
-
-  const code = codeOf(sync!.source);
-  assert.match(code, /applyAppearance/, "the sync applies the full appearance");
-  assert.equal(/applyNickname|loadNickname/.test(code), false, "the nickname-only shape is retired");
+test("the bot never applies the appearance it does not own", () => {
+  // The writer moved. The dashboard performs the REST writes — nickname, avatar,
+  // banner, role colour, icon and bio — because it can report each field's
+  // outcome straight back to the operator. The bot keeps exactly one appearance
+  // writer, the presence, because only a live gateway connection can set a
+  // status and Discord exposes no REST route for it.
+  //
+  // This is the assertion that keeps a second writer from appearing: two writers
+  // for one field would fight, and the losing one would look like a save that
+  // did nothing.
+  const offenders = files
+    .filter(file => /applyBotAppearance|applyAppearance/.test(codeOf(file.source)))
+    .map(file => file.relativePath);
+  assert.deepEqual(offenders, [], "the appearance is applied by the dashboard, not the bot");
 });
 
-test("the bot applies the appearance through the one module allowed to touch Discord", () => {
+test("the bot's only appearance write is the presence, over the gateway", () => {
+  const sync = files.find(file => file.relativePath === "src/runtime/presence-sync.ts");
+  assert.ok(sync, "the presence sync module exists");
+
+  const code = codeOf(sync!.source);
+  assert.match(code, /normaliseBotIdentity/, "the presence is normalised with the shared helper");
+  assert.equal(/avatarDataUrl|bannerDataUrl|roleColor/.test(code), false, "the sync touches the presence only");
+
+  // The sync works on plain data and must never reach Discord itself: the
+  // gateway call belongs in the one module allowed to import discord.js.
+  assert.equal(/from\s+"discord\.js"/.test(sync!.source), false, "the sync does not reach Discord directly");
+});
+
+test("the presence is the only field the bot writes to the gateway", () => {
   const discord = files.find(file => file.relativePath === "src/lib/discord.ts");
   assert.ok(discord, "the Discord module exists");
-  assert.match(codeOf(discord!.source), /applyBotAppearance/, "the Discord call lives here, not in the sync");
 
-  // The sync must not reach Discord directly: it works on plain data.
-  const sync = files.find(file => file.relativePath === "src/runtime/customization-sync.ts")!;
-  assert.equal(/from\s+"discord\.js"/.test(sync.source), false);
+  const code = codeOf(discord!.source);
+  assert.match(code, /applyBotPresence/, "the gateway write lives here");
+
+  // A nickname or an avatar applied from the bot would be a second writer for a
+  // field the dashboard already owns.
+  assert.equal(/setNickname|setAvatar/.test(code), false, "the bot writes no guild identity");
+});
+
+test("the runtime applies the presence through the sync, not by hand", () => {
+  const index = files.find(file => file.relativePath === "src/index.ts")!;
+  assert.match(codeOf(index.source), /createPresenceSync\s*\(/, "the runtime builds the sync");
 });
 

@@ -298,3 +298,107 @@ test("the legacy allow-list column is gone, so one concept has one column", { sk
   );
   assert.deepEqual(rows.map(row => row.column_name), ["allowed_role_ids"]);
 });
+
+/* ------------------------------------------------------------------ *
+ * The global bot identity
+ *
+ * One row, shared by every guild. The behaviour that matters is that a read
+ * never has to special-case "nothing stored yet", and that the database's own
+ * CHECK constraints are what stop a value the application layer would have
+ * refused — so a hand-written INSERT cannot smuggle one in.
+ * ------------------------------------------------------------------ */
+
+/** A tiny valid PNG data URL, so no test depends on a real file. */
+const PNG_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
+
+test("the identity table has exactly one row, and the seed guarantees it", { skip }, async () => {
+  const { rows } = await pool!.query<{ count: string }>("SELECT count(*)::text AS count FROM bot_identity");
+  assert.equal(rows[0]?.count, "1", "the seed row is what lets a read skip the empty case");
+});
+
+test("the database refuses a second identity row", { skip }, async () => {
+  // The single row is structural, not a convention: without the CHECK on `id`,
+  // "the current identity" would be ambiguous and the last writer would win.
+  await assert.rejects(
+    pool!.query("INSERT INTO bot_identity (id, status) VALUES (false, 'online')"),
+    /bot_identity_id_check|duplicate key/
+  );
+});
+
+test("an identity round-trips through storage unchanged", { skip }, async () => {
+  const written = {
+    avatarDataUrl: PNG_DATA_URL,
+    bannerDataUrl: null,
+    bio: "يحرس السيرفر",
+    status: "dnd" as const,
+    activityType: "watching" as const,
+    activityText: "السجلات"
+  };
+
+  await db!.saveBotIdentity(written);
+  const read = await db!.getBotIdentity();
+
+  assert.deepEqual(read, written, "what was stored is what comes back");
+});
+
+test("an impossible identity is normalised on read rather than trusted", { skip }, async () => {
+  // Written straight to the table, bypassing the BFF. The status column accepts
+  // any text at the database level (its CHECK lists the four valid ones, so an
+  // invalid value is refused there) — proving the two layers agree.
+  await assert.rejects(
+    pool!.query("UPDATE bot_identity SET status = 'busy' WHERE id = true"),
+    /bot_identity_status_check/,
+    "the database refuses a status the contract does not have"
+  );
+});
+
+test("the identity row survives a guild deletion", { skip }, async () => {
+  // The identity belongs to no guild, so `ON DELETE CASCADE` from `guilds` must
+  // never reach it. Clearing a guild must not blank the bot's own profile.
+  await seedBotOwnedGuild();
+  await db!.saveBotIdentity({ ...(await db!.getBotIdentity()), bio: "يبقى" });
+
+  await pool!.query("DELETE FROM guilds WHERE id = $1", [GUILD_ID]);
+
+  assert.equal((await db!.getBotIdentity()).bio, "يبقى", "a guild's deletion leaves the global identity alone");
+  assert.equal(
+    (await pool!.query<{ count: string }>("SELECT count(*)::text AS count FROM bot_identity")).rows[0]?.count,
+    "1"
+  );
+});
+
+test("saveBotIdentity heals a missing seed row instead of discarding the edit", { skip }, async () => {
+  // A database restored from a partial dump can lose the seed row. An UPDATE
+  // would then affect nothing and report success — the operator's save would
+  // vanish with no error anywhere.
+  await pool!.query("DELETE FROM bot_identity");
+  await db!.saveBotIdentity({
+    avatarDataUrl: null,
+    bannerDataUrl: null,
+    bio: "استُعيد",
+    status: "idle",
+    activityType: "listening",
+    activityText: ""
+  });
+
+  assert.equal((await db!.getBotIdentity()).bio, "استُعيد");
+  assert.equal((await pool!.query<{ count: string }>("SELECT count(*)::text AS count FROM bot_identity")).rows[0]?.count, "1");
+});
+
+test("the database refuses an identity image over the ceiling", { skip }, async () => {
+  // The application validates the same thing, but the constraint is what makes
+  // it true for a row written by anything else — a migration, a psql session.
+  const oversized = `data:image/png;base64,${"A".repeat(500_001)}`;
+  await assert.rejects(
+    pool!.query("UPDATE bot_identity SET avatar_data_url = $1 WHERE id = true", [oversized]),
+    /bot_identity_avatar_size_check/
+  );
+});
+
+test("the database refuses an activity type Discord has no number for", { skip }, async () => {
+  await assert.rejects(
+    pool!.query("UPDATE bot_identity SET activity_type = 'streaming' WHERE id = true"),
+    /bot_identity_activity_type_check/,
+    "streaming is deliberately absent from the contract"
+  );
+});

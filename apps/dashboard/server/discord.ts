@@ -111,6 +111,36 @@ async function request<T>(path: string, init: RequestInit & { token: string; sch
   return (await response.json()) as T;
 }
 
+/**
+ * A Discord call that sends and receives JSON.
+ *
+ * Separate from `request` above, which posts form-encoded bodies for the OAuth
+ * token exchange. Both throw the same `DiscordApiError`, so the 401-versus-403
+ * and 429-versus-everything-else classification stays in one place rather than
+ * being re-derived by each caller.
+ *
+ * The error carries the raw body, because the appearance writer needs Discord's
+ * `code` (50013 for a missing permission, 50035 for a rejected value) to say
+ * something more useful than "the request failed".
+ */
+export async function requestJson<T>(
+  path: string,
+  init: { token: string; method: "GET" | "PATCH" | "POST"; body?: unknown }
+): Promise<T> {
+  const response = await fetch(`${API}${path}`, {
+    method: init.method,
+    headers: { Authorization: `Bot ${init.token}`, "Content-Type": "application/json" },
+    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) })
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    const retryAfter = response.status === 429 ? readRetryAfter(text, response.headers) : null;
+    throw new DiscordApiError(response.status, path, text, retryAfter);
+  }
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
 export function buildAuthorizeUrl(input: { clientId: string; redirectUri: string; state: string; scopes: readonly string[] }) {
   const params = new URLSearchParams({
     client_id: input.clientId,
@@ -598,4 +628,19 @@ export function userAvatarUrl(userId: string, avatarHash: string | null, size = 
 export function guildIconUrl(guildId: string, iconHash: string | null, size = 128): string | null {
   if (!iconHash) return null;
   return `https://cdn.discordapp.com/icons/${guildId}/${iconHash}.${assetExtension(iconHash)}?size=${size}`;
+}
+
+/**
+ * A user's profile banner, or null when they have none.
+ *
+ * Banners follow the same animated-hash rule as avatars, and asking for `.png`
+ * on an `a_` hash silently returns the first frame — so this shares
+ * `assetExtension` rather than spelling the rule a second time.
+ *
+ * Discord serves banners from a separate route and the size must be one of its
+ * powers of two; 600 is the largest width it will honour for a banner.
+ */
+export function userBannerUrl(userId: string, bannerHash: string | null, size = 600): string | null {
+  if (!bannerHash) return null;
+  return `https://cdn.discordapp.com/banners/${userId}/${bannerHash}.${assetExtension(bannerHash)}?size=${size}`;
 }

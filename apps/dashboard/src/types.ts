@@ -27,8 +27,14 @@ export { tierOrder } from "@al-ai/core/browser";
  * ------------------------------------------------------------------ */
 export type {
   ActivityEntry,
+  ActivityType,
   AntiNukeConfig,
   AntiNukeLimits,
+  AppearanceFailure,
+  AppearanceFieldName,
+  AppearanceSaveResult,
+  BotIdentitySettings,
+  BotStatus,
   ChannelOption,
   CommandCategory,
   CommandConfig,
@@ -53,6 +59,22 @@ export type {
 /* ------------------------------------------------------------------ *
  * Dashboard-only shapes
  * ------------------------------------------------------------------ */
+
+/**
+ * The bot's *resolved* global profile, for the live preview.
+ *
+ * Declared here rather than in core because it is a view, not a stored shape:
+ * `BotIdentitySettings` holds what the operator chose (which may be a data URL
+ * they just cropped), while this holds what Discord currently serves — the CDN
+ * URL, the account name. The preview needs both so it can show the last applied
+ * value before the operator touches anything.
+ */
+export type BotIdentitySnapshot = {
+  username: string;
+  avatarUrl: string | null;
+  bannerUrl: string | null;
+  bio: string;
+};
 
 export type Guild = {
   id: string;

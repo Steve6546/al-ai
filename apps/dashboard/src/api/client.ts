@@ -1,7 +1,10 @@
 import type {
   AntiNukeConfig,
   AntiNukeSettings,
+  AppearanceSaveResult,
   AuditEntry,
+  BotIdentitySettings,
+  BotIdentitySnapshot,
   ChannelOption,
   CommandCategory,
   CommandConfig,
@@ -133,9 +136,31 @@ export const customization = (guildId: string) =>
     roleIcon: RoleIconGate;
   }>(`/api/guilds/${guildId}/customization`);
 export const saveCustomization = (guildId: string, settings: CustomizationSettings) =>
-  call<{ settings: CustomizationSettings; savedAt: string }>(`/api/guilds/${guildId}/customization`, {
+  call<{ settings: CustomizationSettings; savedAt: string } & AppearanceSaveResult>(
+    `/api/guilds/${guildId}/customization`,
+    { method: "PUT", body: JSON.stringify(settings) }
+  );
+
+/* ------------------------------------------------------------------ *
+ * Settings: global bot identity
+ *
+ * Avatar, banner, bio, status and activity. Discord gives an application one of
+ * each, so these follow the bot into every server — which is why they live on
+ * their own route rather than on the per-guild customization one.
+ *
+ * `guildId` travels in the body even though the route is not guild-scoped:
+ * access is still checked per guild, and a guild ID is not a secret (it is in
+ * every invite link), so the guard has to be told which guild to check.
+ * ------------------------------------------------------------------ */
+export const botIdentity = (guildId: string) =>
+  call<{ settings: BotIdentitySettings; snapshot: BotIdentitySnapshot }>(
+    `/api/bot/identity?guildId=${encodeURIComponent(guildId)}`
+  );
+
+export const saveBotIdentity = (guildId: string, settings: BotIdentitySettings) =>
+  call<{ settings: BotIdentitySettings; savedAt: string } & AppearanceSaveResult>(`/api/bot/identity`, {
     method: "PUT",
-    body: JSON.stringify(settings)
+    body: JSON.stringify({ guildId, ...settings })
   });
 
 /* ------------------------------------------------------------------ *

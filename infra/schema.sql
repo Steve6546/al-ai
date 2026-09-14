@@ -50,7 +50,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS guild_customization (
   guild_id TEXT PRIMARY KEY REFERENCES guilds(id) ON DELETE CASCADE,
-  -- Per-guild bot nickname, applied by the bot's customization sync.
+  -- Per-guild bot nickname, applied by the dashboard over REST.
   nickname TEXT,
   -- Per-guild appearance of the AL AI role: colour plus optional icon. Discord
   -- gives a bot one global avatar, so a per-guild image is expressed through its
@@ -68,6 +68,37 @@ ALTER TABLE guild_customization ADD COLUMN IF NOT EXISTS role_icon_url TEXT;
 -- looks like a feature is worse than no column at all.
 ALTER TABLE guild_customization DROP COLUMN IF EXISTS avatar_url;
 ALTER TABLE guild_customization DROP COLUMN IF EXISTS banner_url;
+
+-- The global half of the bot's identity: one row, shared by every guild.
+--
+-- Kept out of `guild_customization` on purpose. An avatar, a banner and a
+-- presence are the same everywhere, so storing them per guild would mean N rows
+-- holding one setting — the last writer wins and the rest silently disagree with
+-- what Discord actually shows. The `id` column plus its CHECK is what makes the
+-- single row structural rather than a convention: a second row cannot be
+-- inserted, so "the current identity" is never ambiguous.
+--
+-- The images are base64 data URLs because that is the form Discord accepts. They
+-- are cropped in the browser before they get here, so the ceiling below is a
+-- guard against a hand-crafted request, not against normal use.
+CREATE TABLE IF NOT EXISTS bot_identity (
+  id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
+  avatar_data_url TEXT,
+  banner_data_url TEXT,
+  bio TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'online',
+  activity_type TEXT NOT NULL DEFAULT 'playing',
+  activity_text TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT bot_identity_avatar_size_check CHECK (avatar_data_url IS NULL OR length(avatar_data_url) <= 500000),
+  CONSTRAINT bot_identity_banner_size_check CHECK (banner_data_url IS NULL OR length(banner_data_url) <= 500000),
+  CONSTRAINT bot_identity_bio_check CHECK (length(bio) <= 400),
+  CONSTRAINT bot_identity_status_check CHECK (status IN ('online','idle','dnd','invisible')),
+  CONSTRAINT bot_identity_activity_type_check CHECK (activity_type IN ('playing','listening','watching','competing')),
+  CONSTRAINT bot_identity_activity_text_check CHECK (length(activity_text) <= 128)
+);
+-- Seed the single row so a read never has to special-case "no identity yet".
+INSERT INTO bot_identity (id) VALUES (true) ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS guild_logging (
   guild_id TEXT PRIMARY KEY REFERENCES guilds(id) ON DELETE CASCADE,

@@ -20,13 +20,22 @@ import {
   DEFAULT_LOGGING_MODE,
   describeVerification,
   deriveBotStatus,
+  imageRejectionReason,
   isLoggingMode,
   LAYER_SIGNATURE_TTL_MS,
   logDestinations,
+  MAX_ACTIVITY_TEXT_LENGTH,
+  MAX_BIO_LENGTH,
+  MAX_IMAGE_DATA_URL_LENGTH,
   MAX_NICKNAME_LENGTH,
+  normaliseActivityText,
+  normaliseBio,
+  normaliseBotIdentity,
   normaliseCommandConfig,
   normaliseHexColor,
   normaliseIconUrl,
+  normaliseImageDataUrl,
+  normaliseImageValue,
   normaliseNickname,
   normaliseRoleIds,
   normaliseTierRoles,
@@ -38,6 +47,7 @@ import {
   widgetOnlineNote,
   type ActivityEntry,
   type AntiNukeConfig,
+  type BotIdentitySettings,
   type ChannelOption,
   type CommandConfig,
   type CustomizationSettings,
@@ -71,14 +81,25 @@ import {
   invalidateGuildReadCache,
   isAuthFailure,
   isRateLimited,
+  resolveBotUserId,
   USER_PERMISSIONS,
   userAvatarUrl,
+  userBannerUrl,
   hasPermission,
   type DiscordApiError,
   type DiscordRole
 } from "./discord.js";
 import { clientKey, RequestThrottle } from "./cache.js";
 import { describeGuildAccess, isAdministrable } from "./guild-access.js";
+import {
+  applyAppearance,
+  changedAppearanceFields,
+  describeAppearanceFailure,
+  readAppearanceSnapshot,
+  type AppearanceField,
+  type AppearanceSnapshot,
+  type FieldOutcome
+} from "./appearance.js";
 
 const env = loadEnv();
 const pool = createPool(env.databaseUrl);
@@ -872,6 +893,262 @@ app.put("/api/guilds/:guildId/security/config", async (request, reply) => {
  * ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ *
+ * Appearance writes — the shared plumbing
+ *
+ * Every appearance field, per-guild or global, is written by `applyAppearance`
+ * in `appearance.ts`, and every one of them can fail on its own. Three rules
+ * hold across both scopes:
+ *
+ *  - **A failed field is reported, never swallowed.** `FieldOutcome` carries the
+ *    field name and an actionable message, so the operator learns which of six
+ *    changes Discord refused instead of watching a save report "done".
+ *  - **A save that wrote nothing is not a success.** If not one field reached
+ *    Discord, the response is an error the toast can show in red; a 200 there
+ *    would be the "محفوظ ≠ منفّذ" defect in its purest form.
+ *  - **What was stored is what was applied.** The row is written from the same
+ *    values handed to Discord, so a partial failure cannot leave the database
+ *    claiming something the bot never received.
+ * ------------------------------------------------------------------ */
+
+/** True for the transport-level failures the caller must answer itself. */
+function isTokenFailure(error: unknown): boolean {
+  return isAuthFailure(error);
+}
+
+/**
+ * Answers for a Discord token that was refused, so every write path says the
+ * same thing: the credential is dead, not the request.
+ *
+ * Deliberately *not* used for 403. Discord answers 403 when the bot lacks a
+ * permission, which `describeAppearanceFailure` turns into the specific hint
+ * for that field — replacing it with a generic auth message would throw away
+ * the one piece of information that tells the operator what to fix.
+ */
+function answerBotTokenRefused(reply: FastifyReply, error: unknown) {
+  app.log.error(error, "Discord refused the bot token during an appearance write");
+  return reply.code(503).send({
+    error: "BOT_TOKEN_INVALID",
+    message: "رفض Discord توكن البوت. تحقّق من قيمة BOT_TOKEN ثم أعد تشغيل الخدمة."
+  });
+}
+
+/** The body shape every appearance save answers with. */
+type AppearanceSaveResponse = {
+  savedAt: string;
+  applied: AppearanceField[];
+  failed: Extract<FieldOutcome, { ok: false }>[];
+};
+
+/**
+ * Runs a plan and turns its outcomes into a response.
+ *
+ * A partial failure is a 200 whose `failed` array is not empty: the fields that
+ * succeeded really are saved, and answering 500 would tell the operator their
+ * whole edit was lost when most of it was not. Only a save where *nothing*
+ * landed — and something was attempted — becomes an error.
+ */
+function appearanceResponse(
+  reply: FastifyReply,
+  outcomes: FieldOutcome[],
+  attempted: AppearanceField[],
+  successMessage: string
+): AppearanceSaveResponse | undefined {
+  const failed = outcomes.filter((outcome): outcome is Extract<FieldOutcome, { ok: false }> => !outcome.ok);
+  const applied = outcomes.filter(outcome => outcome.ok).map(outcome => outcome.field);
+
+  if (attempted.length > 0 && applied.length === 0) {
+    const first = failed[0];
+    return reply.code(first.code === "RATE_LIMITED" ? 429 : 502).send({
+      error: first.code,
+      message: first.message,
+      failed
+    }) as unknown as undefined;
+  }
+
+  app.log.info({ applied, failed: failed.map(entry => entry.code) }, successMessage);
+  return { savedAt: new Date().toISOString(), applied, failed };
+}
+
+/* ------------------------------------------------------------------ *
+ * Global bot identity — avatar, banner, bio, presence
+ *
+ * The half of the appearance that is the same in every guild. Reading and
+ * writing need no guild at all, which is why this route lives under
+ * `/api/bot/identity` rather than nested inside a guild: an avatar that only
+ * changed for one server would be the fake setting this project removed.
+ *
+ * The tier check still needs a guild — "may this account edit AL AI's own
+ * profile?" is a question about standing somewhere — so the write takes an
+ * optional `guildId` and resolves the caller's tier inside it. It asks for the
+ * admin tier rather than owner because an Administrator already reaches this
+ * screen, and the write is reversible from the same form: the worst an admin
+ * can do here is change a picture and a status back.
+ * ------------------------------------------------------------------ */
+
+/** The fields the global form owns. Presence is excluded: see the PUT route. */
+const GLOBAL_APPEARANCE_FIELDS = new Set<AppearanceField>(["avatarDataUrl", "bannerDataUrl", "bio"]);
+
+app.get("/api/bot/identity", async (request, reply) => {
+  const session = await readSession(db, request as unknown as { headers: Record<string, unknown> });
+  if (!session) {
+    return reply.code(401).send({ error: "UNAUTHENTICATED", message: "الجلسة منتهية أو غير موجودة. سجّل الدخول عبر Discord." });
+  }
+
+  const identity = await db.getBotIdentity();
+
+  // The bot's own snowflake, needed to build its CDN avatar address — Discord
+  // serves avatars from `/avatars/{user_id}/{hash}`, so a hash alone is not
+  // enough to address one. Memoised for the life of the process by
+  // `resolveBotUserId`, so this costs nothing after the first call.
+  const botUserId = env.botToken ? await resolveBotUserId(env.botToken).catch(() => null) : null;
+
+  // Advisory, exactly like the per-guild screen's reads. A Discord outage must
+  // not stop the operator from seeing and editing the stored identity, so every
+  // read degrades to "unknown" and an unknown never becomes a warning.
+  const live: AppearanceSnapshot | null = env.botToken
+    ? await readAppearanceSnapshot(env.botToken).catch(() => null)
+    : null;
+
+  // Discord returns hashes, never URLs. Resolved here so the browser never
+  // assembles a CDN address and can never get the animated-asset extension or
+  // the size parameter wrong. Without the bot's ID there is no address to
+  // build, so the fields are null rather than a URL pointing at nothing.
+  const snapshot =
+    live && botUserId
+      ? {
+          username: live.username,
+          bio: live.bio,
+          avatarUrl: userAvatarUrl(botUserId, live.avatar),
+          bannerUrl: userBannerUrl(botUserId, live.banner)
+        }
+      : null;
+
+  return { identity, snapshot };
+});
+
+app.put("/api/bot/identity", async (request, reply) => {
+  const body = request.body as (Partial<BotIdentitySettings> & { guildId?: unknown }) | undefined;
+
+  // The tier is resolved in the guild the caller is looking at. It cannot come
+  // from the body as a claim — only as a *location* to check.
+  const guildId = normaliseSnowflake(body?.guildId);
+  if (!guildId) {
+    return reply.code(400).send({
+      error: "GUILD_ID_REQUIRED",
+      message: "أرسل معرّف السيرفر الذي تُعدّ منه الهوية العالمية، ليُتحقق من صلاحيتك فيه."
+    });
+  }
+
+  const context = await requireTierForGuild(request, reply, guildId, "admin");
+  if (!context) return;
+
+  const previous = await db.getBotIdentity();
+
+  // Rejected rather than silently dropped. An image that failed validation and
+  // became `null` would *wipe* the avatar the operator meant to replace — the
+  // database would agree, the form would look saved, and the picture would be
+  // gone. So a value that was sent and did not survive is a 400.
+  if (body?.avatarDataUrl) {
+    if (!normaliseImageDataUrl(body.avatarDataUrl)) {
+      return reply.code(400).send({
+        error: "INVALID_AVATAR",
+        message:
+          imageRejectionReason(body.avatarDataUrl) === "TOO_LARGE"
+            ? `حجم الصورة يتجاوز الحد المسموح (${Math.round(MAX_IMAGE_DATA_URL_LENGTH / 1000)} كيلوبايت تقريباً). قصّها أو صغّرها ثم أعد المحاولة.`
+            : "صيغة الصورة غير مدعومة. استخدم PNG أو JPEG أو WEBP أو GIF."
+      });
+    }
+  }
+  if (body?.bannerDataUrl) {
+    if (!normaliseImageDataUrl(body.bannerDataUrl)) {
+      return reply.code(400).send({
+        error: "INVALID_BANNER",
+        message:
+          imageRejectionReason(body.bannerDataUrl) === "TOO_LARGE"
+            ? `حجم البانر يتجاوز الحد المسموح (${Math.round(MAX_IMAGE_DATA_URL_LENGTH / 1000)} كيلوبايت تقريباً). قصّه أو صغّره ثم أعد المحاولة.`
+            : "صيغة صورة البانر غير مدعومة. استخدم PNG أو JPEG أو WEBP أو GIF."
+      });
+    }
+  }
+  // A bio that is too long is truncated by `normaliseBio`, so the raw length is
+  // checked first — truncating here would hide the mistake instead of reporting it.
+  const rawBio = typeof body?.bio === "string" ? body.bio.trim() : "";
+  if (rawBio.length > MAX_BIO_LENGTH) {
+    return reply.code(400).send({ error: "INVALID_BIO", message: `النبذة يجب ألا تتجاوز ${MAX_BIO_LENGTH} حرفاً.` });
+  }
+  const rawActivity = typeof body?.activityText === "string" ? body.activityText.trim() : "";
+  if (rawActivity.length > MAX_ACTIVITY_TEXT_LENGTH) {
+    return reply.code(400).send({
+      error: "INVALID_ACTIVITY",
+      message: `نص النشاط يجب ألا يتجاوز ${MAX_ACTIVITY_TEXT_LENGTH} حرفاً.`
+    });
+  }
+
+  const next = normaliseBotIdentity({
+    // Fields absent from the body keep their stored value: a PUT that only
+    // carries the presence must not clear the avatar as a side effect of
+    // `undefined` normalising to null.
+    avatarDataUrl: body?.avatarDataUrl === undefined ? previous.avatarDataUrl : body.avatarDataUrl,
+    bannerDataUrl: body?.bannerDataUrl === undefined ? previous.bannerDataUrl : body.bannerDataUrl,
+    bio: body?.bio === undefined ? previous.bio : body.bio,
+    status: body?.status === undefined ? previous.status : body.status,
+    activityType: body?.activityType === undefined ? previous.activityType : body.activityType,
+    activityText: body?.activityText === undefined ? previous.activityText : body.activityText
+  });
+
+  if (!env.botToken) {
+    return reply.code(503).send({ error: "BOT_NOT_CONFIGURED", message: "البوت غير مهيأ لتعديل هويته." });
+  }
+
+  const outcomes: FieldOutcome[] = [];
+  try {
+    // Only the three fields this route can reach Discord with. The presence is
+    // still stored below, but `applyAppearance` deliberately does not write it:
+    // a status lives on the gateway, so this is the one value whose writer is
+    // the bot. Claiming it here would be the fourth column of a promise nobody
+    // keeps.
+    outcomes.push(
+      ...(await applyAppearance({
+        token: env.botToken,
+        guildId,
+        previous: { customization: await db.getCustomization(guildId), identity: previous },
+        next: { customization: await db.getCustomization(guildId), identity: next }
+      }))
+    );
+  } catch (error) {
+    if (isTokenFailure(error)) return answerBotTokenRefused(reply, error);
+    app.log.error(error, "Appearance write failed before any field was attempted");
+    return reply.code(503).send({ error: "DISCORD_UNAVAILABLE", message: "تعذّر الوصول إلى Discord. أعد المحاولة." });
+  }
+
+  const attempted = outcomes.map(outcome => outcome.field).filter(field => GLOBAL_APPEARANCE_FIELDS.has(field));
+
+  // Storage happens even when Discord refused: the stored row is what the bot
+  // reads on its next tick, and a rate limit is momentary. Refusing to store
+  // would make the operator retype an image that `applyAppearance` may well
+  // accept a second later. The response says plainly what did not land, so
+  // "stored" and "applied" never get conflated.
+  await db.saveBotIdentity(next);
+
+  const response = appearanceResponse(reply, outcomes, attempted, "Global bot identity saved");
+  if (!response) return;
+
+  await appendAudit(db, env, {
+    guildId,
+    severity: "warning",
+    eventId: "bot.command-success",
+    actorId: context.session!.discordUserId,
+    payload: {
+      action: "bot.identity.save",
+      applied: response.applied,
+      failed: response.failed.map(entry => entry.code)
+    }
+  });
+
+  return { identity: next, ...response };
+});
+
+/* ------------------------------------------------------------------ *
  * Customization — the bot's per-guild identity
  *
  * Discord gives an application one global avatar, so this screen only ever
@@ -941,9 +1218,18 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
     return reply.code(400).send({ error: "INVALID_ROLE_COLOR", message: "لون الرتبة يجب أن يكون بصيغة #RRGGBB." });
   }
 
-  const roleIconUrl = normaliseIconUrl(body?.roleIconUrl);
+  // A data URL (uploaded through the cropper) or an https link (a value stored
+  // by an older build). Anything else is refused rather than quietly dropped,
+  // so the operator is told instead of guessing.
+  const roleIconUrl = normaliseImageValue(body?.roleIconUrl);
   if (body?.roleIconUrl && !roleIconUrl) {
-    return reply.code(400).send({ error: "INVALID_ROLE_ICON", message: "أيقونة الرتبة يجب أن تكون رابط HTTPS صالحاً." });
+    return reply.code(400).send({
+      error: "INVALID_ROLE_ICON",
+      message:
+        imageRejectionReason(body.roleIconUrl) === "TOO_LARGE"
+          ? `حجم أيقونة الرتبة يتجاوز الحد المسموح (${Math.round(MAX_IMAGE_DATA_URL_LENGTH / 1000)} كيلوبايت تقريباً). قصّها أو صغّرها ثم أعد المحاولة.`
+          : "أيقونة الرتبة يجب أن تكون صورة مرفوعة (PNG/JPEG/WEBP/GIF) أو رابط HTTPS صالحاً."
+    });
   }
 
   // The screen locks this field below boost level 2, but that lock is a
@@ -980,12 +1266,33 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
   }
 
   const settings: CustomizationSettings = { nickname, roleColor, roleIconUrl };
+  const previous = await db.getCustomization(guildId);
+
+  // Save first, then apply. The row is the source of truth the bot reads on its
+  // sync tick, and a Discord outage must not lose an edit the operator has
+  // already made — a rate limit is momentary, a lost form is not. What each
+  // field actually did is reported below, so "محفوظ" and "منفّذ" stay distinct.
   await db.saveCustomization(guildId, settings);
 
   // AL AI's own role just changed colour, icon or name, so the memoised role
   // list every picker reads is now stale. Dropping it here is what makes the
   // tier and command screens show the new colour instead of waiting out the TTL.
   invalidateGuildReadCache(guildId);
+
+  let outcomes: FieldOutcome[] = [];
+  if (env.botToken) {
+    try {
+      outcomes = await applyAppearance({ token: env.botToken, guildId, previous: { customization: previous, identity: await db.getBotIdentity() }, next: { customization: settings, identity: await db.getBotIdentity() } });
+    } catch (error) {
+      if (isTokenFailure(error)) return answerBotTokenRefused(reply, error);
+      app.log.error(error, "Per-guild appearance write failed before any field was attempted");
+      return reply.code(503).send({ error: "DISCORD_UNAVAILABLE", message: "تعذّر الوصول إلى Discord. أعد المحاولة." });
+    }
+  } else {
+    // Nothing was attempted, so nothing is claimed. The settings are stored and
+    // the screen says so; the bot will apply them on its next tick.
+    app.log.warn({ guildId }, "BOT_TOKEN is unset; the appearance was stored but not applied");
+  }
 
   await appendAudit(db, env, {
     guildId,
@@ -994,7 +1301,16 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
     actorId: context.session!.discordUserId,
     payload: { action: "customization.save", nickname, roleColor, roleIconUrl }
   });
-  return { settings, savedAt: new Date().toISOString() };
+
+  const response = appearanceResponse(
+    reply,
+    outcomes,
+    outcomes.map(outcome => outcome.field),
+    "Per-guild customization saved"
+  );
+  if (!response) return;
+
+  return { settings, ...response };
 });
 
 /* ------------------------------------------------------------------ *

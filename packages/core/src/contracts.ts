@@ -21,15 +21,28 @@ export type PermissionStatus = {
 /* ------------------------------------------------------------------ *
  * Bot appearance
  *
- * Discord gives an application ONE global avatar and banner, so a per-guild
- * image cannot be a real feature. What *is* per-guild is the bot's nickname and
- * the colour and icon of its own role. This contract therefore describes exactly
- * three things, and every layer — the dashboard form, the BFF validator and the
- * bot's sync — reads its defaults and its normalisation rules from here.
+ * Discord splits a bot's identity across two scopes, and the contract keeps that
+ * split visible instead of pretending it is uniform:
  *
- * The previous shape carried `avatarUrl`/`bannerUrl`, which the dashboard saved
- * and the bot never read: the operator changed them and nothing happened. Those
- * fields are gone rather than merely ignored, so that mistake cannot recur.
+ *   per guild  — the nickname, and the colour and icon of the AL AI role
+ *   global     — the account's avatar and banner, the application's description
+ *                (what Discord shows as the bot's "About me"), and the gateway
+ *                presence (status + activity)
+ *
+ * Every field below is applied by exactly one writer. The dashboard performs the
+ * REST writes, because it can report the real per-field outcome straight back to
+ * the operator; the bot performs the presence write, because only a live gateway
+ * connection can set a status. A field with no writer is the defect this project
+ * treats as a bug, so there are none.
+ *
+ * The two scopes are two types and two tables — `guild_customization` for the
+ * per-guild half and `bot_identity` for the global half. One table would force a
+ * per-guild row to carry a global value, which is how N rows come to hold the
+ * same setting and quietly disagree.
+ *
+ * A previous design carried per-guild `avatarUrl`/`bannerUrl` that the dashboard
+ * saved and nothing ever read. Those names are still absent: an avatar cannot be
+ * per-guild, and the fields that exist now are global and actually applied.
  * ------------------------------------------------------------------ */
 
 /** The name AL AI shows in a guild until the operator renames it. */
@@ -37,6 +50,71 @@ export const DEFAULT_BOT_NICKNAME = "AL AI";
 
 /** Longest nickname Discord accepts. Validated here so the UI and the BFF agree. */
 export const MAX_NICKNAME_LENGTH = 32;
+
+/**
+ * The role AL AI creates for itself on join.
+ *
+ * Declared in core because two processes need the same string: the bot creates
+ * and assigns the role, and the dashboard finds it by name to colour it. Two
+ * copies of this literal would drift and the colour would land on nothing.
+ */
+export const BOT_ROLE_NAME = "AL AI";
+
+/** Discord's four presence states. */
+export type BotStatus = "online" | "idle" | "dnd" | "invisible";
+
+export const botStatuses = ["online", "idle", "dnd", "invisible"] as const;
+
+export const botStatusLabels: Record<BotStatus, string> = {
+  online: "متصل",
+  idle: "خامل",
+  dnd: "لا تُزعجني",
+  invisible: "غير ظاهر"
+};
+
+export const DEFAULT_BOT_STATUS: BotStatus = "online";
+
+/**
+ * The activity kinds the operator may choose, limited to the four the directive
+ * names. `streaming` (1) is deliberately absent: Discord only renders it as a
+ * live stream when a Twitch or YouTube URL accompanies it, so offering it
+ * without a URL would be a control that cannot show what it promises.
+ */
+export type ActivityType = "playing" | "listening" | "watching" | "competing";
+
+export const activityTypes = ["playing", "listening", "watching", "competing"] as const;
+
+export const activityTypeLabels: Record<ActivityType, string> = {
+  playing: "يلعب",
+  listening: "يستمع إلى",
+  watching: "يشاهد",
+  competing: "يتنافس في"
+};
+
+/** Discord's own numbers for the activity kinds. */
+export const activityTypeNumbers: Record<ActivityType, number> = {
+  playing: 0,
+  listening: 2,
+  watching: 3,
+  competing: 5
+};
+
+export const DEFAULT_ACTIVITY_TYPE: ActivityType = "playing";
+
+/** Discord rejects a longer activity name. */
+export const MAX_ACTIVITY_TEXT_LENGTH = 128;
+
+/** Discord's limit for an application description, which is the bot's "About me". */
+export const MAX_BIO_LENGTH = 400;
+
+/**
+ * Largest base64 data URL accepted for an avatar, a banner or a role icon.
+ *
+ * The images are cropped in the browser before they arrive, so this is a ceiling
+ * on something already small — its job is to stop a hand-crafted request from
+ * writing megabytes into a text column.
+ */
+export const MAX_IMAGE_DATA_URL_LENGTH = 500_000;
 
 export type CustomizationSettings = {
   /** Empty string means "use the application's own name" and is sent as null. */
@@ -74,8 +152,12 @@ export function normaliseHexColor(value: unknown): string | null {
 
 /**
  * Accepts only an absolute https image URL.
- * Discord rejects http and relative values, so they are refused at the edge
- * instead of being stored and failing silently inside the bot.
+ *
+ * Kept for values that genuinely arrive as links. The role icon no longer has
+ * to: it is uploaded through the cropper as a base64 data URL, because a link
+ * was the wrong shape for a field the operator fills from their own machine —
+ * it saved successfully and then broke whenever the host went away, with
+ * nothing on the screen to say so.
  */
 export function normaliseIconUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -90,6 +172,76 @@ export function normaliseIconUrl(value: unknown): string | null {
 }
 
 /**
+ * An image the bot will draw: either an uploaded data URL or an https link.
+ *
+ * Order matters conceptually as well as practically — the data URL form is
+ * checked first because that is what the cropper produces, and an https link
+ * remains supported so a value stored by an older build keeps working instead
+ * of being silently cleared on the next save.
+ *
+ * Returns null for anything unusable, and callers must distinguish "absent"
+ * from "rejected": storing null for a value that failed would wipe the picture
+ * the operator meant to replace.
+ */
+export function normaliseImageValue(value: unknown): string | null {
+  return normaliseImageDataUrl(value) ?? normaliseIconUrl(value);
+}
+
+/**
+ * Only a base64 image data URL, within the size ceiling.
+ *
+ * The type list is closed on purpose: Discord accepts PNG, JPEG, WEBP and GIF,
+ * and a `data:text/html` or `data:image/svg+xml` value is either useless there or
+ * an injection waiting to happen if it is ever rendered back.
+ *
+ * Returns null for anything unusable. Callers must distinguish "absent" from
+ * "rejected" — silently storing null would wipe an image the operator meant to
+ * replace, so the write path refuses the request instead.
+ */
+export function normaliseImageDataUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  if (raw.length > MAX_IMAGE_DATA_URL_LENGTH) return null;
+  return /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(raw) ? raw : null;
+}
+
+/** Why an image was refused, for the operator-facing message. */
+export function imageRejectionReason(value: unknown): "TOO_LARGE" | "NOT_AN_IMAGE" | null {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  if (normaliseImageDataUrl(raw)) return null;
+  return raw.length > MAX_IMAGE_DATA_URL_LENGTH ? "TOO_LARGE" : "NOT_AN_IMAGE";
+}
+
+export function normaliseBio(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, MAX_BIO_LENGTH);
+}
+
+export function normaliseActivityText(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, MAX_ACTIVITY_TEXT_LENGTH);
+}
+
+export function isBotStatus(value: unknown): value is BotStatus {
+  return typeof value === "string" && (botStatuses as readonly string[]).includes(value);
+}
+
+export function isActivityType(value: unknown): value is ActivityType {
+  return typeof value === "string" && (activityTypes as readonly string[]).includes(value);
+}
+
+export function normaliseBotStatus(value: unknown): BotStatus {
+  return isBotStatus(value) ? value : DEFAULT_BOT_STATUS;
+}
+
+export function normaliseActivityType(value: unknown): ActivityType {
+  return isActivityType(value) ? value : DEFAULT_ACTIVITY_TYPE;
+}
+
+/**
  * Normalises a whole appearance. Used by the BFF before a write and by the bot
  * after a read, so a value can never mean two different things on the two sides.
  */
@@ -97,9 +249,164 @@ export function normaliseCustomization(input: Partial<CustomizationSettings> | n
   return {
     nickname: normaliseNickname(input?.nickname),
     roleColor: normaliseHexColor(input?.roleColor),
-    roleIconUrl: normaliseIconUrl(input?.roleIconUrl)
+    // A data URL from the cropper or an https link from a value stored earlier.
+    roleIconUrl: normaliseImageValue(input?.roleIconUrl)
   };
 }
+
+/* ------------------------------------------------------------------ *
+ * Global bot identity
+ *
+ * The counterpart to the per-guild settings above, and a separate type because
+ * it is a separate scope: Discord gives the application ONE avatar and ONE
+ * banner, and one presence shared by every guild it is in. Storing these per
+ * guild would mean N rows holding the same value, where the last writer wins and
+ * the others silently disagree — so they live in their own single-row table and
+ * this contract says so.
+ * ------------------------------------------------------------------ */
+
+export type BotIdentitySettings = {
+  /** Global account avatar as a base64 data URL, or null for Discord's default. */
+  avatarDataUrl: string | null;
+  /** Global account banner as a base64 data URL, or null. */
+  bannerDataUrl: string | null;
+  /** The application description Discord shows as the bot's "About me". */
+  bio: string;
+  status: BotStatus;
+  activityType: ActivityType;
+  /** Empty means "show no activity" rather than an activity with a blank name. */
+  activityText: string;
+};
+
+export const DEFAULT_BOT_IDENTITY: BotIdentitySettings = {
+  avatarDataUrl: null,
+  bannerDataUrl: null,
+  bio: "",
+  status: DEFAULT_BOT_STATUS,
+  activityType: DEFAULT_ACTIVITY_TYPE,
+  activityText: ""
+};
+
+/**
+ * A stored identity as it comes *out* of the database, before validation.
+ *
+ * The distinction from `BotIdentitySettings` is the whole point of this type.
+ * `normaliseBotIdentity` exists to turn unvalidated input into a valid identity,
+ * so typing its parameter as `Partial<BotIdentitySettings>` was a contradiction:
+ * it demanded a `BotStatus` and then spent its body checking whether the value
+ * was one. That mismatch is what made both database readers — the bot's and the
+ * dashboard's — fail to compile over a string that the function is designed to
+ * accept.
+ *
+ * `unknown` on the narrowed fields is deliberate rather than `string`: the point
+ * is that the caller has not validated them, and the function is what decides.
+ * Widening the parameter does not weaken the result — the return type is still
+ * a fully-validated `BotIdentitySettings`.
+ */
+export type RawBotIdentity = Partial<{
+  avatarDataUrl: unknown;
+  bannerDataUrl: unknown;
+  bio: unknown;
+  status: unknown;
+  activityType: unknown;
+  activityText: unknown;
+}>;
+
+export function normaliseBotIdentity(input: RawBotIdentity | null | undefined): BotIdentitySettings {
+  return {
+    avatarDataUrl: normaliseImageDataUrl(input?.avatarDataUrl),
+    bannerDataUrl: normaliseImageDataUrl(input?.bannerDataUrl),
+    bio: normaliseBio(input?.bio),
+    status: normaliseBotStatus(input?.status),
+    activityType: normaliseActivityType(input?.activityType),
+    activityText: normaliseActivityText(input?.activityText)
+  };
+}
+
+/**
+ * The fields the dashboard can only apply over REST, in the order the form shows
+ * them. Named here so the write path and its tests cannot disagree about which
+ * fields exist.
+ */
+export const BOT_IDENTITY_IMAGE_FIELDS = ["avatarDataUrl", "bannerDataUrl"] as const;
+
+/* ------------------------------------------------------------------ *
+ * Appearance save results
+ *
+ * An appearance save is not all-or-nothing: Discord applies each field on its
+ * own, and one refusal (a nickname the bot may not change, a rate limit on
+ * profile edits) must not discard the other five. These types are the shape
+ * both scopes answer with, declared once in core so the BFF, the two screens
+ * and their tests cannot disagree about what "saved" means.
+ *
+ * `applied` and `failed` are both reported, never inferred from one another:
+ * an empty `failed` means every attempted field landed, and an empty `applied`
+ * with a non-empty `failed` means nothing did and the save is an error.
+ * ------------------------------------------------------------------ */
+
+/** Arabic labels for the fields an operator can change, for messages. */
+export const APPEARANCE_FIELD_LABELS_AR = {
+  nickname: "الاسم المستعار",
+  avatarDataUrl: "الصورة الرمزية",
+  bannerDataUrl: "البانر",
+  bio: "النبذة التعريفية",
+  roleColor: "لون الرتبة",
+  roleIconUrl: "أيقونة الرتبة"
+} as const;
+
+export type AppearanceFieldName = keyof typeof APPEARANCE_FIELD_LABELS_AR;
+
+/** One field Discord refused, with something the operator can act on. */
+export type AppearanceFailure = {
+  field: AppearanceFieldName;
+  code: string;
+  message: string;
+};
+
+/** What a save actually did, as the toast reads it. */
+export type AppearanceSaveResult = {
+  savedAt: string;
+  /** Fields Discord accepted. The rest of the form is untouched. */
+  applied: AppearanceFieldName[];
+  /** Empty on a clean save. Never empty on a partial one. */
+  failed: AppearanceFailure[];
+};
+
+/**
+ * The sentence a toast shows after a save.
+ *
+ * Extracted so the two scopes say the same thing, and so "some fields were
+ * skipped" can never be presented as a plain success — the operator would walk
+ * away believing the whole form took effect.
+ */
+export function describeAppearanceResult(result: AppearanceSaveResult): { ok: boolean; message: string } {
+  const failedFields = result.failed.map(entry => APPEARANCE_FIELD_LABELS_AR[entry.field] ?? entry.field);
+
+  if (result.failed.length === 0) {
+    return { ok: true, message: result.applied.length === 0 ? "لا توجد تغييرات لتطبيقها." : "تم حفظ التغييرات وتطبيقها." };
+  }
+
+  if (result.applied.length === 0) {
+    return { ok: false, message: result.failed.map(entry => entry.message).join(" ") };
+  }
+
+  return {
+    ok: false,
+    message: `تم تطبيق بعض التغييرات، وتعذّر تطبيق: ${failedFields.join("، ")}. ${result.failed
+      .map(entry => entry.message)
+      .join(" ")}`
+  };
+}
+
+/** Where the bot's profile picture is expected to be square and its banner wide. */
+export const IMAGE_ASPECT_RATIOS = { avatar: 1, banner: 600 / 240, roleIcon: 1 } as const;
+
+/** The size each upload is cropped to before it is sent to Discord. */
+export const IMAGE_TARGET_SIZES = {
+  avatar: { width: 256, height: 256 },
+  banner: { width: 600, height: 240 },
+  roleIcon: { width: 128, height: 128 }
+} as const;
 
 /**
  * How the operator wants the rooms laid out.

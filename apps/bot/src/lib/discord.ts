@@ -1,4 +1,5 @@
 import {
+  ActivityType as DiscordActivityType,
   ApplicationCommandOptionType,
   AuditLogEvent,
   ChannelType,
@@ -15,8 +16,15 @@ import {
   type SlashCommandStringOption,
   type SlashCommandUserOption
 } from "discord.js";
-import type { LogDestination, Severity } from "@al-ai/core";
-import { groupPagesIntoMessages, planEmbedFields, SEVERITY_EMBED_COLOR, TIMEOUT_MAX_SECONDS } from "@al-ai/core";
+import type { ActivityType, BotStatus, LogDestination, Severity } from "@al-ai/core";
+import {
+  activityTypeNumbers,
+  BOT_ROLE_NAME,
+  groupPagesIntoMessages,
+  planEmbedFields,
+  SEVERITY_EMBED_COLOR,
+  TIMEOUT_MAX_SECONDS
+} from "@al-ai/core";
 
 // GOVERNANCE rule 2: This is the only file allowed to import discord.js.
 // Every Discord API call the bot makes must be expressed as a function here.
@@ -147,9 +155,8 @@ export async function readMemberRoleIds(client: Client, guildId: string, userId:
   return roleIds;
 }
 
-/** Name of the role AL AI creates for itself, shown next to its name in the member list. */
-export const BOT_ROLE_NAME = "AL AI";
-
+// `BOT_ROLE_NAME` lives in @al-ai/core, not here: the dashboard finds the role by
+// the same name to colour it, and two copies of the literal would drift apart.
 export type BotRoleResult = { roleId: string; created: boolean; assigned: boolean };
 
 /**
@@ -188,75 +195,35 @@ export async function ensureBotRole(client: Client, guildId: string): Promise<Bo
   return { roleId: role.id, created, assigned };
 }
 
-/** Discord's ceiling for a role icon. Anything larger is refused by the API. */
-const MAX_ROLE_ICON_BYTES = 256 * 1024;
-
 /**
- * Downloads a role icon so it can be sent to Discord.
+ * Applies the bot's global presence: its status and its activity.
  *
- * The API takes image *data*, not a link, and discord.js treats a bare string as
- * a local file path — so a URL has to be fetched here. Returns null when the
- * value cannot be used, which the caller reports rather than silently dropping.
+ * This is the one appearance field the dashboard cannot write. A status lives on
+ * the gateway connection and Discord exposes no REST route for it, so the bot
+ * reads the value from the database and sets it here.
+ *
+ * The division is deliberate and each stored field has exactly one writer: the
+ * dashboard performs the REST writes (nickname, avatar, banner, role colour, bio)
+ * because it can report their per-field outcome straight back to the operator,
+ * and the bot performs the presence write because only it holds a gateway
+ * connection. Two writers for one field would mean the two fighting.
+ *
+ * Returns false when the gateway is not ready, so the sync retries rather than
+ * recording a presence it never sent.
  */
-async function fetchRoleIcon(url: string): Promise<Buffer | null> {
-  try {
-    const response = await fetch(url, { redirect: "follow" });
-    if (!response.ok) return null;
-    if (!(response.headers.get("content-type") ?? "").startsWith("image/")) return null;
-    const buffer = Buffer.from(await response.arrayBuffer());
-    return buffer.byteLength > 0 && buffer.byteLength <= MAX_ROLE_ICON_BYTES ? buffer : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Applies the operator's per-guild appearance to Discord.
- *
- * Discord gives an application a single global avatar and banner, so the only
- * per-guild visual identity that exists is the bot's nickname plus the colour
- * and icon of its own role. All three are written here, together, because this
- * is the one place that knows how the appearance contract maps onto Discord —
- * the dashboard stores the values and never talks to Discord itself.
- *
- * Throws when Discord or the icon download refuses the change, so the sync treats
- * it as "not yet applied" and retries, rather than recording a success that never
- * happened.
- */
-export async function applyBotAppearance(
+export async function applyBotPresence(
   client: Client,
-  guildId: string,
-  appearance: { nickname: string; roleColor: string | null; roleIconUrl: string | null }
+  presence: { status: BotStatus; activityType: ActivityType; activityText: string }
 ): Promise<boolean> {
-  const guild = await client.guilds.fetch(guildId);
-  const me = await guild.members.fetchMe();
+  if (!client.isReady() || !client.user) return false;
 
-  // An empty nickname means "fall back to the application's own name", which is
-  // how Discord spells a cleared nickname.
-  await me.setNickname(appearance.nickname || null);
-
-  // The role is the only per-guild surface that can carry a colour and an icon.
-  // ensureBotRole is idempotent: it returns the existing role, and recreates it
-  // if an operator deleted the role by hand.
-  const { roleId } = await ensureBotRole(client, guildId);
-  const role = await guild.roles.fetch(roleId);
-  // The role existed a moment ago, so its disappearance is a real failure rather
-  // than a reason to report a success that never happened.
-  if (!role) throw new Error(`BOT_ROLE_MISSING:${guildId}`);
-
-  // A stored icon that cannot be downloaded is a failure, not a detail: letting
-  // it pass would leave the operator looking at a saved value with no effect.
-  let icon: Buffer | null = null;
-  if (appearance.roleIconUrl) {
-    icon = await fetchRoleIcon(appearance.roleIconUrl);
-    if (!icon) throw new Error(`ROLE_ICON_UNUSABLE:${appearance.roleIconUrl}`);
-  }
-
-  await role.edit({
-    // Colour 0 is Discord's "no colour", which is what a cleared value means.
-    colors: { primaryColor: appearance.roleColor ? Number.parseInt(appearance.roleColor.slice(1), 16) : 0 },
-    // null clears the icon, which is what an emptied field means.
-    icon
+  client.user.setPresence({
+    status: presence.status,
+    // An empty text means "no activity", not an activity with a blank name —
+    // Discord would otherwise render a bare "Playing" with nothing after it.
+    activities: presence.activityText
+      ? [{ name: presence.activityText, type: activityTypeNumbers[presence.activityType] as DiscordActivityType }]
+      : []
   });
 
   return true;

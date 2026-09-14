@@ -110,3 +110,44 @@ test("the caller's guild list is read only through loadUserGuilds", () => {
     `the only fetchUserGuilds call (line ${callSites[0]!.number}) must live inside loadUserGuilds (line ${owner}), which maps a rejected token to 401 rather than a 500`
   );
 });
+
+/* ------------------------------------------------------------------ *
+ * The global bot identity route
+ *
+ * It is the one guild-sensitive route that carries no `:guildId` in its path —
+ * the guild arrives in the body, because the identity itself belongs to no
+ * guild. That makes it invisible to the scanner above, so it is asserted here
+ * explicitly rather than left relying on a convention it does not follow.
+ * ------------------------------------------------------------------ */
+
+const identityRoute = routes.find(route => route.path === "/api/bot/identity" && route.method === "PUT");
+const identityRead = routes.find(route => route.path === "/api/bot/identity" && route.method === "GET");
+
+test("the global identity write route exists and is scanned", () => {
+  assert.ok(identityRoute, "PUT /api/bot/identity is declared");
+});
+
+test("the global identity write resolves the caller's tier in a guild from the body", () => {
+  const body = identityRoute!.body;
+
+  // The guild is a *location to check*, never a claim. The tier must be resolved
+  // server-side from it, which is what `requireTierForGuild` does — it re-reads
+  // the caller's roles from Discord rather than trusting anything sent up.
+  assert.match(body, /requireTierForGuild\(/, "the write re-resolves the tier on the server");
+  assert.match(body, /normaliseSnowflake\(body\??\.guildId\)/, "the guild id is validated before it is used");
+
+  // A route that checked only for a session would let any signed-in account
+  // rewrite the bot's profile across every guild.
+  assert.doesNotMatch(body, /const\s+\w+\s*=\s*await requireSession\(/, "a bare session check is not enough");
+});
+
+test("the global identity read requires a session", () => {
+  assert.ok(identityRead, "GET /api/bot/identity is declared");
+  assert.match(identityRead!.body, /readSession\(/, "the read is not public");
+});
+
+test("the global identity write refuses a body with no guild to authorise against", () => {
+  // Without a guild there is nowhere to resolve standing, and the honest answer
+  // is a 400 — not a default that silently grants or denies.
+  assert.match(identityRoute!.body, /GUILD_ID_REQUIRED/, "a missing guild id is refused with a reason");
+});

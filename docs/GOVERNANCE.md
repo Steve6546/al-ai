@@ -89,3 +89,32 @@ here, so this file and the source cannot drift apart.
     left dormant, because an unused credential store is a liability rather than  
     a spare part. A browser session authorises an operator; it never carries a  
     credential that can act as the bot.
+20. **Every guild-scoped route re-checks guild access on the server.** A guild ID  
+    is not a secret — it appears in every invite link — so `requireSession`  
+    alone would let any signed-in account read any guild by pasting its ID.  
+    Reads go through `requireGuildAccess`, writes through  
+    `requireTierForGuild`. The check is a *call that must be present*, which is  
+    why `route-guards.test.ts` asserts the route table textually: the failure  
+    mode is a missing guard, not a wrong result.
+21. **Session lifetime is bounded and absolute.** A session cookie is httpOnly,  
+    SameSite, and rejected past `SESSION_MAX_AGE_SECONDS` regardless of activity  
+    — there is no sliding renewal, so a stolen cookie has a fixed window. The  
+    dashboard signs a session with `SESSION_SECRET`; rotating that secret  
+    invalidates every outstanding session, which is the intended emergency lever.  
+    A cookie that fails verification yields `401 UNAUTHENTICATED` — it never buys  
+    a free pass through the throttle hook.
+22. **A failed Discord read never becomes a confident claim.** Three states must  
+    stay distinct: *true*, *false*, and *unknown*. `PermissionStatus.granted` is  
+    `boolean | null`, where `null` means the read failed. Collapsing `null` into  
+    `false` refuses an operation the bot can actually perform, and — the worse  
+    direction — a naive bitwise test reports a missing permission for a bot that  
+    holds Administrator, because `0x8` supersedes the other bits rather than  
+    expanding into them. Check `0x8` first (`hasPermission`).
+23. **Storage never contains a secret.** `.env` is never tracked and its values  
+    must not reach a committed file. Images are the one large payload the  
+    dashboard accepts, and they are bounded by  
+    `MAX_IMAGE_DATA_URL_LENGTH = 500_000`; an oversized upload is refused rather  
+    than stored. A value that is read back is normalised again on the way out, so  
+    a hand-edited row cannot inject a shape the writer would have rejected.  
+    `.workbuddy-ai/backups/` (live `pg_dump` output) and `.workbuddy-ai/preview/`  
+    (generated bundles) are git-ignored for this reason.

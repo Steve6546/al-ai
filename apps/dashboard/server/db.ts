@@ -1,6 +1,6 @@
 import pg from "pg";
 import type { AntiNukeConfig, LoggingSettings, CustomizationSettings, CommandConfig, TierRoles } from "@al-ai/core";
-import { DEFAULT_ANTI_NUKE_CONFIG, DEFAULT_CUSTOMIZATION, DEFAULT_EMBED_COLOR, DEFAULT_LOGGING_MODE, isLoggingMode, isTier, normaliseAntiNukeConfig, normaliseTierRoles, PUNISHMENT_EVENT_IDS, SESSION_MAX_AGE_SECONDS } from "@al-ai/core";
+import { DEFAULT_ANTI_NUKE_CONFIG, DEFAULT_BOT_IDENTITY, DEFAULT_CUSTOMIZATION, DEFAULT_EMBED_COLOR, DEFAULT_LOGGING_MODE, isLoggingMode, isTier, normaliseAntiNukeConfig, normaliseBotIdentity, normaliseTierRoles, PUNISHMENT_EVENT_IDS, SESSION_MAX_AGE_SECONDS, type BotIdentitySettings } from "@al-ai/core";
 
 const { Pool } = pg;
 
@@ -115,6 +115,69 @@ export function createDatabase(pool: pg.Pool) {
                role_icon_url = EXCLUDED.role_icon_url,
                updated_at = now()`,
         [guildId, settings.nickname, settings.roleColor, settings.roleIconUrl]
+      );
+    },
+
+    /**
+     * The global half of the bot's identity — one row, shared by every guild.
+     *
+     * Read through the same `normaliseBotIdentity` the bot uses, so a row written
+     * by an older build cannot mean two different things on the two sides of the
+     * database. There is no guild argument because there is no per-guild value:
+     * Discord gives an application one avatar, one banner and one presence.
+     *
+     * The seed row is created by `schema.sql`, but a read must still survive its
+     * absence — a database restored from a partial dump would otherwise throw on
+     * the first page load instead of showing the defaults.
+     */
+    async getBotIdentity(): Promise<BotIdentitySettings> {
+      const { rows } = await pool.query<{
+        avatar_data_url: string | null;
+        banner_data_url: string | null;
+        bio: string | null;
+        status: string | null;
+        activity_type: string | null;
+        activity_text: string | null;
+      }>(`SELECT avatar_data_url, banner_data_url, bio, status, activity_type, activity_text FROM bot_identity WHERE id = true`);
+      const row = rows[0];
+      return normaliseBotIdentity({
+        avatarDataUrl: row?.avatar_data_url ?? DEFAULT_BOT_IDENTITY.avatarDataUrl,
+        bannerDataUrl: row?.banner_data_url ?? DEFAULT_BOT_IDENTITY.bannerDataUrl,
+        bio: row?.bio ?? DEFAULT_BOT_IDENTITY.bio,
+        status: row?.status ?? DEFAULT_BOT_IDENTITY.status,
+        activityType: row?.activity_type ?? DEFAULT_BOT_IDENTITY.activityType,
+        activityText: row?.activity_text ?? DEFAULT_BOT_IDENTITY.activityText
+      });
+    },
+
+    /**
+     * Writes the single identity row.
+     *
+     * Upserted rather than updated, so a database whose seed row was removed
+     * heals on the next save instead of silently discarding the operator's work.
+     * The `id` column is forced to `true` and its CHECK refuses anything else,
+     * which is what keeps "the current identity" unambiguous.
+     */
+    async saveBotIdentity(settings: BotIdentitySettings) {
+      await pool.query(
+        `INSERT INTO bot_identity (id, avatar_data_url, banner_data_url, bio, status, activity_type, activity_text, updated_at)
+         VALUES (true, $1, $2, $3, $4, $5, $6, now())
+         ON CONFLICT (id) DO UPDATE
+           SET avatar_data_url = EXCLUDED.avatar_data_url,
+               banner_data_url = EXCLUDED.banner_data_url,
+               bio = EXCLUDED.bio,
+               status = EXCLUDED.status,
+               activity_type = EXCLUDED.activity_type,
+               activity_text = EXCLUDED.activity_text,
+               updated_at = now()`,
+        [
+          settings.avatarDataUrl,
+          settings.bannerDataUrl,
+          settings.bio,
+          settings.status,
+          settings.activityType,
+          settings.activityText
+        ]
       );
     },
 

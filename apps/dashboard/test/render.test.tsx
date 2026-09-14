@@ -3,18 +3,21 @@ import assert from "node:assert/strict";
 import { createElement, type ReactElement } from "react";
 import { renderToString } from "react-dom/server";
 import { ServerOff } from "lucide-react";
-import { commandCategories, commandCategoryLabels, commandFlagsFor, commandRegistry } from "@al-ai/core/browser";
+import { commandCategories, commandCategoryLabels, commandFlagsFor, commandRegistry, describeAppearanceResult } from "@al-ai/core/browser";
 import { AppShell } from "../src/components/app-shell";
+import { ColorPicker, DISCORD_ROLE_SWATCHES, contrastingText, hexToRgb, hsvToRgb, rgbToHex, rgbToHsv } from "../src/components/color-picker";
 import { EmptyState } from "../src/components/empty-state";
 import { GuildSelector } from "../src/components/guild-selector";
 import { InviteBotPanel } from "../src/components/invite-bot";
 import { LoginScreen } from "../src/components/login-screen";
 import { SaveBar } from "../src/components/save-bar";
+import { Toaster } from "../src/components/toaster";
 import { AuditView } from "../src/views/audit";
 import { DashboardView } from "../src/views/dashboard";
 import { SecurityView } from "../src/views/security";
 import { CommandsBoard, CommandsView, PresetReasons, ScopeList } from "../src/views/settings/commands";
 import { CustomizationView, HierarchyWarning } from "../src/views/settings/customization";
+import { BotLivePreview } from "../src/views/settings/bot-preview";
 import { LogsView } from "../src/views/settings/logs";
 import { RolesView } from "../src/views/settings/roles";
 import type { Guild, HealthSnapshot, SessionInfo } from "../src/types";
@@ -319,4 +322,265 @@ test("an empty preset list explains that the reason is typed by hand", () => {
   const ban = commandFlags.find(command => command.name === "ban")!;
   const html = renderToString(createElement(PresetReasons, { command: { ...ban, presetReasons: [] }, onChange: () => {} }));
   assert.match(html, /لا توجد أسباب جاهزة/);
+});
+
+/* ------------------------------------------------------------------ *
+ * The customization screen's pure pieces
+ *
+ * `CustomizationView` itself only reaches its loading state under
+ * `renderToString`, because effects never run — so the parts that actually
+ * decide what the operator sees are rendered directly, with real values.
+ * ------------------------------------------------------------------ */
+
+test("the live preview shows the nickname, the role colour and the activity", () => {
+  const html = renderToString(
+    createElement(BotLivePreview, {
+      identity: {
+        username: "AL AI",
+        avatarDataUrl: null,
+        bannerDataUrl: null,
+        bio: "يحرس هذا السيرفر",
+        status: "online",
+        activityType: "watching",
+        activityText: "السجلات"
+      },
+      guild: {
+        nickname: "الحارس",
+        roleColor: "#e91e63",
+        roleIconUrl: null,
+        guildName: "سيرفر الاختبار",
+        memberCount: 42
+      }
+    })
+  ).replace(/<!-- -->/g, "");
+
+  assert.match(html, /الحارس/, "the per-guild nickname is previewed");
+  assert.match(html, /#e91e63/i, "the chosen role colour reaches the preview");
+  assert.match(html, /السجلات/, "the activity text is previewed");
+  assert.match(html, /يشاهد/, "the activity kind is spelled out, not left as an icon");
+  assert.match(html, /يحرس هذا السيرفر/, "the bio is previewed");
+});
+
+test("the preview falls back to the account name when no nickname is set", () => {
+  const html = renderToString(
+    createElement(BotLivePreview, {
+      identity: {
+        username: "AL AI",
+        avatarDataUrl: null,
+        bannerDataUrl: null,
+        bio: "",
+        status: "online",
+        activityType: "playing",
+        activityText: ""
+      },
+      guild: { nickname: "   ", roleColor: null, roleIconUrl: null, guildName: "س", memberCount: null }
+    })
+  ).replace(/<!-- -->/g, "");
+
+  assert.match(html, /AL AI/, "a blank nickname shows the account name instead of an empty row");
+  // An empty activity must not render Discord's bare "Playing" with nothing
+  // after it, which is what sending a blank activity name would produce.
+  assert.doesNotMatch(html, /يلعب/, "no activity line is rendered when there is no activity");
+  assert.match(html, /لا يوجد نشاط ظاهر/, "the absence is stated rather than left blank");
+});
+
+test("the preview states which fields are global and which are per-guild", () => {
+  // This is the part operators get wrong, so it is asserted rather than left to
+  // a comment: the scope split has to be visible on the screen.
+  const html = renderToString(
+    createElement(BotLivePreview, {
+      identity: {
+        username: "AL AI",
+        avatarDataUrl: null,
+        bannerDataUrl: null,
+        bio: "",
+        status: "online",
+        activityType: "playing",
+        activityText: ""
+      },
+      guild: { nickname: "", roleColor: null, roleIconUrl: null, guildName: "س", memberCount: null }
+    })
+  ).replace(/<!-- -->/g, "");
+
+  assert.match(html, /عالمي \(كل السيرفرات\)/, "the global scope is named");
+  assert.match(html, /هذا السيرفر فقط/, "the per-guild scope is named");
+  assert.match(html, /الصورة الرمزية، البانر، النبذة، الحالة والنشاط/, "the global fields are listed");
+  assert.match(html, /الاسم المستعار، ولون وأيقونة رتبة AL AI/, "the per-guild fields are listed");
+});
+
+test("an animated-looking avatar value is rendered as a plain image, not a URL string", () => {
+  // The avatar is a data URL the operator just cropped, so the preview must use
+  // it directly rather than trying to resolve it as a Discord hash.
+  const dataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
+  const html = renderToString(
+    createElement(BotLivePreview, {
+      identity: {
+        username: "AL AI",
+        avatarDataUrl: dataUrl,
+        bannerDataUrl: dataUrl,
+        bio: "",
+        status: "dnd",
+        activityType: "playing",
+        activityText: ""
+      },
+      guild: { nickname: "", roleColor: null, roleIconUrl: null, guildName: "س", memberCount: null }
+    })
+  );
+
+  assert.match(html, /data:image\/png;base64/, "the cropped image is drawn");
+  assert.doesNotMatch(html, /لا يوجد بانر/, "a banner that exists is not reported as missing");
+});
+
+/* ------------------------------------------------------------------ *
+ * The colour picker
+ * ------------------------------------------------------------------ */
+
+test("the colour picker offers the swatches, a hue track and a hex field", () => {
+  const html = renderToString(createElement(ColorPicker, { value: "#e91e63", onChange: () => {} })).replace(/<!-- -->/g, "");
+
+  assert.match(html, /aria-label="اللون والتشبّع"/, "the saturation/brightness square is present");
+  assert.match(html, /aria-label="درجة اللون"/, "the hue track is present");
+  assert.match(html, /aria-label="قيمة اللون"/, "the hex field is present");
+  assert.match(html, /#e91e63/, "the current value is seeded into the hex field");
+  assert.match(html, /#1abc9c/, "the Discord swatches are offered");
+  assert.match(html, /aria-label="#e91e63"/, "the selected swatch is identifiable");
+});
+
+test("the colour picker offers a way back to Discord's default", () => {
+  // Rendered with no label override, so this pins the component's own default
+  // wording — the exact string the customization screen shows the operator.
+  const bare = renderToString(createElement(ColorPicker, { value: null, onChange: () => {} })).replace(/<!-- -->/g, "");
+  assert.match(bare, /بلا لون/, "the clear option is present even when nothing is chosen yet");
+
+  // The label is the screen's, not the component's, so it has to travel through
+  // the prop rather than being hardcoded inside the picker.
+  const labelled = renderToString(
+    createElement(ColorPicker, { value: "#e91e63", onChange: () => {}, unsetLabel: "لون Discord الافتراضي" })
+  ).replace(/<!-- -->/g, "");
+  assert.match(labelled, /لون Discord الافتراضي/, "an overriding label is honoured");
+});
+
+test("a colour converts to the exact hex the BFF accepts", () => {
+  // The round trip matters: a hue of 0 with zero saturation is black, and the
+  // hue slider must not lose the operator's chosen hue when they drag to an edge.
+  assert.equal(rgbToHex({ r: 233, g: 30, b: 99 }), "#e91e63");
+  assert.equal(rgbToHex({ r: 0, g: 0, b: 0 }), "#000000");
+  // A hand-rounded fixture is misleading here: at 340° the channels land on
+  // 30.0000, 97.6667 and 233, and 97.6667 correctly rounds down to 0x62. So the
+  // honest expectation is #e91e62 — #e91e63 is not reachable from hue 340 at all
+  // (its blue is 99, which needs a different sector). What matters is that the
+  // round trip is stable and lossless, which the reverse assertion below pins.
+  assert.equal(rgbToHex(hsvToRgb({ h: 340, s: 203 / 233, v: 233 / 255 })), "#e91e62");
+
+  // Hue wraps. 360 is the right edge of the hue track and must be red, not the
+  // last sector; a negative hue must behave the same way.
+  assert.equal(rgbToHex(hsvToRgb({ h: 360, s: 1, v: 1 })), "#ff0000", "a full turn of hue is red");
+  assert.equal(rgbToHex(hsvToRgb({ h: -60, s: 1, v: 1 })), "#ff00ff", "a negative hue wraps");
+
+  const round = rgbToHsv({ r: 233, g: 30, b: 99 });
+  // The hue is left unrounded on purpose, so it is close to 340 rather than
+  // exactly it. Pinning the exact value would re-introduce the very rounding
+  // this test exists to prevent.
+  assert.ok(Math.abs(round.h - 340) < 0.5, `the hue lands on the pink band (got ${round.h})`);
+  assert.equal(rgbToHex(hsvToRgb(round)), "#e91e63", "a hex survives an HSV round trip unchanged");
+  assert.equal(hexToRgb("#E91E63")!.r, 233, "uppercase hex parses");
+  assert.equal(hexToRgb("not a colour"), null, "a malformed value is refused rather than guessed");
+});
+
+test("every Discord swatch survives the picker's own round trip", () => {
+  // This is the failure the operator would see: the picker seeds its HSV state
+  // from the chosen hex, and every drag commits `rgbToHex(hsvToRgb(state))`.
+  // An off-by-one anywhere in that loop swaps the colour they clicked for a
+  // neighbour — a role colour that saves as something nobody chose.
+  for (const swatch of DISCORD_ROLE_SWATCHES) {
+    const rgb = hexToRgb(swatch)!;
+    assert.equal(rgbToHex(hsvToRgb(rgbToHsv(rgb))), swatch, `${swatch} survives HSV unchanged`);
+  }
+});
+
+test("text on a swatch flips to stay readable", () => {
+  assert.equal(contrastingText("#f1c40f"), "#111827", "light backgrounds get dark text");
+  assert.equal(contrastingText("#11806a"), "#ffffff", "dark backgrounds get light text");
+});
+
+/* ------------------------------------------------------------------ *
+ * Toasts
+ * ------------------------------------------------------------------ */
+
+test("a failure toast is an alert and a success toast is a status", () => {
+  // A screen reader must interrupt for a failure and must not for a success.
+  const failure = renderToString(
+    createElement(Toaster, {
+      toasts: [{ id: "1", tone: "error", title: "فشل الحفظ", description: "الصورة الرمزية: رفض Discord القيمة." }],
+      onDismiss: () => {}
+    })
+  );
+  assert.match(failure, /role="alert"/, "a failure interrupts");
+  assert.match(failure, /فشل الحفظ/, "the title is shown");
+  assert.match(failure, /الصورة الرمزية/, "the specific field is named in the detail");
+
+  const success = renderToString(
+    createElement(Toaster, { toasts: [{ id: "2", tone: "success", title: "تم الحفظ" }], onDismiss: () => {} })
+  );
+  assert.match(success, /role="status"/, "a success does not interrupt");
+});
+
+test("an empty toast stack renders nothing", () => {
+  assert.equal(renderToString(createElement(Toaster, { toasts: [], onDismiss: () => {} })), "");
+});
+
+test("a partial save is described as partial, never as a clean success", () => {
+  // The defect this guards: three fields land, the nickname is refused, and the
+  // operator walks away believing the whole form took effect.
+  const partial = describeAppearanceResult({
+    savedAt: new Date().toISOString(),
+    applied: ["avatarDataUrl", "bio"],
+    failed: [{ field: "nickname", code: "MISSING_PERMISSION", message: "الاسم المستعار: البوت يحتاج صلاحية إدارة الأسماء المستعارة." }]
+  });
+  assert.equal(partial.ok, false, "a partial save is not reported as ok");
+  assert.match(partial.message, /بعض التغييرات/, "the partial nature is stated");
+  assert.match(partial.message, /الاسم المستعار/, "the field that failed is named");
+
+  const clean = describeAppearanceResult({ savedAt: new Date().toISOString(), applied: ["nickname"], failed: [] });
+  assert.equal(clean.ok, true);
+  assert.match(clean.message, /تم حفظ التغييرات وتطبيقها/);
+
+  const nothing = describeAppearanceResult({ savedAt: new Date().toISOString(), applied: [], failed: [] });
+  assert.equal(nothing.ok, true);
+  assert.match(nothing.message, /لا توجد تغييرات/, "an untouched form does not claim to have saved something");
+});
+
+/* ------------------------------------------------------------------ *
+ * The unsaved-changes bar
+ * ------------------------------------------------------------------ */
+
+test("the save bar warns about unsaved changes and offers both actions", () => {
+  const html = renderToString(
+    createElement(SaveBar, { onSave: async () => {}, onCancel: () => {} })
+  ).replace(/<!-- -->/g, "");
+
+  assert.match(html, /حذارِ/, "the warning is present the moment there is a change");
+  assert.match(html, /تغييرات غير محفوظة/, "the warning says what the problem is");
+  assert.match(html, /حفظ التغييرات/, "the save action is offered");
+  assert.match(html, /إعادة ضبط/, "the revert action is offered");
+  assert.match(html, /fixed/, "the bar floats rather than pushing the layout");
+});
+
+test("the save bar's labels are overridable per screen", () => {
+  // The wording belongs to the screen, not the component: a form that uses
+  // "إلغاء" must be able to say so without forking the bar.
+  const html = renderToString(
+    createElement(SaveBar, {
+      onSave: async () => {},
+      onCancel: () => {},
+      message: "عدّلت شيئاً",
+      saveLabel: "خزّن",
+      cancelLabel: "تراجع"
+    })
+  ).replace(/<!-- -->/g, "");
+
+  assert.match(html, /عدّلت شيئاً/);
+  assert.match(html, /خزّن/);
+  assert.match(html, /تراجع/);
+  assert.doesNotMatch(html, /حذارِ/, "an overridden message replaces the default rather than joining it");
 });

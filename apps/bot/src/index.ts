@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import {
-  applyBotAppearance,
+  applyBotPresence,
   applyChannelAction,
   applyModeration,
   bindEvents,
@@ -42,7 +42,7 @@ import { createIntrusionDetector } from "./security/intrusion-detector.js";
 import { createAntiNukeEngine } from "./security/anti-nuke.js";
 import { guardAuditWrite } from "./security/audit-trail.js";
 import { createIntentUsageTracker } from "./compliance/intent-usage-tracker.js";
-import { createCustomizationSync } from "./runtime/customization-sync.js";
+import { createPresenceSync } from "./runtime/presence-sync.js";
 import { assertChannelsMatchSchema, loadControlPlane, undecidedSettings } from "./config/control-plane.js";
 import { startIntegrationAdapter } from "./integration-adapter.js";
 import { logEvent, type LogRuntime } from "./logging/log-router.js";
@@ -594,7 +594,7 @@ client.once("clientReady", async () => {
       .catch(() => undefined);
   }
   console.log(`AL AI intent budget: ${intentUsage.describe()}`);
-  await customization.run();
+  await presence.run();
 });
 
 /* ------------------------------------------------------------------ *
@@ -671,22 +671,24 @@ if (adapter) {
 }
 
 /* ------------------------------------------------------------------ *
- * Customization sync
+ * Presence sync
  *
- * The dashboard writes the nickname, role colour and role icon to the database;
- * the bot is what actually applies them to Discord. Polling keeps a dashboard
- * change effective without a restart, and the cache stops us re-sending a value
- * Discord already has.
+ * Status and activity are the only appearance fields the dashboard cannot apply:
+ * they live on the gateway connection, and Discord has no REST route for them.
+ * The dashboard writes them to `bot_identity`; this applies them without a
+ * restart, and the cache stops us re-sending a value the gateway already has.
+ *
+ * Everything else — nickname, avatar, banner, role colour, bio — is applied by
+ * the dashboard itself so it can report each field's result to the operator.
  * ------------------------------------------------------------------ */
-const customization = createCustomizationSync({
-  guildIds: () => [...client.guilds.cache.keys()],
-  loadAppearance: guildId => database.loadCustomization(guildId),
-  applyAppearance: (guildId, appearance) => applyBotAppearance(client, guildId, appearance),
-  onError: (guildId, error) => console.error(`AL AI could not apply the appearance for ${guildId}`, error)
+const presence = createPresenceSync({
+  loadIdentity: () => database.loadBotIdentity(),
+  applyPresence: value => applyBotPresence(client, value),
+  onError: error => console.error("AL AI could not apply the presence", error)
 });
 
-const customizationTimer = setInterval(() => void customization.run(), 60_000);
-customizationTimer.unref?.();
+const presenceTimer = setInterval(() => void presence.run(), 15_000);
+presenceTimer.unref?.();
 
 /* ------------------------------------------------------------------ *
  * Graceful shutdown
@@ -699,7 +701,7 @@ async function shutdown(signal: string) {
   supervisor.stop();
   watchdog.stop();
   clearInterval(securityProbe);
-  clearInterval(customizationTimer);
+  clearInterval(presenceTimer);
   await adapter?.close().catch(() => undefined);
   const flushed = await pipeline.flush(5_000);
   if (!flushed) console.warn("AL AI shutdown with undelivered log jobs.");
