@@ -256,6 +256,40 @@ const botGuildCache = new TtlCache<string, Set<string>>(BOT_GUILD_CACHE_MS);
 const guildChannelCache = new TtlCache<string, ChannelOption[]>(GUILD_READ_CACHE_MS);
 const guildRoleCache = new TtlCache<string, DiscordRole[]>(GUILD_READ_CACHE_MS);
 
+/**
+ * The raw `/guilds/{id}/roles` payload, shared by every reader of it.
+ *
+ * `fetchGuildRoles` memoised the *mapped* list, which was not enough: the
+ * permission check, the hierarchy check and the role picker each issue their own
+ * raw request, so the identical list was pulled from Discord three times for a
+ * single screen load. Measured before this cache existed: **one customization
+ * page load cost 7 Discord calls, three of them the same role list** — enough to
+ * trip the rate limit when an operator clicks through the tabs.
+ *
+ * The raw payload is what is shared, not the mapped one, because the two callers
+ * want different shapes: the picker wants `DiscordRole[]`, while the permission
+ * and hierarchy maths want `{ id, permissions }` and `{ id, position }`. Caching
+ * the response keeps one copy of the truth and lets each reader project it.
+ */
+type RawGuildRole = { id: string; name: string; position: number; managed: boolean; color: number; permissions: string };
+const guildRoleListCache = new TtlCache<string, RawGuildRole[]>(GUILD_READ_CACHE_MS);
+
+/**
+ * The in-flight member read per guild, so concurrent callers share one request.
+ *
+ * Deliberately narrower than the 45-second caches above. A member object is what
+ * the *permission* check reads, and a permission can be revoked in Discord at
+ * any moment — serving a 45-second-old bitfield to a write path would let the
+ * dashboard claim the bot holds a permission it has since lost. Coalescing only
+ * the in-flight request costs nothing in correctness: all callers within the
+ * same tick are answering the same question at the same instant.
+ *
+ * Without this, one screen load spent two identical member reads (the permission
+ * check and the hierarchy check race each other), which is half of why clicking
+ * through the tabs hit Discord's rate limit.
+ */
+const botMemberInFlight = new Map<string, Promise<BotMember | null>>();
+
 const BOT_GUILD_KEY = "bot-guilds";
 
 /** Drop the memoised bot guild list. Used after an invite and by tests. */
@@ -274,10 +308,24 @@ export function invalidateGuildReadCache(guildId?: string) {
   if (guildId === undefined) {
     guildChannelCache.clear();
     guildRoleCache.clear();
+    guildRoleListCache.clear();
     return;
   }
   guildChannelCache.clear(guildId);
   guildRoleCache.clear(guildId);
+  guildRoleListCache.clear(guildId);
+}
+
+/**
+ * Read-only: the guild's raw role list, shared by every reader.
+ *
+ * One request, one cache entry, three consumers. See `guildRoleListCache` above
+ * for why the raw payload is what gets cached.
+ */
+function fetchGuildRoleList(botToken: string, guildId: string): Promise<RawGuildRole[]> {
+  return guildRoleListCache.resolve(guildId, () =>
+    request<RawGuildRole[]>(`/guilds/${guildId}/roles`, { token: botToken })
+  );
 }
 
 /**
@@ -324,6 +372,18 @@ export async function fetchMemberRoleIds(botToken: string, guildId: string, user
 let cachedBotUserId: string | null = null;
 
 /**
+ * The in-flight `/users/@me` read, so concurrent callers share one request.
+ *
+ * Memoising only the *result* was not enough. On a cold cache the permission
+ * check and the hierarchy check both call this in the same tick, both see
+ * `cachedBotUserId === null`, and both issue the request — which is why one
+ * screen load was measured at **two** `GET /users/@me`. Holding the promise
+ * closes that window: the second caller awaits the first caller's promise
+ * instead of starting its own.
+ */
+let botUserIdInFlight: Promise<string> | null = null;
+
+/**
  * The bot application's own user ID.
  *
  * This is a property of the token rather than of any request, so it is memoised
@@ -331,14 +391,44 @@ let cachedBotUserId: string | null = null;
  */
 export async function resolveBotUserId(botToken: string): Promise<string> {
   if (cachedBotUserId) return cachedBotUserId;
-  const me = await request<{ id: string }>("/users/@me", { token: botToken });
-  cachedBotUserId = me.id;
-  return me.id;
+  if (botUserIdInFlight) return botUserIdInFlight;
+
+  botUserIdInFlight = (async () => {
+    const me = await request<{ id: string }>("/users/@me", { token: botToken });
+    cachedBotUserId = me.id;
+    return me.id;
+  })();
+
+  try {
+    return await botUserIdInFlight;
+  } finally {
+    // Released either way. Holding a rejected promise would poison every later
+    // call for the life of the process, which is how a single transient 401
+    // would take the dashboard down until a restart.
+    botUserIdInFlight = null;
+  }
 }
 
 /** Test seam: drop the memoised bot user ID so a fake token is re-resolved. */
 export function resetBotUserIdCache() {
   cachedBotUserId = null;
+  botUserIdInFlight = null;
+}
+
+/**
+ * Test seam: drop every memoised guild read and the in-flight coalescers.
+ *
+ * A cache that survives between tests is a correctness hazard rather than a
+ * convenience: the second test in a file sees the first test's guild roles and
+ * its assertions pass or fail for reasons that have nothing to do with the code
+ * under test. Two tests in `discord.test.ts` began failing exactly that way when
+ * the role list was first shared. Tests call this in `beforeEach`.
+ */
+export function resetGuildReadCaches() {
+  guildChannelCache.clear();
+  guildRoleCache.clear();
+  guildRoleListCache.clear();
+  botMemberInFlight.clear();
 }
 
 export type BotMember = {
@@ -359,6 +449,30 @@ export async function fetchBotMember(botToken: string, guildId: string): Promise
   const botUserId = await resolveBotUserId(botToken).catch(() => null);
   if (!botUserId) return null;
   return request<BotMember>(`/guilds/${guildId}/members/${botUserId}`, { token: botToken }).catch(() => null);
+}
+
+/**
+ * The same read, with concurrent callers sharing one request.
+ *
+ * Deliberately *not* a 45-second cache like the role and channel lists. A member
+ * object is what the permission check reads, and a permission can be revoked in
+ * Discord at any moment — answering a write path from a 45-second-old bitfield
+ * would let the dashboard claim the bot holds a permission it has since lost.
+ * Coalescing only the in-flight request costs nothing in correctness: every
+ * caller within the same tick is asking the same question at the same instant.
+ *
+ * Without this, one screen load spent two identical member reads, because the
+ * permission check and the hierarchy check race each other before either
+ * settles. That duplicate was half of why clicking through the tabs hit
+ * Discord's rate limit.
+ */
+export async function fetchBotMemberShared(botToken: string, guildId: string): Promise<BotMember | null> {
+  const running = botMemberInFlight.get(guildId);
+  if (running) return running;
+
+  const promise = fetchBotMember(botToken, guildId).finally(() => botMemberInFlight.delete(guildId));
+  botMemberInFlight.set(guildId, promise);
+  return promise;
 }
 
 /**
@@ -393,8 +507,8 @@ export async function fetchGuildChannels(botToken: string, guildId: string): Pro
  */
 export async function fetchBotPermissions(botToken: string, guildId: string): Promise<bigint | null> {
   const [member, roles] = await Promise.all([
-    fetchBotMember(botToken, guildId),
-    request<{ id: string; permissions: string }[]>(`/guilds/${guildId}/roles`, { token: botToken }).catch(() => null)
+    fetchBotMemberShared(botToken, guildId),
+    fetchGuildRoleList(botToken, guildId).catch(() => null)
   ]);
   if (!member || !roles) return null;
   return computeBasePermissions(guildId, roles, member.roles ?? []);
@@ -452,10 +566,7 @@ export type DiscordRole = {
  */
 export async function fetchGuildRoles(botToken: string, guildId: string): Promise<DiscordRole[]> {
   return guildRoleCache.resolve(guildId, async () => {
-    const roles = await request<{ id: string; name: string; position: number; managed: boolean; color: number }[]>(
-      `/guilds/${guildId}/roles`,
-      { token: botToken }
-    );
+    const roles = await fetchGuildRoleList(botToken, guildId);
     return roles
       .filter(role => !role.managed && role.id !== guildId)
       .sort((a, b) => b.position - a.position)
@@ -477,8 +588,8 @@ export async function fetchGuildRoles(botToken: string, guildId: string): Promis
  */
 export async function fetchBotHighestRolePosition(botToken: string, guildId: string) {
   const [member, roles] = await Promise.all([
-    fetchBotMember(botToken, guildId),
-    request<{ id: string; position: number }[]>(`/guilds/${guildId}/roles`, { token: botToken }).catch(() => null)
+    fetchBotMemberShared(botToken, guildId),
+    fetchGuildRoleList(botToken, guildId).catch((): RawGuildRole[] | null => null)
   ]);
   if (!member || !roles) return null;
   const byId = new Map(roles.map(role => [role.id, role.position]));
@@ -520,12 +631,12 @@ export type GuildHierarchy = {
  */
 export async function fetchGuildHierarchy(botToken: string, guildId: string): Promise<GuildHierarchy | null> {
   const [member, roles] = await Promise.all([
-    fetchBotMember(botToken, guildId),
-    request<{ id: string; position: number }[]>(`/guilds/${guildId}/roles`, { token: botToken }).catch(() => null)
+    fetchBotMemberShared(botToken, guildId),
+    fetchGuildRoleList(botToken, guildId).catch((): RawGuildRole[] | null => null)
   ]);
   if (!member || !roles) return null;
 
-  const rolePositions = new Map(roles.map(role => [role.id, role.position]));
+  const rolePositions = new Map(roles.map(role => [role.id, role.position] as const));
   // `@everyone` is not listed in a member's role array, so an empty result means
   // the bot holds no role — position 0, which every configured role outranks.
   const positions = (member.roles ?? []).map(id => rolePositions.get(id) ?? 0);

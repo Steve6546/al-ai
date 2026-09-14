@@ -3,8 +3,12 @@ import assert from "node:assert/strict";
 import {
   fetchBotHighestRolePosition,
   fetchBotPermissions,
+  fetchGuildChannels,
   fetchGuildHierarchy,
-  resetBotUserIdCache
+  fetchGuildPremiumTier,
+  fetchGuildRoles,
+  resetBotUserIdCache,
+  resetGuildReadCaches
 } from "../server/discord.js";
 import { botIdentityPermissionStatus } from "../server/authorization.js";
 
@@ -58,6 +62,11 @@ beforeEach(() => {
   calls = [];
   routes = [];
   resetBotUserIdCache();
+  // The role list and the bot's member object are now memoised across callers —
+  // which is the fix for the rate limit, but it also means one test's guild
+  // roles would leak into the next test's assertions. Clearing here keeps each
+  // case independent.
+  resetGuildReadCaches();
 });
 
 /** The happy path: the bot resolves its own ID and holds one role. */
@@ -71,7 +80,13 @@ function happyRoutes(rolePosition: number, rolePermissions: string) {
     {
       match: `/guilds/${GUILD_ID}/roles`,
       respond: json([{ id: ADMIN_ROLE_ID, position: rolePosition, permissions: rolePermissions }])
-    }
+    },
+    // The more specific sub-paths must come *before* the bare guild URL: the
+    // harness matches with `includes`, so `/guilds/{id}` would otherwise swallow
+    // `/guilds/{id}/channels` and hand the channel reader a guild object.
+    { match: `/guilds/${GUILD_ID}/channels`, respond: json([]) },
+    // The guild object itself, which the premium-tier read (`/guilds/{id}`) uses.
+    { match: `/guilds/${GUILD_ID}`, respond: json({ premium_tier: 2 }) }
   ];
 }
 
@@ -211,4 +226,71 @@ test("base permissions include @everyone and ignore roles the bot does not hold"
 
   // 64 (@everyone's ADD_REACTIONS) | 8 (the held role) — the unheld role's 32 is out.
   assert.equal(await fetchBotPermissions("token", GUILD_ID), 72n);
+});
+
+/* ------------------------------------------------------------------ *
+ * The rate limit: one screen load must not repeat an identical read
+ *
+ * This is the test that would have caught the 429 the operator actually saw.
+ * A customization page load used to spend **seven** Discord calls, three of them
+ * the same `/guilds/{id}/roles` list and two the same member object, because the
+ * permission check, the hierarchy check and the role picker each made their own
+ * request. Clicking through the tabs then tripped Discord's limit and the screen
+ * showed a bare 429.
+ *
+ * The failure mode is a *count*, not an error, so nothing about the old code
+ * looked broken — which is exactly why it is pinned here.
+ * ------------------------------------------------------------------ */
+
+test("a customization screen load reads each Discord endpoint once", async () => {
+  routes = happyRoutes(7, "8");
+
+  // The route's own Promise.all: permissions, premium tier and hierarchy fire
+  // together, which is the shape that produced the duplicate reads.
+  await Promise.all([
+    botIdentityPermissionStatus("token", GUILD_ID),
+    fetchGuildPremiumTier("token", GUILD_ID),
+    fetchGuildHierarchy("token", GUILD_ID)
+  ]);
+  // Then the role list the pickers ask for, which is the same list again.
+  await Promise.all([fetchGuildRoles("token", GUILD_ID), fetchGuildChannels("token", GUILD_ID)]);
+
+  const countOf = (fragment: string) => calls.filter(call => call.url.includes(fragment)).length;
+
+  assert.equal(countOf(`/guilds/${GUILD_ID}/roles`), 1, "the role list is fetched once, not once per consumer");
+  assert.equal(countOf("/members/"), 1, "the bot's member object is fetched once, not once per consumer");
+  assert.equal(countOf("/users/@me"), 1, "the bot's own id is resolved once, not once per concurrent caller");
+});
+
+test("concurrent callers share one member read rather than racing", async () => {
+  // Both of these read the bot's member object. Fired together, they used to
+  // issue two identical requests because neither had resolved when the other
+  // checked the cache.
+  routes = happyRoutes(7, "8");
+
+  await Promise.all([fetchBotPermissions("token", GUILD_ID), fetchGuildHierarchy("token", GUILD_ID)]);
+
+  assert.equal(
+    calls.filter(call => call.url.includes("/members/")).length,
+    1,
+    "the second caller must await the first caller's request, not start its own"
+  );
+});
+
+test("the shared role list still reports each consumer's own answer", async () => {
+  // Sharing the request must not mean sharing the *shape*: the picker wants
+  // colours and names, the permission check wants the bitfield, the hierarchy
+  // wants positions. All three read the one cached payload.
+  routes = happyRoutes(7, "8");
+
+  const [roles, bits, hierarchy] = await Promise.all([
+    fetchGuildRoles("token", GUILD_ID),
+    fetchBotPermissions("token", GUILD_ID),
+    fetchGuildHierarchy("token", GUILD_ID)
+  ]);
+
+  assert.equal(roles.length, 1, "the picker still gets its mapped role list");
+  assert.equal(roles[0]!.position, 7, "with the position Discord reported");
+  assert.equal(bits, 8n, "the permission check still unions the role's bits");
+  assert.equal(hierarchy?.botPosition, 7, "the hierarchy still finds the bot's highest role");
 });

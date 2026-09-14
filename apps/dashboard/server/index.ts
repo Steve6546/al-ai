@@ -1023,7 +1023,12 @@ app.get("/api/bot/identity", async (request, reply) => {
         }
       : null;
 
-  return { identity, snapshot };
+  // `settings` rather than `identity`, matching every other settings route in
+  // this file. The dashboard's client reads `result.settings`, so the earlier
+  // name was a silent contract break: the screen crashed on a null draft
+  // (`Object.keys(null)`) rather than showing an error, because the response
+  // was a perfectly valid 200 carrying a key nobody looked at.
+  return { settings: identity, snapshot };
 });
 
 app.put("/api/bot/identity", async (request, reply) => {
@@ -1145,7 +1150,8 @@ app.put("/api/bot/identity", async (request, reply) => {
     }
   });
 
-  return { identity: next, ...response };
+  // `settings` for the reason given on the GET route above: one key, everywhere.
+  return { settings: next, ...response };
 });
 
 /* ------------------------------------------------------------------ *
