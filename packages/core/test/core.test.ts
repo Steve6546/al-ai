@@ -4,19 +4,25 @@ import {
   allDestinations,
   assertDisjointTierRoles,
   assertUniqueChannelAssignment,
+  botStatusDurations,
   canManage,
   decryptSecret,
   DEFAULT_BOT_NICKNAME,
   DEFAULT_CUSTOMIZATION,
   describeVerification,
+  durationToMs,
+  effectiveBotStatus,
   encryptSecret,
   eventSchema,
   eventsByCategory,
   INTERNAL_DESTINATIONS,
+  isStatusWindowExpired,
+  isTimedBotStatus,
   layerSignature,
   logDestinations,
   MAX_NICKNAME_LENGTH,
   newNonce,
+  normaliseBotIdentity,
   normaliseCustomization,
   normaliseHexColor,
   normaliseIconUrl,
@@ -290,4 +296,94 @@ test("normalising a whole appearance never invents a value the operator did not 
 test("normalising is idempotent, so a second pass cannot change a value", () => {
   const once = normaliseCustomization({ nickname: " AL AI ", roleColor: "#ABC", roleIconUrl: "https://x.example/i.png" });
   assert.deepEqual(normaliseCustomization(once), once);
+});
+
+/* ---------------- presence durations ---------------- */
+
+test("only the three statuses Discord times are timer-capable", () => {
+  // `online` is the exception on purpose: Discord's own client offers no
+  // duration sub-menu for it, so treating it as timed would put a countdown
+  // beside a state that has no concept of running out.
+  assert.equal(isTimedBotStatus("idle"), true);
+  assert.equal(isTimedBotStatus("dnd"), true);
+  assert.equal(isTimedBotStatus("invisible"), true);
+  assert.equal(isTimedBotStatus("online"), false);
+  assert.equal(isTimedBotStatus("away"), false);
+});
+
+test("each duration converts to the minutes its label promises", () => {
+  assert.equal(durationToMs("15m"), 15 * 60_000);
+  assert.equal(durationToMs("1h"), 60 * 60_000);
+  assert.equal(durationToMs("8h"), 8 * 60 * 60_000);
+  assert.equal(durationToMs("24h"), 24 * 60 * 60_000);
+  assert.equal(durationToMs("3d"), 3 * 24 * 60 * 60_000);
+  // `forever` is null, never 0: zero is a length of time that has already
+  // passed, and conflating the two would make "never ends" read as "over".
+  assert.equal(durationToMs("forever"), null);
+  assert.equal(durationToMs(null), null);
+});
+
+test("every duration option has a distinct id and a non-empty label", () => {
+  const ids = botStatusDurations.map(duration => duration.id);
+  assert.equal(new Set(ids).size, ids.length, "ids must be unique");
+  for (const duration of botStatusDurations) {
+    assert.ok(duration.label.length > 0, `${duration.id} needs a label`);
+  }
+});
+
+test("a duration on a status Discord does not time is discarded, not stored", () => {
+  // The dangerous half is the expiry: keeping it would leave a clock counting
+  // down behind `online` and make a later `dnd` appear already expired.
+  const identity = normaliseBotIdentity({
+    status: "online",
+    statusDuration: "8h",
+    statusExpiresAt: "2030-01-01T00:00:00.000Z"
+  });
+  assert.equal(identity.statusDuration, null);
+  assert.equal(identity.statusExpiresAt, null);
+});
+
+test("forever stores the choice but no expiry, so the menu can still show it", () => {
+  const identity = normaliseBotIdentity({ status: "dnd", statusDuration: "forever", statusExpiresAt: null });
+  assert.equal(identity.statusDuration, "forever");
+  assert.equal(identity.statusExpiresAt, null);
+});
+
+test("a corrupt expiry reads as no window rather than a permanently expired one", () => {
+  const identity = normaliseBotIdentity({ status: "dnd", statusDuration: "1h", statusExpiresAt: "not a date" });
+  assert.equal(identity.statusDuration, "1h");
+  assert.equal(identity.statusExpiresAt, null);
+  assert.equal(isStatusWindowExpired(identity, Date.now()), false, "an unparseable clock is not proof of expiry");
+});
+
+test("an elapsed window reports the fallback status without rewriting the row", () => {
+  const now = Date.parse("2026-09-14T12:00:00.000Z");
+  const past = normaliseBotIdentity({
+    status: "dnd",
+    statusDuration: "1h",
+    statusExpiresAt: "2026-09-14T11:00:00.000Z"
+  });
+  const future = normaliseBotIdentity({
+    status: "dnd",
+    statusDuration: "1h",
+    statusExpiresAt: "2026-09-14T13:00:00.000Z"
+  });
+
+  assert.equal(effectiveBotStatus(past, now), "online", "a closed window falls back to online");
+  assert.equal(effectiveBotStatus(future, now), "dnd", "an open window keeps the chosen status");
+  // The stored choice survives: the screen has to show the operator what they
+  // picked, even while the effective status is the fallback.
+  assert.equal(past.status, "dnd");
+});
+
+test("a status with no duration is never expired", () => {
+  const identity = normaliseBotIdentity({ status: "invisible", statusDuration: null, statusExpiresAt: null });
+  assert.equal(isStatusWindowExpired(identity, Date.now()), false);
+  assert.equal(effectiveBotStatus(identity, Date.now()), "invisible");
+});
+
+test("an absent duration normalises to no window rather than throwing", () => {
+  const identity = normaliseBotIdentity({ status: "idle" });
+  assert.equal(identity.statusDuration, null);
+  assert.equal(identity.statusExpiresAt, null);
 });

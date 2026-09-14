@@ -332,7 +332,12 @@ test("an identity round-trips through storage unchanged", { skip }, async () => 
     bio: "يحرس السيرفر",
     status: "dnd" as const,
     activityType: "watching" as const,
-    activityText: "السجلات"
+    activityText: "السجلات",
+    // A timed status, to prove the window survives the round trip: the driver
+    // returns a TIMESTAMPTZ as a Date and the contract promises an ISO string,
+    // so this is the assertion that catches a missed conversion.
+    statusDuration: "8h" as const,
+    statusExpiresAt: "2030-01-01T00:00:00.000Z"
   };
 
   await db!.saveBotIdentity(written);
@@ -378,7 +383,9 @@ test("saveBotIdentity heals a missing seed row instead of discarding the edit", 
     bio: "استُعيد",
     status: "idle",
     activityType: "listening",
-    activityText: ""
+    activityText: "",
+    statusDuration: null,
+    statusExpiresAt: null
   });
 
   assert.equal((await db!.getBotIdentity()).bio, "استُعيد");

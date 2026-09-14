@@ -30,6 +30,7 @@ import { api } from "@/api";
 import { ColorPicker } from "@/components/color-picker";
 import { ImageCropper, ImagePickerButton, readImageFile, type CropTarget, type LoadedImage } from "@/components/image-cropper";
 import { SaveBar } from "@/components/save-bar";
+import { StatusPicker } from "@/components/status-picker";
 import { Toaster, useToasts } from "@/components/toaster";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -210,7 +211,8 @@ export function CustomizationView({ guild }: { guild: Guild }) {
       bio: source.bio,
       status: source.status,
       activityType: source.activityType,
-      activityText: source.activityText
+      activityText: source.activityText,
+      statusDuration: source.statusDuration
     };
   }, [identityDraft, savedIdentity, snapshot]);
 
@@ -367,7 +369,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                     {identityDraft?.avatarDataUrl || snapshot?.avatarUrl ? "" : "AI"}
                   </span>
                   <div className="flex flex-wrap gap-2">
-                    <ImagePickerButton label="اختيار صورة" busy={crop?.target === "avatar"} onPick={() => openPicker("avatar")} />
+                    <ImagePickerButton label="رفع صورة" busy={crop?.target === "avatar"} onPick={() => openPicker("avatar")} />
                     {identityDraft?.avatarDataUrl ? (
                       <Button type="button" variant="ghost" size="sm" onClick={() => patchIdentity({ avatarDataUrl: null })}>
                         <RotateCcw />
@@ -385,7 +387,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
               <div className="space-y-2">
                 <Label>البانر</Label>
                 <div
-                  className="relative h-20 w-full overflow-hidden rounded-lg border border-border bg-muted"
+                  className="relative aspect-[5/2] w-full overflow-hidden rounded-lg border border-border bg-muted"
                   style={
                     identityDraft?.bannerDataUrl || snapshot?.bannerUrl
                       ? { backgroundImage: `url(${identityDraft?.bannerDataUrl ?? snapshot?.bannerUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
@@ -397,7 +399,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                   ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <ImagePickerButton label="اختيار بانر" busy={crop?.target === "banner"} onPick={() => openPicker("banner")} />
+                  <ImagePickerButton label="رفع بانر" busy={crop?.target === "banner"} onPick={() => openPicker("banner")} />
                   {identityDraft?.bannerDataUrl ? (
                     <Button type="button" variant="ghost" size="sm" onClick={() => patchIdentity({ bannerDataUrl: null })}>
                       <RotateCcw />
@@ -438,18 +440,24 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <span className="text-xs text-muted-foreground">الحالة</span>
-                    <select
-                      aria-label="حالة البوت"
-                      className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
-                      value={identityDraft?.status ?? "online"}
-                      onChange={event => patchIdentity({ status: event.target.value as BotIdentitySettings["status"] })}
-                    >
-                      {botStatuses.map(status => (
-                        <option key={status} value={status}>
-                          {botStatusLabels[status]}
-                        </option>
-                      ))}
-                    </select>
+                    <div>
+                      <StatusPicker
+                        status={identityDraft?.status ?? "online"}
+                        duration={identityDraft?.statusDuration ?? null}
+                        onChange={({ status, duration }) =>
+                          patchIdentity({
+                            status,
+                            statusDuration: duration,
+                            // The expiry is a wall-clock instant, so only the
+                            // server can compute it: the client sends the choice
+                            // and the route turns it into a timestamp. Sending a
+                            // client clock would let a skewed machine set a
+                            // window that is already over.
+                            statusExpiresAt: null
+                          })
+                        }
+                      />
+                    </div>
                   </div>
                   <div className="space-y-1.5">
                     <span className="text-xs text-muted-foreground">نوع النشاط</span>

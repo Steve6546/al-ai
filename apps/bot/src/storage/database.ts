@@ -166,7 +166,9 @@ export function createBotDatabase(databaseUrl: string) {
         status: string | null;
         activity_type: string | null;
         activity_text: string | null;
-      }>(`SELECT avatar_data_url, banner_data_url, bio, status, activity_type, activity_text FROM bot_identity WHERE id = true`);
+        status_duration: string | null;
+        status_expires_at: Date | string | null;
+      }>(`SELECT avatar_data_url, banner_data_url, bio, status, activity_type, activity_text, status_duration, status_expires_at FROM bot_identity WHERE id = true`);
       const row = rows[0];
       // No row means nothing has been customised yet, so the shipped defaults apply.
       return normaliseBotIdentity({
@@ -175,7 +177,18 @@ export function createBotDatabase(databaseUrl: string) {
         bio: row?.bio ?? DEFAULT_BOT_IDENTITY.bio,
         status: row?.status ?? DEFAULT_BOT_IDENTITY.status,
         activityType: row?.activity_type ?? DEFAULT_BOT_IDENTITY.activityType,
-        activityText: row?.activity_text ?? DEFAULT_BOT_IDENTITY.activityText
+        activityText: row?.activity_text ?? DEFAULT_BOT_IDENTITY.activityText,
+        // The window matters to the gateway: it is what makes a timed status
+        // end. Omitting these two columns would leave the bot applying `dnd`
+        // forever while the dashboard showed a countdown — the duration would
+        // save and never apply.
+        statusDuration: row?.status_duration ?? DEFAULT_BOT_IDENTITY.statusDuration,
+        // `pg` returns a TIMESTAMPTZ as a Date; the contract promises an ISO
+        // string, and `normaliseBotIdentity` parses only strings.
+        statusExpiresAt:
+          row?.status_expires_at === null || row?.status_expires_at === undefined
+            ? DEFAULT_BOT_IDENTITY.statusExpiresAt
+            : new Date(row.status_expires_at).toISOString()
       });
     },
 

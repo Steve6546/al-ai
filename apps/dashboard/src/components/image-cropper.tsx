@@ -118,6 +118,12 @@ export function ImageCropper({ target, image, onApply, onCancel }: Props) {
     const drawnWidth = image.element.naturalWidth * scale;
     const drawnHeight = image.element.naturalHeight * scale;
 
+    // Canvas defaults to `imageSmoothingQuality: "low"`, which resamples with a
+    // cheap filter and is exactly what makes an upscaled banner look washed out
+    // on screen. This context only draws the preview, but the operator judges
+    // the crop by it, so it has to be as smooth as the export.
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
     context.clearRect(0, 0, canvas.width, canvas.height);
     context.drawImage(
       image.element,
@@ -147,6 +153,11 @@ export function ImageCropper({ target, image, onApply, onCancel }: Props) {
     // is scaled up to the target — one transform, no second guess at the maths.
     const factor = spec.width / frame.width;
     const scale = base * zoom;
+    // Smoothing matters most here: the crop is drawn at the target resolution
+    // (600×240 for a banner) while the preview drew it smaller, so the default
+    // low-quality filter would soften every edge in the exported image.
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
     context.drawImage(
       image.element,
       ((frame.width - image.element.naturalWidth * scale) / 2 + offset.x) * factor,

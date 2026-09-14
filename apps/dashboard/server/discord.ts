@@ -235,6 +235,42 @@ export async function fetchUserGuilds(accessToken: string) {
 }
 
 /**
+ * How long the caller's own guild list is trusted.
+ *
+ * Every guild-scoped route runs the same guard, and the guard's first question
+ * is always "which guilds does this person belong to?" — so an uncached read
+ * here meant one identical `/users/@me/guilds` request per guarded route. One
+ * customization screen load runs three of them, and clicking a tab runs them
+ * again; that is the request that actually tripped Discord's limit.
+ *
+ * Short, because a bot invited to a guild a moment ago must appear on the next
+ * deliberate look — but measured against the same 429 window Discord applies to
+ * this endpoint, which is far longer than a screen load.
+ */
+const USER_GUILD_CACHE_MS = 20_000;
+
+/**
+ * Keyed by *access token*, not by user.
+ *
+ * The token is what the request is authenticated with, so it is the only thing
+ * that can distinguish two callers' answers. Keying by user id would serve one
+ * session's guild list to another if a user re-authorised with different scopes,
+ * and keying on nothing would hand every caller the first caller's guilds.
+ */
+const userGuildCache = new TtlCache<string, DiscordUserGuild[]>(USER_GUILD_CACHE_MS);
+
+/**
+ * The caller's guild list, cached and coalesced for the life of one screen load.
+ *
+ * `TtlCache.resolve` also coalesces concurrent callers, which matters here more
+ * than the TTL: the routes a single screen fires overlap, so three callers ask
+ * this question in the same tick and must share one request rather than race.
+ */
+export function fetchUserGuildsCached(accessToken: string): Promise<DiscordUserGuild[]> {
+  return userGuildCache.resolve(accessToken, () => fetchUserGuilds(accessToken));
+}
+
+/**
  * How long the bot's guild list is trusted.
  *
  * Short on purpose: long enough to absorb a burst of refreshes, short enough
@@ -314,6 +350,22 @@ export function invalidateGuildReadCache(guildId?: string) {
   guildChannelCache.clear(guildId);
   guildRoleCache.clear(guildId);
   guildRoleListCache.clear(guildId);
+}
+
+/**
+ * Drop the memoised caller guild list.
+ *
+ * Called when a session ends, so the next sign-in cannot inherit the previous
+ * caller's guilds, and after the bot-invite callback, so a guild the bot was
+ * just added to is visible on the immediately following look rather than up to
+ * twenty seconds later.
+ */
+export function invalidateUserGuildCache(accessToken?: string) {
+  if (accessToken === undefined) {
+    userGuildCache.clear();
+    return;
+  }
+  userGuildCache.clear(accessToken);
 }
 
 /**
@@ -428,6 +480,7 @@ export function resetGuildReadCaches() {
   guildChannelCache.clear();
   guildRoleCache.clear();
   guildRoleListCache.clear();
+  userGuildCache.clear();
   botMemberInFlight.clear();
 }
 

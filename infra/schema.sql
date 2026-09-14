@@ -89,16 +89,33 @@ CREATE TABLE IF NOT EXISTS bot_identity (
   status TEXT NOT NULL DEFAULT 'online',
   activity_type TEXT NOT NULL DEFAULT 'playing',
   activity_text TEXT NOT NULL DEFAULT '',
+  status_duration TEXT,
+  status_expires_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT bot_identity_avatar_size_check CHECK (avatar_data_url IS NULL OR length(avatar_data_url) <= 500000),
   CONSTRAINT bot_identity_banner_size_check CHECK (banner_data_url IS NULL OR length(banner_data_url) <= 500000),
   CONSTRAINT bot_identity_bio_check CHECK (length(bio) <= 400),
   CONSTRAINT bot_identity_status_check CHECK (status IN ('online','idle','dnd','invisible')),
   CONSTRAINT bot_identity_activity_type_check CHECK (activity_type IN ('playing','listening','watching','competing')),
-  CONSTRAINT bot_identity_activity_text_check CHECK (length(activity_text) <= 128)
+  CONSTRAINT bot_identity_activity_text_check CHECK (length(activity_text) <= 128),
+  CONSTRAINT bot_identity_status_duration_check CHECK (status_duration IS NULL OR status_duration IN ('15m','1h','8h','24h','3d','forever'))
 );
 -- Seed the single row so a read never has to special-case "no identity yet".
 INSERT INTO bot_identity (id) VALUES (true) ON CONFLICT (id) DO NOTHING;
+
+-- Added after the table shipped. `online` has no duration in Discord's own
+-- client, so a database that predates this column simply has no window stored —
+-- which is exactly what the nullable default means. No backfill is needed, and
+-- a backfill would be wrong: inventing a duration nobody chose would put a
+-- countdown beside a status the operator never gave one to.
+ALTER TABLE bot_identity ADD COLUMN IF NOT EXISTS status_duration TEXT;
+ALTER TABLE bot_identity ADD COLUMN IF NOT EXISTS status_expires_at TIMESTAMPTZ;
+DO $$
+BEGIN
+  ALTER TABLE bot_identity ADD CONSTRAINT bot_identity_status_duration_check
+    CHECK (status_duration IS NULL OR status_duration IN ('15m','1h','8h','24h','3d','forever'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS guild_logging (
   guild_id TEXT PRIMARY KEY REFERENCES guilds(id) ON DELETE CASCADE,

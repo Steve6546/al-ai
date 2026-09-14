@@ -28,6 +28,9 @@ import {
   MAX_BIO_LENGTH,
   MAX_IMAGE_DATA_URL_LENGTH,
   MAX_NICKNAME_LENGTH,
+  durationToMs,
+  isBotStatusDuration,
+  isTimedBotStatus,
   normaliseActivityText,
   normaliseBio,
   normaliseBotIdentity,
@@ -75,7 +78,7 @@ import {
   fetchGuildRoles,
   fetchBotHighestRolePosition,
   fetchIdentity,
-  fetchUserGuilds,
+  fetchUserGuildsCached,
   fetchWidgetPresence,
   invalidateBotGuildCache,
   invalidateGuildReadCache,
@@ -181,13 +184,47 @@ async function requireSession(request: FastifyRequest, reply: FastifyReply) {
  * Every caller reads through here so the list route and the per-guild guards
  * cannot disagree about what a given failure means.
  */
+/**
+ * Turn a chosen status duration into the instant it lapses, or null.
+ *
+ * Three cases, and they are genuinely different:
+ *
+ * - **The status carries no duration.** Discord offers no sub-menu for `online`,
+ *   so there is nothing to expire and the stored expiry is cleared. Leaving a
+ *   stale timestamp here is what would make a later `dnd` appear pre-expired.
+ * - **`forever`.** A real choice with no end, stored as a null expiry. It is
+ *   *not* the same as "no duration": the popover has to show the tick beside
+ *   `دائم` when it reopens, and only a stored duration can do that.
+ * - **A real window.** Now plus the duration. Computed server-side because the
+ *   client's clock is not authoritative.
+ */
+function statusExpiryFor(
+  status: unknown,
+  duration: unknown,
+  previousExpiry: string | null,
+  now: number
+): string | null {
+  if (!isTimedBotStatus(status) || !isBotStatusDuration(duration)) return null;
+
+  const ms = durationToMs(duration);
+  if (ms === null) return null;
+
+  // Re-saving the same window without touching the duration keeps the original
+  // deadline rather than silently restarting the clock. Otherwise pressing save
+  // to change the nickname would hand the operator a fresh 8 hours, which is a
+  // change they did not ask for.
+  if (previousExpiry !== null && Date.parse(previousExpiry) > now) return previousExpiry;
+
+  return new Date(now + ms).toISOString();
+}
+
 async function loadUserGuilds(
   request: FastifyRequest,
   reply: FastifyReply,
   session: NonNullable<Awaited<ReturnType<typeof readSession>>>
 ) {
   try {
-    return await fetchUserGuilds(sessionAccessToken(session, env));
+    return await fetchUserGuildsCached(sessionAccessToken(session, env));
   } catch (error) {
     if (isAuthFailure(error)) {
       await destroySession(db, request as unknown as { headers: Record<string, unknown> }).catch(() => undefined);
@@ -1097,6 +1134,17 @@ app.put("/api/bot/identity", async (request, reply) => {
     bannerDataUrl: body?.bannerDataUrl === undefined ? previous.bannerDataUrl : body.bannerDataUrl,
     bio: body?.bio === undefined ? previous.bio : body.bio,
     status: body?.status === undefined ? previous.status : body.status,
+    // The client sends the *choice*; the expiry is derived here. A client clock
+    // can be wrong by hours, and letting it set the instant would mean a window
+    // that is already over — or one that never ends — decided by whichever
+    // machine happened to press save.
+    statusDuration: body?.statusDuration === undefined ? previous.statusDuration : body.statusDuration,
+    statusExpiresAt: statusExpiryFor(
+      body?.status === undefined ? previous.status : body.status,
+      body?.statusDuration === undefined ? previous.statusDuration : body.statusDuration,
+      previous.statusExpiresAt,
+      Date.now()
+    ),
     activityType: body?.activityType === undefined ? previous.activityType : body.activityType,
     activityText: body?.activityText === undefined ? previous.activityText : body.activityText
   });

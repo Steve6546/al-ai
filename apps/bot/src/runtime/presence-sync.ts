@@ -17,7 +17,7 @@
  * Dependencies are injected so the decision logic can be tested without Discord.
  */
 
-import { normaliseBotIdentity, type BotIdentitySettings } from "@al-ai/core";
+import { effectiveBotStatus, normaliseBotIdentity, type BotIdentitySettings } from "@al-ai/core";
 
 /** The slice of the global identity the gateway owns. */
 export type BotPresence = Pick<BotIdentitySettings, "status" | "activityType" | "activityText">;
@@ -46,7 +46,11 @@ export function createPresenceSync(deps: PresenceSyncDeps) {
         // out, so a stored value can never mean two things on the two sides.
         const identity = normaliseBotIdentity(await deps.loadIdentity());
         desired = {
-          status: identity.status,
+          // The *effective* status, not the stored one. A timed `dnd` whose
+          // window has closed must read as `online` — that is the whole point of
+          // offering a duration. The stored row keeps the operator's choice, so
+          // reopening the screen still shows what they picked.
+          status: effectiveBotStatus(identity, Date.now()),
           activityType: identity.activityType,
           activityText: identity.activityText
         };

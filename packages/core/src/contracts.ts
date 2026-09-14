@@ -75,6 +75,56 @@ export const botStatusLabels: Record<BotStatus, string> = {
 export const DEFAULT_BOT_STATUS: BotStatus = "online";
 
 /**
+ * The three statuses Discord lets you hold for a fixed window.
+ *
+ * `online` is excluded because Discord offers no sub-menu for it — picking
+ * "online for 15 minutes" is not a thing the real client can do, so offering it
+ * here would be a control Discord itself refuses.
+ */
+export const timedBotStatuses = ["idle", "dnd", "invisible"] as const;
+
+export type TimedBotStatus = (typeof timedBotStatuses)[number];
+
+export function isTimedBotStatus(value: unknown): value is TimedBotStatus {
+  return typeof value === "string" && (timedBotStatuses as readonly string[]).includes(value);
+}
+
+/**
+ * The durations Discord's duration sub-menu offers, in the order it shows them.
+ *
+ * The minutes are the source of truth and the label is derived, so a test can
+ * assert the arithmetic once instead of asserting six string constants that
+ * could each drift from the number beside them.
+ */
+export const botStatusDurations = [
+  { id: "15m", minutes: 15, label: "لمدة 15 دقيقة" },
+  { id: "1h", minutes: 60, label: "لمدة ساعة" },
+  { id: "8h", minutes: 480, label: "لمدة 8 ساعات" },
+  { id: "24h", minutes: 1440, label: "لمدة 24 ساعة" },
+  { id: "3d", minutes: 4320, label: "لمدة 3 أيام" },
+  { id: "forever", minutes: null, label: "دائم (Forever)" }
+] as const;
+
+export type BotStatusDuration = (typeof botStatusDurations)[number]["id"];
+
+export function isBotStatusDuration(value: unknown): value is BotStatusDuration {
+  return typeof value === "string" && botStatusDurations.some(duration => duration.id === value);
+}
+
+/**
+ * How long a duration lasts from now, in milliseconds, or null for "forever".
+ *
+ * `null` rather than `0` for the open-ended choice, because `0` is a length of
+ * time that has already passed — the two would be indistinguishable at every
+ * call site, and "expired immediately" is the exact opposite of "never expires".
+ */
+export function durationToMs(duration: BotStatusDuration | null): number | null {
+  if (duration === null) return null;
+  const found = botStatusDurations.find(candidate => candidate.id === duration);
+  return found?.minutes === null || found === undefined ? null : found.minutes * 60_000;
+}
+
+/**
  * The activity kinds the operator may choose, limited to the four the directive
  * names. `streaming` (1) is deliberately absent: Discord only renders it as a
  * live stream when a Twitch or YouTube URL accompanies it, so offering it
@@ -276,6 +326,31 @@ export type BotIdentitySettings = {
   activityType: ActivityType;
   /** Empty means "show no activity" rather than an activity with a blank name. */
   activityText: string;
+  /**
+   * The status durations Discord offers when you click one of the three
+   * timed states, or null for "until I change it".
+   *
+   * Discord's own client lets you hold `idle`, `dnd` or `invisible` for a fixed
+   * window — 15 minutes, an hour, and so on — and then clears it. Storing the
+   * choice is what makes the sub-menu honest: a duration the operator picks and
+   * the dashboard throws away would be a control that saves but never applies.
+   *
+   * Not every state accepts a duration. Discord only offers the sub-menu for
+   * those three; `online` has no duration and normalisation clears any value
+   * paired with it, so a stale clock can never linger behind a state that has no
+   * concept of running out.
+   */
+  statusDuration: BotStatusDuration | null;
+  /**
+   * When the timed status lapses, as an ISO-8601 instant, or null for "never".
+   *
+   * Derived from `statusDuration` when the status is written, not sent by the
+   * client: the client picks a duration, and the server owns what that means in
+   * wall-clock terms. It exists so the reader can tell a window that has passed
+   * from one still running, which is the difference between showing the operator
+   * `dnd` and showing them `online` with an explanation.
+   */
+  statusExpiresAt: string | null;
 };
 
 export const DEFAULT_BOT_IDENTITY: BotIdentitySettings = {
@@ -284,7 +359,9 @@ export const DEFAULT_BOT_IDENTITY: BotIdentitySettings = {
   bio: "",
   status: DEFAULT_BOT_STATUS,
   activityType: DEFAULT_ACTIVITY_TYPE,
-  activityText: ""
+  activityText: "",
+  statusDuration: null,
+  statusExpiresAt: null
 };
 
 /**
@@ -310,17 +387,86 @@ export type RawBotIdentity = Partial<{
   status: unknown;
   activityType: unknown;
   activityText: unknown;
+  statusDuration: unknown;
+  statusExpiresAt: unknown;
 }>;
 
+/**
+ * Resolve the timed-status pair from raw input.
+ *
+ * Both fields are decided here rather than in the route, so the bot and the
+ * dashboard cannot disagree about when a window closes. The rules:
+ *
+ * - A duration on a status Discord offers no sub-menu for is dropped, along with
+ *   its expiry. Keeping the expiry would leave a stale clock counting down
+ *   behind `online`, which has no concept of running out.
+ * - `forever` stores a duration with a null expiry: the operator made a real
+ *   choice and the sub-menu must still show it when they reopen the popover.
+ * - A missing duration stores null, which reads as "no window" — the state a
+ *   fresh install is in.
+ *
+ * An unparseable `statusExpiresAt` becomes null rather than Invalid Date: a
+ * corrupt clock must not make the status look permanently expired.
+ */
+function normaliseStatusWindow(
+  status: BotStatus,
+  duration: unknown,
+  expiresAt: unknown
+): Pick<BotIdentitySettings, "statusDuration" | "statusExpiresAt"> {
+  if (!isTimedBotStatus(status) || !isBotStatusDuration(duration)) {
+    return { statusDuration: null, statusExpiresAt: null };
+  }
+
+  const ms = durationToMs(duration);
+  if (ms === null) return { statusDuration: duration, statusExpiresAt: null };
+
+  const parsed = typeof expiresAt === "string" ? Date.parse(expiresAt) : Number.NaN;
+  return {
+    statusDuration: duration,
+    statusExpiresAt: Number.isFinite(parsed) ? new Date(parsed).toISOString() : null
+  };
+}
+
 export function normaliseBotIdentity(input: RawBotIdentity | null | undefined): BotIdentitySettings {
+  const status = normaliseBotStatus(input?.status);
   return {
     avatarDataUrl: normaliseImageDataUrl(input?.avatarDataUrl),
     bannerDataUrl: normaliseImageDataUrl(input?.bannerDataUrl),
     bio: normaliseBio(input?.bio),
-    status: normaliseBotStatus(input?.status),
+    status,
     activityType: normaliseActivityType(input?.activityType),
-    activityText: normaliseActivityText(input?.activityText)
+    activityText: normaliseActivityText(input?.activityText),
+    ...normaliseStatusWindow(status, input?.statusDuration, input?.statusExpiresAt)
   };
+}
+
+/**
+ * Whether a stored status window has already closed.
+ *
+ * The reader asks this rather than comparing timestamps itself, so the two sides
+ * cannot disagree about the boundary. A missing expiry means the window is open
+ * — either it is `forever`, or there is no window at all — and a status with no
+ * duration is never expired.
+ */
+export function isStatusWindowExpired(
+  identity: Pick<BotIdentitySettings, "statusDuration" | "statusExpiresAt">,
+  now: number
+): boolean {
+  if (identity.statusDuration === null || identity.statusExpiresAt === null) return false;
+  const expires = Date.parse(identity.statusExpiresAt);
+  return Number.isFinite(expires) && expires <= now;
+}
+
+/**
+ * The status to actually show, once an elapsed window is taken into account.
+ *
+ * A timed `dnd` whose window closed falls back to `online`, which is what
+ * Discord does when the clock runs out. The stored row is deliberately *not*
+ * rewritten on read: a read must not mutate, and the operator's chosen state is
+ * worth keeping until they change it.
+ */
+export function effectiveBotStatus(identity: BotIdentitySettings, now: number): BotStatus {
+  return isStatusWindowExpired(identity, now) ? DEFAULT_BOT_STATUS : identity.status;
 }
 
 /**

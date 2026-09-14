@@ -138,7 +138,9 @@ export function createDatabase(pool: pg.Pool) {
         status: string | null;
         activity_type: string | null;
         activity_text: string | null;
-      }>(`SELECT avatar_data_url, banner_data_url, bio, status, activity_type, activity_text FROM bot_identity WHERE id = true`);
+        status_duration: string | null;
+        status_expires_at: Date | string | null;
+      }>(`SELECT avatar_data_url, banner_data_url, bio, status, activity_type, activity_text, status_duration, status_expires_at FROM bot_identity WHERE id = true`);
       const row = rows[0];
       return normaliseBotIdentity({
         avatarDataUrl: row?.avatar_data_url ?? DEFAULT_BOT_IDENTITY.avatarDataUrl,
@@ -146,7 +148,16 @@ export function createDatabase(pool: pg.Pool) {
         bio: row?.bio ?? DEFAULT_BOT_IDENTITY.bio,
         status: row?.status ?? DEFAULT_BOT_IDENTITY.status,
         activityType: row?.activity_type ?? DEFAULT_BOT_IDENTITY.activityType,
-        activityText: row?.activity_text ?? DEFAULT_BOT_IDENTITY.activityText
+        activityText: row?.activity_text ?? DEFAULT_BOT_IDENTITY.activityText,
+        statusDuration: row?.status_duration ?? DEFAULT_BOT_IDENTITY.statusDuration,
+        // `pg` hands a TIMESTAMPTZ back as a Date, not a string, and
+        // `normaliseBotIdentity` parses only strings. Converting here keeps the
+        // contract's "ISO-8601 instant" promise true for every reader instead of
+        // letting the driver's choice leak into the shape.
+        statusExpiresAt:
+          row?.status_expires_at === null || row?.status_expires_at === undefined
+            ? DEFAULT_BOT_IDENTITY.statusExpiresAt
+            : new Date(row.status_expires_at).toISOString()
       });
     },
 
@@ -160,8 +171,8 @@ export function createDatabase(pool: pg.Pool) {
      */
     async saveBotIdentity(settings: BotIdentitySettings) {
       await pool.query(
-        `INSERT INTO bot_identity (id, avatar_data_url, banner_data_url, bio, status, activity_type, activity_text, updated_at)
-         VALUES (true, $1, $2, $3, $4, $5, $6, now())
+        `INSERT INTO bot_identity (id, avatar_data_url, banner_data_url, bio, status, activity_type, activity_text, status_duration, status_expires_at, updated_at)
+         VALUES (true, $1, $2, $3, $4, $5, $6, $7, $8, now())
          ON CONFLICT (id) DO UPDATE
            SET avatar_data_url = EXCLUDED.avatar_data_url,
                banner_data_url = EXCLUDED.banner_data_url,
@@ -169,6 +180,8 @@ export function createDatabase(pool: pg.Pool) {
                status = EXCLUDED.status,
                activity_type = EXCLUDED.activity_type,
                activity_text = EXCLUDED.activity_text,
+               status_duration = EXCLUDED.status_duration,
+               status_expires_at = EXCLUDED.status_expires_at,
                updated_at = now()`,
         [
           settings.avatarDataUrl,
@@ -176,7 +189,9 @@ export function createDatabase(pool: pg.Pool) {
           settings.bio,
           settings.status,
           settings.activityType,
-          settings.activityText
+          settings.activityText,
+          settings.statusDuration,
+          settings.statusExpiresAt
         ]
       );
     },

@@ -99,7 +99,7 @@ const navSections: { id: string; title: string | null; items: NavItem[] }[] = [
     title: "الإعدادات العامة",
     items: [
       { key: "roles", label: "رتب الإدارة والمشرفين", icon: UserCog, needs: "canManageTiers", requiresBot: true },
-      { key: "customization", label: "هوية البوت بالسيرفر", icon: Palette, needs: "canManageIdentity", requiresBot: true }
+      { key: "customization", label: "هوية البوت", icon: Palette, needs: "canManageIdentity", requiresBot: true }
     ]
   },
   {

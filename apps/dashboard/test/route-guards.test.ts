@@ -91,11 +91,17 @@ test("every guild-scoped write requires the admin tier, not merely access", () =
  * So the read has exactly one call site, inside `loadUserGuilds`, which clears
  * the dead session and answers 401. A second call site is a route that will
  * answer 500 on a dead token.
+ *
+ * The call goes through `fetchUserGuildsCached` so the same list is not pulled
+ * from Discord once per guarded route — but the cached wrapper must still be
+ * reached only from here, or the first failure mode returns along with the
+ * second. Both spellings are matched, because the invariant is "one guarded call
+ * site", not "one particular identifier".
  */
 test("the caller's guild list is read only through loadUserGuilds", () => {
   const callSites = lines
     .map((line, index) => ({ number: index + 1, text: line }))
-    .filter(entry => /fetchUserGuilds\(/.test(entry.text));
+    .filter(entry => /fetchUserGuilds(Cached)?\(/.test(entry.text));
 
   assert.equal(
     callSites.length,

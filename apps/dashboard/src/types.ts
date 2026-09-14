@@ -35,6 +35,7 @@ export type {
   AppearanceSaveResult,
   BotIdentitySettings,
   BotStatus,
+  BotStatusDuration,
   ChannelOption,
   CommandCategory,
   CommandConfig,

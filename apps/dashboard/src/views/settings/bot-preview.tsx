@@ -1,9 +1,11 @@
 import { Globe, Server } from "lucide-react";
+import { botStatusDurations } from "@al-ai/core/browser";
+import { STATUS_COLORS, StatusDot } from "@/components/status-picker";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import type { ActivityType, BotStatus } from "@/types";
+import type { ActivityType, BotStatus, BotStatusDuration } from "@/types";
 
 /**
  * A live preview of the bot as Discord will actually draw it.
@@ -26,6 +28,14 @@ export type PreviewIdentity = {
   status: BotStatus;
   activityType: ActivityType;
   activityText: string;
+  /**
+   * The chosen window, so the preview can show that a status is temporary.
+   *
+   * Optional because most callers have no window to report, and a required field
+   * would force every one of them to invent a `null` — the kind of ceremony that
+   * makes a type harder to read without making it safer.
+   */
+  statusDuration?: BotStatusDuration | null;
 };
 
 export type PreviewGuild = {
@@ -57,12 +67,21 @@ const STATUS_LABELS: Record<BotStatus, string> = {
 };
 
 /** The dot Discord paints on the avatar — same colours, same meaning. */
-const STATUS_DOTS: Record<BotStatus, string> = {
-  online: "#23a55a",
-  idle: "#f0b232",
-  dnd: "#f23f43",
-  invisible: "#80848e"
-};
+// The colours live in `status-picker.tsx` beside the glyphs that draw them.
+// A second copy here would be a second place to mistype `#23a55a`, and the
+// preview and the menu could then disagree about what "online" looks like.
+
+/**
+ * How the chosen window reads beside the status.
+ *
+ * `forever` says so rather than showing nothing, because "no window" and "an
+ * open-ended window" are different promises and the operator needs to tell them
+ * apart when checking their work.
+ */
+function durationLabel(duration: BotStatusDuration | null | undefined): string | null {
+  if (!duration) return null;
+  return botStatusDurations.find(entry => entry.id === duration)?.label ?? null;
+}
 
 export function statusLabel(status: BotStatus): string {
   return STATUS_LABELS[status] ?? STATUS_LABELS.online;
@@ -87,7 +106,7 @@ export function BotLivePreview({ identity, guild }: { identity: PreviewIdentity;
        * ---------------------------------------------------------------- */}
       <div className="overflow-hidden rounded-xl border border-border bg-card">
         <div
-          className="relative h-24 w-full"
+          className="relative aspect-[5/2] w-full"
           style={
             identity.bannerDataUrl
               ? { backgroundImage: `url(${identity.bannerDataUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
@@ -108,12 +127,18 @@ export function BotLivePreview({ identity, guild }: { identity: PreviewIdentity;
               </Avatar>
               <span
                 className="absolute end-1 bottom-1 size-5 rounded-full border-[3px] border-card"
-                style={{ backgroundColor: STATUS_DOTS[identity.status] ?? STATUS_DOTS.online }}
+                style={{ backgroundColor: STATUS_COLORS[identity.status] ?? STATUS_COLORS.online }}
                 title={statusLabel(identity.status)}
               />
             </div>
-            <Badge variant="secondary" className="mb-1">
+            <Badge variant="secondary" className="mb-1 gap-1">
+              {/* The same glyph the picker draws, so the preview cannot show a
+                  green disc for a status the menu renders as a crescent. */}
+              <StatusDot status={identity.status} size={9} maskColor="currentColor" />
               {statusLabel(identity.status)}
+              {durationLabel(identity.statusDuration) ? (
+                <span className="text-muted-foreground">· {durationLabel(identity.statusDuration)}</span>
+              ) : null}
             </Badge>
           </div>
 
@@ -154,7 +179,7 @@ export function BotLivePreview({ identity, guild }: { identity: PreviewIdentity;
             </Avatar>
             <span
               className="absolute -end-0.5 -bottom-0.5 size-3 rounded-full border-2 border-card"
-              style={{ backgroundColor: STATUS_DOTS[identity.status] ?? STATUS_DOTS.online }}
+              style={{ backgroundColor: STATUS_COLORS[identity.status] ?? STATUS_COLORS.online }}
             />
           </div>
           <span className="truncate text-sm font-medium" style={{ color: roleColor ?? undefined }}>
