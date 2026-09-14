@@ -29,8 +29,12 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
 - **مراجع التتبّع لا تُحفظ:** `git status` يقول «ahead N» بعد دفع ناجح ⇒ **تحقّق
   بـ`git ls-remote origin refs/heads/main` فقط.** والحلّ: اكتب
   `.git/refs/remotes/origin/main` يدوياً **آخر شيء** (أي `git update-ref` بعده يحذفه).
-- **`git push` قد يتعلّق على مطالبة الاعتماد** ويُقتل بـSIGTERM بلا مخرجات ⇒
-  `gh auth setup-git` مرة. **مخزن معطوب:** مهارة `al-ai-git-recovery`.
+- **`git push` قد يتعلّق على مطالبة الاعتماد** (`wincred` يحتاج GUI). **⛔ `gh auth
+  setup-git` لا يفيد** — `gh` غير مسجَّل فيرد «not logged into any GitHub hosts»
+  **ويخرج 0** (فشل يبدو نجاحاً). **الذي ينجح:** `GIT_TERMINAL_PROMPT=0
+  GIT_ASKPASS=/bin/true timeout 150 git push origin main` ⇒ يفشل فوراً بدل التعليق،
+  وwincred غالباً يحمل اعتماداً مخزَّناً فينجح في ثوانٍ. **مخزن معطوب:** مهارة
+  `al-ai-git-recovery`.
 
 ## Discord API — مصائد صامتة
 - **لا اختصار `@me` في مسار عضو السيرفر** (`GET` ⇒ 400/403). الصحيح: معرّف البوت من
