@@ -469,13 +469,6 @@ export function effectiveBotStatus(identity: BotIdentitySettings, now: number): 
   return isStatusWindowExpired(identity, now) ? DEFAULT_BOT_STATUS : identity.status;
 }
 
-/**
- * The fields the dashboard can only apply over REST, in the order the form shows
- * them. Named here so the write path and its tests cannot disagree about which
- * fields exist.
- */
-export const BOT_IDENTITY_IMAGE_FIELDS = ["avatarDataUrl", "bannerDataUrl"] as const;
-
 /* ------------------------------------------------------------------ *
  * Appearance save results
  *
@@ -544,10 +537,14 @@ export function describeAppearanceResult(result: AppearanceSaveResult): { ok: bo
   };
 }
 
-/** Where the bot's profile picture is expected to be square and its banner wide. */
-export const IMAGE_ASPECT_RATIOS = { avatar: 1, banner: 600 / 240, roleIcon: 1 } as const;
-
-/** The size each upload is cropped to before it is sent to Discord. */
+/**
+ * The size each upload is cropped to before it is sent to Discord.
+ *
+ * The cropper in the dashboard is the only thing that acts on this, and it reads
+ * these values rather than restating them: Discord rejects an image of the wrong
+ * shape, so two copies of these numbers would be two chances to send the wrong
+ * one.
+ */
 export const IMAGE_TARGET_SIZES = {
   avatar: { width: 256, height: 256 },
   banner: { width: 600, height: 240 },

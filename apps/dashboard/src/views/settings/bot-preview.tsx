@@ -4,7 +4,6 @@ import { STATUS_COLORS, StatusDot } from "@/components/status-picker";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { cn } from "@/lib/utils";
 import type { ActivityType, BotStatus, BotStatusDuration } from "@/types";
 
 /**
@@ -230,27 +229,5 @@ export function BotLivePreview({ identity, guild }: { identity: PreviewIdentity;
         </div>
       </div>
     </div>
-  );
-}
-
-/**
- * The footer under the preview that says where the settings will land.
- *
- * Kept separate from the preview itself so the preview can be rendered on its
- * own in tests, and so the advisory wording can change without touching layout.
- */
-export function PreviewGuildFooter({
-  guildName,
-  hasUnsavedChanges
-}: {
-  guildName: string;
-  hasUnsavedChanges: boolean;
-}) {
-  return (
-    <p className={cn("text-xs", hasUnsavedChanges ? "text-amber-500" : "text-muted-foreground")}>
-      {hasUnsavedChanges
-        ? `المعاينة تعكس تعديلاتك غير المحفوظة على «${guildName}».`
-        : `المعاينة تطابق ما هو محفوظ حالياً في «${guildName}».`}
-    </p>
   );
 }

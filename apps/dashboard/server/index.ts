@@ -60,6 +60,7 @@ import {
   type HealthSnapshot,
   type PermissionStatus,
   type Tier,
+  DISCORD_PERMISSION_BITS,
   LOGIN_SCOPES
 } from "@al-ai/core";
 import { loadEnv } from "./env.js";
@@ -85,7 +86,6 @@ import {
   isAuthFailure,
   isRateLimited,
   resolveBotUserId,
-  USER_PERMISSIONS,
   userAvatarUrl,
   userBannerUrl,
   hasPermission,
@@ -310,7 +310,7 @@ async function requireTierForGuild(request: FastifyRequest, reply: FastifyReply,
     userIsGuildOwner: membership.owner,
     // Discord's own permission bitfield, not a claim from the browser: an
     // Administrator holds the top tier with no configuration.
-    userIsAdministrator: hasPermission(membership.permissions, USER_PERMISSIONS.ADMINISTRATOR)
+    userIsAdministrator: hasPermission(membership.permissions, DISCORD_PERMISSION_BITS.ADMINISTRATOR)
   });
 
   try {
@@ -611,7 +611,7 @@ app.get("/api/guilds", async (request, reply) => {
             guildId: guild.id,
             discordUserId: session.discordUserId,
             userIsGuildOwner: guild.owner,
-            userIsAdministrator: hasPermission(guild.permissions, USER_PERMISSIONS.ADMINISTRATOR)
+            userIsAdministrator: hasPermission(guild.permissions, DISCORD_PERMISSION_BITS.ADMINISTRATOR)
           })
         : null;
 

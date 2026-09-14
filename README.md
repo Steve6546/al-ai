@@ -183,15 +183,21 @@ npm run verify   # lint → check:schema → test → build, in that order
 
 | Suite | Tests | Covers |
 |---|---|---|
-| `apps/bot/test` | 158 | crypto, nonces, routing, permissions, pipeline, presence sync, governance, anti-nuke, adapter, security |
-| `apps/dashboard/test` | 166 | every screen renders without throwing; Discord read shapes; storage round-trips; appearance field outcomes; route guards; cache |
-| `packages/core/test` | 128 | event schema, tiers, session policy, appearance normalisation, commands, metrics, hierarchy, anti-nuke limits |
+| `apps/bot/test` | 173 | crypto, nonces, routing, permissions, pipeline, presence sync, governance, Discord-constant alignment, anti-nuke, adapter, security |
+| `apps/dashboard/test` | 189 | every screen renders without throwing (real jsdom mount, not `renderToString`); Discord read shapes; storage round-trips; appearance field outcomes; route guards; cache |
+| `packages/core/test` | 137 | event schema, tiers, session policy, appearance normalisation, commands, metrics, hierarchy, anti-nuke limits |
 
 **Read `# skipped`, not `# pass`.** `apps/dashboard/test/storage.test.ts` reads
 `DATABASE_URL`; with no reachable database it logs
-`{ skip: "no reachable database" }` for each case, the dashboard suite drops to
-158 tests, and `npm run verify` **still exits 0**. Start PostgreSQL first or the
-green tick means nothing.
+`{ skip: "no reachable database" }` for each case. The suite still *reports* 189
+tests — it is `# pass 165, # skipped 24` — and `npm run verify` **still exits 0**.
+Start PostgreSQL first or the green tick means nothing.
+
+Two more checks are enforced by tests rather than by eye:
+`apps/bot/test/governance.test.ts` fails if `docs/GOVERNANCE.md` and the source
+disagree about which rules exist, and `apps/bot/test/discord-standards.test.ts`
+holds the shared permission and activity-type values against discord.js's own
+`PermissionFlagsBits` and `ActivityType`.
 
 ## Performance: how the rate limit was eliminated
 

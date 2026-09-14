@@ -3,9 +3,17 @@
 These rules are enforced in code, reviewed in pull requests, and covered by tests.  
 Breaking one is a defect, not a style preference.
 
+They bind every contributor, human or automated. An agent that adds a feature is
+subject to the same reading of the official documentation, the same enum
+requirement and the same caching obligation as a person is; "the model did it"
+is not a category of exemption. If a rule cannot be satisfied, say so in the pull
+request rather than working around it quietly.
+
 Code that implements a rule carries a `GOVERNANCE rule N` comment. The  
 `governance.test.ts` suite fails if a comment cites a rule that does not exist  
-here, so this file and the source cannot drift apart.
+here, so this file and the source cannot drift apart. It also fails if the count
+below stops matching, which is why adding a rule means editing this file and that
+test together.
 
 1. **Slash commands only.** Prefix commands are forbidden. Every command is  
    registered in packages/core/src/command-registry.ts; an unregistered  
@@ -118,3 +126,43 @@ here, so this file and the source cannot drift apart.
     a hand-edited row cannot inject a shape the writer would have rejected.  
     `.workbuddy-ai/backups/` (live `pg_dump` output) and `.workbuddy-ai/preview/`  
     (generated bundles) are git-ignored for this reason.
+24. **Every new feature is built from the official documentation, not from  
+    memory.** Before writing a line that talks to Discord, read the relevant page  
+    of <https://github.com/discord/discord-api-docs> and the matching source in  
+    <https://github.com/discordjs/discord.js>. Where the library already exposes  
+    the operation, call it — a hand-rolled request, a raw endpoint string or a  
+    re-implemented helper is a defect even when it works, because it will not
+    track Discord's changes. A workaround is allowed only when the official path
+    genuinely does not cover the case, and then the comment must say which
+    documented behaviour made it necessary. The standing example is rule 2's
+    split: the bot uses `Routes` and the builders, and the BFF uses the REST API
+    directly only because a gateway connection is not what it needs.
+25. **Discord's own constants come from Discord's own enums.** Permissions come  
+    from `PermissionFlagsBits`, activity kinds from `ActivityType`, channel kinds  
+    from `ChannelType`, intents from `GatewayIntentBits`, and endpoints from  
+    `Routes`. A raw `0x…` literal, a bare `1 << n`, a numeric channel type or a  
+    hand-written `/guilds/{id}/…` string is a defect. The one exception is a value  
+    a runtime genuinely cannot import — the BFF must not pull in discord.js — and  
+    such a value is restated in exactly one place,  
+    `packages/core/src/discord-permissions.ts`, and held against the official enum  
+    by `apps/bot/test/discord-standards.test.ts`. A restated constant without that  
+    test is worse than no constant at all, because it looks authoritative.
+26. **A snowflake is a string, from end to end.** Discord IDs exceed  
+    `Number.MAX_SAFE_INTEGER`, so a number is a lossy container: `Number(id)`  
+    silently returns a different guild. IDs are typed `string` in every contract,  
+    read as `string` from the database, and never compared with `==` against a  
+    number. A numeric conversion is permitted only where the result is provably  
+    bounded — the shard-like `Number((BigInt(id) >> 22n) % 6n)` — and the  
+    BigInt arithmetic must come first, so the precision loss happens after the  
+    value is already small.
+27. **Never spend a Discord request on data this process already holds.** The  
+    live bot's gateway cache is authoritative for everything the bot can see: a  
+    dashboard route that re-fetches a guild, its channels, its roles or its  
+    members from REST instead of asking the running bot is a defect, not a slow  
+    path. Where a REST read is genuinely required, the BFF memoises it through  
+    `server/cache.ts` — a TTL, plus in-flight coalescing so three concurrent  
+    callers produce one request rather than three. The TTL is the bound on  
+    staleness, so any write that changes the cached value invalidates it in the  
+    same request. Discord rate-limits per *application*, not per route, so a  
+    cache is not an optimisation here; it is what keeps the bot's own calls  
+    working.

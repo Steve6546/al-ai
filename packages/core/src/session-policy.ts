@@ -53,6 +53,3 @@ export function describeVerification(input: { guildCount: number; uniqueUsers: n
     warning
   };
 }
-
-/** Discord keeps official audit logs for 45 days, so the internal trail is mandatory. */
-export const DISCORD_AUDIT_LOG_RETENTION_DAYS = 45;

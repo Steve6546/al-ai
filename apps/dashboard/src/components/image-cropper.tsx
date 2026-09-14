@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Image as ImageIcon, Loader2, Upload, ZoomIn } from "lucide-react";
+import { IMAGE_TARGET_SIZES } from "@al-ai/core/browser";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -25,11 +26,19 @@ export const MAX_SOURCE_FILE_BYTES = 8 * 1024 * 1024;
 
 export type CropTarget = "avatar" | "banner" | "roleIcon";
 
-/** The exact pixel size Discord wants for each field, and its aspect ratio. */
+/**
+ * The exact pixel size Discord wants for each field.
+ *
+ * The sizes are read from `@al-ai/core` rather than restated here: Discord
+ * rejects an image of the wrong shape, so a second copy of these numbers would be
+ * a second chance to crop to the wrong one — and the copy that actually sends the
+ * bytes is the one that would win. Only the Arabic label is local, because it is
+ * a display concern the shared contract has no business knowing.
+ */
 export const CROP_TARGETS: Record<CropTarget, { width: number; height: number; label: string }> = {
-  avatar: { width: 256, height: 256, label: "الأفاتار" },
-  banner: { width: 600, height: 240, label: "البانر" },
-  roleIcon: { width: 128, height: 128, label: "أيقونة الرتبة" }
+  avatar: { ...IMAGE_TARGET_SIZES.avatar, label: "الأفاتار" },
+  banner: { ...IMAGE_TARGET_SIZES.banner, label: "البانر" },
+  roleIcon: { ...IMAGE_TARGET_SIZES.roleIcon, label: "أيقونة الرتبة" }
 };
 
 export type LoadedImage = { element: HTMLImageElement; objectUrl: string };

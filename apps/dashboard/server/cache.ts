@@ -1,6 +1,11 @@
 /**
  * Memoisation and request throttling for the dashboard's Discord reads.
  *
+ * GOVERNANCE rule 27 — never spend a Discord request on data this process
+ * already holds. This module is where that rule is implemented for the BFF: the
+ * TTLs below are the bound on staleness, and `resolve` coalesces concurrent
+ * callers so a burst becomes one request rather than one per screen.
+ *
  * WHY THIS EXISTS
  *
  * Every screen that shows a guild reads the same two Discord lists — its roles
@@ -9,11 +14,16 @@
  * `429 Too Many Requests`. That was reported as "the dashboard breaks when I
  * move between tabs": Discord was rate limiting AL AI, not the operator.
  *
+ * Discord rate-limits per *application*, not per route, so this is not an
+ * optimisation — a burst here also degrades the bot's own calls.
+ *
  * Two mechanisms fix it, and they are deliberately separate:
  *
  * - `TtlCache` removes the repeated *reads*. Roles and channels change on the
- *   scale of minutes, so answering from memory for 45 seconds costs nothing and
- *   removes almost every call.
+ *   scale of minutes, so answering from memory for a minute costs nothing and
+ *   removes almost every call. The window itself lives beside each cache in
+ *   `discord.ts` (`GUILD_READ_CACHE_MS`), because that is where it can be read
+ *   against the write that invalidates it.
  * - `RequestThrottle` bounds the *unauthenticated* traffic, so a flood of
  *   sign-in attempts cannot consume the budget AL AI needs for its own reads.
  *

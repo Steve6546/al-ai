@@ -1,6 +1,6 @@
-import { EMPTY_TIER_ROLES, requireTier, resolveTier, type PermissionStatus, type Tier } from "@al-ai/core";
+import { DISCORD_PERMISSION_BITS, EMPTY_TIER_ROLES, requireTier, resolveTier, type PermissionStatus, type Tier } from "@al-ai/core";
 import type { Database } from "./db.js";
-import { fetchMemberRoleIds, fetchBotPermissions, hasPermission, USER_PERMISSIONS } from "./discord.js";
+import { fetchMemberRoleIds, fetchBotPermissions, hasPermission } from "./discord.js";
 
 export class AuthorizationError extends Error {
   constructor(public readonly code: string, message: string) {
@@ -72,12 +72,12 @@ export async function botIdentityPermissionStatus(botToken: string, guildId: str
       label: "تغيير الاسم المستعار",
       granted: bits === null
         ? null
-        : hasPermission(bits, USER_PERMISSIONS.CHANGE_NICKNAME) || hasPermission(bits, USER_PERMISSIONS.MANAGE_NICKNAMES)
+        : hasPermission(bits, DISCORD_PERMISSION_BITS.CHANGE_NICKNAME) || hasPermission(bits, DISCORD_PERMISSION_BITS.MANAGE_NICKNAMES)
     },
     {
       key: "manage_guild",
       label: "إدارة السيرفر",
-      granted: bits === null ? null : hasPermission(bits, USER_PERMISSIONS.MANAGE_GUILD)
+      granted: bits === null ? null : hasPermission(bits, DISCORD_PERMISSION_BITS.MANAGE_GUILD)
     }
   ];
 }

@@ -28,6 +28,12 @@ import {
 
 // GOVERNANCE rule 2: This is the only file allowed to import discord.js.
 // Every Discord API call the bot makes must be expressed as a function here.
+//
+// GOVERNANCE rule 24: every call below is written against the official
+// documentation — discord-api-docs for the endpoint's behaviour, discord.js for
+// the wrapper — and uses the library's own enums and builders rather than a
+// hand-rolled request. A new call is added the same way: read the docs first,
+// then look for the function the library already provides.
 
 /**
  * Intents are frozen by the AL AI governance contract.

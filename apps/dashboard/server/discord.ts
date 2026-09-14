@@ -9,20 +9,10 @@
  *   token to the browser.
  */
 
-import { BOT_INVITE_SCOPES, type ChannelOption } from "@al-ai/core";
+import { BOT_INVITE_PERMISSIONS, BOT_INVITE_SCOPES, DISCORD_PERMISSION_BITS, type ChannelOption } from "@al-ai/core";
 import { TtlCache } from "./cache.js";
 
 const API = "https://discord.com/api/v10";
-export const USER_PERMISSIONS = {
-  /**
-   * Administrator (bit 3). Holders get the automatic owner tier, because Discord
-   * already treats them as fully trusted in that guild.
-   */
-  ADMINISTRATOR: 0x8n,
-  MANAGE_GUILD: 0x20n,
-  MANAGE_NICKNAMES: 0x8000000n,
-  CHANGE_NICKNAME: 0x4000000n
-} as const;
 
 export type DiscordIdentity = { id: string; username: string; globalName: string | null; avatar: string | null };
 export type DiscordUserGuild = { id: string; name: string; icon: string | null; owner: boolean; permissions: bigint };
@@ -154,14 +144,6 @@ export function buildAuthorizeUrl(input: { clientId: string; redirectUri: string
 }
 
 /**
- * Administrator (bit 3). AL AI creates roles, edits channels and moderates
- * members, so it needs the full bitfield rather than a hand-picked subset — the
- * previous value was 1 << 40 (MODERATE_MEMBERS), which silently left the bot
- * unable to perform most of its own commands.
- */
-export const BOT_PERMISSIONS = "8";
-
-/**
  * The bot invite. When a guild is known the invite is pinned to it and Discord's
  * server picker is hidden, so the operator can only add AL AI to the guild they
  * are actually configuring — never to every guild their account can reach.
@@ -174,6 +156,13 @@ export const BOT_PERMISSIONS = "8";
  *
  * `response_type=code` is required for that return leg, and `state` is the same
  * CSRF guard the sign-in flow uses.
+ *
+ * The request asks for Administrator (bit 3): AL AI creates roles, edits channels
+ * and moderates members, so it needs the full bitfield rather than a hand-picked
+ * subset. An earlier invite requested MODERATE_MEMBERS (1 << 40) instead, which
+ * silently left the bot unable to perform most of its own commands. The number
+ * lives in the shared contract, so the invite and the authorisation checks cannot
+ * disagree about what Administrator means.
  */
 export function buildBotInviteUrl(
   clientId: string,
@@ -185,7 +174,7 @@ export function buildBotInviteUrl(
     // Read from the shared contract rather than repeated as a literal: the
     // scopes are frozen there, and a second copy is a second thing to update.
     scope: BOT_INVITE_SCOPES.join(" "),
-    permissions: BOT_PERMISSIONS
+    permissions: BOT_INVITE_PERMISSIONS
   });
   if (guildId) {
     params.set("guild_id", guildId);
@@ -351,22 +340,6 @@ export function invalidateGuildReadCache(guildId?: string) {
   guildChannelCache.clear(guildId);
   guildRoleCache.clear(guildId);
   guildRoleListCache.clear(guildId);
-}
-
-/**
- * Drop the memoised caller guild list.
- *
- * Called when a session ends, so the next sign-in cannot inherit the previous
- * caller's guilds, and after the bot-invite callback, so a guild the bot was
- * just added to is visible on the immediately following look rather than up to
- * twenty seconds later.
- */
-export function invalidateUserGuildCache(accessToken?: string) {
-  if (accessToken === undefined) {
-    userGuildCache.clear();
-    return;
-  }
-  userGuildCache.clear(accessToken);
 }
 
 /**
@@ -661,7 +634,7 @@ export async function fetchBotHighestRolePosition(botToken: string, guildId: str
  * Administrator bot that it lacked MANAGE_GUILD and refused its saves.
  */
 export function hasPermission(bits: bigint, permission: bigint) {
-  if ((bits & USER_PERMISSIONS.ADMINISTRATOR) === USER_PERMISSIONS.ADMINISTRATOR) return true;
+  if ((bits & DISCORD_PERMISSION_BITS.ADMINISTRATOR) === DISCORD_PERMISSION_BITS.ADMINISTRATOR) return true;
   return (bits & permission) === permission;
 }
 
@@ -781,6 +754,9 @@ export function userAvatarUrl(userId: string, avatarHash: string | null, size = 
   }
   let index = 0;
   try {
+    // GOVERNANCE rule 26 — the one numeric conversion of a snowflake that is
+    // allowed, because the result is bounded: the shift and the modulo happen in
+    // BigInt, so precision is already irrelevant by the time `Number` sees it.
     index = Number((BigInt(userId) >> 22n) % 6n);
   } catch {
     index = 0;

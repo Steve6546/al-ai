@@ -74,7 +74,13 @@ export function resolveTier(holder: TierHolder, roles: TierRoles): Tier | null {
   return null;
 }
 
-/** Discord snowflakes are 17-20 digits. Anything else is not a role ID. */
+/**
+ * Discord snowflakes are 17-20 digits. Anything else is not a role ID.
+ *
+ * GOVERNANCE rule 26 — a snowflake is a string, never a number. The pattern
+ * exists so an ID can be validated without ever being parsed as one: a number
+ * loses precision above 2^53 and Discord's IDs sit well past it.
+ */
 const SNOWFLAKE = /^\d{17,20}$/;
 
 /**

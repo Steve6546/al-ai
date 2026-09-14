@@ -122,11 +122,6 @@ export function requireCommand(name: string) {
   return command;
 }
 
-/** Commands in one category, in registry order. */
-export function commandsInCategory(category: CommandCategory) {
-  return commandRegistry.filter(command => command.category === category);
-}
-
 /* ------------------------------------------------------------------ *
  * Durations
  *

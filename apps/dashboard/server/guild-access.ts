@@ -11,8 +11,8 @@
  * the Fastify handler is what makes them testable without a database.
  */
 
-import type { Tier } from "@al-ai/core";
-import { guildIconUrl, hasPermission, USER_PERMISSIONS, type DiscordUserGuild } from "./discord.js";
+import { DISCORD_PERMISSION_BITS, type Tier } from "@al-ai/core";
+import { guildIconUrl, hasPermission, type DiscordUserGuild } from "./discord.js";
 
 export type GuildSummary = {
   id: string;
@@ -38,7 +38,7 @@ export type GuildSummary = {
  * who cannot manage the guild cannot be shown a dashboard that edits it.
  */
 export function isAdministrable(permissions: bigint): boolean {
-  return hasPermission(permissions, USER_PERMISSIONS.MANAGE_GUILD);
+  return hasPermission(permissions, DISCORD_PERMISSION_BITS.MANAGE_GUILD);
 }
 
 /**
@@ -81,6 +81,6 @@ export function describeGuildAccess(input: {
     // tier or above — a moderator must not be able to widen their own access by
     // editing the list.
     canManageTiers: tier === "owner" || tier === "admin",
-    canInvite: hasPermission(guild.permissions, USER_PERMISSIONS.MANAGE_GUILD)
+    canInvite: hasPermission(guild.permissions, DISCORD_PERMISSION_BITS.MANAGE_GUILD)
   };
 }

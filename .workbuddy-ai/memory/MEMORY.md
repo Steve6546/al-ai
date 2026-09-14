@@ -1,7 +1,7 @@
 # AL AI — Discord bot + لوحة تحكم
 
 Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RTL)
-+ `packages/core` (المصدر الوحيد لكل عقد مشترك). **491 اختباراً** (165/189/137).
++ `packages/core` (المصدر الوحيد لكل عقد مشترك). **499 اختباراً** (173/189/137).
 
 ## التشغيل والتحقق
 - `npm run verify` = lint + check:schema + test + build. **اقرأ `# skipped` لا `# pass`**:
@@ -61,26 +61,22 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
 - **`TtlCache.resolve(key, load)`**: إصابة طازجة، **دمج الطلبات الجارية** (نداء ثانٍ
   ينتظر الوعد القائم — **هذا ما يقتل الانفجار لا الـTTL**)، «القديم أفضل من الخطأ»،
   و`finally` تُحرّر خانة الـin-flight.
-- **الفخّ 1: الكاش على النتيجة المُحوَّلة لا الحمولة الخام.** شاشة واحدة كلّفت 7 نداءات
-  وثلاثة منها `/roles` متطابقة ⇒ `guildRoleListCache`. **القاعدة: كاش على الحمولة
-  الخام، وكل مستهلك يُسقط عليها سؤاله.**
-- **الفخّ 2: نسيت الحارس.** `loadUserGuilds` → `fetchUserGuilds` في كل مسار مرتبط
-  بسيرفر ⇒ `fetchUserGuildsCached`. **مُدخل القياس يحاكي المسار من أوله بحارسه.**
-- **الفخّ 3: قراءة بلا كاش على مسار يُفتح دائماً** (أُصلح 2026-09-14):
-  `GET /api/bot/identity` كان ينادي `/users/@me` و`/applications/@me` بلا كاش، وهو
-  حدّ **لكل تطبيق لا لكل مسار** ⇒ `appearanceSnapshotCache` (TTL 60s، مفتاح = التوكن)
-  + `invalidateAppearanceSnapshot()` بعد الحفظ. **قيس حياً: 2.400s ← 0.415s.**
-  الدرس: أي قراءة تجلب نفس البيانات في كل فتح شاشة يجب أن تُخزَّن.
+- **الفخّ 1: الكاش على النتيجة المُحوَّلة لا الحمولة الخام** (شاشة كلّفت 7 نداءات، ثلاثة
+  `/roles` متطابقة) ⇒ `guildRoleListCache`. **كاش على الحمولة الخام، وكل مستهلك
+  يُسقط عليها سؤاله.**
+- **الفخّ 2: نسيت الحارس** — `loadUserGuilds` في كل مسار مرتبط بسيرفر ⇒
+  `fetchUserGuildsCached`. **مُدخل القياس يحاكي المسار من أوله بحارسه.**
+- **الفخّ 3: قراءة بلا كاش على مسار يُفتح دائماً** (2026-09-14): `GET /api/bot/identity`
+  كان ينادي `/users/@me` و`/applications/@me` بلا كاش، وحدّ Discord **لكل تطبيق لا
+  لكل مسار** ⇒ `appearanceSnapshotCache` (60s، مفتاح = التوكن) +
+  `invalidateAppearanceSnapshot()` بعد الحفظ. **قيس حياً: 2.400s ← 0.415s.**
 - **الفخّ 4: المذكرة على النتيجة لا على الوعد** ⇒ نداءان في نفس التكة كلٌّ يرى `null`.
-  أمسك الوعد وحرّره في `finally`.
-- `GUILD_READ_CACHE_MS = 60_000` / `BOT_GUILD_CACHE_MS = 15_000` /
-  `USER_GUILD_CACHE_MS = 20_000`. **`invalidateGuildReadCache(guildId)` بعد أي كتابة.**
-  `resetGuildReadCaches()` في `beforeEach`. (اختبار يسقط فور إدخال كاش = **سببه الكاش**،
-  صلّح الكاش لا التأكيد.)
+- TTL: `GUILD_READ 60_000` / `BOT_GUILD 15_000` / `USER_GUILD 20_000`.
+  **`invalidateGuildReadCache(guildId)` بعد أي كتابة**، و`resetGuildReadCaches()` في
+  `beforeEach`. (اختبار يسقط فور إدخال كاش = **سببه الكاش**، صلّح الكاش لا التأكيد.)
 - **`fetchBotMemberShared` بلا TTL عن قصد**: بتة صلاحية قديمة تحوّل «البوت فقد
-  الصلاحية» إلى «البوت يملكها». **لذلك فتح شاشة ثانٍ كلّف 2 نداءات (member + guild)
-  ولو بعد كل الكاش — مقصود لا عطل.** (8 نداءات بارد، +2 للفتحة الثانية.)
-- **`RequestThrottle` نافذة منزلقة.** الخطّاف يستثني الجلسات الموثَّقة و`/internal/`
+  الصلاحية» إلى «البوت يملكها» ⇒ +2 نداءات للفتحة الثانية **مقصودة لا عطل**.
+- **`RequestThrottle` نافذة منزلقة** تستثني الجلسات الموثَّقة و`/internal/`
   — **ليس ثغرة:** كوكي مزوّر يعطي `401 UNAUTHENTICATED`.
 
 ## 🔴 الشاشة السوداء = hook بعد early return (2026-09-14)
@@ -111,10 +107,9 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
   كل قسم مُبوَّب على راية قدرة حقيقية (`supportsReason/Duration/Purge/Notify`).
 - **المدد الـ11:** `permanent/5m/30m/1h/6h/12h/1d/3d/7d/14d/30d`. **`permanent` =
   `null` لا `0`.** `TIMEOUT_MAX_SECONDS` تُقصّ **عند التحويل إلى ثوانٍ فقط**.
-- `CommandConfig`: `allowedRoleIds` (كان `customRoleIds`)، `deniedRoleIds`،
-  `allowedChannelIds`، `deniedChannelIds`، `cooldownSeconds`،
-  `autoDeleteResponseSeconds`، `requireReason`، `defaultDuration`، `presetReasons`.
-  `assessCommandScope`: **المنع يتقدّم على السماح**.
+- `CommandConfig` (القائمة الكاملة في `command-registry.ts`): قوائم سماح/منع للأدوار
+  والقنوات، `cooldownSeconds`، `autoDeleteResponseSeconds`، `requireReason`،
+  `defaultDuration`، `presetReasons`. `assessCommandScope`: **المنع يتقدّم على السماح**.
 - **⛔ لا تفرض في Discord ما يقرّره المشغّل:** `required` **يُجمَّد وقت التسجيل** ⇒
   إعداد باتجاه واحد. الفرض في البوت.
 - `command-registry.ts` السلطة: كل أمر مُسجَّل له builder، ومفتاح غير مدعوم يُجبَر على
@@ -182,30 +177,16 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
 ## المعاينة والفحص بلا متصفح
 - **`renderToString` لا يكفي:** التأثيرات لا تجري وRadix لا يُثبّت محتوى `Collapsible`
   المطويّ ⇒ شاشة تجلب بيانات تُرسم في حالة التحميل فقط، **ولهذا لا يكشف انهيار التمريرة
-  الثانية.** للشاشات الجالبة: `mount.test.tsx` (jsdom)، والأجزاء النقية منفصلة.
-- **jsdom الآن devDependency في `apps/dashboard`** (مع `@types/jsdom`). التركيب: انسخ
-  كل خصائص `window` غير الموجودة في `globalThis` (التعداد اليدوي يفشل بـ
-  `HTMLFormElement is not defined`)، و`window`/`document`/`navigator` عبر
-  `defineProperty` (getter فقط في Node 22)، و`IS_REACT_ACT_ENVIRONMENT = true`.
-- **🔴 ترتيب الاستيراد حامل للحمل:** الإعداد يسكن `test/dom-env.ts` ويُستورد
-  **أول سطر** (`import { dom } from "./dom-env.js";`) قبل `App` وقبل `react`.
-  إعداده **داخل** ملف الاختبار لا يعمل: استيرادات الملف تُقيَّم أولاً ⇒ React يبدأ
-  بلا DOM، والنتيجة **صامتة ومضلّلة**: القائمة تُعلن `data-state="open"` بينما
-  `document.querySelector('[role="menu"]')` يجد **صفراً** (الـportal لا يُثبَّت).
-  تُقرأ كـ«القائمة معطوبة» لا كـ«الهارنس مرتَّب خطأ».
-- **مُنشِئات DOM من jsdom لا من Node:** حلقة النسخ تتخطّى ما هو موجود في
-  `globalThis`، وNode 22 يُعرّف `Event`/`CustomEvent`/… ⇒ `CustomEvent` من Node
-  **ليس** `Event` من jsdom، و`dispatchEvent` يرمي
-  «parameter 1 is not of type 'Event'» — هكذا انكسرت طبقة Radix الـdismissable.
-  أعد تعريف: `Event`, `CustomEvent`, `UIEvent`, `MouseEvent`, `PointerEvent`,
-  `KeyboardEvent`, `FocusEvent`, `Node`, `Element`, `HTMLElement`, `DocumentFragment`, …
-- **فتح قائمة Radix في اختبار:** مسار الـhover خلف مؤقّت 100ms مشروط بـ
-  `pointerType === "mouse"`، أما **مسار النقر** (`onClick` → `onOpenChange(true)`)
-  يفتح **فوراً** ⇒ استخدم `.click()` على `[aria-label]` لا `pointerdown`.
+  الثانية.** للشاشات الجالبة: `test/mount.test.tsx` (jsdom + `createRoot` + `StrictMode`)،
+  والأجزاء النقية منفصلة.
+- **تفاصيل jsdom الكاملة في مهارة `react-jsdom-mount-test`** — ترتيب الاستيراد الحامل
+  للحمل، منشئات DOM من jsdom لا Node، الحمولات الحقيقية، القراءة قبل الـunmount،
+  ترشيح ضجيج `act`، وفتح قائمة Radix بالنقر. **اقرأها قبل كتابة أي اختبار تركيب.**
 - **`createElement` مع مكوّن يشترط `children`:** مرّرها **داخل كائن الخصائص** لا
   كوسيط ثالث وإلا `TS2769`.
 - **فخّان في التأكيد:** قيمة عنصر نموذج **ليست `textContent`** (اقرأ `el.value`)، وRadix
   يرسم `Select` في **portal** (أكّد على `aria-label`). **وأكّد الاتجاهين.**
+  و**`grep -c` يعدّ الأسطر لا الوقوعات** ⇒ على HTML سطر واحد استخدم `grep -o | wc -l`.
 - **قياس نداءات Discord:** اعترض `globalThis.fetch` وعدّ لكل نقطة
   (`.workbuddy-ai/preview/count-screen-calls.mjs`) — أثبتت 4→2.
 - **بناء معاينة تفاعلية:** مُدخل مؤقت يستدعي `createRoot` ويستورد `./src/index.css`،
@@ -214,17 +195,49 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
   والمُدخل **إلى `apps/dashboard/`**، شغّل، **ثم احذف المؤقتين**. **لا تفتح بـ`file://`**
   — اخدم بـ`python -m http.server`. اكتب في `.workbuddy-ai/preview/` (البناء ينظّف `dist/`).
 
+## 🔴 ميثاق الحوكمة — مُفروض باختبار لا بالنيّة
+`docs/GOVERNANCE.md` = **27 قاعدة**، والكود يحمل `GOVERNANCE rule N`. أربعة اختبارات
+في `apps/bot/test/governance.test.ts` تمنع الانزلاق:
+- **عدد القواعد مثبَّت (27) ومرقّم 1..27 بلا فجوات** ⇒ **إضافة قاعدة = تعديل
+  الوثيقة + الاختبار معاً**، وإلا سقط `verify`.
+- **كل إحالة `GOVERNANCE rule N` في الكود يجب أن تشير لقاعدة موجودة.** الفحص يمسح
+  **ثلاثة جذور**: `apps/bot/src` + `apps/dashboard/server` + `packages/core/src`
+  (كان البوت وحده، فكانت إحالة فاسدة في core تمرّ). أُثبت بإضافة `rule 99` في core.
+- **قواعد [2,3,5,7,10..19,24,25,26,27] يجب أن تكون مُشاراً إليها** في الكود.
+- قواعد 24–27 الجديدة: المرجعية الرسمية الإلزامية / ثوابت Discord من تعداداتها /
+  الـSnowflake نصّ دائماً / لا تستهلك طلب Discord على بيانات يملكها البوت الحيّ.
+
+## مواءمة ثوابت Discord (أُصلح 2026-09-14)
+- **`packages/core/src/discord-permissions.ts` هو الاستثناء الوحيد المسموح** لتكرار
+  ثوابت Discord، لأن اللوحة لا يجوز أن تستورد discord.js. **مُصدَّر من `index.ts`
+  فقط لا `browser.ts`** (قيم `bigint` = شأن خادمي).
+- **`apps/bot/test/discord-standards.test.ts`** يمسك القيم مقابل
+  `PermissionFlagsBits` و`ActivityType` الرسميين ⇒ discord.js يبقى المصدر.
+  **أُثبت بإفساد `MANAGE_GUILD` عمداً: `not ok 1` بالاسم الصحيح.**
+- **حُذف `USER_PERMISSIONS` و`BOT_PERMISSIONS`** (كانا بتات مكتوبة يدوياً في اللوحة،
+  وأحدهما أخطأ فعلاً مرة). الآن الكل يقرأ `DISCORD_PERMISSION_BITS` من core.
+- **`IMAGE_TARGET_SIZES` في core هو المصدر** والمُقتطِع يقرأه؛ كانت الأبعاد مكتوبة
+  مرتين (واحد ميت في core وآخر حيّ في المُقتطِع = انزلاق جاهز).
+
+## تنظيف الكود الميت — الأدوات
+سكربتان في `.workbuddy-ai/preview/` (مُتجاهَل): `scan-deps.mjs` (تبعية مُعلنة بلا
+استيراد — **لكنه لا يقرأ CSS**، فافحص `@import` يدوياً) و`scan-dead-values.mjs`
+(تصديرات **قيم** بلا مرجع خارجي؛ **يستثني الأنواع** لأنها سطح واجهة).
+- **لا تحذف ثابتاً «ميتاً» قبل أن تتحقق أنه ليس النسخة الصحيحة**: `IMAGE_TARGET_SIZES`
+  كان ميتاً لكن الحيّ نسخة منه ⇒ الصحيح ربط المُقتطِع بـcore لا الحذف.
+- **`tailwindcss-animate` + `@radix-ui/react-visually-hidden` + `dotenv`** أُزيلت من
+  اللوحة (مُعلنة فقط). `dotenv` **باقية في البوت** (يستعمل `dotenv/config`).
+- **⛔ لا تنقل `tsx`/`typescript` إلى devDependencies:** كلا ملفَي Docker يشغّلان
+  `npx tsx` في `CMD` ⇒ **تبعية تشغيل حقيقية هنا**.
+
 ## البيئة (Windows)
 - PostgreSQL 17 في `C:\Program Files\PostgreSQL\17`، data dir
   `C:\Users\dlwta\.al-ai\pgdata`، منفذ **55432**. `psql` ليس على `PATH`.
 - **`pg_ctl start` يُقتل** مع انتهاء أمر Bash ⇒ شغّل `postgres.exe` بـ
   `run_in_background: true`. الإقلاع ~30s و`pg_isready` يقول "rejecting" خلالها.
   **5432 مشغول بتثبيت آخر — لا تلمسه.**
-- **كل `curl` لعنوان محلي يحتاج `--noproxy '*'`** وإلا رجع **502 مضلِّل**. و`000` +
-  exit 7 هو «رفض الاتصال» الحقيقي. **لا تقرأ `-w '%{size_download}'`** (يرجع 0 حتى مع
-  200) — عُدّ بـ`grep -c` أو `content-length`. و**`psql` يتعلّق بلا `-w` و`< /dev/null`**.
-- **لا تُطلق curl في `node -e`** لشيء موثَّق — اكتب `.mjs` بـ`fetch` بترويسات صريحة.
-- **`/tmp` يترجم إلى `C:\tmp` لـnode** ⇒ `node "$(cygpath -w /tmp/x.mjs)"` أو داخل المستودع.
+- **`psql` يتعلّق بلا `-w` و`< /dev/null`.** و**لا تقرأ `-w '%{size_download}'`**
+  (يرجع 0 حتى مع 200) — عُدّ بـ`grep -c` أو `content-length`.
 - `scripts/dev-issue-session.mts` (**يجب أن يكون `.mts`**) يصدر جلسة حقيقية، لكن
   **التوكن وهمي** ⇒ `401 SESSION_EXPIRED` (يُثبت أن الحارس يعمل بـ401 لا 500)، **ولا
   يمكن فحص مسار سيرفر حقيقي به** (الحارس يقرأ `/users/@me/guilds` فيفشل).
@@ -232,6 +245,5 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
 - **مسار صحة محوّل التكامل `GET /ping` لا `/health`** (`/health` ⇒ `404` وهذا سليم).
 - **`.workbuddy-ai/memory/*.md` مُتتبَّعة ومرفوعة إلى مستودع عام** — لا أسرار.
   `backups/` و`preview/` **مُتجاهَلان**.
-- **عملية خلفية بـ`&` تُقتل عند رجوع الأمر** ⇒ `run_in_background: true`.
-- **`npx tsc` يُحلّ لكل مجلد** (الجذر قد يكون TS 5 والحزمة TS 7). **TS 7 أزال
-  `baseUrl`** — أبقِ `paths` فقط.
+- (قواعد `--noproxy '*'`، `run_in_background`، `/tmp`، و`npx tsc` لكل مجلد: في
+  الذاكرة العامة للمستخدم `~/.workbuddy-ai/MEMORY.md` — لا تُكرَّر هنا.)

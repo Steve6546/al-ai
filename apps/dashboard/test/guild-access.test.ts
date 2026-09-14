@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DISCORD_PERMISSION_BITS } from "@al-ai/core";
 import { describeGuildAccess, isAdministrable } from "../server/guild-access.js";
-import { USER_PERMISSIONS, type DiscordUserGuild } from "../server/discord.js";
+import type { DiscordUserGuild } from "../server/discord.js";
 
 /* ------------------------------------------------------------------ *
  * The selector's data contract.
@@ -21,23 +22,23 @@ function guild(overrides: Partial<DiscordUserGuild> = {}): DiscordUserGuild {
     name: "سيرفر الاختبار",
     icon: null,
     owner: false,
-    permissions: USER_PERMISSIONS.MANAGE_GUILD,
+    permissions: DISCORD_PERMISSION_BITS.MANAGE_GUILD,
     ...overrides
   };
 }
 
 test("MANAGE_GUILD is enough to appear in the selector", () => {
-  assert.equal(isAdministrable(USER_PERMISSIONS.MANAGE_GUILD), true);
+  assert.equal(isAdministrable(DISCORD_PERMISSION_BITS.MANAGE_GUILD), true);
 });
 
 test("Administrator is enough, because Discord grants it every bit", () => {
-  assert.equal(isAdministrable(USER_PERMISSIONS.ADMINISTRATOR), true);
+  assert.equal(isAdministrable(DISCORD_PERMISSION_BITS.ADMINISTRATOR), true);
 });
 
 test("a guild the caller cannot manage is dropped, not listed and then refused", () => {
   assert.equal(isAdministrable(0n), false);
   // A bitfield of unrelated permissions must not be mistaken for standing.
-  assert.equal(isAdministrable(USER_PERMISSIONS.MANAGE_NICKNAMES | USER_PERMISSIONS.CHANGE_NICKNAME), false);
+  assert.equal(isAdministrable(DISCORD_PERMISSION_BITS.MANAGE_NICKNAMES | DISCORD_PERMISSION_BITS.CHANGE_NICKNAME), false);
 });
 
 test("an administrable guild with the bot is fully manageable", () => {

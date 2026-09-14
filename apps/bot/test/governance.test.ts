@@ -23,6 +23,24 @@ function sourceFiles(dir: string): string[] {
 
 const files = sourceFiles(join(botRoot, "src")).map(path => ({ path, relativePath: relative(botRoot, path).replace(/\\/g, "/"), source: readFileSync(path, "utf8") }));
 
+/**
+ * Every source tree that is allowed to cite a rule.
+ *
+ * The contract binds the whole monorepo, not just the bot: rules 25 to 27 are
+ * implemented in `packages/core` and `apps/dashboard/server`, and a citation
+ * there has to be checked as well. Scanning only the bot is what would let a
+ * comment in core point at a rule number that no longer exists.
+ */
+const repoRoot = join(botRoot, "..", "..");
+const citationRoots = ["apps/bot/src", "apps/dashboard/server", "packages/core/src"];
+const citationFiles = citationRoots
+  .flatMap(root => sourceFiles(join(repoRoot, root)))
+  .map(path => ({
+    path,
+    relativePath: relative(repoRoot, path).replace(/\\/g, "/"),
+    source: readFileSync(path, "utf8")
+  }));
+
 test("discord.js is imported by exactly one module", () => {
   const importers = files.filter(file => /from\s+"discord\.js"/.test(file.source)).map(file => file.relativePath);
   assert.deepEqual(importers, ["src/lib/discord.ts"]);
@@ -104,18 +122,18 @@ const governance = readFileSync(governancePath, "utf8");
 /** Rule numbers declared in docs/GOVERNANCE.md, e.g. "1. **Slash commands only.**" */
 const declaredRules = [...governance.matchAll(/^(\d+)\.\s+\*\*/gm)].map(match => Number(match[1]));
 
-test("docs/GOVERNANCE.md declares exactly twenty-three rules", () => {
-  assert.equal(declaredRules.length, 23, `found ${declaredRules.length} numbered rules`);
+test("docs/GOVERNANCE.md declares exactly twenty-seven rules", () => {
+  assert.equal(declaredRules.length, 27, `found ${declaredRules.length} numbered rules`);
   assert.deepEqual(
     declaredRules,
-    Array.from({ length: 23 }, (_, index) => index + 1),
-    "rules are numbered 1..23 with no gaps"
+    Array.from({ length: 27 }, (_, index) => index + 1),
+    "rules are numbered 1..27 with no gaps"
   );
 });
 
 test("every GOVERNANCE rule reference in the source points at a real rule", () => {
   const dangling: string[] = [];
-  for (const file of files) {
+  for (const file of citationFiles) {
     for (const match of file.source.matchAll(/GOVERNANCE rule (\d+)/g)) {
       const rule = Number(match[1]);
       if (!declaredRules.includes(rule)) dangling.push(`${file.relativePath} cites rule ${rule}`);
@@ -126,12 +144,12 @@ test("every GOVERNANCE rule reference in the source points at a real rule", () =
 
 test("the rule numbers actually used cover the rules that need code", () => {
   const cited = new Set<number>();
-  for (const file of files) {
+  for (const file of citationFiles) {
     for (const match of file.source.matchAll(/GOVERNANCE rule (\d+)/g)) cited.add(Number(match[1]));
   }
   // Rules 1, 4, 6, 8 and 9 are enforced structurally by the other tests above
   // and by the deploy/registry modules; the rest must be cited where they live.
-  for (const rule of [2, 3, 5, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]) {
+  for (const rule of [2, 3, 5, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 24, 25, 26, 27]) {
     assert.ok(cited.has(rule), `rule ${rule} is not cited anywhere in src`);
   }
 });
@@ -248,5 +266,57 @@ test("the presence is the only field the bot writes to the gateway", () => {
 test("the runtime applies the presence through the sync, not by hand", () => {
   const index = files.find(file => file.relativePath === "src/index.ts")!;
   assert.match(codeOf(index.source), /createPresenceSync\s*\(/, "the runtime builds the sync");
+});
+
+/* ------------------------------------------------------------------ *
+ * The layers stay apart.
+ *
+ * GOVERNANCE rule 2 separates the Discord access points; these tests separate
+ * the packages. The dependency direction is one-way — the bot and the BFF both
+ * depend on core, and core depends on neither — because a cycle would make the
+ * shared contract impossible to test on its own, and an npm dependency inside
+ * core would land in the browser bundle whether or not the SPA uses it.
+ * ------------------------------------------------------------------ */
+
+const coreFiles = sourceFiles(join(repoRoot, "packages", "core", "src"));
+const spaFiles = sourceFiles(join(repoRoot, "apps", "dashboard", "src"));
+
+/** Import specifiers that are not relative, i.e. packages or node builtins. */
+function externalImports(source: string): string[] {
+  return [...source.matchAll(/^import[^;]*?from\s+"([^"]+)"/gm)]
+    .map(match => match[1])
+    .filter(specifier => !specifier.startsWith("."));
+}
+
+test("the shared contract imports nothing but node:crypto", () => {
+  const found = coreFiles.flatMap(path =>
+    externalImports(readFileSync(path, "utf8")).map(
+      specifier => `${relative(repoRoot, path).replace(/\\/g, "/")} -> ${specifier}`
+    )
+  );
+
+  // `security.ts` is the one exception, and it is a node builtin rather than a
+  // package. It is also excluded from `browser.ts`, so the SPA never sees it.
+  assert.deepEqual(
+    found,
+    ["packages/core/src/security.ts -> node:crypto"],
+    "an npm dependency in core would be bundled into the dashboard whether it is used or not"
+  );
+});
+
+test("the SPA never reaches the bot or the BFF's server modules", () => {
+  const offenders = spaFiles
+    .filter(path => /from\s+"[^"]*(apps\/bot|\/server\/|apps\/dashboard\/server)/.test(readFileSync(path, "utf8")))
+    .map(path => relative(repoRoot, path).replace(/\\/g, "/"));
+
+  assert.deepEqual(offenders, [], "the browser talks to the BFF over HTTP, never by import");
+});
+
+test("the bot never reaches the dashboard", () => {
+  const offenders = files
+    .filter(file => /from\s+"[^"]*apps\/dashboard/.test(file.source))
+    .map(file => file.relativePath);
+
+  assert.deepEqual(offenders, [], "the dashboard is not a dependency of the bot");
 });
 
