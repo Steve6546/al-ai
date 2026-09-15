@@ -5,6 +5,7 @@ import {
   buildAllCommands,
   CLEAR_MAX_COUNT,
   CLEAR_MIN_COUNT,
+  compareCommandRegistry,
   SLOWMODE_MAX_SECONDS,
   TIMEOUT_MAX_SECONDS,
   TIMEOUT_MIN_SECONDS
@@ -75,17 +76,30 @@ test("every hierarchy reason has operator-facing wording", () => {
  * ------------------------------------------------------------------ */
 
 test("every registered command is actually published to Discord", () => {
-  const published = new Set(buildAllCommands().map(command => (command as { name: string }).name));
-  const missing = commandRegistry.filter(command => !published.has(command.name)).map(command => command.name);
+  const { missing } = compareCommandRegistry();
   assert.deepEqual(missing, [], "a registry entry with no builder would never be reachable");
 });
 
 test("nothing is published that is not in the registry", () => {
-  const registered = new Set(commandRegistry.map(command => command.name));
-  const extra = buildAllCommands()
-    .map(command => (command as { name: string }).name)
-    .filter(name => name !== "al-status" && !registered.has(name));
+  const { extra } = compareCommandRegistry();
   assert.deepEqual(extra, [], "publishing an unregistered command is a governance violation");
+});
+
+test("the parity comparison detects a mismatch in both directions", () => {
+  // The comparison is the guard, so it gets the same treatment as everything
+  // else here: hand it a set that is wrong both ways and confirm it says so.
+  // Without this, a comparison that always returned empty lists would satisfy
+  // both tests above while guarding nothing.
+  const commands = buildAllCommands();
+  const doctored = [
+    ...commands.filter(command => (command as { name: string }).name !== "ban"),
+    { name: "not-a-command" }
+  ];
+
+  const { missing, extra } = compareCommandRegistry(doctored);
+
+  assert.deepEqual(missing, ["ban"], "a registered command missing from the published set");
+  assert.deepEqual(extra, ["not-a-command"], "a published command absent from the registry");
 });
 
 test("commands are hidden from everyone by default, except the informational core four", () => {

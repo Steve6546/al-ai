@@ -21,6 +21,7 @@ import type { ActivityType, BotStatus, LogDestination, Severity } from "@al-ai/c
 import {
   activityTypeNumbers,
   BOT_ROLE_NAME,
+  commandRegistry,
   groupPagesIntoMessages,
   planEmbedFields,
   SEVERITY_EMBED_COLOR,
@@ -494,6 +495,29 @@ export function buildModerationCommands() {
 /** Everything AL AI publishes. Used by scripts/deploy-commands.ts. */
 export function buildAllCommands() {
   return [buildStatusCommand(), ...buildCoreCommands(), ...buildModerationCommands()];
+}
+
+/**
+ * GOVERNANCE rule 1: the registry is the authority for what gets published.
+ *
+ * This is the single comparison, used by both the deploy script and its test.
+ * They used to carry separate copies of this logic, each with its own
+ * `al-status` exception left over from when `/al-status` was published without
+ * being registered. Once the registry gained `/al-status` that exception turned
+ * into a false mismatch — but only in the script: the test's copy filtered the
+ * same name for the same stale reason, so it kept passing while deployment had
+ * become impossible. A guard that re-implements the thing it guards inherits
+ * that thing's blind spots; sharing the code is what makes it a guard.
+ */
+export function compareCommandRegistry(
+  published: readonly unknown[] = buildAllCommands()
+): { missing: string[]; extra: string[] } {
+  const registered = commandRegistry.map(command => command.name);
+  const names = published.map(command => (command as { name: string }).name);
+  return {
+    missing: registered.filter(name => !names.includes(name)),
+    extra: names.filter(name => !registered.includes(name))
+  };
 }
 
 /* ------------------------------------------------------------------ *

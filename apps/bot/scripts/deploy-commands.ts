@@ -1,6 +1,5 @@
 import "dotenv/config";
-import { buildAllCommands, deploySlashCommands } from "../src/lib/discord.js";
-import { commandRegistry } from "@al-ai/core";
+import { buildAllCommands, compareCommandRegistry, deploySlashCommands } from "../src/lib/discord.js";
 
 /**
  * GOVERNANCE rule 9: command deployment is a separate process, never the runtime.
@@ -15,15 +14,10 @@ const clientId = process.env.DISCORD_CLIENT_ID;
 if (!token || !clientId) throw new Error("BOT_TOKEN and DISCORD_CLIENT_ID are required.");
 
 const published = buildAllCommands();
-const registryNames = commandRegistry.map(command => command.name);
-const publishedNames = published
-  .map(command => (command as { name: string }).name)
-  .filter(name => name !== "al-status");
 
 // The registry is the authority: publishing something absent from it, or
 // forgetting something present in it, is a defect rather than a preference.
-const missing = registryNames.filter(name => !publishedNames.includes(name));
-const extra = publishedNames.filter(name => !registryNames.includes(name));
+const { missing, extra } = compareCommandRegistry(published);
 if (missing.length || extra.length) {
   throw new Error(
     `Command registry and published commands disagree. Not published: ${missing.join(", ") || "—"}. Not registered: ${extra.join(", ") || "—"}.`
