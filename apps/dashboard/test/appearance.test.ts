@@ -6,6 +6,7 @@ import {
   describeAppearanceFailure,
   invalidateAppearanceSnapshot,
   readAppearanceSnapshot,
+  resolveRoleIconWrite,
   type AppearancePlan
 } from "../server/appearance.js";
 import { DiscordApiError } from "../server/discord.js";
@@ -269,4 +270,62 @@ test("a read that fails with nothing cached answers null rather than throwing", 
     throw new TypeError("fetch failed");
   };
   assert.equal(await readAppearanceSnapshot("token"), null);
+});
+
+/* ------------------------------------------------------------------ *
+ * The role icon gate
+ *
+ * The screen disables this field below boost level 2, so the field is
+ * *omitted* from the request — which makes "absent" the normal case, not an
+ * edge one. Reading it as null would wipe a stored icon, and answering 409
+ * would fail the whole form over one control the operator cannot touch. Both
+ * were live defects; both are decided here.
+ * ------------------------------------------------------------------ */
+
+const ICON = "data:image/png;base64,AAAA";
+
+test("an omitted role icon leaves the stored one alone", () => {
+  // Not "clears it": the screen omits the field whenever the guild is below
+  // boost level 2, so treating absent as null would delete the icon on the next
+  // unrelated save.
+  const result = resolveRoleIconWrite({ sent: false, value: null, stored: ICON, locked: true, reason: "مقفلة" });
+  assert.equal(result.value, ICON, "the stored icon survived a save that never mentioned it");
+  assert.equal(result.deferred, null, "nothing was attempted, so nothing is reported");
+});
+
+test("a locked role icon is dropped and reported rather than failing the request", () => {
+  const result = resolveRoleIconWrite({ sent: true, value: "data:image/png;base64,BBBB", stored: ICON, locked: true, reason: "يتطلب مستوى تعزيز 2" });
+  assert.equal(result.value, ICON, "the stored icon is kept, not the refused one");
+  assert.equal(result.deferred?.code, "ROLE_ICON_REQUIRES_BOOST");
+  assert.match(result.deferred?.message ?? "", /تعزيز/, "the operator is told why");
+});
+
+test("re-sending the stored icon while locked is a no-op, not a refusal", () => {
+  // Otherwise the operator is stranded: the field is disabled, so they could
+  // neither change it nor clear it, and every unrelated save would report a
+  // failure for a field they never touched.
+  const result = resolveRoleIconWrite({ sent: true, value: ICON, stored: ICON, locked: true, reason: "مقفلة" });
+  assert.equal(result.value, ICON);
+  assert.equal(result.deferred, null, "an unchanged value is not a refused change");
+});
+
+test("an unlocked role icon stores what was sent, and null clears it", () => {
+  const set = resolveRoleIconWrite({ sent: true, value: "data:image/png;base64,CCCC", stored: null, locked: false, reason: null });
+  assert.equal(set.value, "data:image/png;base64,CCCC");
+  assert.equal(set.deferred, null);
+
+  // An explicit null is a real instruction, unlike an absent field — this is how
+  // the operator removes an icon.
+  const cleared = resolveRoleIconWrite({ sent: true, value: null, stored: ICON, locked: false, reason: null });
+  assert.equal(cleared.value, null, "an explicit null clears it");
+  assert.equal(cleared.deferred, null);
+});
+
+test("a locked write with no reason still explains itself", () => {
+  // The reason comes from a Discord read that can fail; the message must not
+  // come out empty when it does.
+  const result = resolveRoleIconWrite({ sent: true, value: ICON, stored: null, locked: true, reason: null });
+  assert.equal(result.value, null);
+  assert.ok(result.deferred, "the refusal is still reported");
+  assert.ok((result.deferred?.message ?? "").length > 0, "and it is never a blank sentence");
 });

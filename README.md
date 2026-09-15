@@ -184,13 +184,13 @@ npm run verify   # lint → check:schema → test → build, in that order
 | Suite | Tests | Covers |
 |---|---|---|
 | `apps/bot/test` | 173 | crypto, nonces, routing, permissions, pipeline, presence sync, governance, Discord-constant alignment, anti-nuke, adapter, security |
-| `apps/dashboard/test` | 191 | every screen renders without throwing (real jsdom mount, not `renderToString`); the error boundary contains a failure and recovers on retry; Discord read shapes; storage round-trips; appearance field outcomes; route guards; cache |
+| `apps/dashboard/test` | 197 | every screen renders without throwing (real jsdom mount, not `renderToString`); the error boundary contains a failure and recovers on retry; a gated role icon is disabled and omitted from the write; Discord read shapes; storage round-trips; appearance field outcomes; route guards; cache |
 | `packages/core/test` | 137 | event schema, tiers, session policy, appearance normalisation, commands, metrics, hierarchy, anti-nuke limits |
 
 **Read `# skipped`, not `# pass`.** `apps/dashboard/test/storage.test.ts` reads
 `DATABASE_URL`; with no reachable database it logs
-`{ skip: "no reachable database" }` for each case. The suite still *reports* 191
-tests — it is `# pass 167, # skipped 24` — and `npm run verify` **still exits 0**.
+`{ skip: "no reachable database" }` for each case. The suite still *reports* 197
+tests — it is `# pass 173, # skipped 24` — and `npm run verify` **still exits 0**.
 Start PostgreSQL first or the green tick means nothing.
 
 Two more checks are enforced by tests rather than by eye:

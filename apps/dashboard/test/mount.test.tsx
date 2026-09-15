@@ -52,19 +52,34 @@ const role = { id: "1", name: "AL AI", position: 5, managed: false, isDefault: f
  * hold `''` for `status_duration` and `status_expires_at` on this machine. A
  * fixture with tidy `null`s would have tested a row that does not exist.
  */
+/**
+ * The customization payload, held by reference so a test can lock the role-icon
+ * gate and put it back afterwards.
+ *
+ * The gate matters because the field is *disabled* below boost level 2, and a
+ * disabled field that is still sent to the server is what produced the 409: the
+ * input was disabled, the picker beside it was not.
+ */
+const customizationPayload: {
+  settings: { nickname: string; roleColor: string; roleIconUrl: string };
+  permissions: { key: string; label: string; granted: boolean | null }[];
+  hierarchy: { botPosition: number; highestManagedPosition: number; blocked: boolean; message: string | null };
+  roleIcon: { locked: boolean; unknown: boolean; reason: string | null };
+} = {
+  settings: { nickname: "AL uwu", roleColor: "#050572", roleIconUrl: "" },
+  permissions: [
+    { key: "change_nickname", label: "تغيير الاسم المستعار", granted: true },
+    { key: "manage_roles", label: "إدارة الرتب", granted: null }
+  ],
+  hierarchy: { botPosition: 5, highestManagedPosition: 3, blocked: false, message: null },
+  roleIcon: { locked: false, unknown: false, reason: null }
+};
+
 const payloads: [RegExp, unknown][] = [
   [/^\/api\/session$/, { authenticated: true, user: { id: "1", username: "owner", avatarUrl: null, expiresAt: new Date().toISOString() } }],
   [/^\/api\/health$/, { status: "healthy", dashboard: "online", bot: "connected", database: "reachable", gateway: { eventsLastMinute: 0, ceiling: 120 }, verification: { guildCount: 1, uniqueUsers: 1, reviewRequired: false, warning: null } }],
   [/^\/api\/guilds$/, { guilds: [guild] }],
-  [/^\/api\/guilds\/[^/]+\/customization$/, {
-    settings: { nickname: "AL uwu", roleColor: "#050572", roleIconUrl: "" },
-    permissions: [
-      { key: "change_nickname", label: "تغيير الاسم المستعار", granted: true },
-      { key: "manage_roles", label: "إدارة الرتب", granted: null }
-    ],
-    hierarchy: { botPosition: 5, highestManagedPosition: 3, blocked: false, message: null },
-    roleIcon: { locked: false, unknown: false, reason: null }
-  }],
+  [/^\/api\/guilds\/[^/]+\/customization$/, customizationPayload],
   [/^\/api\/bot\/identity$/, {
     settings: {
       avatarDataUrl: "",
@@ -435,6 +450,81 @@ test("the status menu opens, and its duration sub-menu opens inside it", async (
     root.unmount();
   } finally {
     console.error = originalError;
+    container.remove();
+  }
+});
+
+test("a locked role icon cannot be picked and is left out of the save", async () => {
+  const { createRoot } = await import("react-dom/client");
+  const { act } = await import("react");
+
+  const gate = customizationPayload.roleIcon;
+  customizationPayload.roleIcon = { locked: true, unknown: false, reason: "يتطلب مستوى تعزيز 2" };
+  stubFetch();
+
+  // Wrap the stub so the body the screen actually sends can be read. The 409
+  // came from this body carrying an icon the server would refuse.
+  const stub = (globalThis as unknown as { fetch: (input: unknown, init?: unknown) => Promise<unknown> }).fetch;
+  const writes: string[] = [];
+  (globalThis as unknown as { fetch: unknown }).fetch = (input: unknown, init?: { method?: string; body?: string }) => {
+    if (init?.method === "PUT") writes.push(String(init.body ?? ""));
+    return stub(input, init);
+  };
+
+  dom.window.history.replaceState({}, "", `/dashboard/${GUILD_ID}/customization`);
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(container);
+
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => { errors.push(args.map(String).join(" ")); };
+
+  try {
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        createElement(StrictMode, null, createElement(TooltipProvider, { delayDuration: 200, children: createElement(App, null) }))
+      );
+    });
+    for (let i = 0; i < 6; i += 1) {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 15)); });
+    }
+
+    // Disabled, not merely discouraged. A live picker let the operator attach an
+    // icon the server then refused — and the refusal took the whole form with it.
+    const picker = [...container.querySelectorAll("button")].find(el => el.textContent?.includes("اختيار أيقونة"));
+    assert.ok(picker, "the role icon picker is rendered");
+    assert.equal((picker as HTMLButtonElement).disabled, true, "the locked picker cannot be clicked");
+
+    // Make the form dirty so the save bar appears, then save once. React tracks
+    // its own value, so the native setter has to be used for the change to land.
+    const nickname = container.querySelector<HTMLInputElement>("#nickname");
+    assert.ok(nickname, "the nickname field is rendered");
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")?.set;
+      setValue?.call(nickname, "AL محفوظ");
+      nickname!.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    for (let i = 0; i < 3; i += 1) {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 15)); });
+    }
+
+    const save = [...container.querySelectorAll("button")].find(el => /حفظ/.test(el.textContent ?? ""));
+    assert.ok(save, "the save bar appeared once the nickname changed");
+    await act(async () => {
+      (save as HTMLButtonElement).click();
+      await new Promise(resolve => setTimeout(resolve, 60));
+    });
+
+    assert.equal(writes.length, 1, "exactly one customization write was sent");
+    assert.doesNotMatch(writes[0]!, /roleIconUrl/, "the gated icon was left out of the request");
+    assert.match(writes[0]!, /nickname/, "while the nickname it may save was sent");
+    assert.deepEqual(fatal(errors), [], "the locked screen produced no render error");
+
+    root.unmount();
+  } finally {
+    console.error = originalError;
+    customizationPayload.roleIcon = gate;
     container.remove();
   }
 });

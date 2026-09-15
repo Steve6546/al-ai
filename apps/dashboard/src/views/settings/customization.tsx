@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check,
   CircleHelp,
   Globe,
   Info,
@@ -9,10 +8,8 @@ import {
   Palette,
   RotateCcw,
   Server,
-  ShieldCheck,
   TriangleAlert,
-  Upload,
-  X
+  Upload
 } from "lucide-react";
 import {
   DEFAULT_BOT_IDENTITY,
@@ -262,7 +259,15 @@ export function CustomizationView({ guild }: { guild: Guild }) {
    * refusal on the nickname cannot be presented as a refusal of the avatar.
    * ---------------------------------------------------------------- */
   const saveGuild = async () => {
-    const result = await api.saveCustomization(guild.id, guildDraft);
+    // Below boost level 2 the icon is disabled, so it is left out of the request
+    // entirely rather than sent and refused. On the server an absent field means
+    // "leave it alone", which is what lets the nickname and the colour save in
+    // one click: the 409 that used to answer here failed the whole form — and
+    // with it the fields that were perfectly valid — over one gated control.
+    const payload: Partial<CustomizationSettings> = { ...guildDraft };
+    if (roleIcon?.locked) delete payload.roleIconUrl;
+
+    const result = await api.saveCustomization(guild.id, payload);
     setSavedGuild(result.settings);
     setGuildDraft(result.settings);
     return describeAppearanceResult(result);
@@ -583,10 +588,17 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                     <ImagePickerButton
                       label="اختيار أيقونة"
                       busy={crop?.target === "roleIcon"}
+                      disabled={roleIcon?.locked}
                       onPick={() => openPicker("roleIcon")}
                     />
                     {guildDraft.roleIconUrl ? (
-                      <Button type="button" variant="ghost" size="sm" onClick={() => patchGuild({ roleIconUrl: null })}>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={roleIcon?.locked}
+                        onClick={() => patchGuild({ roleIconUrl: null })}
+                      >
                         <RotateCcw />
                         إزالة
                       </Button>
@@ -621,53 +633,9 @@ export function CustomizationView({ guild }: { guild: Guild }) {
               <Alert>
                 <Info />
                 <AlertDescription>
-                  يُطبّق البوت هذه التغييرات خلال دقيقة من الحفظ. إن لم تظهر، تأكّد من أن رتبة AL AI أعلى من الرتب
-                  التي يحاول تعديلها.
+                  إن لم تظهر التغييرات، تأكّد من أن رتبة AL AI أعلى من الرتب التي يحاول تعديلها.
                 </AlertDescription>
               </Alert>
-            </CardContent>
-          </Card>
-
-          {/* ---------------------------------------------------------- *
-           * Card 3 — the permission list. Collapsed by default because it
-           * is diagnostic, not something the operator edits.
-           * ---------------------------------------------------------- */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <ShieldCheck className="size-4" />
-                الصلاحيات المطلوبة
-              </CardTitle>
-              <CardDescription>تأتي مع رتبة AL AI التي ينشئها البوت عند دخوله.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {permissions.length === 0 || permissionsUnreadable ? (
-                <p className="text-xs text-muted-foreground">
-                  تعذّر قراءة صلاحيات البوت. أعد إضافة AL AI بصلاحيات Administrator ليتمكن من تعديل هويته.
-                </p>
-              ) : (
-                permissions.map(permission => (
-                  <div key={permission.key} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="text-muted-foreground">{permission.label}</span>
-                    {permission.granted === true ? (
-                      <Badge variant="secondary" className="gap-1">
-                        <Check className="size-3" />
-                        متاحة
-                      </Badge>
-                    ) : permission.granted === false ? (
-                      <Badge variant="destructive" className="gap-1">
-                        <X className="size-3" />
-                        مفقودة
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="gap-1">
-                        <CircleHelp className="size-3" />
-                        غير معروفة
-                      </Badge>
-                    )}
-                  </div>
-                ))
-              )}
             </CardContent>
           </Card>
         </div>
@@ -702,12 +670,6 @@ export function CustomizationView({ guild }: { guild: Guild }) {
               />
             </CardContent>
           </Card>
-
-          {!crop ? (
-            <div className="flex flex-wrap gap-2">
-              <ImagePickerButton label="رفع صورة للأفاتار" onPick={() => openPicker("avatar")} />
-            </div>
-          ) : null}
         </div>
       </div>
 

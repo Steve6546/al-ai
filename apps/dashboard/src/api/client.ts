@@ -135,7 +135,13 @@ export const customization = (guildId: string) =>
     hierarchy: RoleHierarchyVerdict | null;
     roleIcon: RoleIconGate;
   }>(`/api/guilds/${guildId}/customization`);
-export const saveCustomization = (guildId: string, settings: CustomizationSettings) =>
+/**
+ * Partial on purpose: a field the operator cannot edit must be omitted rather
+ * than echoed back. The server reads an absent field as "leave it alone" and a
+ * `null` as "clear it", so omitting the gated role icon keeps a stored one while
+ * still letting the rest of the form save.
+ */
+export const saveCustomization = (guildId: string, settings: Partial<CustomizationSettings>) =>
   call<{ settings: CustomizationSettings; savedAt: string } & AppearanceSaveResult>(
     `/api/guilds/${guildId}/customization`,
     { method: "PUT", body: JSON.stringify(settings) }

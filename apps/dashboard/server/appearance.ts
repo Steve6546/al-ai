@@ -212,6 +212,54 @@ export function changedAppearanceFields(plan: Omit<AppearancePlan, "token" | "gu
 }
 
 /**
+ * Decides what a role-icon write should store, and whether to report it.
+ *
+ * Extracted because the rule has three cases that are easy to collapse into one
+ * and expensive when they are:
+ *
+ * - **Not sent** means "leave it alone". Reading an absent field as `null` would
+ *   wipe a stored icon — and the screen omits this field entirely below boost
+ *   level 2, so that path is the normal one, not an edge case.
+ * - **Sent and locked** keeps the stored value and reports the refusal. The
+ *   write is dropped, never the request: answering 409 here failed the whole
+ *   form, so a valid nickname and colour were lost to a control the operator was
+ *   not allowed to touch. That was the bug.
+ * - **Sent and allowed** stores what was sent, including an explicit `null`,
+ *   which is how the icon is cleared.
+ *
+ * Pure, so all three are asserted directly instead of inferred from a response.
+ */
+export function resolveRoleIconWrite(input: {
+  /** False when the request did not carry the field at all. */
+  sent: boolean;
+  /** The normalised value that was sent. Meaningless when `sent` is false. */
+  value: string | null;
+  /** What the row holds now. */
+  stored: string | null;
+  /** Whether Discord would refuse an icon for this guild right now. */
+  locked: boolean;
+  /** Why it is locked, for the operator. */
+  reason: string | null;
+}): { value: string | null; deferred: { code: string; message: string } | null } {
+  if (!input.sent) return { value: input.stored, deferred: null };
+
+  // Only a *change* is doomed. Re-sending the icon already stored is a no-op,
+  // and rejecting that would strand the operator: the field is disabled, so
+  // they could not clear it either.
+  if (input.locked && input.value !== input.stored) {
+    return {
+      value: input.stored,
+      deferred: {
+        code: "ROLE_ICON_REQUIRES_BOOST",
+        message: input.reason ?? "أيقونة الرتبة غير متاحة في هذا السيرفر."
+      }
+    };
+  }
+
+  return { value: input.value, deferred: null };
+}
+
+/**
  * Applies every changed field, one at a time.
  *
  * A failure is recorded against its own field and the rest still run: refusing

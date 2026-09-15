@@ -100,6 +100,7 @@ import {
   describeAppearanceFailure,
   invalidateAppearanceSnapshot,
   readAppearanceSnapshot,
+  resolveRoleIconWrite,
   type AppearanceField,
   type AppearanceSnapshot,
   type FieldOutcome
@@ -1278,11 +1279,17 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
     return reply.code(400).send({ error: "INVALID_ROLE_COLOR", message: "لون الرتبة يجب أن يكون بصيغة #RRGGBB." });
   }
 
+  // Absent means "leave it alone"; `null` means "clear it". The screen omits the
+  // icon entirely below boost level 2, and reading an absent field as null would
+  // wipe a stored icon the moment it did.
+  const iconSent = body?.roleIconUrl !== undefined;
+  const current = await db.getCustomization(guildId);
+  const normalisedIcon = iconSent ? normaliseImageValue(body?.roleIconUrl) : null;
+
   // A data URL (uploaded through the cropper) or an https link (a value stored
   // by an older build). Anything else is refused rather than quietly dropped,
   // so the operator is told instead of guessing.
-  const roleIconUrl = normaliseImageValue(body?.roleIconUrl);
-  if (body?.roleIconUrl && !roleIconUrl) {
+  if (iconSent && body?.roleIconUrl && !normalisedIcon) {
     return reply.code(400).send({
       error: "INVALID_ROLE_ICON",
       message:
@@ -1292,32 +1299,41 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
     });
   }
 
-  // The screen locks this field below boost level 2, but that lock is a
-  // courtesy, not a guarantee — a hand-crafted request would still reach Discord
-  // and come back as an opaque 400. Refuse it here, with a reason the operator
-  // can act on.
-  //
-  // Only a *change* is doomed. Re-sending the icon already stored is a no-op,
-  // and rejecting that would strand the operator: the field is locked, so they
-  // could not clear it either. An unreadable boost level fails open, matching
-  // the gate.
-  if (env.botToken) {
-    const current = await db.getCustomization(guildId);
-    if (roleIconUrl && roleIconUrl !== current.roleIconUrl) {
-      const premiumTier = await fetchGuildPremiumTier(env.botToken, guildId).catch(() => null);
-      const gate = assessRoleIconGate(premiumTier);
-      if (gate.locked) {
-        return reply.code(409).send({ error: "ROLE_ICON_REQUIRES_BOOST", message: gate.reason });
-      }
-    }
-  }
+  // Below boost level 2 Discord refuses a role icon — but refusing the *request*
+  // took the nickname and the colour down with it, so a valid edit was lost to a
+  // control the operator was not allowed to touch. That was the 409 the operator
+  // kept meeting. The icon is dropped and reported as a field outcome instead,
+  // the same shape a Discord refusal takes. `resolveRoleIconWrite` owns the rule
+  // and is unit-tested on its own; the boost level is only worth a Discord call
+  // when the icon actually changes.
+  const iconChanged = iconSent && normalisedIcon !== current.roleIconUrl;
+  const iconGate =
+    iconChanged && env.botToken
+      ? assessRoleIconGate(await fetchGuildPremiumTier(env.botToken, guildId).catch(() => null))
+      : null;
+
+  const icon = resolveRoleIconWrite({
+    sent: iconSent,
+    value: normalisedIcon,
+    stored: current.roleIconUrl,
+    locked: iconGate?.locked ?? false,
+    reason: iconGate?.reason ?? null
+  });
+  const roleIconUrl = icon.value;
+  const roleIconDeferred = icon.deferred;
 
   // Refuse instead of performing an operation that is guaranteed to fail — but
-  // only on a *known* absence. `null` means the permission read failed, and
-  // blocking on that would make an unreadable permission indistinguishable from
-  // a missing one, refusing saves the bot can perform. The bot re-checks before
-  // it writes and reports Discord's own error if the permission really is absent.
-  if (env.botToken) {
+  // only on a *known* absence, and only when the nickname is actually being
+  // changed. `null` means the permission read failed, and blocking on that would
+  // make an unreadable permission indistinguishable from a missing one,
+  // refusing saves the bot can perform. The bot re-checks before it writes and
+  // reports Discord's own error if the permission really is absent.
+  //
+  // The "only when it changes" half matters for the same reason the icon gate
+  // does: a colour-only save was refused because the bot happened to lack Manage
+  // Nicknames, which is one field's problem failing a form that would otherwise
+  // have saved. It also spends two Discord calls less on the common case.
+  if (env.botToken && nickname !== current.nickname) {
     const statuses = await botIdentityPermissionStatus(env.botToken, guildId);
     const nicknamePermission = statuses.find(status => status.key === "change_nickname");
     if (nicknamePermission?.granted === false) {
@@ -1326,7 +1342,7 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
   }
 
   const settings: CustomizationSettings = { nickname, roleColor, roleIconUrl };
-  const previous = await db.getCustomization(guildId);
+  const previous = current;
 
   // Save first, then apply. The row is the source of truth the bot reads on its
   // sync tick, and a Discord outage must not lose an edit the operator has
@@ -1362,10 +1378,19 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
     payload: { action: "customization.save", nickname, roleColor, roleIconUrl }
   });
 
+  // The deferred icon is a policy refusal, not a Discord outage, so it must not
+  // be allowed to trip the "nothing landed" branch and answer 502 — the service
+  // is fine and the rest of the form saved. It is still reported in `failed`,
+  // which is what tells the operator which field did not apply.
+  const deferred: Extract<FieldOutcome, { ok: false }> | null = roleIconDeferred
+    ? { field: "roleIconUrl", ok: false, code: roleIconDeferred.code, message: roleIconDeferred.message }
+    : null;
+  const reported = deferred ? [...outcomes, deferred] : outcomes;
+
   const response = appearanceResponse(
     reply,
-    outcomes,
-    outcomes.map(outcome => outcome.field),
+    reported,
+    reported.filter(outcome => outcome !== deferred).map(outcome => outcome.field),
     "Per-guild customization saved"
   );
   if (!response) return;

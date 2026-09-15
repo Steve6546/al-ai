@@ -245,14 +245,22 @@ export function ImageCropper({ target, image, onApply, onCancel }: Props) {
 export function ImagePickerButton({
   label,
   busy,
+  disabled,
   onPick
 }: {
   label: string;
   busy?: boolean;
+  /**
+   * A field that is gated (the role icon below boost level 2) must be unable to
+   * pick, not merely unable to type. Leaving the button live was the actual
+   * source of the 409: the input was disabled, the picker was not, so an
+   * operator could still attach an icon the server would then refuse.
+   */
+  disabled?: boolean;
   onPick: () => void;
 }) {
   return (
-    <Button type="button" variant="outline" size="sm" onClick={onPick} disabled={busy}>
+    <Button type="button" variant="outline" size="sm" onClick={onPick} disabled={busy || disabled}>
       {busy ? <Loader2 className="animate-spin" /> : <Upload />}
       {label}
     </Button>
