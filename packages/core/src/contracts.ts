@@ -705,17 +705,34 @@ export type BotHeartbeat = {
 };
 
 /**
+ * Is this heartbeat recent enough to describe a bot that is still running?
+ *
+ * The comparison is strict — "fresher than three minutes", not "three minutes or
+ * fresher" — and it is written exactly once, here. It used to exist twice: this
+ * file had one copy and `/api/health` in the dashboard had another, over the
+ * same constant. The boundary test pinned only the copy here, which cannot
+ * notice the other one drifting — so the overview screen and the health
+ * endpoint could have disagreed about whether the bot was live while every test
+ * stayed green.
+ *
+ * `checkedAt` is the stored ISO timestamp. `now` is passed in rather than read
+ * here so the caller's clock is the only clock, and so this stays testable
+ * without mocking time.
+ */
+export function isHeartbeatFresh(checkedAt: string | null, now: number): boolean {
+  return checkedAt !== null && now - Date.parse(checkedAt) < BOT_HEARTBEAT_STALE_MS;
+}
+
+/**
  * Decides whether the bot is live, and whether its ping is still meaningful.
  *
  * A heartbeat row outlives the process that wrote it. Reporting "online", or a
  * ping, from a row older than the staleness window would describe a bot that is
  * no longer running — so both collapse to offline and null once it goes stale.
- * `now` is passed in rather than read here so the caller's clock is the only
- * clock, and so this stays testable without mocking time.
  */
 export function deriveBotStatus(heartbeat: BotHeartbeat | null, now: number): GuildMetrics["bot"] {
   const lastSeenAt = heartbeat?.checkedAt ?? null;
-  const fresh = lastSeenAt !== null && now - Date.parse(lastSeenAt) < BOT_HEARTBEAT_STALE_MS;
+  const fresh = isHeartbeatFresh(lastSeenAt, now);
   return {
     online: Boolean(heartbeat?.botPresent) && fresh,
     pingMs: fresh ? (heartbeat?.pingMs ?? null) : null,

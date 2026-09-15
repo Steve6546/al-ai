@@ -21,6 +21,7 @@ import {
   describeVerification,
   deriveBotStatus,
   imageRejectionReason,
+  isHeartbeatFresh,
   isLoggingMode,
   LAYER_SIGNATURE_TTL_MS,
   logDestinations,
@@ -401,8 +402,12 @@ app.get("/api/health", async (): Promise<HealthSnapshot> => {
   // staleness window says it *is* running. Deriving this from `env.botToken`
   // alone is how this endpoint used to report "connected" for a bot that had
   // been gone for hours — the same class of lie as a ping of 0.
-  const heartbeatFresh =
-    heartbeatAt !== null && Date.now() - heartbeatAt.getTime() < BOT_HEARTBEAT_STALE_MS;
+  //
+  // The window is `isHeartbeatFresh`, the same rule the guild metrics route
+  // reaches through `deriveBotStatus`. This route used to carry its own copy of
+  // the comparison over the same constant, so the overview and the health
+  // endpoint could have disagreed about whether the bot was live.
+  const heartbeatFresh = isHeartbeatFresh(heartbeatAt?.toISOString() ?? null, Date.now());
   const bot: HealthSnapshot["bot"] = !env.botToken
     ? "awaiting_secret"
     : heartbeatFresh

@@ -4,6 +4,7 @@ import {
   BOT_HEARTBEAT_STALE_MS,
   deriveBotStatus,
   EMPTY_PUNISHMENT_COUNTS,
+  isHeartbeatFresh,
   punishmentKindOf,
   PUNISHMENT_EVENT_IDS,
   summarisePunishments,
@@ -116,10 +117,10 @@ test("a heartbeat just inside the window is still live", () => {
 });
 
 test("a heartbeat exactly at the window is already stale", () => {
-  // The comparison is strict, so the rule is "fresher than three minutes",
-  // not "three minutes or fresher". Pinning the exact boundary here stops the
-  // two sides from drifting apart when either is edited — `/api/health`
-  // applies the same strict comparison to the same constant.
+  // The comparison is strict, so the rule is "fresher than three minutes", not
+  // "three minutes or fresher". The boundary is pinned on `isHeartbeatFresh`,
+  // which is the single implementation: `/api/health` calls it directly and
+  // `deriveBotStatus` calls it here, so there is no second copy left to drift.
   const edge = heartbeat({ checkedAt: new Date(NOW - BOT_HEARTBEAT_STALE_MS).toISOString() });
   assert.equal(deriveBotStatus(edge, NOW).online, false);
 });
@@ -134,6 +135,25 @@ test("a ping of null survives as null rather than becoming zero", () => {
   const status = deriveBotStatus(heartbeat({ pingMs: null }), NOW);
   assert.equal(status.online, true);
   assert.equal(status.pingMs, null, "0 ms would read as an impossibly fast gateway");
+});
+
+/* ------------------------------------------------------------------ *
+ * The staleness rule on its own
+ *
+ * It is exported because two callers need it without the rest of
+ * `deriveBotStatus`: the overview derives a guild's status from a heartbeat
+ * row, while `/api/health` holds only a timestamp and asks the narrower
+ * question. Both must answer it identically, so the rule is tested where it is
+ * defined rather than through one of its callers.
+ * ------------------------------------------------------------------ */
+
+test("a heartbeat with no timestamp is never fresh", () => {
+  assert.equal(isHeartbeatFresh(null, NOW), false);
+});
+
+test("freshness is strict exactly at the boundary", () => {
+  assert.equal(isHeartbeatFresh(new Date(NOW - BOT_HEARTBEAT_STALE_MS).toISOString(), NOW), false);
+  assert.equal(isHeartbeatFresh(new Date(NOW - BOT_HEARTBEAT_STALE_MS + 1).toISOString(), NOW), true);
 });
 
 /* ------------------------------------------------------------------ *
