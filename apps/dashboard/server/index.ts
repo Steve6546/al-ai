@@ -321,7 +321,6 @@ async function requireTierForGuild(request: FastifyRequest, reply: FastifyReply,
     if (error instanceof AuthorizationError) {
       await appendAudit(db, env, {
         guildId,
-        severity: "warning",
         eventId: "bot.security-rejection",
         actorId: session.discordUserId,
         payload: { action: request.url, reason: `TIER_BELOW_${required.toUpperCase()}` }
@@ -722,7 +721,6 @@ app.put("/api/guilds/:guildId/tiers", async (request, reply) => {
   await db.saveTierRoles(guildId, roles);
   await appendAudit(db, env, {
     guildId,
-    severity: "warning",
     eventId: "role.update",
     actorId: context.session!.discordUserId,
     payload: { action: "tier.assign", ...roles }
@@ -816,7 +814,6 @@ app.put("/api/guilds/:guildId/commands", async (request, reply) => {
 
   await appendAudit(db, env, {
     guildId,
-    severity: "warning",
     eventId: "bot.command-success",
     actorId: context.session!.discordUserId,
     payload: { action: "command.update", changes: accepted }
@@ -913,7 +910,6 @@ app.put("/api/guilds/:guildId/security/config", async (request, reply) => {
   await db.saveSecurity(guildId, config);
   await appendAudit(db, env, {
     guildId,
-    severity: "warning",
     eventId: "bot.command-success",
     actorId: context.session!.discordUserId,
     payload: {
@@ -1200,7 +1196,6 @@ app.put("/api/bot/identity", async (request, reply) => {
 
   await appendAudit(db, env, {
     guildId,
-    severity: "warning",
     eventId: "bot.command-success",
     actorId: context.session!.discordUserId,
     payload: {
@@ -1377,7 +1372,6 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
 
   await appendAudit(db, env, {
     guildId,
-    severity: "warning",
     eventId: "bot.command-success",
     actorId: context.session!.discordUserId,
     payload: { action: "customization.save", nickname, roleColor, roleIconUrl }
@@ -1515,7 +1509,6 @@ app.put("/api/guilds/:guildId/logging", async (request, reply) => {
   await db.saveLogging(guildId, settings);
   await appendAudit(db, env, {
     guildId,
-    severity: "warning",
     eventId: "bot.command-success",
     actorId: context.session!.discordUserId,
     payload: {
