@@ -185,11 +185,22 @@ export function AppShell({
   );
 
   return (
-    <div className="grid min-h-dvh grid-cols-1 lg:grid-cols-[17rem_1fr]">
+    /*
+     * The frame is one viewport tall and does not scroll. `grid-rows-[minmax(0,1fr)]`
+     * states the single row's height explicitly rather than relying on an `auto`
+     * row stretching to fill — with `minmax(0,1fr)` the row can also be *smaller*
+     * than its content, which is what lets the scroll areas inside it scroll
+     * instead of pushing the frame taller.
+     */
+    <div className="grid h-full grid-cols-1 grid-rows-[minmax(0,1fr)] lg:grid-cols-[17rem_1fr]">
       {/* ---------------------------------------------------------------- *
        * Sidebar (desktop)
+       *
+       * `overflow-hidden` + `min-h-0` keep it exactly as tall as the frame: the
+       * nav scrolls inside the ScrollArea, and a long guild list can never
+       * stretch the column and take the profile menu off the bottom.
        * ---------------------------------------------------------------- */}
-      <aside className="hidden border-e border-sidebar-border bg-sidebar lg:flex lg:flex-col">
+      <aside className="hidden min-h-0 overflow-hidden border-e border-sidebar-border bg-sidebar lg:flex lg:flex-col">
         <Brand />
         <Separator />
         <GuildSwitcher
@@ -200,16 +211,22 @@ export function AppShell({
           onBrowseAll={onBrowseAll}
           inviteUrl={inviteUrl}
         />
-        <ScrollArea className="flex-1">{nav}</ScrollArea>
+        <ScrollArea className="min-h-0 flex-1">{nav}</ScrollArea>
         <Separator />
         <ProfileMenu user={user} guild={guild} onLogout={onLogout} />
       </aside>
 
       {/* ---------------------------------------------------------------- *
        * Content
+       *
+       * A fixed header above a single scrolling region. The header is no longer
+       * `sticky`: it sits in a column that never scrolls, so "sticky" had
+       * nothing to stick to — and the padding the old layout needed at the
+       * bottom of the page (to clear the floating save bar) now belongs to the
+       * scroll container, where it scrolls with the content.
        * ---------------------------------------------------------------- */}
-      <div className="flex min-w-0 flex-col">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-border bg-background/85 px-3 backdrop-blur lg:px-4">
+      <div className="flex min-h-0 min-w-0 flex-col">
+        <header className="z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-background/85 px-3 backdrop-blur lg:px-4">
           {/* Mobile navigation: the sidebar is desktop-only. */}
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
@@ -244,7 +261,15 @@ export function AppShell({
           </Button>
         </header>
 
-        <main className="min-w-0 flex-1 p-4 pb-24 lg:p-6">{children}</main>
+        {/*
+         * The one scrolling element on every settings screen. `min-h-0` is what
+         * makes `flex-1` mean "take the remaining height" rather than "grow to
+         * fit the content"; `overscroll-contain` stops a trackpad flick at the
+         * end of the list from rubber-banding the whole frame behind it.
+         */}
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-24 lg:p-6">
+          {children}
+        </main>
       </div>
     </div>
   );

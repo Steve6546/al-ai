@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -477,18 +478,40 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                   </div>
                   <div className="space-y-1.5">
                     <span className="text-xs text-muted-foreground">نوع النشاط</span>
-                    <select
-                      aria-label="نوع النشاط"
-                      className="h-9 w-full rounded-md border border-border bg-transparent px-2 text-sm"
+                    {/*
+                     * A real Select, not a native `<select>`.
+                     *
+                     * The native popup is drawn by the operating system, so on
+                     * this dark-only palette it opened as a white panel with
+                     * near-white option text: "يلعب", "يشاهد" and the rest were
+                     * all there and all invisible. `color-scheme: dark` on
+                     * `<html>` is only a hint, and the two platforms disagreed
+                     * about honouring it — which is why the control looked fine
+                     * in one browser and broken in another.
+                     *
+                     * This is the same component the rest of the dashboard uses,
+                     * so the popover colours, the 256px height cap and the
+                     * trigger-width sizing all come with it.
+                     *
+                     * `w-60` narrows the field itself: the activity kind is one
+                     * short label, and at full width beside the status picker it
+                     * read as a control asking for something substantial.
+                     */}
+                    <Select
                       value={identityDraft?.activityType ?? "playing"}
-                      onChange={event => patchIdentity({ activityType: event.target.value as BotIdentitySettings["activityType"] })}
+                      onValueChange={value => patchIdentity({ activityType: value as BotIdentitySettings["activityType"] })}
                     >
-                      {activityTypes.map(type => (
-                        <option key={type} value={type}>
-                          {activityTypeLabels[type]}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="w-60 max-w-full" aria-label="نوع النشاط">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activityTypes.map(type => (
+                          <SelectItem key={type} value={type}>
+                            {activityTypeLabels[type]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <Input
@@ -643,8 +666,14 @@ export function CustomizationView({ guild }: { guild: Guild }) {
         {/* ------------------------------------------------------------ *
          * The preview column. Sticky on a wide screen so it stays beside
          * the field being edited rather than scrolling away.
+         *
+         * `self-start` is what makes it work: a grid item stretches to the
+         * row's full height by default, and a sticky element that already fills
+         * its container has nowhere to travel. `top-6` matches the shell's own
+         * `lg:p-6`, so the card comes to rest exactly at the top of the visible
+         * content rather than floating below it.
          * ------------------------------------------------------------ */}
-        <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+        <div className="space-y-3 lg:sticky lg:top-6 lg:self-start">
           {crop ? (
             <ImageCropper target={crop.target} image={crop.image} onApply={applyCrop} onCancel={() => setCrop(null)} />
           ) : null}

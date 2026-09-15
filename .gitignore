@@ -20,3 +20,8 @@ coverage/
 # Generated screen previews (bundled JS + CSS + the throwaway generators that
 # build them). Regenerate on demand; never a source of truth.
 .workbuddy-ai/preview/
+
+# Screenshots written by the browser verification harness
+# (`.workbuddy-ai/verify/browser-check.mjs`). The harness itself is source and
+# stays tracked; its output is regenerated on every run.
+.workbuddy-ai/verify/*.png

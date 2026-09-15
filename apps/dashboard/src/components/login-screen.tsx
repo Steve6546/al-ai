@@ -4,8 +4,17 @@ import { Bot, LogIn, ShieldCheck } from "lucide-react";
 
 export function LoginScreen({ notice }: { notice: string | null }) {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-background p-6">
-      <Card className="w-full max-w-sm">
+    /*
+     * The document no longer scrolls, so this screen scrolls itself.
+     *
+     * The card is centred with `my-auto` on the child rather than `items-center`
+     * on the parent: with `items-center` a card taller than the viewport — a long
+     * notice, or a phone in landscape — is centred *past* the top edge and the
+     * part above it cannot be scrolled back into view. `my-auto` centres it when
+     * there is room and behaves like `margin: 0` when there is not.
+     */
+    <div className="flex h-full justify-center overflow-y-auto overscroll-contain bg-background p-6">
+      <Card className="my-auto w-full max-w-sm">
         <CardHeader className="items-center text-center">
           <div className="mx-auto mb-2 grid size-14 place-items-center rounded-2xl bg-primary text-primary-foreground">
             <Bot className="size-7" />

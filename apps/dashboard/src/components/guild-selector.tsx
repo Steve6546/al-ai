@@ -92,8 +92,17 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
   const nothingFound = searching && visibleActive.length === 0 && visibleEligible.length === 0;
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-background/85 px-4 backdrop-blur">
+    /*
+     * The same frame the shell uses: one viewport tall, header pinned, and a
+     * single scrolling region below it.
+     *
+     * This screen used to let the *window* scroll, which is no longer possible —
+     * `body` is `overflow: hidden` so the shell's sidebar can stay put. Left
+     * alone, a long guild list would simply have been clipped with no way to
+     * reach the bottom of it.
+     */
+    <div className="flex h-full flex-col bg-background">
+      <header className="z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background/85 px-4 backdrop-blur">
         <div className="flex items-center gap-2.5">
           <div className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
             <Bot className="size-4" />
@@ -116,126 +125,131 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
         </Button>
       </header>
 
-      <main className="mx-auto w-full max-w-5xl space-y-6 p-4 lg:p-8">
-        {/* Welcome ---------------------------------------------------- */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <Avatar className="size-14 ring-2 ring-border">
-            {user?.avatarUrl && <AvatarImage src={user.avatarUrl} alt="" />}
-            <AvatarFallback className="text-lg">{initials(user?.username)}</AvatarFallback>
-          </Avatar>
+      {/* The scrollbar belongs to the window edge, not to the centred column,
+          so the scroll container spans the full width and the column is centred
+          inside it. */}
+      <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="mx-auto w-full max-w-5xl space-y-6 p-4 lg:p-8">
+          {/* Welcome ---------------------------------------------------- */}
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <Avatar className="size-14 ring-2 ring-border">
+              {user?.avatarUrl && <AvatarImage src={user.avatarUrl} alt="" />}
+              <AvatarFallback className="text-lg">{initials(user?.username)}</AvatarFallback>
+            </Avatar>
 
-          <div className="min-w-0 flex-1 space-y-1">
-            <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold">
-              <span className="truncate">مرحباً، {user?.username ?? "—"}! 👑</span>
-              {tier && (
-                <Badge variant="secondary" className="gap-1">
-                  <Crown className="size-3" />
-                  {tierLabels[tier]}
-                </Badge>
+            <div className="min-w-0 flex-1 space-y-1">
+              <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold">
+                <span className="truncate">مرحباً، {user?.username ?? "—"}! 👑</span>
+                {tier && (
+                  <Badge variant="secondary" className="gap-1">
+                    <Crown className="size-3" />
+                    {tierLabels[tier]}
+                  </Badge>
+                )}
+              </h1>
+              <p className="text-sm text-muted-foreground">اختر سيرفراً لإدارة إعدادات البوت</p>
+            </div>
+          </div>
+
+          {notice && (
+            <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">{notice}</div>
+          )}
+          {error && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {error}
+            </div>
+          )}
+
+          {/* Search ----------------------------------------------------- */}
+          <div className="relative">
+            <Search className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="ابحث عن سيرفر... 🔭"
+              aria-label="ابحث عن سيرفر"
+              className="h-11 ps-9"
+            />
+          </div>
+
+          {nothingFound && (
+            <Card>
+              <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
+                <div className="grid size-11 place-items-center rounded-xl bg-muted text-muted-foreground">
+                  <ServerOff className="size-5" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">لا نتائج مطابقة</p>
+                  <p className="text-xs text-muted-foreground">
+                    لا يوجد سيرفر باسم «{query.trim()}». جرّب جزءاً من الاسم أو معرّف السيرفر.
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setQuery("")}>
+                  مسح البحث
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {!nothingFound && visibleActive.length > 0 && (
+            <GuildSection
+              title="السيرفرات النشطة"
+              description="AL AI موجود فيها ويمكنك إدارتها الآن."
+              count={visibleActive.length}
+              guilds={visibleActive}
+              renderAction={guild => (
+                <Button size="sm" className="w-full" onClick={() => onSelect(guild.id)}>
+                  <Settings />
+                  إدارة ⚙️
+                </Button>
               )}
-            </h1>
-            <p className="text-sm text-muted-foreground">اختر سيرفراً لإدارة إعدادات البوت</p>
-          </div>
+            />
+          )}
+
+          {!nothingFound && visibleEligible.length > 0 && (
+            <GuildSection
+              title="سيرفرات أخرى مؤهلة"
+              description="تملك صلاحية الإدارة فيها، لكن AL AI ليس مضافاً بعد."
+              count={visibleEligible.length}
+              guilds={visibleEligible}
+              renderAction={guild => (
+                <Button size="sm" variant="outline" className="w-full" asChild>
+                  <a href={`/api/guilds/${guild.id}/invite`}>
+                    <Sparkles />
+                    إضافة البوت ✨
+                  </a>
+                </Button>
+              )}
+            />
+          )}
+
+          {guilds.length === 0 && !searching && (
+            <Card>
+              <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
+                <div className="grid size-11 place-items-center rounded-xl bg-muted text-muted-foreground">
+                  <ServerOff className="size-5" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">لا توجد سيرفرات مؤهلة</p>
+                  <p className="text-xs text-muted-foreground">
+                    تظهر هنا السيرفرات التي تملك فيها صلاحية «إدارة السيرفر» أو «Administrator» فقط.
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
+                  <RefreshCw className={cn(refreshing && "animate-spin")} />
+                  تحديث القائمة
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {refreshing && guilds.length === 0 && (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              جارٍ تحميل السيرفرات
+            </div>
+          )}
         </div>
-
-        {notice && (
-          <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">{notice}</div>
-        )}
-        {error && (
-          <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            {error}
-          </div>
-        )}
-
-        {/* Search ----------------------------------------------------- */}
-        <div className="relative">
-          <Search className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={event => setQuery(event.target.value)}
-            placeholder="ابحث عن سيرفر... 🔭"
-            aria-label="ابحث عن سيرفر"
-            className="h-11 ps-9"
-          />
-        </div>
-
-        {nothingFound && (
-          <Card>
-            <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
-              <div className="grid size-11 place-items-center rounded-xl bg-muted text-muted-foreground">
-                <ServerOff className="size-5" />
-              </div>
-              <div className="space-y-1">
-                <p className="text-sm font-medium">لا نتائج مطابقة</p>
-                <p className="text-xs text-muted-foreground">
-                  لا يوجد سيرفر باسم «{query.trim()}». جرّب جزءاً من الاسم أو معرّف السيرفر.
-                </p>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => setQuery("")}>
-                مسح البحث
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {!nothingFound && visibleActive.length > 0 && (
-          <GuildSection
-            title="السيرفرات النشطة"
-            description="AL AI موجود فيها ويمكنك إدارتها الآن."
-            count={visibleActive.length}
-            guilds={visibleActive}
-            renderAction={guild => (
-              <Button size="sm" className="w-full" onClick={() => onSelect(guild.id)}>
-                <Settings />
-                إدارة ⚙️
-              </Button>
-            )}
-          />
-        )}
-
-        {!nothingFound && visibleEligible.length > 0 && (
-          <GuildSection
-            title="سيرفرات أخرى مؤهلة"
-            description="تملك صلاحية الإدارة فيها، لكن AL AI ليس مضافاً بعد."
-            count={visibleEligible.length}
-            guilds={visibleEligible}
-            renderAction={guild => (
-              <Button size="sm" variant="outline" className="w-full" asChild>
-                <a href={`/api/guilds/${guild.id}/invite`}>
-                  <Sparkles />
-                  إضافة البوت ✨
-                </a>
-              </Button>
-            )}
-          />
-        )}
-
-        {guilds.length === 0 && !searching && (
-          <Card>
-            <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
-              <div className="grid size-11 place-items-center rounded-xl bg-muted text-muted-foreground">
-                <ServerOff className="size-5" />
-              </div>
-              <div className="space-y-1">
-                <p className="text-sm font-medium">لا توجد سيرفرات مؤهلة</p>
-                <p className="text-xs text-muted-foreground">
-                  تظهر هنا السيرفرات التي تملك فيها صلاحية «إدارة السيرفر» أو «Administrator» فقط.
-                </p>
-              </div>
-              <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
-                <RefreshCw className={cn(refreshing && "animate-spin")} />
-                تحديث القائمة
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {refreshing && guilds.length === 0 && (
-          <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            جارٍ تحميل السيرفرات
-          </div>
-        )}
       </main>
     </div>
   );

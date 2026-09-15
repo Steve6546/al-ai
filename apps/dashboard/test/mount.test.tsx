@@ -299,6 +299,50 @@ test("the identity screen survives a stored row with empty strings", async () =>
   assert.ok(html.length > 1_000);
 });
 
+/**
+ * The two layout defects this screen shipped with, asserted on the *loaded*
+ * markup — neither is visible while the screen is still loading, so
+ * `renderToString` could never have caught them.
+ */
+test("the activity kind is the themed Select, not the operating system's", async () => {
+  stubFetch();
+  const { html } = await mount(`/dashboard/${GUILD_ID}/customization`);
+
+  const start = html.indexOf('role="combobox"');
+  assert.ok(start >= 0, "the activity kind renders a combobox, not a native `<select>`");
+
+  /*
+   * A window of the markup rather than a parsed tag. The trigger's class list
+   * contains a literal `>` — the `[&>span]:line-clamp-1` rule from the shadcn
+   * trigger — so matching "up to the first `>`" stops inside the class attribute
+   * and every attribute after it looks missing. That is not a hypothetical: it
+   * is exactly how this assertion first failed.
+   */
+  const trigger = html.slice(start, start + 1_500);
+  assert.match(trigger, /aria-label="نوع النشاط"/, "…labelled as before, so the field is still reachable");
+  assert.match(trigger, /w-60/, "…and narrowed, instead of stretching across the card");
+
+  /*
+   * The label is drawn by Radix into the trigger, not typed into the markup:
+   * while the menu is closed the options live in a detached `DocumentFragment`
+   * and the selected one is portalled into `SelectValue`. So this line is
+   * asserting that the wiring works, which is the part that silently breaks —
+   * an unwired `<SelectValue />` renders an empty trigger and looks like a
+   * placeholder that was never filled in.
+   */
+  assert.match(html, /يستمع إلى/, "the stored value is spelled out in the trigger, not left blank");
+});
+
+test("the live preview stays in view while the settings scroll", async () => {
+  stubFetch();
+  const { html } = await mount(`/dashboard/${GUILD_ID}/customization`);
+
+  const column = html.match(/<div class="[^"]*lg:sticky[^"]*"/);
+  assert.ok(column, "the preview column is sticky");
+  assert.match(column![0], /lg:top-6/, "…at the shell's own padding, so it comes to rest at the top of the content");
+  assert.match(column![0], /lg:self-start/, "…and does not stretch, which would leave it nowhere to travel");
+});
+
 /* ------------------------------------------------------------------ *
  * The error boundary
  * ------------------------------------------------------------------ */

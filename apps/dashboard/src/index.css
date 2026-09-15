@@ -108,6 +108,31 @@
     color-scheme: dark;
   }
 
+  /*
+   * The frame is exactly one viewport tall, and the *document* never scrolls.
+   *
+   * Left to the window, a long page scrolled as a whole: the sidebar and the
+   * header rode up out of view, and every panel that wanted a scrollbar of its
+   * own had no height to measure against — a `flex-1` scroll area inside an
+   * auto-height parent just grows and the window scrolls instead, which is what
+   * made the page feel like it was sliding around under the pointer.
+   *
+   * Scrolling now belongs to exactly one element per screen (the shell's
+   * `<main>`, or the selector's content area), and everything outside it is
+   * pinned. `#root` is included because React renders into it, so a height on
+   * `body` alone leaves the app free to be as tall as it likes.
+   */
+  html,
+  body,
+  #root {
+    height: 100vh;
+    /* `dvh` tracks the *visible* viewport, so the frame does not jump or clip
+       when a mobile URL bar slides in and out. Declared second on purpose: a
+       browser that does not know `dvh` discards this line and keeps `vh`. */
+    height: 100dvh;
+    overflow: hidden;
+  }
+
   body {
     background-color: var(--background);
     color: var(--foreground);
