@@ -117,7 +117,14 @@ test("a tampered body is refused even when the signature was valid for the origi
       },
       body: JSON.stringify({ limit: 9999 })
     });
+    // The code, not just the status: a bare 401 also answers a malformed
+    // request, so status-only would pass even if the signature check were
+    // skipped and something else rejected the body. Its siblings above all name
+    // their reason, and this is the case where the forged payload is otherwise
+    // perfectly well-formed.
+    const body = (await response.json()) as { error?: string };
     assert.equal(response.status, 401);
+    assert.equal(body.error, "LAYER_SIGNATURE_INVALID");
   } finally {
     await harness.adapter.close();
   }

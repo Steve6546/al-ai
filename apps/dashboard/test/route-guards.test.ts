@@ -23,12 +23,37 @@ const lines = source.split(/\r?\n/);
 
 type Route = { method: string; path: string; line: number; body: string };
 
-const routeStart = /^app\.(get|put|post|delete|patch)\(\s*["`]([^"`]+)/;
+/**
+ * Route declarations, matched whatever their indentation or line breaks.
+ *
+ * The pattern used to be anchored with `^app\.`, which only sees a declaration
+ * starting at column 0 on a line whose path string opens on the same line. That
+ * is true of every route today, but it is a *silent* blind spot: indenting the
+ * table into a plugin, or breaking a long path across two lines, would drop the
+ * route out of the scan while the count assertions above only fail if the whole
+ * table disappears. A route that falls out of the scan is a route with no guard,
+ * which is the exact hole this file exists to close — so the scanner is widened
+ * here and the count test still acts as the tripwire for a wholesale change.
+ */
+const routeStart = /app\.(get|put|post|delete|patch)\(\s*["`]([^"`]+)/g;
+const pathContinued = /^\s*["`]([^"`]+)/;
 
 const routes: Route[] = [];
 lines.forEach((line, index) => {
+  routeStart.lastIndex = 0;
   const match = routeStart.exec(line);
-  if (match) routes.push({ method: match[1].toUpperCase(), path: match[2], line: index + 1, body: "" });
+  if (match) {
+    // A path may be opened on one line and closed on the next; take the join so
+    // `:guildId` is seen wherever it sits.
+    const next = lines[index + 1] ?? "";
+    const continued = line.includes(match[2]) && !/["`]\s*[,)]/.test(line) ? pathContinued.exec(next) : null;
+    routes.push({
+      method: match[1].toUpperCase(),
+      path: continued ? `${match[2]}${continued[1]}` : match[2],
+      line: index + 1,
+      body: ""
+    });
+  }
 });
 
 // Each route owns the source up to the next route declaration.

@@ -1,5 +1,5 @@
 import type { BotEvent } from "../lib/discord.js";
-import { VOICE_DEBOUNCE_MS, type EventPipeline, type Priority } from "../runtime/event-pipeline.js";
+import type { EventPipeline, Priority } from "../runtime/event-pipeline.js";
 import { logEvent, type LogRuntime } from "../logging/log-router.js";
 
 /**
@@ -82,8 +82,9 @@ export function createDispatcher({ pipeline, runtime, onHealth, onGuildJoined }:
     };
 
     // Voice churn is coalesced: a member hopping rooms produces one entry.
+    // The window comes from the pipeline, which takes it from config.
     if (type.startsWith("voice.")) {
-      pipeline.debounce(3, `voice:${guildId}:${(data as { memberId?: string }).memberId ?? "?"}`, VOICE_DEBOUNCE_MS, { run, key: type });
+      pipeline.debounce(3, `voice:${guildId}:${(data as { memberId?: string }).memberId ?? "?"}`, pipeline.voiceDebounceMs, { run, key: type });
       return;
     }
 

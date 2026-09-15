@@ -5,6 +5,7 @@ import {
   ChannelType,
   Client,
   EmbedBuilder,
+  Events,
   GatewayIntentBits,
   PermissionsBitField,
   REST,
@@ -815,15 +816,15 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
     }
   };
 
-  client.once("clientReady", () => emit({ type: "client.ready", tag: client.user?.tag ?? "unknown", guildCount: client.guilds.cache.size }));
-  client.on("error", error => emit({ type: "client.error", message: error.message }));
+  client.once(Events.ClientReady, () => emit({ type: "client.ready", tag: client.user?.tag ?? "unknown", guildCount: client.guilds.cache.size }));
+  client.on(Events.Error, error => emit({ type: "client.error", message: error.message }));
   // Emitted so the runtime can create the bot's own role before the operator is
   // offered any settings screen.
-  client.on("guildCreate", guild => emit({ type: "guild.joined", guildId: guild.id, name: guild.name }));
+  client.on(Events.GuildCreate, guild => emit({ type: "guild.joined", guildId: guild.id, name: guild.name }));
 
-  client.on("guildMemberAdd", member => emit({ type: "member.join", guildId: member.guild.id, memberId: member.id }));
-  client.on("guildMemberRemove", member => emit({ type: "member.leave", guildId: member.guild.id, memberId: member.id }));
-  client.on("guildMemberUpdate", (before, after) => {
+  client.on(Events.GuildMemberAdd, member => emit({ type: "member.join", guildId: member.guild.id, memberId: member.id }));
+  client.on(Events.GuildMemberRemove, member => emit({ type: "member.leave", guildId: member.guild.id, memberId: member.id }));
+  client.on(Events.GuildMemberUpdate, (before, after) => {
     if (before.nickname !== after.nickname) {
       emit({ type: "member.nickname-change", guildId: after.guild.id, memberId: after.id, before: before.nickname ?? "", after: after.nickname ?? "" });
     }
@@ -839,24 +840,24 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
   // The audit log is the only source that also sees actions taken outside AL AI
   // (an admin banning from the Discord client), and it carries the reason the
   // moderator typed, so the command handler deliberately does not log these.
-  client.on("guildBanAdd", async ban => {
+  client.on(Events.GuildBanAdd, async ban => {
     const { actorId, reason } = await resolveAudit(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id);
     emit({ type: "moderation.ban", guildId: ban.guild.id, targetId: ban.user.id, actorId, ...(reason ? { reason } : {}) });
   });
 
-  client.on("guildBanRemove", async ban => {
+  client.on(Events.GuildBanRemove, async ban => {
     const { actorId, reason } = await resolveAudit(ban.guild, AuditLogEvent.MemberBanRemove, ban.user.id);
     emit({ type: "moderation.unban", guildId: ban.guild.id, targetId: ban.user.id, actorId, ...(reason ? { reason } : {}) });
   });
 
-  client.on("guildMemberRemove", async member => {
+  client.on(Events.GuildMemberRemove, async member => {
     const { actorId, reason } = await resolveAudit(member.guild, AuditLogEvent.MemberKick, member.id);
     if (actorId !== "unknown") {
       emit({ type: "moderation.kick", guildId: member.guild.id, targetId: member.id, actorId, ...(reason ? { reason } : {}) });
     }
   });
 
-  client.on("guildMemberUpdate", (before, after) => {
+  client.on(Events.GuildMemberUpdate, (before, after) => {
     const wasTimedOut = Boolean(before.communicationDisabledUntilTimestamp);
     const isTimedOut = Boolean(after.communicationDisabledUntilTimestamp);
     if (!wasTimedOut && isTimedOut) {
@@ -866,7 +867,7 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
     }
   });
 
-  client.on("voiceStateUpdate", (before, after) => {
+  client.on(Events.VoiceStateUpdate, (before, after) => {
     const memberId = after.id || before.id;
     const guildId = (after.guild ?? before.guild).id;
     if (before.channelId === after.channelId) {
@@ -880,11 +881,11 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
     else if (before.channelId && after.channelId) emit({ type: "voice.move", guildId, memberId, fromChannelId: before.channelId, toChannelId: after.channelId });
   });
 
-  client.on("roleCreate", async role => emit({ type: "role.create", guildId: role.guild.id, roleId: role.id, actorId: await resolveActor(role.guild, AuditLogEvent.RoleCreate, role.id) }));
-  client.on("roleUpdate", async (_before, role) => emit({ type: "role.update", guildId: role.guild.id, roleId: role.id, actorId: await resolveActor(role.guild, AuditLogEvent.RoleUpdate, role.id) }));
-  client.on("roleDelete", async role => emit({ type: "role.delete", guildId: role.guild.id, roleId: role.id, actorId: await resolveActor(role.guild, AuditLogEvent.RoleDelete, role.id) }));
+  client.on(Events.GuildRoleCreate, async role => emit({ type: "role.create", guildId: role.guild.id, roleId: role.id, actorId: await resolveActor(role.guild, AuditLogEvent.RoleCreate, role.id) }));
+  client.on(Events.GuildRoleUpdate, async (_before, role) => emit({ type: "role.update", guildId: role.guild.id, roleId: role.id, actorId: await resolveActor(role.guild, AuditLogEvent.RoleUpdate, role.id) }));
+  client.on(Events.GuildRoleDelete, async role => emit({ type: "role.delete", guildId: role.guild.id, roleId: role.id, actorId: await resolveActor(role.guild, AuditLogEvent.RoleDelete, role.id) }));
 
-  client.on("messageCreate", message => {
+  client.on(Events.MessageCreate, message => {
     if (!cache || !message.guildId || message.author.bot) return;
     cache.put({
       id: message.id,
@@ -896,7 +897,7 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
     });
   });
 
-  client.on("messageDelete", message => {
+  client.on(Events.MessageDelete, message => {
     if (!message.guildId) return;
     const cached = cache?.get(message.channelId, message.id);
     emit({
@@ -907,7 +908,7 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
       ...(cached ? { authorId: cached.authorId, content: cached.content } : {})
     });
   });
-  client.on("messageUpdate", (before, after) => {
+  client.on(Events.MessageUpdate, (before, after) => {
     if (!after.guildId) return;
     const cached = cache?.get(after.channelId, after.id);
     const beforeContent = cached?.content ?? (typeof before.content === "string" ? before.content : "");
@@ -923,39 +924,44 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
       after: afterContent
     });
   });
-  client.on("messageDeleteBulk", (messages, channel) => {
+  client.on(Events.MessageBulkDelete, (messages, channel) => {
     if (!channel.guildId) return;
     emit({ type: "message.bulk-delete", guildId: channel.guildId, channelId: channel.id, count: messages.size });
   });
 
-  client.on("channelCreate", async channel => {
+  client.on(Events.ChannelCreate, async channel => {
     if (!("guild" in channel) || !channel.guild) return;
     emit({ type: "server.channel-create", guildId: channel.guild.id, channelId: channel.id, actorId: await resolveActor(channel.guild, AuditLogEvent.ChannelCreate, channel.id) });
   });
-  client.on("channelUpdate", async (_before, channel) => {
+  client.on(Events.ChannelUpdate, async (_before, channel) => {
     if (!("guild" in channel) || !channel.guild) return;
     emit({ type: "server.channel-update", guildId: channel.guild.id, channelId: channel.id, actorId: await resolveActor(channel.guild, AuditLogEvent.ChannelUpdate, channel.id) });
   });
-  client.on("channelDelete", async channel => {
+  client.on(Events.ChannelDelete, async channel => {
     if (!("guild" in channel) || !channel.guild) return;
     emit({ type: "server.channel-delete", guildId: channel.guild.id, channelId: channel.id, actorId: await resolveActor(channel.guild, AuditLogEvent.ChannelDelete, channel.id) });
   });
 
-  client.on("inviteCreate", async invite => {
+  client.on(Events.InviteCreate, async invite => {
     if (!invite.guild) return;
     emit({ type: "server.invite-create", guildId: invite.guild.id, inviteCode: invite.code, actorId: await resolveActor(invite.guild as Guild, AuditLogEvent.InviteCreate, invite.code) });
   });
 
-  client.on("guildEmojiCreate", async emoji => {
+  // The constants, not string literals. discord.js ignores a listener whose name
+  // it does not recognise — no throw, no warning — so `client.on("guildEmojiCreate")`
+  // registered a handler that could never run, and the emoji log the operator can
+  // switch on in the dashboard was unreachable. `Events` makes a rename a build
+  // error instead of a silent no-op.
+  client.on(Events.GuildEmojiCreate, async emoji => {
     if (!emoji.guild) return;
     emit({ type: "server.expression-create", guildId: emoji.guild.id, expressionId: emoji.id, actorId: await resolveActor(emoji.guild, AuditLogEvent.EmojiCreate, emoji.id) });
   });
-  client.on("guildEmojiDelete", async emoji => {
+  client.on(Events.GuildEmojiDelete, async emoji => {
     if (!emoji.guild) return;
     emit({ type: "server.expression-delete", guildId: emoji.guild.id, expressionId: emoji.id, actorId: await resolveActor(emoji.guild, AuditLogEvent.EmojiDelete, emoji.id) });
   });
 
-  client.on("interactionCreate", async interaction => {
+  client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.guildId) return;
 
     // Autocomplete arrives as its own interaction type, and Discord wants an

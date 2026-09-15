@@ -95,7 +95,38 @@ const payloads: [RegExp, unknown][] = [
   }],
   [/^\/api\/guilds\/[^/]+\/commands$/, {
     categories: [{ id: "moderation", label: "أوامر الإدارة", description: "" }],
-    commands: [],
+    /**
+     * At least one real command, in the full `CommandFlag` shape.
+     *
+     * This list used to be empty, and the screen answers an empty list with its
+     * empty state — so the board the operator actually uses was never mounted.
+     * The old assertion (`html.length > 1_000`) passed on that empty state, which
+     * is exactly the "fake that does not reach the code under test" problem.
+     */
+    commands: [{
+      name: "ban",
+      enabled: true,
+      allowedLevel: "moderator",
+      dmOnAction: false,
+      deleteMessageDays: 0,
+      allowedRoleIds: [],
+      deniedRoleIds: [],
+      allowedChannelIds: [],
+      deniedChannelIds: [],
+      cooldownSeconds: 0,
+      autoDeleteResponseSeconds: 0,
+      requireReason: false,
+      defaultDuration: "permanent",
+      presetReasons: [],
+      category: "moderation",
+      description: "حظر عضو من السيرفر.",
+      minimumTier: "moderator",
+      target: "member",
+      supportsReason: true,
+      supportsPurge: true,
+      supportsNotify: true,
+      supportsDuration: false
+    }],
     roles: [role],
     channels: [{ id: "2", name: "عام", type: "text" }]
   }],
@@ -118,7 +149,26 @@ const payloads: [RegExp, unknown][] = [
   }],
   [/^\/api\/guilds\/[^/]+\/audit$/, { counts: { total: 0, critical: 0 }, entries: [] }],
   [/^\/api\/guilds\/[^/]+\/security$/, { events: [] }],
-  [/^\/api\/guilds\/[^/]+\/security\/config$/, { enabled: true, windowSeconds: 10, actionLimit: 3, notifyOwner: true, autoContain: true }]
+  /**
+   * The anti-nuke payload, in the shape the route actually returns:
+   * `{ config, roles, actions }` — not a flat config.
+   *
+   * This fixture used to be flat (`{ enabled, windowSeconds, ... }`), which the
+   * screen never asked for: it reads `result.config`, so a flat fixture put
+   * `undefined` into `saved`, and the panel sat on its loading card forever.
+   * The test stayed green because it only checked for the string "جارٍ التحميل"
+   * while the stuck card reads "جارٍ تحميل إعدادات الأمان" — a different string.
+   * A fake that does not match the contract tests nothing about the screen.
+   */
+  [/^\/api\/guilds\/[^/]+\/security\/config$/, {
+    config: { enabled: true, limits: { channelDeletesPerMinute: 3, bansPerMinute: 5, roleChangesPerMinute: 3 }, quarantineRoleId: null },
+    roles: [{ id: "1", name: "AL AI", position: 5, managed: false, isDefault: false, color: 0 }],
+    actions: [
+      { action: "channel-delete", label: "حذف القنوات", limit: 3 },
+      { action: "ban", label: "حظر الأعضاء", limit: 5 },
+      { action: "role-change", label: "إنشاء الرتب وحذفها", limit: 3 }
+    ]
+  }]
 ];
 
 function stubFetch() {
@@ -182,16 +232,41 @@ function fatal(errors: string[]): string[] {
 
 const views = ["dashboard", "commands", "customization", "roles", "logs", "audit", "security"];
 
+/**
+ * A marker that only the *loaded* screen can render, per view.
+ *
+ * This replaced a `html.length > 1_000` heuristic plus a single
+ * `doesNotMatch(/جارٍ التحميل/)`. Both were too weak to be worth keeping: the
+ * length check passes on any fat skeleton, and the loading-string check missed
+ * the anti-nuke panel, whose stuck card reads "جارٍ تحميل إعدادات الأمان" — a
+ * different string, so the panel could sit dead forever with the test green.
+ *
+ * A marker is content the view can only produce once its data arrived, which is
+ * what makes the assertion mean "the screen loaded" rather than "the screen
+ * rendered something".
+ */
+const loadedMarkers: Record<string, RegExp> = {
+  dashboard: /شريط النشاط الأخير/,
+  commands: /إجمالي الأوامر/,
+  customization: /الهوية العالمية/,
+  roles: /المالك/,
+  logs: /التسجيل المركزي/,
+  audit: /آخر الأحداث/,
+  security: /محرّك مضاد التخريب/
+};
+
+/** Every "still loading" phrase in the app, so no screen can hide behind one. */
+const LOADING_COPY = /جارٍ (التحميل|تحميل)/;
+
 for (const view of views) {
   test(`the ${view} screen mounts and renders its loaded state`, async () => {
     stubFetch();
     const { html, errors } = await mount(`/dashboard/${GUILD_ID}/${view}`);
 
     assert.deepEqual(fatal(errors), [], `${view} produced no render error`);
-    // A crashed tree unmounts to nothing, so length is the honest signal: the
-    // loading skeleton alone is a few hundred bytes, a loaded screen is not.
-    assert.ok(html.length > 1_000, `${view} rendered a loaded screen (got ${html.length} bytes)`);
-    assert.doesNotMatch(html, /جارٍ التحميل/, `${view} moved past its loading state`);
+    // Content that only exists after the data arrived — not a byte count.
+    assert.match(html, loadedMarkers[view]!, `${view} rendered its loaded content, not a skeleton`);
+    assert.doesNotMatch(html, LOADING_COPY, `${view} moved past every loading state, not just the first`);
   });
 }
 

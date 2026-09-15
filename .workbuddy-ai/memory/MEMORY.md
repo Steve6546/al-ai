@@ -1,7 +1,7 @@
 # AL AI — Discord bot + لوحة تحكم
 
 Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RTL) + `packages/core`
-(المصدر الوحيد للعقود). **507 اختباراً** (بوت 173 / لوحة 197 / core 137). **قواعد فقط** — القصص
+(المصدر الوحيد للعقود). **532 اختباراً** (بوت 190 / لوحة 203 / core 139). **قواعد فقط** — القصص
 والقياسات في السجلات اليومية، والتفاصيل الإجرائية في المهارات (تُشار إليها بـ`→`).
 
 ## التشغيل
@@ -33,6 +33,12 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
   يطابق بـ`includes` ⇒ رتّب الأكثر تحديداً أولاً.
 - **`a_` = أفاتار متحرك** ⇒ `.gif`. **النبذة عبر `PATCH /applications/@me {description}`** —
   `/users/@me {bio}` يُهمَل صامتاً بـ200. **`Presence Intent` ممنوع** (حوكمة 8).
+- **🔴 أسماء الأحداث بـ`Events.*` لا بنصّ.** discord.js **يتجاهل اسم حدث لا يعرفه بلا رمي
+  ولا تنبيه** ⇒ `client.on("guildEmojiCreate")` كان **ميتاً تماماً**: المفتاح في `Events` هو
+  `GuildEmojiCreate` لكن **قيمته** `emojiCreate`، والحدثان `server.expression-*` معرَّفان في
+  السكيما و`channels.json` ومعروضان في شاشة السجلات ⇒ «محفوظ ≠ منفّذ». الحارس:
+  `discord-standards.test.ts` يطابق كل تسجيل مع `Object.values(Events)` ويفرض الصيغة.
+  **والفحص النصّي يجب أن يجرّد التعليقات أولاً** وإلا طابق شرحه لنفسه.
 
 ## تصنيف الأخطاء
 `DiscordApiError` تحمل `status`/`retryAfterSeconds`؛ `isAuthFailure` **401 فقط** و`isRateLimited`
@@ -108,6 +114,20 @@ hook بعد `if (error) return` ⇒ `Rendered more hooks than during the previou
 - **كل مسار مرتبط بسيرفر يتحقق من الوصول للسيرفر لا من الجلسة** (`requireGuildAccess` قراءة /
   `requireTierForGuild` كتابة). `route-guards.test.ts` يفحص الجدول نصياً.
 - **`normaliseBotIdentity` تأخذ `RawBotIdentity`** — تضييقها يسبب `TS2322`.
+- **🔴 إعداد في `control-plane.json` بلا قارئ = زخرفة.** `index.ts` كان يبني
+  `new EventPipeline()` بلا وسائط ⇒ `gateway.ceilingPerMinute`/`voiceDebounceMs` لا تفعل شيئاً
+  (والثاني بلا أي قارئ أصلاً). **أي قيمة جديدة في الـconfig يلزمها قارئ + اختبار يثبّت الوصل**
+  (`new EventPipeline({ ceiling, voiceDebounceMs })` من الـcontrol plane).
+- **لا تُكرّر دالة عامة بين اللوحة و core:** `clampInteger` كان نسختين **بثوابت مستوردة من core**
+  ⇒ القاعدة في مكان والحدود في آخر. الصحيح: تُصدَّر من core وتُستورَد.
+- **🔴 `npx tsc` يحلّ لكل مجلد** — الجذر بلا TypeScript كان يصعد إلى
+  `C:\Users\dlwta\node_modules` (**TS 5.2.2**) بينما الحزم على **TS 7.0.2** ⇒ «أخطاء» وهمية
+  (TS 7 يقبل ما يرفضه 5.2.2). **`typescript: 7.0.2` مثبّت في الجذر الآن**؛ تحقّق من
+  `npx tsc --version` **داخل الحزمة** قبل تصديق أي خطأ نوعي.
+- **منقّح «الكود الميت» يكذب:** المقارنة عبر الملفات فقط تُظهر كل تصدير مُستخدَم داخلياً
+  كأنه ميت. **افحص الاستخدام داخل الملف نفسه قبل أي حذف** — وإلا حذفت كوداً حياً.
+- **الاعتماديات كلها `"latest"`** والـDockerfiles تعمل `npm install` **بلا lock** ⇒ قد تجلب
+  major أحدث من المُختبَر. الـlockfile يثبّت المحلي فقط.
 - **السجلات:** 6 وجهات (خمس للمشغّل + `bot-log` داخلية). كتابة التدقيق **قبل** أي كتم (rule 12).
 - **اللوحة:** `types.ts` يُعيد تصدير عقود `@al-ai/core/browser`؛ **لا تُكرّر شكلاً في core**.
   **`notice` و`authNotice` منفصلان** — خلطهما يُظهر «لا تملك صلاحية» على شاشة الدخول. **`--primary`

@@ -4,12 +4,60 @@ import { EventPipeline, GATEWAY_CEILING_PER_MINUTE, VOICE_DEBOUNCE_MS } from "..
 
 const tick = (ms = 5) => new Promise(resolve => setTimeout(resolve, ms));
 
-test("the documented gateway ceiling is 120 events per minute", () => {
-  assert.equal(GATEWAY_CEILING_PER_MINUTE, 120);
+/**
+ * The default ceiling is what the *constructor* resolves, not what the constant
+ * says.
+ *
+ * This test used to be `assert.equal(GATEWAY_CEILING_PER_MINUTE, 120)` — a
+ * constant compared with itself, which proves nothing about the pipeline and
+ * would still pass if the constructor dropped its `?? GATEWAY_CEILING_PER_MINUTE`
+ * fallback, or if the bot were wired to a ceiling of 1. Every other test in this
+ * file passes an explicit `ceiling`, so the default path had no coverage at all.
+ * Reading it back through `stats()` is what makes it a real assertion.
+ */
+test("a pipeline built with no ceiling uses the documented gateway default", () => {
+  const pipeline = new EventPipeline({ now: () => 1_000_000 });
+
+  assert.equal(pipeline.stats().ceiling, GATEWAY_CEILING_PER_MINUTE);
+  assert.equal(pipeline.stats().ceiling, 120, "and that default is the documented 120");
+});
+
+test("the default ceiling actually throttles: the 121st job waits", async () => {
+  let clock = 1_000_000;
+  const pipeline = new EventPipeline({ now: () => clock });
+  let ran = 0;
+  // One more than the ceiling, with no ceiling passed in — so this measures the
+  // real default rather than a number the test chose.
+  for (let index = 0; index < GATEWAY_CEILING_PER_MINUTE + 1; index += 1) {
+    pipeline.enqueue(0, { run: async () => void (ran += 1) });
+  }
+
+  await tick();
+  assert.equal(ran, GATEWAY_CEILING_PER_MINUTE, "the default window admits exactly the ceiling");
+  assert.equal(pipeline.stats().queued, 1, "the overflow waits rather than being dropped");
+
+  clock += 61_000;
+  await pipeline.drain();
+  assert.equal(ran, GATEWAY_CEILING_PER_MINUTE + 1);
 });
 
 test("the voice debounce window is two seconds", () => {
   assert.equal(VOICE_DEBOUNCE_MS, 2_000);
+});
+
+/**
+ * The debounce has to be *reachable*, not merely constant.
+ *
+ * `dispatch` reads `pipeline.voiceDebounceMs` so the window can come from
+ * config. While that property did not exist the only copy lived in this
+ * module as a hard-coded constant, and `control-plane.json`'s
+ * `gateway.voiceDebounceMs` was decoration nothing consulted.
+ */
+test("a pipeline exposes the debounce window its caller should use", () => {
+  assert.equal(new EventPipeline({ now: () => 0 }).voiceDebounceMs, VOICE_DEBOUNCE_MS);
+
+  const configured = new EventPipeline({ now: () => 0, voiceDebounceMs: 7_500 });
+  assert.equal(configured.voiceDebounceMs, 7_500, "a configured window wins over the default");
 });
 
 test("pipeline pauses at the ceiling and resumes instead of dropping work", async () => {

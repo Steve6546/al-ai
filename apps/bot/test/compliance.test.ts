@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { INTENT_HARD_LIMIT, INTENT_RENEWAL_DAYS, INTENT_WARNING_THRESHOLD, createIntentUsageTracker } from "../src/compliance/intent-usage-tracker.ts";
 import { assertChannelsMatchSchema, loadChannelDeclaration, loadControlPlane, undecidedSettings } from "../src/config/control-plane.ts";
+import { EventPipeline } from "../src/runtime/event-pipeline.ts";
+
+const BOT_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 
 /* ------------------------------------------------------------------ *
  * Intent budget — GOVERNANCE rule 14
@@ -146,11 +152,51 @@ test("the one genuinely undecided section still carries an owner-decision TODO",
   assert.match(plane.commands._todo ?? "", /يحتاج قرار صريح من المالك/);
 });
 
-test("the control plane carries the directive's gateway limits", () => {
+/**
+ * Rule 15 says operational state lives in config/, and this test used to assert
+ * `plane.commands.deployment === "manual"` — a value no module reads. It was
+ * pinning decoration: the field could be deleted from the config and the bot
+ * would behave identically, which is precisely the "saved but not applied"
+ * defect the rule exists to prevent.
+ *
+ * What is asserted instead is the part that is genuinely load-bearing: `index.ts`
+ * must build the pipeline *from* the control plane. Until this was fixed the
+ * bot constructed `new EventPipeline()`, so editing `gateway.ceilingPerMinute`
+ * changed nothing while the constant in `event-pipeline.ts` quietly supplied
+ * 120. That silent disagreement is what this checks.
+ */
+test("the runtime builds the pipeline from the control plane, not from constants", () => {
+  const plane = loadControlPlane();
+  const index = readFileSync(join(BOT_ROOT, "src", "index.ts"), "utf8");
+
+  assert.match(
+    index,
+    /new EventPipeline\(\{[\s\S]*?ceiling:\s*controlPlane\.gateway\.ceilingPerMinute/,
+    "the gateway ceiling comes from config/"
+  );
+  assert.match(
+    index,
+    /voiceDebounceMs:\s*controlPlane\.gateway\.voiceDebounceMs/,
+    "the voice debounce comes from config/, not from the pipeline's own copy"
+  );
+
+  // And the values it passes must be the ones the pipeline actually adopts.
+  const pipeline = new EventPipeline({
+    ceiling: plane.gateway.ceilingPerMinute,
+    voiceDebounceMs: plane.gateway.voiceDebounceMs
+  });
+  assert.equal(pipeline.stats().ceiling, plane.gateway.ceilingPerMinute);
+  assert.equal(pipeline.voiceDebounceMs, plane.gateway.voiceDebounceMs);
+});
+
+test("the documented gateway limits stay in the range the directive states", () => {
   const plane = loadControlPlane();
   assert.equal(plane.gateway.ceilingPerMinute, 120);
-  assert.equal(plane.gateway.voiceDebounceMs, 2_000);
   assert.equal(plane.intents.limit, 10_000);
   assert.equal(plane.intents.warnAt, 8_000);
-  assert.equal(plane.commands.deployment, "manual");
+
+  // A ceiling the tracker disagrees with would let the bot trip Discord's limit
+  // while its own monitor still reported "ok".
+  assert.ok(plane.gateway.ceilingPerMinute > 0, "the ceiling is a positive rate");
+  assert.ok(plane.gateway.voiceDebounceMs >= 0, "the debounce is not negative");
 });

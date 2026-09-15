@@ -88,7 +88,31 @@ test("normaliseTierRoles tolerates a missing or malformed body", () => {
 /* ---------------- event schema ---------------- */
 
 test("event schema rejects incomplete data", () => assert.throws(() => validateEvent("moderation.ban", { targetId: "1" })));
-test("event schema accepts complete data", () => assert.equal(requireEvent("moderation.ban").category, "moderation-log"));
+
+/**
+ * The positive path of `validateEvent`, which had no coverage.
+ *
+ * The test that used to sit here was named "event schema accepts complete data"
+ * but called `requireEvent` — a plain lookup that takes no data at all — and
+ * asserted a `category`. So the branch that *returns* the definition was never
+ * exercised, and a `validateEvent` that threw unconditionally would have passed
+ * every test in this file.
+ */
+test("event schema accepts data that carries every required field", () => {
+  const definition = validateEvent("moderation.ban", { targetId: "1", actorId: "2" });
+  assert.equal(definition.id, "moderation.ban");
+  assert.equal(definition.category, "moderation-log");
+
+  // A `null` counts as missing, not as a supplied value, so the two spellings
+  // of "absent" must both be rejected.
+  assert.throws(() => validateEvent("moderation.ban", { targetId: "1", actorId: null }), /actorId/);
+  assert.throws(() => validateEvent("moderation.ban", { targetId: "1" }), /actorId/);
+});
+
+test("requireEvent looks up a definition and rejects an unknown id", () => {
+  assert.equal(requireEvent("moderation.ban").category, "moderation-log");
+  assert.throws(() => requireEvent("moderation.explode"), /Unregistered event/);
+});
 test("unregistered event IDs are rejected", () => assert.throws(() => requireEvent("member.explode")));
 
 test("every event ID is unique and uses the domain.action form", () => {

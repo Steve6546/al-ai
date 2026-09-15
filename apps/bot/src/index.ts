@@ -110,7 +110,14 @@ const lock = acquireInstanceLock();
 const database = createBotDatabase(databaseUrl);
 const cache = new ConfigCache(guildId => database.loadLogging(guildId));
 const messageCache = createMessageCache();
-const pipeline = new EventPipeline();
+// GOVERNANCE rule 15: the ceiling and the voice window come from config/, not
+// from constants that happen to agree with it. Built without these arguments
+// the pipeline silently used its own defaults, so editing
+// `gateway.ceilingPerMinute` or `gateway.voiceDebounceMs` changed nothing.
+const pipeline = new EventPipeline({
+  ceiling: controlPlane.gateway.ceilingPerMinute,
+  voiceDebounceMs: controlPlane.gateway.voiceDebounceMs
+});
 const client = createDiscordClient();
 
 const detector = createIntrusionDetector();

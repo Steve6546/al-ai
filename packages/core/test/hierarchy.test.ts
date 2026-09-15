@@ -67,8 +67,17 @@ test("a bot below the highest managed role is blocked", () => {
   const verdict = assessRoleHierarchy(4, [3, 9]);
   assert.equal(verdict.blocked, true);
   assert.equal(verdict.highestManagedPosition, 9);
-  assert.match(verdict.message ?? "", /4/);
-  assert.match(verdict.message ?? "", /9/);
+
+  // The operator sees this sentence and has to act on it, so it is pinned in
+  // full. Matching a bare /4/ or /9/ used to be enough to pass, and that is a
+  // weak check: those digits appear anywhere in the string — a wrong position
+  // reported as "14" would still satisfy /4/, and the operator would be told to
+  // raise the bot above a rank that does not exist.
+  assert.equal(
+    verdict.message,
+    "رتبة AL AI في المرتبة 4، وأعلى رتبة إدارية في المرتبة 9. " +
+      "Discord لا يسمح للبوت بتعديل رتبة مساوية لرتبته أو أعلى منها، فارفع رتبة AL AI فوق الرتب الإدارية."
+  );
 });
 
 test("an equal position is already out of reach", () => {

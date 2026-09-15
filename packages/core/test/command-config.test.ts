@@ -7,6 +7,7 @@ import {
   commandDurationSeconds,
   commandDurations,
   CommandCooldowns,
+  clampInteger,
   commandFlagsFor,
   commandRegistry,
   cooldownKey,
@@ -125,6 +126,32 @@ test("a preset duration is kept only for a command that can apply it", () => {
 /* ------------------------------------------------------------------ *
  * Clamping
  * ------------------------------------------------------------------ */
+
+/**
+ * `clampInteger` is exported because the dashboard's command editor calls it
+ * directly on the values an operator types. It used to exist twice — once here
+ * and once as a private copy in `commands.tsx` — with the *limits* imported from
+ * this module and the *rule that applies them* re-implemented in the view. Two
+ * copies of one rule is how the editor and the validator drift apart.
+ *
+ * It is asserted directly here so a change to the shared rule is caught at the
+ * rule, not only through `normaliseCommandConfig`.
+ */
+test("clampInteger truncates, clamps, and never yields NaN", () => {
+  assert.equal(clampInteger(12.9, 0, 100), 12, "a fraction truncates toward zero");
+  assert.equal(clampInteger(-12.9, 0, 100), 0, "and the truncation happens before the floor");
+  assert.equal(clampInteger(999, 0, 100), 100, "above the ceiling");
+  assert.equal(clampInteger(-1, 0, 100), 0, "below the floor");
+  assert.equal(clampInteger(50, 0, 100), 50, "inside the range, unchanged");
+
+  // Anything that is not a usable number becomes the floor. `min` rather than
+  // `NaN` matters: a `NaN` would be stored as a value the bot cannot parse.
+  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, "30", null, undefined, {}]) {
+    assert.equal(clampInteger(bad, 0, 100), 0, `${String(bad)} is not a usable number`);
+  }
+
+  assert.ok(Number.isInteger(clampInteger(-0.4, 0, 100)), "the result is always a whole number");
+});
 
 test("the cooldown stays inside its declared bounds", () => {
   const timeout = requireCommand("timeout");

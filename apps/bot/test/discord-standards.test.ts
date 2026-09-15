@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ActivityType, PermissionFlagsBits } from "discord.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { ActivityType, Events, PermissionFlagsBits } from "discord.js";
 import { activityTypeNumbers, BOT_INVITE_PERMISSIONS, DISCORD_PERMISSION_BITS } from "@al-ai/core";
 
 /**
@@ -73,5 +75,56 @@ test("no activity type is mapped to a number Discord does not define", () => {
   const known = new Set(Object.values(ActivityType).filter(value => typeof value === "number"));
   for (const [name, value] of Object.entries(activityTypeNumbers)) {
     assert.ok(known.has(value), `${name} (${value}) is not an ActivityType Discord defines`);
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * Event names — the same "second copy" problem, in the listener table.
+ * ------------------------------------------------------------------ */
+
+const discordSource = readFileSync(fileURLToPath(new URL("../src/lib/discord.ts", import.meta.url)), "utf8");
+
+/**
+ * The source with comments removed.
+ *
+ * The scan below looks for `client.on("<name>")`, and this file's own
+ * documentation quotes the broken registration to explain it. Without stripping
+ * comments the test matches its own explanation — which it did on the first run.
+ */
+const discordCode = discordSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+
+/**
+ * Every `client.on(...)` must name an event discord.js actually emits.
+ *
+ * This is not a style rule. discord.js looks the name up in its own table and
+ * ignores anything it does not find — no throw, no warning, no log line — so a
+ * listener under a renamed or misspelled event is *invisible*: the code reads as
+ * working, the operator can switch the category on in the dashboard, and nothing
+ * is ever emitted.
+ *
+ * That is what had happened to the two emoji handlers. They were registered as
+ * `guildEmojiCreate` / `guildEmojiDelete`, which are the *constant key* spellings
+ * — `Events.GuildEmojiCreate` exists, but its **value** is `emojiCreate` — so the
+ * `server.expression-create` and `server.expression-delete` events the schema
+ * declares, `channels.json` routes, and the logs screen offers were unreachable.
+ *
+ * Requiring the `Events.*` form keeps the mistake from returning through a bare
+ * literal: a rename in the library then fails the build instead of falling
+ * silent at runtime.
+ */
+test("every client listener names a real discord.js event", () => {
+  const known = new Set<string>(Object.values(Events));
+  const registrations = [...discordCode.matchAll(/client\.(?:on|once)\(([^,]+),/g)].map(match => match[1]!.trim());
+
+  assert.ok(registrations.length >= 20, `expected the full listener set, found ${registrations.length}`);
+
+  for (const target of registrations) {
+    assert.match(target, /^Events\.[A-Za-z]+$/, `"${target}" must be an Events constant, not a bare string`);
+
+    const value = (Events as unknown as Record<string, string>)[target.slice("Events.".length)];
+    assert.ok(
+      typeof value === "string" && known.has(value),
+      `${target} is not an event discord.js emits (it resolves to ${String(value)})`
+    );
   }
 });

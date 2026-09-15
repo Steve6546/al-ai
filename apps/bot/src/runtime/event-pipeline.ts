@@ -21,6 +21,7 @@ export type PipelineOptions = {
   now?: () => number;
   ceiling?: number;
   windowMs?: number;
+  voiceDebounceMs?: number;
 };
 
 export class EventPipeline {
@@ -29,6 +30,14 @@ export class EventPipeline {
   private readonly now: () => number;
   private readonly ceiling: number;
   private readonly windowMs: number;
+  /**
+   * How long voice churn is coalesced for.
+   *
+   * Exposed because `dispatch` needs it and config is the authority (rule 15):
+   * the value lives in `control-plane.json` as `gateway.voiceDebounceMs`, and a
+   * second copy here would be the drift this project keeps finding.
+   */
+  readonly voiceDebounceMs: number;
   private timestamps: number[] = [];
   private draining = false;
   private drainScheduled = false;
@@ -40,6 +49,7 @@ export class EventPipeline {
     this.now = options.now ?? Date.now;
     this.ceiling = options.ceiling ?? GATEWAY_CEILING_PER_MINUTE;
     this.windowMs = options.windowMs ?? WINDOW_MS;
+    this.voiceDebounceMs = options.voiceDebounceMs ?? VOICE_DEBOUNCE_MS;
   }
 
   onThrottled(handler: (queued: number) => void) {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, Loader2, Plus, Search, SquareTerminal, Trash2 } from "lucide-react";
-import { commandDurations, MAX_AUTO_DELETE_SECONDS, MAX_COOLDOWN_SECONDS, MAX_PRESET_REASONS, MAX_PURGE_DAYS } from "@al-ai/core/browser";
+import { clampInteger, commandDurations, MAX_AUTO_DELETE_SECONDS, MAX_COOLDOWN_SECONDS, MAX_PRESET_REASONS, MAX_PURGE_DAYS } from "@al-ai/core/browser";
 import { api, type CommandChange } from "@/api";
 import { EmptyState } from "@/components/empty-state";
 import { SaveBar } from "@/components/save-bar";
@@ -702,7 +702,6 @@ function clampDays(value: number) {
   return Math.min(Math.max(Math.trunc(value), 0), MAX_PURGE_DAYS);
 }
 
-function clampInteger(value: number, min: number, max: number) {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(Math.max(Math.trunc(value), min), max);
-}
+// `clampInteger` used to be a second copy here. It lives in core now, next to
+// the limits it applies, so the editor cannot clamp differently from the
+// validator that stores the same fields.

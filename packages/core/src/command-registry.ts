@@ -342,7 +342,21 @@ function normaliseIdList(value: unknown, limit: number): string[] {
   return [...new Set(value.filter((id): id is string => typeof id === "string" && SNOWFLAKE.test(id)))].slice(0, limit);
 }
 
-function clampInteger(value: unknown, min: number, max: number): number {
+/**
+ * Truncates to a whole number and holds it inside `[min, max]`.
+ *
+ * Shared because the dashboard's command editor clamps the same two fields
+ * (`cooldownSeconds` and `autoDeleteResponseSeconds`) against the same limits
+ * exported just above. The view used to carry a second copy of this function,
+ * which meant the two could drift: the constants came from here while the rule
+ * that applies them did not, so an edit to one side would leave the editor and
+ * the validator disagreeing about what a legal value is.
+ *
+ * `value` is `unknown` on purpose — it is fed straight from a request body or a
+ * number input, and both can arrive as something that is not a number. Anything
+ * unusable becomes `min` rather than `NaN`.
+ */
+export function clampInteger(value: unknown, min: number, max: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return min;
   return Math.min(Math.max(Math.trunc(value), min), max);
 }

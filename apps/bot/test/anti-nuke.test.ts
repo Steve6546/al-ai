@@ -158,6 +158,29 @@ test("ordinary events are not treated as destructive", () => {
   }
 });
 
+/**
+ * `role.update` is deliberately *not* counted, and this pins that decision.
+ *
+ * The event exists in the schema and the bot emits it (`dispatch.ts` gives it
+ * priority 2), so the engine sees it — but a role edit is a rename, a colour, or
+ * a permission toggle, and a busy server produces them in normal moderation.
+ * Counting them against `roleChangesPerMinute` would quarantine a moderator for
+ * tidying up role colours. The destructive pair is create/delete, which is what
+ * the mapper watches.
+ *
+ * Asserted rather than left implicit so the scope is a decision a reader can
+ * find, not an omission they have to guess at. If role permission edits are ever
+ * meant to count — that is the privilege-escalation path — this test is where
+ * the change belongs, together with a decision about the shared budget.
+ */
+test("role.update is observed but never counted as a role change", () => {
+  assert.equal(
+    nukeActionOf({ type: "role.update", guildId: GUILD, roleId: "r", actorId: ACTOR }),
+    null,
+    "a role edit must not consume the create/delete budget"
+  );
+});
+
 /* ------------------------------------------------------------------ *
  * Mitigation
  * ------------------------------------------------------------------ */
