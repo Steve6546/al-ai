@@ -90,16 +90,17 @@ test("no activity type is mapped to a number Discord does not define", () => {
  * documentation quotes the broken registration to explain it. Without stripping
  * comments the test matches its own explanation — which it did on the first run.
  *
- * It scans the *whole tree* rather than `lib/discord.ts` alone, and that is the
- * repair this test needed: the first version had a hole exactly where the second
- * bug was. `index.ts` registered `client.once("clientReady", ...)` — the bare
- * string — and the scan never looked at `index.ts`, so the startup block that
- * seeds the guild table was invisible to the check that exists to catch it.
- * A test that only guards the file you remembered to point it at is not a guard.
+ * It scans the *whole tree* rather than `lib/discord.ts` alone. The first
+ * version looked at one file, and widening it was right on its own terms — a
+ * guard that only covers the file you remembered to point it at is not a guard,
+ * and a listener can be registered anywhere. The specific suspicion that
+ * prompted the widening (`index.ts`'s `"clientReady"`) turned out to be
+ * unfounded: that literal was the correct value and the listener fired. The
+ * widening stands; the example does not.
  *
  * The root is pinned across the recursion so each file is keyed by its path from
- * the scan root. Deriving it from the current directory would key every file by
- * its name inside the deepest folder, and a report naming `discord.ts` instead of
+ * the scan root. Deriving it from the current directory keys every file by its
+ * name inside the deepest folder, and a report naming `discord.ts` instead of
  * `lib/discord.ts` is a report nobody can act on.
  */
 const botSrcRoot = fileURLToPath(new URL("../src", import.meta.url));
@@ -122,24 +123,31 @@ const eventScanFiles = botSourceFiles(botSrcRoot).map(path => ({
 /**
  * Every `client.on(...)` must name an event discord.js actually emits.
  *
- * This is not a style rule. discord.js looks the name up in its own table and
- * ignores anything it does not find — no throw, no warning, no log line — so a
- * listener under a renamed or misspelled event is *invisible*: the code reads as
- * working, the operator can switch the category on in the dashboard, and nothing
- * is ever emitted.
+ * This is not a style rule, and the distinction it draws is narrow but real.
+ * discord.js looks the name up in its own table and ignores anything it does
+ * not find — no throw, no warning, no log line — so a listener under a
+ * *wrong* name is invisible: the code reads as working, the operator can switch
+ * the category on in the dashboard, and nothing is ever emitted.
  *
- * That is what had happened twice. The two emoji handlers were registered as
- * `guildEmojiCreate` / `guildEmojiDelete`, which are the *constant key* spellings
- * — `Events.GuildEmojiCreate` exists, but its **value** is `emojiCreate` — so the
- * `server.expression-create` and `server.expression-delete` events the schema
- * declares, `channels.json` routes, and the logs screen offers were unreachable.
- * The startup listener in `index.ts` had the same shape of mistake: `"clientReady"`
- * is the correct *value*, but writing it as a literal is what let it survive a
- * rename in the library unnoticed.
+ * That is what had happened to the two emoji handlers. They were registered as
+ * `guildEmojiCreate` / `guildEmojiDelete`, which are the *constant key*
+ * spellings — `Events.GuildEmojiCreate` exists, but its **value** is
+ * `emojiCreate` — so the `server.expression-create` and
+ * `server.expression-delete` events the schema declares, `channels.json`
+ * routes, and the logs screen offers were unreachable.
  *
- * Requiring the `Events.*` form keeps the mistake from returning through a bare
- * literal: a rename in the library then fails the build instead of falling
- * silent at runtime.
+ * What this scan does NOT claim: that every literal is broken. discord.js emits
+ * by value, so a literal that matches the value works — `"clientReady"` is
+ * `Events.ClientReady`'s value and fired correctly in production, which the
+ * guild table's `updated_at` column confirms. The scan was written believing
+ * otherwise and the belief was wrong; the assertion survived because requiring
+ * the constant is still the better rule, for a different reason. A literal is
+ * unverifiable: nothing catches it when a library rename changes the value
+ * underneath it (v13's `ready` → v14's `clientReady`), whereas the constant
+ * fails the build. The scan is a guard against silent drift, not evidence that
+ * any particular literal was already dead.
+ *
+ * Requiring the `Events.*` form is what makes that checkable at all.
  */
 test("every client listener names a real discord.js event", () => {
   const known = new Set<string>(Object.values(Events));

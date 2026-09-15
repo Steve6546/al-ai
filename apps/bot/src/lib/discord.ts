@@ -40,14 +40,18 @@ import {
  * Re-exported so a lifecycle listener can be registered outside this module
  * without importing discord.js a second time.
  *
- * `index.ts` binds `client.once(Events.ClientReady, ...)` for the startup pass,
- * which touches nothing Discord-specific — it seeds the guild table and ensures
- * the bot's role. Spelling that as the bare string `"clientReady"` is the trap:
- * discord.js looks the name up in its own table, finds nothing, and ignores the
- * listener in total silence, so the block simply never runs. Importing the
- * constant keeps the registration checkable by the scan in
+ * `index.ts` binds `client.once(Events.ClientReady, ...)` for the startup pass.
+ * Spelling that as the bare string `"clientReady"` also works — discord.js emits
+ * by *value*, and that is the value — but a literal cannot be checked: nothing
+ * verifies that the name is still real after a library upgrade, which is how the
+ * v13→v14 `ready` → `clientReady` rename would slip through silently. Importing
+ * the constant keeps the registration checkable by the scan in
  * `test/discord-standards.test.ts`, and re-exporting it from here keeps
  * GOVERNANCE rule 2 intact rather than carving an exception into it.
+ *
+ * Contrast the emoji listeners below, where the literal was not merely fragile
+ * but wrong: `"guildEmojiCreate"` is the constant's key while its value is
+ * `emojiCreate`, so those two handlers never ran.
  */
 export { Events };
 

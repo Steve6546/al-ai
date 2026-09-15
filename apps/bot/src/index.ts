@@ -593,10 +593,21 @@ bindEvents(client, guardedDispatch, {
   }
 });
 
-/* The `Events.*` constant, never the bare string. discord.js ignores an event
- * name it does not recognise — no throw, no warning — so `once("clientReady")`
- * resolved to nothing and this whole block never ran. See the note on
- * `Events.ClientReady` in lib/discord.ts for the same mistake repaired there. */
+/* The `Events.*` constant rather than the bare literal.
+ *
+ * Both forms work here, and that is worth stating plainly because the
+ * neighbouring case is the opposite: discord.js emits by *value*, and
+ * `Events.ClientReady`'s value happens to be `clientReady`, so the literal this
+ * replaced was never broken. The constant is still the right spelling, for a
+ * reason that only shows up later — a literal is unverifiable. Nothing checks
+ * that `"clientReady"` is still a real event name, so the v13→v14 rename
+ * (`ready` → `clientReady`) is exactly the kind of change that would leave a
+ * literal silently unmatched. With the constant, the same rename fails the
+ * build instead.
+ *
+ * The emoji listeners in lib/discord.ts are the case where this *was* a live
+ * defect: `"guildEmojiCreate"` is the constant's *key*, not its value
+ * (`emojiCreate`), so those handlers never ran at all. */
 client.once(Events.ClientReady, async () => {
   console.log(`AL AI connected as ${client.user?.tag}`);
   for (const guild of client.guilds.cache.values()) {

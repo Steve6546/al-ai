@@ -31,12 +31,15 @@ Monorepo: `apps/bot` (discord.js) + `apps/dashboard` (Fastify BFF + React SPA RT
   يطابق بـ`includes` ⇒ رتّب الأكثر تحديداً أولاً.
 - **`a_` = أفاتار متحرك** ⇒ `.gif`. **النبذة عبر `PATCH /applications/@me {description}`** —
   `/users/@me {bio}` يُهمَل صامتاً بـ200. **`Presence Intent` ممنوع** (حوكمة 8).
-- **🔴 أسماء الأحداث بـ`Events.*` لا بنصّ.** discord.js **يتجاهل اسم حدث لا يعرفه بلا رمي ولا تنبيه**.
-  وقع هذا **مرّتين**: `"guildEmojiCreate"` (المفتاح في `Events` هو `GuildEmojiCreate` لكن **قيمته**
-  `emojiCreate`) ⇒ `server.expression-*` كان **ميتاً تماماً**؛ و`client.once("clientReady")` في
-  `index.ts` ⇒ **كتلة الإقلاع كلها لم تعمل** (انظر أدناه). الحارس: `discord-standards.test.ts` يمسح
-  **كل شجرة البوت** ويفرض `Events.*` ويطابق مع `Object.values(Events)`. **الفحص النصّي يجب أن يجرّد
-  التعليقات أولاً** وإلا طابق شرحه لنفسه.
+- **🔴 أسماء الأحداث: `Events.*` لا نصّاً — لكن اعرف الفرق بدقة.** discord.js **يبعث بالقيمة**،
+  فالنصّ الذي **يساوي القيمة** يعمل. **مفتاح ≠ قيمة:** `Events.GuildEmojiCreate` مفتاحه كذلك
+  **وقيمته** `emojiCreate` ⇒ `client.on("guildEmojiCreate")` كان **ميتاً تماماً**
+  (`server.expression-*` معرَّف وموجَّه ومعروض ولا يُنتَج). أما `"clientReady"` فهو **القيمة نفسها**
+  ⇒ **كان يعمل** (ادّعيتُ العكس خطأً؛ `guilds.updated_at` و`guild_health.unique_users` أثبتا أنه
+  عمل — انظر السجل). **لا تستنتج «ميت» من نمط ثابت — شغّل السلوك أو افحص البيانات الحيّة.**
+  الثابت يبقى الأفضل لأنه **قابل للفحص** (v13 `ready` → v14 `clientReady` كان سيمرّ صامتاً بنصّ).
+  الحارس: `discord-standards.test.ts` يمسح **كل شجرة البوت** ويفرض `Events.*` ويطابق
+  `Object.values(Events)`. **الفحص النصّي يجب أن يجرّد التعليقات أولاً** وإلا طابق شرحه لنفسه.
 - **`Events` يُعاد تصديره من `lib/discord.ts`** (rule 2 يمنع استيراد discord.js في ملف ثانٍ،
   و`governance.test.ts` يثبّت أن المستورِد الوحيد هو `src/lib/discord.ts`).
 
