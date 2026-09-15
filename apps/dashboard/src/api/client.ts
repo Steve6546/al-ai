@@ -108,8 +108,46 @@ export const saveTiers = (guildId: string, values: TierRoles) =>
 /** A member named in a per-command scope, resolved to something readable. */
 export type ScopedMember = { id: string; name: string; avatarUrl: string | null };
 
-export const commands = (guildId: string) =>
-  call<{
+/**
+ * The list fields the board iterates over.
+ *
+ * A dashboard server answers 200 in whatever shape it was built with, so a
+ * server that predates one of these fields omits it silently. The board then
+ * iterates `undefined`, React reports "x is not iterable", and the screen goes
+ * blank with a message that names neither the field nor the cause.
+ *
+ * That is not an exotic situation here: the dev server runs under `tsx`, which
+ * has no hot reload, so serving an old server next to a newly built bundle is
+ * an ordinary mistake. It therefore earns a message that says what is wrong and
+ * what to do, instead of a blank screen.
+ */
+const commandListFields = [
+  "allowedRoleIds",
+  "deniedRoleIds",
+  "allowedUserIds",
+  "deniedUserIds",
+  "allowedChannelIds",
+  "deniedChannelIds",
+  "presetReasons"
+] as const;
+
+function assertCommandShape(commands: CommandFlag[]) {
+  for (const command of commands) {
+    const fields = command as unknown as Record<string, unknown>;
+    for (const field of commandListFields) {
+      if (!Array.isArray(fields[field])) {
+        throw new ApiError(
+          "STALE_SERVER",
+          `الخادم لم يُرسل الحقل «${field}» للأمر «${command.name}». الأرجح أن اللوحة تعمل بكود أقدم من الحزمة المعروضة — أعد تشغيل خادم اللوحة.`,
+          200
+        );
+      }
+    }
+  }
+}
+
+export const commands = async (guildId: string) => {
+  const payload = await call<{
     /** The sections the screen groups commands into, in render order. */
     categories: { id: CommandCategory; label: string; description: string }[];
     commands: CommandFlag[];
@@ -119,6 +157,10 @@ export const commands = (guildId: string) =>
     /** Arabic names for the Discord permission each command asks for. */
     permissionLabels: Record<string, string>;
   }>(`/api/guilds/${guildId}/commands`);
+
+  assertCommandShape(payload.commands);
+  return payload;
+};
 
 /**
  * Resolves the members a scope names, so the screen shows a name rather than a

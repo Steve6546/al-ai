@@ -1,7 +1,7 @@
 import test, { after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import type { HealthSnapshot } from "@al-ai/core/browser";
-import { ApiError, health } from "../src/api/client";
+import { commandFlagsFor, type HealthSnapshot } from "@al-ai/core/browser";
+import { ApiError, commands, health } from "../src/api/client";
 
 /**
  * The one place the dashboard retries a request.
@@ -148,4 +148,52 @@ test("a non-429 failure is never retried", async () => {
 
   assert.equal(attempts.length, 1, "a 401 is final, not a hiccup");
   assert.equal(sleeps.length, 0, "and nothing was waited out");
+});
+
+/* ------------------------------------------------------------------ *
+ * The payload shape guard
+ * ------------------------------------------------------------------ */
+
+/**
+ * A stale server is the ordinary way the commands screen breaks.
+ *
+ * `tsx` has no hot reload, so a dashboard left running across a backend change
+ * keeps answering 200 in the shape it was built with. The board then iterates a
+ * field that is not there, and React reports "x is not iterable" — a blank
+ * screen naming neither the field nor the fix. These pin the replacement.
+ *
+ * The fixture is the real `commandFlagsFor` output, and the field is removed by
+ * destructuring rather than set to `undefined`, because that is what actually
+ * crosses the wire: `JSON.stringify` drops an absent key, and the client never
+ * sees the difference between "omitted" and "undefined".
+ */
+const payloadWith = (list: unknown[]) => () =>
+  Response.json({ categories: [], commands: list, roles: [], channels: [], permissionLabels: {} });
+
+test("a payload missing a list field is rejected, and the message names it", async () => {
+  const stale = commandFlagsFor(new Map()).map(command => {
+    const { allowedUserIds: _omitted, ...rest } = command;
+    return rest;
+  });
+  responses = [payloadWith(stale)];
+
+  await assert.rejects(() => commands("123"), (error: unknown) => {
+    assert.ok(error instanceof ApiError, "it surfaces as the dashboard's own error type");
+    assert.equal(error.code, "STALE_SERVER");
+    assert.match(error.message, /allowedUserIds/, "the message names the field that is missing");
+    assert.match(error.message, /أعد تشغيل/, "and says what to do about it");
+    return true;
+  });
+});
+
+test("a current payload passes the guard untouched", async () => {
+  // Without this, a guard whose field list is misspelled would reject every
+  // payload and the test above would still pass.
+  const current = commandFlagsFor(new Map());
+  responses = [payloadWith(current)];
+
+  const result = await commands("123");
+
+  assert.equal(result.commands.length, current.length, "every command survives the check");
+  assert.equal(attempts.length, 1, "and the guard does not re-request anything");
 });
