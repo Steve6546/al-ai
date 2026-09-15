@@ -2,7 +2,6 @@ import pg from "pg";
 import {
   DEFAULT_ANTI_NUKE_CONFIG,
   DEFAULT_BOT_IDENTITY,
-  DEFAULT_CUSTOMIZATION,
   DEFAULT_EMBED_COLOR,
   DEFAULT_LOGGING_MODE,
   encryptSecret,
@@ -10,13 +9,11 @@ import {
   isTier,
   normaliseAntiNukeConfig,
   normaliseBotIdentity,
-  normaliseCustomization,
   normaliseTierRoles,
   signActor,
   type AntiNukeConfig,
   type BotIdentitySettings,
   type CommandConfig,
-  type CustomizationSettings,
   type LogDestination,
   type LoggingMode,
   type TierRoles
@@ -127,27 +124,6 @@ export function createBotDatabase(databaseUrl: string) {
           bansPerMinute: row.bans_per_minute,
           roleChangesPerMinute: row.role_changes_per_minute
         }
-      });
-    },
-
-    /**
-     * The dashboard's customization screen, read by the customization sync.
-     *
-     * The shape matches `CustomizationSettings` in @al-ai/core exactly, and the
-     * value is normalised here with the same helper the BFF used on write, so the
-     * bot can never act on a value the dashboard would have refused.
-     */
-    async loadCustomization(guildId: string): Promise<CustomizationSettings> {
-      const { rows } = await pool.query<{ nickname: string | null; role_color: string | null; role_icon_url: string | null }>(
-        `SELECT nickname, role_color, role_icon_url FROM guild_customization WHERE guild_id = $1`,
-        [guildId]
-      );
-      const row = rows[0];
-      // No row means the guild still carries the shipped defaults.
-      return normaliseCustomization({
-        nickname: row?.nickname ?? DEFAULT_CUSTOMIZATION.nickname,
-        roleColor: row?.role_color ?? DEFAULT_CUSTOMIZATION.roleColor,
-        roleIconUrl: row?.role_icon_url ?? DEFAULT_CUSTOMIZATION.roleIconUrl
       });
     },
 

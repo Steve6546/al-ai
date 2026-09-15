@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { isCategoryEnabled, logDestinations } from "@al-ai/core";
 import { resolveChannel } from "../src/logging/channel-registry.ts";
 import { check, roleCarrierOf } from "../src/permissions/permission-guard.ts";
@@ -397,4 +400,97 @@ test("invalidating the cache forces a reload", async () => {
   cache.invalidate("g1");
   await cache.get("g1");
   assert.equal(loads, 2);
+});
+
+/* ------------------------------------------------------------------ *
+ * Schema reachability
+ *
+ * Every event the schema declares must have something that can actually write
+ * it. Without this check a dead declaration is indistinguishable from a working
+ * feature: it appears in `event-schema.ts`, it is routed in
+ * `config/channels.json`, and a `logEvent` call naming it would succeed — so the
+ * entry reads as live while nothing ever produces it.
+ *
+ * This was not hypothetical. `bot.health` was declared with `state` as a
+ * required field, routed to `bot-log`, and given Arabic copy in the dashboard.
+ * No code path emitted it. The health surface an operator actually sees is
+ * `guild_health` plus the signed push to the dashboard; `onHealth` — the
+ * callback whose signature takes `(state, gatewayEvents)` — wrote to
+ * `console.log` and discarded its second argument, which is what the missing
+ * producer left behind.
+ *
+ * SCOPE: the whole monorepo, not just the bot. The event schema is shared, and a
+ * producer may legitimately live on the other side of a layer boundary —
+ * `bot.security-rejection` is written by the dashboard BFF when a request fails
+ * the tier check, and then travels through bot-log. Scanning only the bot
+ * reported it as dead, which is exactly the false positive that makes a guard
+ * worth deleting instead of keeping.
+ *
+ * The check is textual because driving every emitter would need Discord, a
+ * database and a clock. The shapes below are the only ones a producer takes.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Every `.ts`/`.tsx` file under each root, keyed by a path relative to that root.
+ *
+ * The root is carried through the recursion. Deriving the relative path from the
+ * *current* directory instead collapses every file to its bare filename —
+ * `lib/discord.ts` becomes `discord.ts` and `security/intrusion-detector.ts`
+ * becomes `intrusion-detector.ts` — so any lookup by subdirectory silently never
+ * matches and the scan reports "nothing found" for the files it exists to
+ * inspect. That is the same class of failure this whole test is about, and it
+ * caught the guard itself on the first run.
+ */
+function sourceFiles(root: string, dir: string = root): { relativePath: string; source: string }[] {
+  return readdirSync(dir).flatMap(entry => {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) return sourceFiles(root, full);
+    return full.endsWith(".ts") || full.endsWith(".tsx")
+      ? [{ relativePath: relative(root, full).replace(/\\/g, "/"), source: readFileSync(full, "utf8") }]
+      : [];
+  });
+}
+
+test("every declared event has a producer somewhere in the monorepo", async () => {
+  const { eventSchema } = await import("@al-ai/core");
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const source = ["apps/bot/src", "apps/dashboard/server", "apps/dashboard/src"]
+    .flatMap(root => sourceFiles(join(repoRoot, root)))
+    .map(file => ({
+      relativePath: file.relativePath,
+      // Comments are stripped so a doc block quoting an event ID cannot stand in
+      // for a producer. This test's own comment names both dead events.
+      source: file.source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")
+    }));
+
+  const emitted = new Set<string>();
+
+  for (const file of source) {
+    // 1. A literal event ID as logEvent's first argument.
+    for (const match of file.source.matchAll(/logEvent\(\s*"([a-z][a-z.-]+)"/g)) emitted.add(match[1]!);
+
+    // 2. `appendAudit({ ..., eventId: "x" })` — the dashboard's equivalent, used
+    //    for events the BFF raises on its own side of the boundary.
+    for (const match of file.source.matchAll(/eventId:\s*"([a-z][a-z.-]+)"/g)) emitted.add(match[1]!);
+
+    // 3. Gateway events reach logEvent as a `BotEvent["type"]`, listed in the
+    //    union in lib/discord.ts. Every member of that union is forwarded.
+    if (file.relativePath === "lib/discord.ts") {
+      for (const match of file.source.matchAll(/type:\s*"([a-z][a-z.-]+)"/g)) emitted.add(match[1]!);
+    }
+
+    // 4. The intrusion detector returns a signal whose `id` is the event ID, and
+    //    the runtime passes that straight to logEvent. `bot.security-rejection`
+    //    is the detector's equivalent on the dashboard side, raised via appendAudit.
+    if (file.relativePath === "security/intrusion-detector.ts") {
+      for (const match of file.source.matchAll(/id:\s*"([a-z][a-z.-]+)"/g)) emitted.add(match[1]!);
+    }
+  }
+
+  const unreachable = [...eventSchema.keys()].filter(id => !emitted.has(id));
+  assert.deepEqual(
+    unreachable,
+    [],
+    "declared but never emitted: " + unreachable.join(", ") + " — an event nothing produces is a dead declaration"
+  );
 });

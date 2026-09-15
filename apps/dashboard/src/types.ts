@@ -209,6 +209,7 @@ const eventCopy: Record<string, string> = {
   "moderation.kick": "طرد",
   "moderation.timeout": "إسكات مؤقت",
   "moderation.warn": "تحذير",
+  "moderation.clearwarns": "مسح التحذيرات",
   "voice.join": "دخول غرفة صوتية",
   "voice.leave": "خروج من غرفة صوتية",
   "voice.move": "انتقال بين غرفتين",

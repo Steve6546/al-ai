@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ActivityType, Events, PermissionFlagsBits } from "discord.js";
 import { activityTypeNumbers, BOT_INVITE_PERMISSIONS, DISCORD_PERMISSION_BITS } from "@al-ai/core";
@@ -82,16 +83,41 @@ test("no activity type is mapped to a number Discord does not define", () => {
  * Event names — the same "second copy" problem, in the listener table.
  * ------------------------------------------------------------------ */
 
-const discordSource = readFileSync(fileURLToPath(new URL("../src/lib/discord.ts", import.meta.url)), "utf8");
-
 /**
- * The source with comments removed.
+ * Every `.ts` file under `dir`, with comments stripped.
  *
  * The scan below looks for `client.on("<name>")`, and this file's own
  * documentation quotes the broken registration to explain it. Without stripping
  * comments the test matches its own explanation — which it did on the first run.
+ *
+ * It scans the *whole tree* rather than `lib/discord.ts` alone, and that is the
+ * repair this test needed: the first version had a hole exactly where the second
+ * bug was. `index.ts` registered `client.once("clientReady", ...)` — the bare
+ * string — and the scan never looked at `index.ts`, so the startup block that
+ * seeds the guild table was invisible to the check that exists to catch it.
+ * A test that only guards the file you remembered to point it at is not a guard.
+ *
+ * The root is pinned across the recursion so each file is keyed by its path from
+ * the scan root. Deriving it from the current directory would key every file by
+ * its name inside the deepest folder, and a report naming `discord.ts` instead of
+ * `lib/discord.ts` is a report nobody can act on.
  */
-const discordCode = discordSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+const botSrcRoot = fileURLToPath(new URL("../src", import.meta.url));
+
+function botSourceFiles(root: string, dir: string = root): string[] {
+  return readdirSync(dir).flatMap(entry => {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) return botSourceFiles(root, full);
+    return full.endsWith(".ts") ? [full] : [];
+  });
+}
+
+const eventScanFiles = botSourceFiles(botSrcRoot).map(path => ({
+  relativePath: relative(botSrcRoot, path).replace(/\\/g, "/"),
+  code: readFileSync(path, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "")
+}));
 
 /**
  * Every `client.on(...)` must name an event discord.js actually emits.
@@ -102,11 +128,14 @@ const discordCode = discordSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/
  * working, the operator can switch the category on in the dashboard, and nothing
  * is ever emitted.
  *
- * That is what had happened to the two emoji handlers. They were registered as
+ * That is what had happened twice. The two emoji handlers were registered as
  * `guildEmojiCreate` / `guildEmojiDelete`, which are the *constant key* spellings
  * — `Events.GuildEmojiCreate` exists, but its **value** is `emojiCreate` — so the
  * `server.expression-create` and `server.expression-delete` events the schema
  * declares, `channels.json` routes, and the logs screen offers were unreachable.
+ * The startup listener in `index.ts` had the same shape of mistake: `"clientReady"`
+ * is the correct *value*, but writing it as a literal is what let it survive a
+ * rename in the library unnoticed.
  *
  * Requiring the `Events.*` form keeps the mistake from returning through a bare
  * literal: a rename in the library then fails the build instead of falling
@@ -114,17 +143,23 @@ const discordCode = discordSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/
  */
 test("every client listener names a real discord.js event", () => {
   const known = new Set<string>(Object.values(Events));
-  const registrations = [...discordCode.matchAll(/client\.(?:on|once)\(([^,]+),/g)].map(match => match[1]!.trim());
+  const registrations: { target: string; file: string }[] = [];
+
+  for (const file of eventScanFiles) {
+    for (const match of file.code.matchAll(/client\.(?:on|once)\(([^,]+),/g)) {
+      registrations.push({ target: match[1]!.trim(), file: file.relativePath });
+    }
+  }
 
   assert.ok(registrations.length >= 20, `expected the full listener set, found ${registrations.length}`);
 
-  for (const target of registrations) {
-    assert.match(target, /^Events\.[A-Za-z]+$/, `"${target}" must be an Events constant, not a bare string`);
+  for (const { target, file } of registrations) {
+    assert.match(target, /^Events\.[A-Za-z]+$/, `${file}: "${target}" must be an Events constant, not a bare string`);
 
     const value = (Events as unknown as Record<string, string>)[target.slice("Events.".length)];
     assert.ok(
       typeof value === "string" && known.has(value),
-      `${target} is not an event discord.js emits (it resolves to ${String(value)})`
+      `${file}: ${target} is not an event discord.js emits (it resolves to ${String(value)})`
     );
   }
 });

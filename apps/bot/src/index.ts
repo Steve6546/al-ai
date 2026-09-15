@@ -8,6 +8,7 @@ import {
   createDiscordClient,
   dmGuildOwner,
   ensureBotRole,
+  Events,
   listLoggableChannels,
   notifyTarget,
   quarantineMember,
@@ -169,7 +170,27 @@ const runtime: LogRuntime = {
 const dispatch = createDispatcher({
   pipeline,
   runtime,
-  onHealth: state => console.log(`AL AI health: ${state}`),
+  /**
+   * GOVERNANCE rule 13-adjacent, and the producer `bot.health` never had.
+   *
+   * The event is declared in `event-schema.ts` with `state` required, routed in
+   * `config/channels.json` under bot-log, and delivered through the developer
+   * webhook like every other internal event. Until this line existed nothing
+   * emitted it: the dispatcher called this callback on `client.ready`, and the
+   * callback wrote to `console.log` and discarded its `gatewayEvents` argument.
+   *
+   * `state` is the pipeline's own word for whether the gateway is keeping up,
+   * and `gatewayEvents` is the count the health surface reports, so both are
+   * carried into the payload rather than dropped. The console line stays: it is
+   * the only signal available when the database or the webhook is the thing
+   * that is broken.
+   */
+  onHealth: (state, gatewayEvents) => {
+    console.log(`AL AI health: ${state}`);
+    void logEvent("bot.health", { guildId: "*", actorId: "system", data: { state, gatewayEvents } }, runtime).catch(
+      error => console.error("AL AI could not record its health", error)
+    );
+  },
   /**
    * Runs before the operator is offered any settings screen: the bot must own a
    * visible role in the guild so it can position the moderation roles it manages.
@@ -572,7 +593,11 @@ bindEvents(client, guardedDispatch, {
   }
 });
 
-client.once("clientReady", async () => {
+/* The `Events.*` constant, never the bare string. discord.js ignores an event
+ * name it does not recognise — no throw, no warning — so `once("clientReady")`
+ * resolved to nothing and this whole block never ran. See the note on
+ * `Events.ClientReady` in lib/discord.ts for the same mistake repaired there. */
+client.once(Events.ClientReady, async () => {
   console.log(`AL AI connected as ${client.user?.tag}`);
   for (const guild of client.guilds.cache.values()) {
     await database
@@ -621,6 +646,13 @@ const securityProbe = setInterval(async () => {
     await raiseSecurityEvent(signal.id, signal.data);
   }
   await database.pruneNonces().catch(() => undefined);
+  // The anti-nuke counters are a sliding window keyed by guild:actor:action, and
+  // nothing else ever removes a key whose window has closed. Without this the map
+  // only grows: every distinct member who deletes a channel, issues a ban or
+  // changes a role leaves an entry behind for the life of the process. The
+  // dashboard never reads it, so the leak produces no symptom until memory runs
+  // out — which is why it is easy to miss and cheap to fix here.
+  antiNuke.tracker.prune();
 }, 30_000);
 securityProbe.unref?.();
 
