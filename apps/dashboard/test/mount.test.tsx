@@ -3,7 +3,7 @@
 import { dom } from "./dom-env.js";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createElement, StrictMode } from "react";
+import { createElement, StrictMode, type ReactElement } from "react";
 import { App } from "../src/App";
 import { ErrorBoundary } from "../src/components/error-boundary";
 import { TooltipProvider } from "../src/components/ui/tooltip";
@@ -217,6 +217,21 @@ function Boom(): never {
   throw new Error("انفجار متعمّد داخل العرض");
 }
 
+/**
+ * Fails on the first render and succeeds afterwards.
+ *
+ * The retry button is the only way back to a working screen without a manual
+ * reload, so "the button is present" is not enough — it has to be shown
+ * actually recovering. Arming a real failure and then clearing it is what
+ * makes the difference between testing the button and testing its label.
+ */
+let retryArmed = true;
+
+function Flaky(): ReactElement | null {
+  if (retryArmed) throw new Error("فشل مقصود قبل إعادة المحاولة");
+  return createElement("p", null, "نجحت إعادة المحاولة");
+}
+
 test("a render error shows a readable card instead of a blank page", async () => {
   const { createRoot } = await import("react-dom/client");
   const { act } = await import("react");
@@ -270,6 +285,87 @@ test("changing the reset key releases a latched error", async () => {
     root.unmount();
   } finally {
     console.error = originalError;
+    container.remove();
+  }
+});
+
+test("a failing screen does not take the shell down with it", async () => {
+  const { createRoot } = await import("react-dom/client");
+  const { act } = await import("react");
+
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(container);
+
+  const originalError = console.error;
+  console.error = () => undefined;
+
+  try {
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        createElement(
+          "div",
+          null,
+          createElement("p", null, "القائمة الجانبية سليمة"),
+          createElement(ErrorBoundary, { resetKey: "a", children: createElement(Boom, null) })
+        )
+      );
+    });
+
+    // This is the claim the component's own comment makes, and it is the whole
+    // reason the boundary wraps the screen content rather than the app: an
+    // uncaught render error unmounts the entire root, so without containment
+    // the sibling beside the failing screen would disappear too and the
+    // operator would be stranded with nothing to navigate with.
+    assert.match(container.innerHTML, /القائمة الجانبية سليمة/, "the sibling outside the boundary survived");
+    assert.match(container.innerHTML, /تعذّر عرض/, "and the failure is still reported");
+    assert.match(container.innerHTML, /role="alert"/, "the failure is announced, not merely drawn");
+    root.unmount();
+  } finally {
+    console.error = originalError;
+    container.remove();
+  }
+});
+
+test("the retry button recovers the screen without a page reload", async () => {
+  const { createRoot } = await import("react-dom/client");
+  const { act } = await import("react");
+
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(container);
+
+  const originalError = console.error;
+  console.error = () => undefined;
+  retryArmed = true;
+
+  try {
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        createElement(ErrorBoundary, { resetKey: "a", scope: "هوية البوت", children: createElement(Flaky, null) })
+      );
+    });
+    assert.match(container.innerHTML, /تعذّر عرض/, "the failure is caught first");
+
+    const button = [...container.querySelectorAll("button")].find(el =>
+      el.textContent?.includes("إعادة المحاولة")
+    );
+    assert.ok(button, "the fallback offers a retry button");
+
+    // The condition that caused the failure is gone by the time the operator
+    // clicks — otherwise this would only prove the button can be pressed.
+    retryArmed = false;
+    await act(async () => {
+      (button as HTMLElement).click();
+      await new Promise(resolve => setTimeout(resolve, 10));
+    });
+
+    assert.match(container.innerHTML, /نجحت إعادة المحاولة/, "the children rendered after retry");
+    assert.doesNotMatch(container.innerHTML, /تعذّر عرض/, "the error card is gone");
+    root.unmount();
+  } finally {
+    console.error = originalError;
+    retryArmed = true;
     container.remove();
   }
 });
