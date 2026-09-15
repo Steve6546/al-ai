@@ -7,5 +7,5 @@
     "./browser": "./src/browser.ts"
   },
   "scripts": { "test": "tsx --test test/*.test.ts" },
-  "dependencies": { "tsx": "latest" }
+  "dependencies": { "tsx": "^4.23.13" }
 }

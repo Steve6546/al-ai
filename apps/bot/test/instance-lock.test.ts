@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { acquireInstanceLock } from "../src/runtime/supervisor.js";
+import { basename, dirname, isAbsolute, join } from "node:path";
+import { DEFAULT_LOCK_PATH, acquireInstanceLock, resolveLockPath } from "../src/runtime/supervisor.js";
 
 /**
  * The single-instance lock.
@@ -14,6 +14,11 @@ import { acquireInstanceLock } from "../src/runtime/supervisor.js";
  * refusal, the reclaim of a crashed process's lock, and the release were all
  * unverified, and the reclaim path is the one that runs in production after a
  * crash — which is exactly when nobody is watching.
+ *
+ * The last two tests cover the *path*, which turned out to be the part that was
+ * actually broken: the lock existed and worked, but the bot is documented to
+ * start from two different working directories, and each one wrote its own lock
+ * file. A guard that both sides agree on is worth nothing.
  */
 
 const dir = mkdtempSync(join(tmpdir(), "al-ai-lock-"));
@@ -86,4 +91,49 @@ test("releasing twice is not an error", () => {
   lock.release();
   lock.release();
   assert.equal(existsSync(path), false);
+});
+
+/* ------------------------------------------------------------------ *
+ * The path the lock is taken at must not depend on the working directory.
+ * ------------------------------------------------------------------ */
+
+test("the default lock path is absolute and sits at the repository root", () => {
+  // Measured before this was fixed: the instance started from the repository
+  // root held `.al-ai-bot.lock` while the instance started from `apps/bot` wrote
+  // `apps/bot/.al-ai-bot.lock` and started anyway. Two live processes, one
+  // token — the exact failure this lock exists to prevent.
+  assert.ok(isAbsolute(DEFAULT_LOCK_PATH), "a relative default resolves differently per working directory");
+  assert.equal(basename(DEFAULT_LOCK_PATH), ".al-ai-bot.lock");
+
+  // The repository root is the directory whose manifest declares the
+  // workspaces, not one of the workspaces themselves.
+  const manifest = JSON.parse(readFileSync(join(dirname(DEFAULT_LOCK_PATH), "package.json"), "utf8")) as {
+    workspaces?: unknown;
+  };
+  assert.ok(manifest.workspaces, "the lock sits at the repository root, not inside a workspace");
+});
+
+test("a relative BOT_LOCK_FILE is anchored to the repository root, not the cwd", () => {
+  // `.env.example` ships the bare name `.al-ai-bot.lock`, which is also what the
+  // real `.env` sets. Read as a cwd-relative path that is a *second* lock file,
+  // which is how the root instance and the `apps/bot` instance stopped seeing
+  // each other.
+  const previous = process.env.BOT_LOCK_FILE;
+  try {
+    process.env.BOT_LOCK_FILE = ".al-ai-bot.lock";
+    assert.equal(resolveLockPath(), DEFAULT_LOCK_PATH, "the documented value is the default lock");
+
+    process.env.BOT_LOCK_FILE = "ops.lock";
+    assert.equal(resolveLockPath(), join(dirname(DEFAULT_LOCK_PATH), "ops.lock"), "a bare name means the repository root");
+
+    const absolute = join(tmpdir(), "elsewhere.lock");
+    process.env.BOT_LOCK_FILE = absolute;
+    assert.equal(resolveLockPath(), absolute, "an absolute value names its own place");
+
+    delete process.env.BOT_LOCK_FILE;
+    assert.equal(resolveLockPath(), DEFAULT_LOCK_PATH, "unset falls back to the repository lock");
+  } finally {
+    if (previous === undefined) delete process.env.BOT_LOCK_FILE;
+    else process.env.BOT_LOCK_FILE = previous;
+  }
 });

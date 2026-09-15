@@ -1,4 +1,6 @@
 import { closeSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { newNonce, layerSignature } from "@al-ai/core";
 import type { EventPipeline } from "./event-pipeline.js";
 import type { BotDatabase } from "../storage/database.js";
@@ -9,7 +11,37 @@ import type { BotDatabase } from "../storage/database.js";
  * Two bot processes sharing one token cause duplicated logs and double command
  * handling, so the supervisor refuses to start a second copy.
  */
-export function acquireInstanceLock(path = process.env.BOT_LOCK_FILE ?? ".al-ai-bot.lock") {
+
+/**
+ * The repository root, resolved from this file rather than from the working
+ * directory. Everything below is anchored here.
+ */
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+
+export const DEFAULT_LOCK_PATH = join(REPO_ROOT, ".al-ai-bot.lock");
+
+/**
+ * Where the lock lives.
+ *
+ * The bot is documented to start both from the repository root and from
+ * `apps/bot`, and a cwd-relative path made those two invocations write
+ * *different* lock files — so the same token ran as two live processes, each
+ * duplicating every log line and handling every command twice. Measured: the
+ * instance started from the root held `.al-ai-bot.lock`, while the one started
+ * from `apps/bot` wrote `apps/bot/.al-ai-bot.lock` and started anyway. That is
+ * precisely the failure this lock exists to prevent.
+ *
+ * `BOT_LOCK_FILE` is documented in `.env.example` as a bare file name, so a
+ * relative value means "this name, at the repository root" and only an absolute
+ * value names its own place. Reading it as a cwd-relative path is what put the
+ * second lock file there in the first place.
+ */
+export function resolveLockPath(configured = process.env.BOT_LOCK_FILE?.trim()): string {
+  if (!configured) return DEFAULT_LOCK_PATH;
+  return isAbsolute(configured) ? configured : join(REPO_ROOT, configured);
+}
+
+export function acquireInstanceLock(path = resolveLockPath()) {
   try {
     const handle = openSync(path, "wx");
     writeSync(handle, String(process.pid));

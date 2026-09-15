@@ -75,9 +75,20 @@ export function createAntiNukeTracker(options: AntiNukeTrackerOptions = {}) {
     /**
      * Clears the latch for one actor.
      *
-     * Called when an operator releases someone from quarantine. Without it the
-     * actor would stay latched forever and a false positive could never be
-     * undone.
+     * No production caller today — it is exercised by the tests, like
+     * `countFor` and `reset`, and kept as the surface a release flow would use.
+     * It previously claimed to be "called when an operator releases someone
+     * from quarantine", which described a caller that does not exist and
+     * overstated what an unreleased latch costs:
+     *
+     *  - containment is `roles.set([quarantineRoleId])`, which is persisted in
+     *    Discord, so an actor the latch still covers is not punished twice;
+     *  - the latch itself lives in this process's memory, so a restart clears it
+     *    along with every counter.
+     *
+     * The reachable consequence is therefore narrower than "latched forever":
+     * within one process lifetime the owner is told about an incident once, and
+     * a restart may report it a second time. Nothing is left contained.
      */
     release(guildId: string, actorId: string) {
       latched.delete(actorKey(guildId, actorId));

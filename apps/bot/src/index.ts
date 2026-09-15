@@ -44,25 +44,34 @@ import { createAntiNukeEngine } from "./security/anti-nuke.js";
 import { guardAuditWrite } from "./security/audit-trail.js";
 import { createIntentUsageTracker } from "./compliance/intent-usage-tracker.js";
 import { createPresenceSync } from "./runtime/presence-sync.js";
-import { assertChannelsMatchSchema, loadControlPlane, undecidedSettings } from "./config/control-plane.js";
+import {
+  assertChannelsMatchSchema,
+  loadControlPlane,
+  undecidedSettings,
+  type ControlPlane
+} from "./config/control-plane.js";
 import { startIntegrationAdapter } from "./integration-adapter.js";
 import { logEvent, type LogRuntime } from "./logging/log-router.js";
-
-const SOURCE_LAYER = "bot-runtime";
 
 /* ------------------------------------------------------------------ *
  * GOVERNANCE rule 15 — operational state is loaded, validated, and never
  * guessed. A drifted config or an undecided value fails before Discord is
  * contacted, so a half-configured bot never runs in production.
+ *
+ * Both reads sit inside the guard, because both can throw. The control plane
+ * validates itself as it loads, so a missing or mistyped field stops the boot
+ * here instead of reaching the pipeline as `undefined` and letting a fallback
+ * constant answer in its place.
  * ------------------------------------------------------------------ */
+let controlPlane: ControlPlane;
 try {
   assertChannelsMatchSchema();
+  controlPlane = loadControlPlane();
 } catch (error) {
   console.error(`AL AI configuration is invalid: ${error instanceof Error ? error.message : error}`);
   process.exit(1);
 }
 
-const controlPlane = loadControlPlane();
 const undecided = undecidedSettings(controlPlane);
 if (undecided.length) {
   const message = `AL AI has undecided operational settings: ${undecided.join(", ")} (see apps/bot/config/control-plane.json).`;
@@ -155,7 +164,7 @@ const runtime: LogRuntime = {
   cache,
   hmacSecret,
   encryptionKey,
-  sourceLayer: SOURCE_LAYER,
+  sourceLayer: controlPlane.instance.sourceLayer,
   send: (channelId, envelope, colorOverride) => sendLogEmbed(client, channelId, envelope, colorOverride),
   // Internal destinations (bot-log: the bot's own failures and every security.*
   // event) go to the developer webhook, never to a customer's server.
@@ -688,7 +697,7 @@ const adapter =
   process.env.INTEGRATION_ADAPTER_ENABLED === "true"
     ? startIntegrationAdapter({
         hmacSecret,
-        sourceLayer: SOURCE_LAYER,
+        sourceLayer: controlPlane.instance.sourceLayer,
         consumeNonce: (nonce, expiresAt) => database.consumeNonce(nonce, "integration-adapter", expiresAt),
         handlers: {
           getStatus: async () => ({ ...pipeline.stats(), intents: intentUsage.stats(), watchdog: watchdog.snapshot() }),
@@ -761,6 +770,24 @@ async function shutdown(signal: string) {
   process.exit(0);
 }
 
+/**
+ * Signals are the shutdown path. A crash is deliberately not.
+ *
+ * `SIGINT` and `SIGTERM` run the flush above because both mean "stop now, on
+ * purpose" — a redeploy, a `docker stop`, an operator pressing Ctrl-C — and the
+ * pipeline is holding events that were accepted but not yet delivered.
+ *
+ * `uncaughtException` is left to Node, which prints and exits. Two reasons, both
+ * deliberate: continuing after one is exactly what Node's own documentation
+ * warns against, and the code that threw is by definition the code that would
+ * have to run the flush. Nothing is left behind by exiting this way — the
+ * instance lock is reclaimed on the next boot because its owner is no longer
+ * alive, which `instance-lock.test.ts` covers — and the loss is bounded to the
+ * events still queued, which the rate-limiting pipeline caps at one window.
+ *
+ * A rejected promise is different: it is already handled where it happens, so
+ * this only makes sure it is not silent.
+ */
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("unhandledRejection", reason => console.error("AL AI unhandled rejection", reason));

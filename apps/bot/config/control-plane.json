@@ -1,7 +1,6 @@
 {
   "schemaVersion": 1,
   "instance": {
-    "name": "AL AI",
     "sourceLayer": "bot-runtime"
   },
   "intents": {

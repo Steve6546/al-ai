@@ -3,22 +3,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
-    "deploy-commands": "tsx scripts/deploy-commands.ts",
+    "dev": "tsx watch --env-file=../../.env src/index.ts",
+    "start": "tsx --env-file=../../.env src/index.ts",
+    "deploy-commands": "tsx --env-file=../../.env scripts/deploy-commands.ts",
     "test": "tsx --test test/*.test.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@al-ai/core": "*",
     "discord.js": "^14.21.0",
-    "dotenv": "latest",
+    "dotenv": "^17.4.2",
     "pg": "^8.13.0",
-    "tsx": "latest"
+    "tsx": "^4.23.13"
   },
   "devDependencies": {
-    "@types/node": "latest",
-    "@types/pg": "latest",
-    "typescript": "latest"
+    "@types/node": "^22.20.2",
+    "@types/pg": "^8.23.1",
+    "typescript": "^7.0.2"
   }
 }
