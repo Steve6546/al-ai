@@ -252,6 +252,13 @@ CREATE TABLE IF NOT EXISTS guild_command_flags (
   -- channels; denied_channel_ids is checked first and always wins.
   allowed_channel_ids JSONB NOT NULL DEFAULT '[]',
   denied_channel_ids JSONB NOT NULL DEFAULT '[]',
+  -- Members allowed to run this command, beyond the tier mapping and the roles
+  -- above. The narrowest escape hatch there is, for the case a role cannot
+  -- express: one trusted helper on a server whose roles are otherwise meaningful.
+  allowed_user_ids JSONB NOT NULL DEFAULT '[]',
+  -- Members barred from this command even when a role or a tier would allow it.
+  -- A deny beats every allow, including allowed_user_ids.
+  denied_user_ids JSONB NOT NULL DEFAULT '[]',
   -- Seconds a member must wait between two runs of this command. 0 = no wait.
   cooldown_seconds SMALLINT NOT NULL DEFAULT 0,
   -- Seconds before the bot removes its own reply. 0 = keep it. Only the reply is
@@ -259,6 +266,12 @@ CREATE TABLE IF NOT EXISTS guild_command_flags (
   auto_delete_response_seconds SMALLINT NOT NULL DEFAULT 0,
   -- A reason is mandatory for this guild, overriding the registry's default.
   require_reason BOOLEAN NOT NULL DEFAULT false,
+  -- Whether the moderator may type a reason of their own. Only meaningful once
+  -- preset_reasons is non-empty: with this off, a reason matching no preset is
+  -- refused. Defaults to true because that is what the screen did before the
+  -- switch existed — a default that narrowed an existing behaviour would be a
+  -- regression wearing a default's clothes.
+  allow_custom_reason BOOLEAN NOT NULL DEFAULT true,
   -- The duration applied when the operator supplies none. Only meaningful for a
   -- command that consumes one (Discord's timeout); forced back to 'permanent'
   -- by the shared normaliser for every other command.
@@ -300,9 +313,14 @@ ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS allowed_role_ids JSONB 
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS denied_role_ids JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS allowed_channel_ids JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS denied_channel_ids JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS allowed_user_ids JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS denied_user_ids JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS cooldown_seconds SMALLINT NOT NULL DEFAULT 0;
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS auto_delete_response_seconds SMALLINT NOT NULL DEFAULT 0;
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS require_reason BOOLEAN NOT NULL DEFAULT false;
+-- `true`, matching the behaviour the screen already had: the switch narrows an
+-- existing freedom rather than restoring one, so off is the deliberate choice.
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS allow_custom_reason BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS default_duration TEXT NOT NULL DEFAULT 'permanent';
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS preset_reasons JSONB NOT NULL DEFAULT '[]';
 
@@ -349,9 +367,12 @@ ALTER TABLE guild_command_flags ADD CONSTRAINT guild_command_flags_auto_delete_c
   CHECK (auto_delete_response_seconds >= 0 AND auto_delete_response_seconds <= 600);
 -- The list mirrors `commandDurations` in core. A value the bot cannot resolve
 -- would silently fall back to "permanent" at runtime, so it is refused here.
+-- `custom` is a policy rather than a length — "always ask, and ignore a preset's
+-- paired duration" — and it is listed because core lists it; the two must agree
+-- or a value the dashboard offers would be rejected on write.
 ALTER TABLE guild_command_flags DROP CONSTRAINT IF EXISTS guild_command_flags_duration_check;
 ALTER TABLE guild_command_flags ADD CONSTRAINT guild_command_flags_duration_check
-  CHECK (default_duration IN ('permanent','5m','30m','1h','6h','12h','1d','3d','7d','14d','30d'));
+  CHECK (default_duration IN ('permanent','5m','30m','1h','6h','12h','1d','3d','7d','14d','30d','custom'));
 
 -- `/mute` is retired: a native timeout silences a member everywhere, including
 -- voice, and expires on its own. Any stored switch for it is removed so the

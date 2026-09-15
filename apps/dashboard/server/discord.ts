@@ -301,6 +301,21 @@ type RawGuildRole = { id: string; name: string; position: number; managed: boole
 const guildRoleListCache = new TtlCache<string, RawGuildRole[]>(GUILD_READ_CACHE_MS);
 
 /**
+ * Display names for the members named in per-command scopes, keyed by guild+user.
+ *
+ * Memoised for the same reason every other guild read is: the operator opens
+ * this screen repeatedly, and without a cache each visit would spend one Discord
+ * call per named member for a name that changes at most a few times a year. It
+ * also collapses the burst — a screen with twenty scoped members would otherwise
+ * fire twenty requests in the same tick.
+ *
+ * `null` is cached as a value rather than treated as a miss: a member who has
+ * left stays gone, and re-asking on every render would be the one case where
+ * this cache made things worse instead of better.
+ */
+const guildMemberCache = new TtlCache<string, { id: string; name: string; avatarUrl: string | null } | null>(GUILD_READ_CACHE_MS);
+
+/**
  * The in-flight member read per guild, so concurrent callers share one request.
  *
  * Deliberately narrower than the 45-second caches above. A member object is what
@@ -374,6 +389,43 @@ export async function fetchBotGuildIds(botToken: string): Promise<Set<string>> {
 export async function fetchMemberRoleIds(botToken: string, guildId: string, userId: string) {
   const member = await request<{ roles: string[] }>(`/guilds/${guildId}/members/${userId}`, { token: botToken });
   return new Set(member.roles ?? []);
+}
+
+/**
+ * Read-only: a member's display name and avatar, for the per-command user scopes.
+ *
+ * The screen stores user IDs — a name is not an identifier, and Discord lets two
+ * members share one — but showing the operator a wall of snowflakes would make
+ * the list unreadable and the feature unusable. So the ID is what is stored and
+ * this is what is displayed.
+ *
+ * Returns `null` rather than throwing for a member who has left, or an ID that
+ * was never real: both are ordinary states for a stored scope, and neither is a
+ * reason to fail the whole screen. The caller renders the bare ID in that case.
+ *
+ * Deliberately a per-ID lookup rather than a member list. Listing a guild's
+ * members needs the privileged `GUILD_MEMBERS` intent, returns thousands of rows
+ * to render at most fifty, and would turn opening this screen into the heaviest
+ * request the dashboard makes.
+ */
+export async function fetchGuildMember(token: string, guildId: string, userId: string): Promise<{ id: string; name: string; avatarUrl: string | null } | null> {
+  const member = await request<{
+    user?: { id?: string; username?: string; global_name?: string | null; avatar?: string | null };
+    nick?: string | null;
+  }>(`/guilds/${guildId}/members/${userId}`, { token }).catch(() => null);
+  if (!member?.user?.id) return null;
+  // Nickname, then global name, then username — the same order Discord's own
+  // client shows, so the operator recognises the person they picked.
+  const name = member.nick || member.user.global_name || member.user.username || member.user.id;
+  const avatarUrl = member.user.avatar
+    ? `https://cdn.discordapp.com/avatars/${member.user.id}/${member.user.avatar}.${member.user.avatar.startsWith("a_") ? "gif" : "png"}?size=64`
+    : null;
+  return { id: member.user.id, name, avatarUrl };
+}
+
+/** `fetchGuildMember` behind the shared guild-read cache. */
+export function fetchGuildMemberCached(botToken: string, guildId: string, userId: string) {
+  return guildMemberCache.resolve(`${guildId}:${userId}`, () => fetchGuildMember(botToken, guildId, userId));
 }
 
 /* ------------------------------------------------------------------ *
@@ -455,6 +507,7 @@ export function resetGuildReadCaches() {
   guildRoleCache.clear();
   guildRoleListCache.clear();
   userGuildCache.clear();
+  guildMemberCache.clear();
   botMemberInFlight.clear();
 }
 

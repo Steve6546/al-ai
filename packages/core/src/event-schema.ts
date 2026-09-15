@@ -57,10 +57,16 @@ const entries: EventDefinition[] = [
   { id: "moderation.unban", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "warning" },
   { id: "moderation.kick", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "warning" },
   { id: "moderation.timeout", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "warning" },
+  // The gateway reports a timeout being lifted as well as applied, and it reads
+  // the actor from Discord's audit log rather than from the command — so a
+  // timeout removed in Discord's own client is logged exactly like one removed
+  // through `/untimeout`, once, by the same listener.
+  { id: "moderation.untimeout", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "info" },
   { id: "moderation.warn", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "warning" },
   // A warning is a record rather than a Discord mutation, so nothing in the
-  // gateway reports it — the command handler writes both of these itself.
+  // gateway reports it — the command handler writes these three itself.
   { id: "moderation.clearwarns", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "warning" },
+  { id: "moderation.delwarn", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "warning" },
 
   // voice-log
   { id: "voice.join", category: "voice-log", requiredFields: ["memberId", "toChannelId"], severity: "info" },

@@ -1,3 +1,4 @@
+import type { DiscordPermissionBit } from "./discord-permissions.js";
 import type { Tier } from "./permissions.js";
 
 /**
@@ -22,21 +23,79 @@ import type { Tier } from "./permissions.js";
  * This is the operator's mental model, not the code layout: what punishes a
  * member, what acts on the channel it is typed in, and everything else. It is
  * also the section order the screen renders in.
+ *
+ * The list is deliberately wider than the commands that exist today. A section
+ * with nothing in it is still shown — with a count of zero and an explanation
+ * rather than a fabricated row — because the alternative is worse in both
+ * directions: an operator who cannot see that voice tools are coming assumes
+ * they were never planned, and a section padded with placeholder commands is a
+ * database full of switches nothing reads.
  */
-export type CommandCategory = "moderation" | "channels" | "general";
+export type CommandCategory =
+  | "core"
+  | "penalties"
+  | "punishment-logs"
+  | "channel-management"
+  | "chat-tools"
+  | "voice"
+  | "role-management"
+  | "special-roles"
+  | "member-info"
+  | "bot-tools"
+  | "protection"
+  | "levels"
+  | "server-stats"
+  | "profile";
 
-export const commandCategories: readonly CommandCategory[] = ["moderation", "channels", "general"] as const;
+export const commandCategories: readonly CommandCategory[] = [
+  "core",
+  "penalties",
+  "punishment-logs",
+  "channel-management",
+  "chat-tools",
+  "voice",
+  "role-management",
+  "special-roles",
+  "member-info",
+  "bot-tools",
+  "protection",
+  "levels",
+  "server-stats",
+  "profile"
+] as const;
 
 export const commandCategoryLabels: Record<CommandCategory, string> = {
-  moderation: "أوامر الإدارة",
-  channels: "أوامر القنوات والشات",
-  general: "أوامر عامة"
+  core: "الأوامر الأساسية",
+  penalties: "العقوبات",
+  "punishment-logs": "سجلات العقوبات",
+  "channel-management": "إدارة القنوات",
+  "chat-tools": "أدوات الشات",
+  voice: "إدارة الصوت",
+  "role-management": "إدارة الرتب",
+  "special-roles": "الرتب الخاصة",
+  "member-info": "معلومات السيرفر والأعضاء",
+  "bot-tools": "أدوات البوت الخاص",
+  protection: "الحماية",
+  levels: "المستويات والخبرة",
+  "server-stats": "إحصائيات السيرفر",
+  profile: "الملف الشخصي"
 };
 
 export const commandCategoryDescriptions: Record<CommandCategory, string> = {
-  moderation: "عقوبات الأعضاء: الحظر والطرد والإسكات والتحذيرات.",
-  channels: "إجراءات على القناة التي كُتب فيها الأمر: الحذف والإغلاق والوضع البطيء.",
-  general: "أوامر معلوماتية لا تغيّر شيئاً في السيرفر."
+  core: "أوامر التعريف بالبوت والوصول إلى اللوحة.",
+  penalties: "عقوبات الأعضاء: الحظر والطرد والإسكات والتحذيرات والأسماء.",
+  "punishment-logs": "القناة التي تُسجَّل فيها العقوبات وتنبيهاتها.",
+  "channel-management": "إنشاء القنوات وتعديلها وترتيبها.",
+  "chat-tools": "إجراءات على القناة التي كُتب فيها الأمر: الحذف والإغلاق والوضع البطيء.",
+  voice: "التحكم في الغرف الصوتية: النقل والكتم والصمّ.",
+  "role-management": "إنشاء الرتب وإسنادها وسحبها.",
+  "special-roles": "الرتب التفاعلية التي يمنحها الأعضاء لأنفسهم.",
+  "member-info": "بطاقة العضو ومعلومات السيرفر.",
+  "bot-tools": "أوامر تشغيلية خاصة ببوت AL AI نفسه.",
+  protection: "مضاد التخريب والحجر الصحي وحدود الحماية.",
+  levels: "نظام الخبرة والمستويات.",
+  "server-stats": "عدادات الأعضاء والرسائل.",
+  profile: "ملف العضو الشخصي وتخصيصه."
 };
 
 /**
@@ -80,6 +139,18 @@ export type CommandDefinition = {
    * rediscovered by whichever layer happens to call Discord first.
    */
   maxDurationSeconds?: number;
+  /**
+   * Discord's own permission bit for this command, shown to the operator as a
+   * badge on the command's card.
+   *
+   * This is what replaced the tier dropdown. The dropdown asked the operator to
+   * translate "moderator" into a set of people; this names the thing Discord
+   * already enforces, so the requirement is stated once, in Discord's own terms,
+   * and cannot drift from what the client shows in the role editor.
+   *
+   * Omitted for a command that every member may run.
+   */
+  requiredPermission?: DiscordPermissionBit;
 };
 
 /**
@@ -91,25 +162,42 @@ export type CommandDefinition = {
  */
 export const TIMEOUT_MAX_SECONDS = 28 * 24 * 60 * 60;
 
-export const commandRegistry: readonly CommandDefinition[] = [  // Member actions.
-  { name: "ban", category: "moderation", description: "حظر عضو", minimumTier: "admin", target: "member", supportsReason: true, supportsPurge: true, supportsNotify: true },
-  { name: "unban", category: "moderation", description: "رفع الحظر", minimumTier: "admin", target: "member", supportsReason: true, supportsNotify: true },
-  { name: "kick", category: "moderation", description: "طرد عضو", minimumTier: "admin", target: "member", supportsReason: true, supportsNotify: true },
-  { name: "timeout", category: "moderation", description: "إسكات مؤقت", minimumTier: "moderator", target: "member", supportsReason: true, supportsPurge: true, supportsNotify: true, supportsDuration: true, maxDurationSeconds: TIMEOUT_MAX_SECONDS },
-  { name: "warn", category: "moderation", description: "تحذير عضو", minimumTier: "moderator", target: "member", supportsReason: true, requiresReason: true, supportsNotify: true },
-  { name: "warns", category: "moderation", description: "عرض تحذيرات عضو", minimumTier: "moderator", target: "member" },
-  { name: "clearwarns", category: "moderation", description: "مسح تحذيرات عضو", minimumTier: "admin", target: "member", supportsReason: true, supportsNotify: true },
+export const commandRegistry: readonly CommandDefinition[] = [
+  /* ---------------- Core ----------------
+   * The commands that explain AL AI and get the operator somewhere. None of
+   * them changes a guild, so none declares a permission bit: every member may
+   * ask what a command does, and refusing that would be a lockout with no
+   * purpose behind it. `/settings` is the exception — it hands back a link into
+   * a screen that re-checks its own authorization, but naming `MANAGE_GUILD`
+   * here keeps the badge honest about who the link is for. */
+  { name: "help", category: "core", description: "عرض قائمة الأوامر وشرح كل أمر", minimumTier: "moderator", target: "none" },
+  { name: "commands", category: "core", description: "عرض الأوامر المتاحة لك في هذا السيرفر", minimumTier: "moderator", target: "none" },
+  { name: "settings", category: "core", description: "الحصول على رابط إعدادات البوت في اللوحة", minimumTier: "admin", target: "none", requiredPermission: "MANAGE_GUILD" },
+  { name: "dashboard", category: "core", description: "الحصول على رابط لوحة التحكم", minimumTier: "moderator", target: "none" },
+  { name: "al-status", category: "core", description: "عرض حالة AL AI", minimumTier: "moderator", target: "none" },
+  { name: "colors", category: "core", description: "عرض ألوان الرتب المتاحة في السيرفر", minimumTier: "moderator", target: "none" },
 
-  // Channel actions. No member target, so no member hierarchy check applies.
-  { name: "clear", category: "channels", description: "حذف عدد من الرسائل", minimumTier: "moderator", target: "none" },
-  { name: "lock", category: "channels", description: "إغلاق القناة", minimumTier: "admin", target: "none", supportsReason: true },
-  { name: "unlock", category: "channels", description: "فتح القناة", minimumTier: "admin", target: "none", supportsReason: true },
-  { name: "slowmode", category: "channels", description: "ضبط الوضع البطيء", minimumTier: "moderator", target: "none" },
+  /* ---------------- Penalties ----------------
+   * Everything that records or applies a punishment. `warns` and `delwarn` are
+   * records rather than Discord mutations, which is why they are logged by the
+   * handler instead of by the gateway listener — see `onCommand`. */
+  { name: "ban", category: "penalties", description: "حظر عضو", minimumTier: "admin", target: "member", supportsReason: true, supportsPurge: true, supportsNotify: true, requiredPermission: "BAN_MEMBERS" },
+  { name: "unban", category: "penalties", description: "رفع الحظر", minimumTier: "admin", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "BAN_MEMBERS" },
+  { name: "kick", category: "penalties", description: "طرد عضو", minimumTier: "admin", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "KICK_MEMBERS" },
+  { name: "timeout", category: "penalties", description: "إسكات مؤقت", minimumTier: "moderator", target: "member", supportsReason: true, supportsPurge: true, supportsNotify: true, supportsDuration: true, maxDurationSeconds: TIMEOUT_MAX_SECONDS, requiredPermission: "MODERATE_MEMBERS" },
+  { name: "untimeout", category: "penalties", description: "رفع الإسكات المؤقت عن عضو", minimumTier: "moderator", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "MODERATE_MEMBERS" },
+  { name: "warn", category: "penalties", description: "تحذير عضو", minimumTier: "moderator", target: "member", supportsReason: true, requiresReason: true, supportsNotify: true, requiredPermission: "MODERATE_MEMBERS" },
+  { name: "warns", category: "penalties", description: "عرض تحذيرات عضو", minimumTier: "moderator", target: "member", requiredPermission: "MODERATE_MEMBERS" },
+  { name: "delwarn", category: "penalties", description: "حذف تحذير واحد بعينه", minimumTier: "moderator", target: "member", supportsReason: true, requiredPermission: "MODERATE_MEMBERS" },
+  { name: "clearwarns", category: "penalties", description: "مسح كل تحذيرات عضو", minimumTier: "admin", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "MODERATE_MEMBERS" },
+  { name: "setnick", category: "penalties", description: "تغيير الاسم المستعار لعضو", minimumTier: "moderator", target: "member", supportsReason: true, requiredPermission: "MANAGE_NICKNAMES" },
 
-  // General. `al-status` used to sit outside the registry entirely, which meant
-  // it could not be switched off, cooled down or scoped like every other
-  // command. It is an ordinary registry entry now and goes through the same gate.
-  { name: "al-status", category: "general", description: "عرض حالة AL AI", minimumTier: "moderator", target: "none" }
+  /* ---------------- Chat tools ----------------
+   * No member target, so no member hierarchy check applies. */
+  { name: "clear", category: "chat-tools", description: "حذف عدد من الرسائل", minimumTier: "moderator", target: "none", requiredPermission: "MANAGE_MESSAGES" },
+  { name: "lock", category: "chat-tools", description: "إغلاق القناة", minimumTier: "admin", target: "none", supportsReason: true, requiredPermission: "MANAGE_CHANNELS" },
+  { name: "unlock", category: "chat-tools", description: "فتح القناة", minimumTier: "admin", target: "none", supportsReason: true, requiredPermission: "MANAGE_CHANNELS" },
+  { name: "slowmode", category: "chat-tools", description: "ضبط الوضع البطيء", minimumTier: "moderator", target: "none", requiredPermission: "MANAGE_CHANNELS" }
 ] as const;
 
 const byName = new Map(commandRegistry.map(entry => [entry.name, entry]));
@@ -131,10 +219,22 @@ export function requireCommand(name: string) {
  * one-second action.
  * ------------------------------------------------------------------ */
 
-export type CommandDuration = "permanent" | "5m" | "30m" | "1h" | "6h" | "12h" | "1d" | "3d" | "7d" | "14d" | "30d";
+export type CommandDuration = "permanent" | "5m" | "30m" | "1h" | "6h" | "12h" | "1d" | "3d" | "7d" | "14d" | "30d" | "custom";
 
 export type DurationOption = { value: CommandDuration; label: string; seconds: number | null };
 
+/**
+ * `custom` is not a length, and it is not a second spelling of `permanent`.
+ *
+ * The two differ in exactly one place, and it is a place that matters: a preset
+ * reason may carry a paired duration. Under `permanent` that pair still fills
+ * the gap — the operator picked "سبام — ساعة", so an hour is applied. Under
+ * `custom` it does not: the moderator is asked to write a duration every single
+ * time, and a preset's suggestion is treated as a label rather than as a length.
+ *
+ * That is the whole difference, which is why it is worth having. A thirteenth
+ * option meaning "the same as دائم" would be a control that changes nothing.
+ */
 export const commandDurations: readonly DurationOption[] = [
   { value: "permanent", label: "دائم", seconds: null },
   { value: "5m", label: "5 دقائق", seconds: 5 * 60 },
@@ -146,7 +246,8 @@ export const commandDurations: readonly DurationOption[] = [
   { value: "3d", label: "3 أيام", seconds: 3 * 24 * 60 * 60 },
   { value: "7d", label: "أسبوع", seconds: 7 * 24 * 60 * 60 },
   { value: "14d", label: "أسبوعين", seconds: 14 * 24 * 60 * 60 },
-  { value: "30d", label: "شهر", seconds: 30 * 24 * 60 * 60 }
+  { value: "30d", label: "شهر", seconds: 30 * 24 * 60 * 60 },
+  { value: "custom", label: "مخصص — يجب كتابة مدة عند الاستخدام", seconds: null }
 ] as const;
 
 export const DEFAULT_COMMAND_DURATION: CommandDuration = "permanent";
@@ -186,6 +287,27 @@ export function commandDurationSeconds(definition: CommandDefinition, duration: 
 /** Arabic label for a stored duration, falling back to the raw value. */
 export function durationLabel(duration: string): string {
   return commandDurations.find(option => option.value === duration)?.label ?? duration;
+}
+
+/**
+ * The duration a run will actually use, before it becomes a number of seconds.
+ *
+ * Three inputs compete, and the order between them is the whole point:
+ *
+ * 1. `custom` wins outright. The operator asked to be prompted every time, so
+ *    neither a preset's paired length nor the stored default may fill the gap —
+ *    that is what separates `custom` from `permanent`, and the only reason the
+ *    option exists.
+ * 2. Otherwise a preset reason's own duration wins, because "سبام — ساعة" is a
+ *    more specific instruction than a command-wide default.
+ * 3. Otherwise the default applies.
+ *
+ * Lives in core so the bot and its tests reach the same verdict from the same
+ * configuration — the rule used to be half here and half in the bot's handler.
+ */
+export function resolveCommandDuration(config: Pick<CommandConfig, "defaultDuration" | "presetReasons">, reason: string): CommandDuration {
+  if (config.defaultDuration === "custom") return "custom";
+  return config.presetReasons.find(preset => preset.label === reason)?.duration ?? config.defaultDuration;
 }
 
 /* ------------------------------------------------------------------ *
@@ -252,6 +374,23 @@ export type CommandConfig = {
   allowedChannelIds: string[];
   /** Channels where the command never runs. */
   deniedChannelIds: string[];
+  /**
+   * Members allowed to run this command, on top of everything else.
+   *
+   * The narrowest escape hatch there is, and the only one that binds to a person
+   * rather than a role. It exists for the case a role cannot express: one
+   * trusted helper, or the owner's second account, on a server whose roles are
+   * otherwise meaningful and should not be reshuffled to admit one person.
+   */
+  allowedUserIds: string[];
+  /**
+   * Members barred from this command even when a role or a tier would allow it.
+   *
+   * A deny beats every allow, including `allowedUserIds` — so a person listed in
+   * both lists is denied. That is what "denied" means; the alternative would make
+   * the deny list unreliable exactly when it is needed most.
+   */
+  deniedUserIds: string[];
   /** Seconds a member must wait between two runs of this command. 0 = no wait. */
   cooldownSeconds: number;
   /**
@@ -263,6 +402,15 @@ export type CommandConfig = {
   autoDeleteResponseSeconds: number;
   /** A reason is mandatory, overriding the registry's shipped default. */
   requireReason: boolean;
+  /**
+   * Whether the moderator may type a reason of their own.
+   *
+   * Only meaningful once preset reasons exist. With this off, a reason that
+   * matches no preset is refused — which is how an operator gets a clean,
+   * countable set of reasons without Discord's own choice list, whose entries
+   * are frozen at registration time and so could never follow a setting.
+   */
+  allowCustomReason: boolean;
   /** The duration applied when the operator does not supply one. */
   defaultDuration: CommandDuration;
   /** Ready-made reasons offered in Discord for this command. */
@@ -283,9 +431,15 @@ export function defaultCommandConfig(definition: CommandDefinition): CommandConf
     deniedRoleIds: [],
     allowedChannelIds: [],
     deniedChannelIds: [],
+    allowedUserIds: [],
+    deniedUserIds: [],
     cooldownSeconds: 0,
     autoDeleteResponseSeconds: 0,
     requireReason: Boolean(definition.requiresReason),
+    // On by default, which is what the screen did before the switch existed: a
+    // moderator could always type their own reason. A setting that silently
+    // narrowed an existing behaviour would be a regression dressed as a default.
+    allowCustomReason: true,
     defaultDuration: DEFAULT_COMMAND_DURATION,
     presetReasons: []
   };
@@ -293,6 +447,7 @@ export function defaultCommandConfig(definition: CommandDefinition): CommandConf
 
 export const MAX_CUSTOM_ROLES_PER_COMMAND = 25;
 export const MAX_SCOPED_CHANNELS_PER_COMMAND = 25;
+export const MAX_SCOPED_USERS_PER_COMMAND = 25;
 
 /**
  * Normalises a stored or submitted configuration against its definition.
@@ -308,6 +463,11 @@ export function normaliseCommandConfig(definition: CommandDefinition, input: Par
   // A reason can only be demanded where a reason option exists, and a duration
   // only where one can be applied. Both are dropped for every other command.
   const requireReason = definition.supportsReason ? (input?.requireReason === undefined ? base.requireReason : Boolean(input.requireReason)) : false;
+  const allowCustomReason = definition.supportsReason
+    ? input?.allowCustomReason === undefined
+      ? base.allowCustomReason
+      : Boolean(input.allowCustomReason)
+    : true;
   const defaultDuration = definition.supportsDuration
     ? normaliseDuration(input?.defaultDuration, definition)
     : DEFAULT_COMMAND_DURATION;
@@ -322,9 +482,12 @@ export function normaliseCommandConfig(definition: CommandDefinition, input: Par
     deniedRoleIds: normaliseIdList(input?.deniedRoleIds, MAX_CUSTOM_ROLES_PER_COMMAND),
     allowedChannelIds: normaliseIdList(input?.allowedChannelIds, MAX_SCOPED_CHANNELS_PER_COMMAND),
     deniedChannelIds: normaliseIdList(input?.deniedChannelIds, MAX_SCOPED_CHANNELS_PER_COMMAND),
+    allowedUserIds: normaliseIdList(input?.allowedUserIds, MAX_SCOPED_USERS_PER_COMMAND),
+    deniedUserIds: normaliseIdList(input?.deniedUserIds, MAX_SCOPED_USERS_PER_COMMAND),
     cooldownSeconds: clampInteger(input?.cooldownSeconds, 0, MAX_COOLDOWN_SECONDS),
     autoDeleteResponseSeconds: clampInteger(input?.autoDeleteResponseSeconds, 0, MAX_AUTO_DELETE_SECONDS),
     requireReason,
+    allowCustomReason,
     defaultDuration,
     presetReasons: definition.supportsReason ? normalisePresetReasons(input?.presetReasons, definition) : []
   };
@@ -416,6 +579,8 @@ export type CommandFlag = CommandConfig & {
   supportsPurge: boolean;
   supportsNotify: boolean;
   supportsDuration: boolean;
+  /** The Discord permission the command asks of whoever runs it, if any. */
+  requiredPermission?: DiscordPermissionBit;
 };
 
 /** Joins the registry to a guild's stored configuration, filling every gap with a default. */
@@ -429,7 +594,12 @@ export function commandFlagsFor(configured: Map<string, Partial<CommandConfig>>)
     supportsReason: Boolean(definition.supportsReason),
     supportsPurge: Boolean(definition.supportsPurge),
     supportsNotify: Boolean(definition.supportsNotify),
-    supportsDuration: Boolean(definition.supportsDuration)
+    supportsDuration: Boolean(definition.supportsDuration),
+    // Spread rather than assigned, so an absent permission stays absent instead
+    // of becoming an explicit `undefined` key — `exactOptionalPropertyTypes`
+    // treats those as different, and the dashboard reads the absence as "every
+    // member may run this".
+    ...(definition.requiredPermission ? { requiredPermission: definition.requiredPermission } : {})
   }));
 }
 
@@ -442,22 +612,31 @@ export function commandFlagsFor(configured: Map<string, Partial<CommandConfig>>)
  * ------------------------------------------------------------------ */
 
 export type CommandScopeInput = {
+  /** The member running the command. Checked against the user lists. */
+  userId: string;
   roleIds: readonly string[];
   channelId: string;
 };
 
-export type ScopeVerdict = { allowed: true } | { allowed: false; reason: "ROLE_DENIED" | "CHANNEL_DENIED" | "CHANNEL_NOT_ALLOWED" };
+export type ScopeVerdict =
+  | { allowed: true }
+  | { allowed: false; reason: "USER_DENIED" | "ROLE_DENIED" | "CHANNEL_DENIED" | "CHANNEL_NOT_ALLOWED" };
 
 /**
- * Whether the channel and role scopes permit this run.
+ * Whether the member, role and channel scopes permit this run.
  *
- * Order matters and is deliberate: a deny always beats an allow, so an operator
- * who barred a role cannot have it re-admitted by a channel rule. A member
- * holding both an allowed and a denied role is denied — that is what "denied"
- * means, and the alternative would make the deny list unreliable exactly when it
- * is needed most.
+ * Order matters and is deliberate: every deny is settled before any allow, so an
+ * operator who barred a person cannot have them re-admitted by a role or a
+ * channel rule. A member listed in both an allow and a deny is denied — that is
+ * what "denied" means, and the alternative would make the deny list unreliable
+ * exactly when it is needed most.
+ *
+ * The user check comes first because it is the narrowest statement the operator
+ * can make: barring one person is a more specific intent than barring a role,
+ * and the reason the operator is shown should name the specific thing they did.
  */
 export function assessCommandScope(config: CommandConfig, input: CommandScopeInput): ScopeVerdict {
+  if (config.deniedUserIds.includes(input.userId)) return { allowed: false, reason: "USER_DENIED" };
   if (input.roleIds.some(id => config.deniedRoleIds.includes(id))) return { allowed: false, reason: "ROLE_DENIED" };
   if (config.deniedChannelIds.includes(input.channelId)) return { allowed: false, reason: "CHANNEL_DENIED" };
   if (config.allowedChannelIds.length > 0 && !config.allowedChannelIds.includes(input.channelId)) {
@@ -467,10 +646,24 @@ export function assessCommandScope(config: CommandConfig, input: CommandScopeInp
 }
 
 export const scopeReasonMessages: Record<Exclude<ScopeVerdict, { allowed: true }>["reason"], string> = {
+  USER_DENIED: "هذا الأمر ممنوع عليك تحديداً.",
   ROLE_DENIED: "إحدى رتبك مستثناة من هذا الأمر.",
   CHANNEL_DENIED: "هذا الأمر ممنوع في هذه القناة.",
   CHANNEL_NOT_ALLOWED: "هذا الأمر مسموح في قنوات محددة فقط."
 };
+
+/**
+ * Whether the member is admitted by the allow-lists.
+ *
+ * Separate from `assessCommandScope` because it answers the opposite question:
+ * the scopes above can only ever *refuse* someone the tier already admitted,
+ * while these lists are the way in for somebody it did not. Keeping the two
+ * apart is what lets the bot report "you are not permitted" separately from
+ * "this command is barred here" — two different problems for the operator.
+ */
+export function isAdmittedByAllowList(config: CommandConfig, input: Pick<CommandScopeInput, "userId" | "roleIds">): boolean {
+  return config.allowedUserIds.includes(input.userId) || input.roleIds.some(id => config.allowedRoleIds.includes(id));
+}
 
 /**
  * A cooldown tracker keyed by guild, command and member.

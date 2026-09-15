@@ -484,15 +484,20 @@ export function createDatabase(pool: pg.Pool) {
         denied_role_ids: string[] | null;
         allowed_channel_ids: string[] | null;
         denied_channel_ids: string[] | null;
+        allowed_user_ids: string[] | null;
+        denied_user_ids: string[] | null;
         cooldown_seconds: number;
         auto_delete_response_seconds: number;
         require_reason: boolean;
+        allow_custom_reason: boolean;
         default_duration: string;
         preset_reasons: unknown;
       }>(
         `SELECT command, enabled, minimum_tier, dm_on_action, delete_message_days,
                 allowed_role_ids, denied_role_ids, allowed_channel_ids, denied_channel_ids,
-                cooldown_seconds, auto_delete_response_seconds, require_reason, default_duration, preset_reasons
+                allowed_user_ids, denied_user_ids,
+                cooldown_seconds, auto_delete_response_seconds, require_reason, allow_custom_reason,
+                default_duration, preset_reasons
          FROM guild_command_flags WHERE guild_id = $1`,
         [guildId]
       );
@@ -512,9 +517,12 @@ export function createDatabase(pool: pg.Pool) {
             deniedRoleIds: row.denied_role_ids ?? [],
             allowedChannelIds: row.allowed_channel_ids ?? [],
             deniedChannelIds: row.denied_channel_ids ?? [],
+            allowedUserIds: row.allowed_user_ids ?? [],
+            deniedUserIds: row.denied_user_ids ?? [],
             cooldownSeconds: row.cooldown_seconds,
             autoDeleteResponseSeconds: row.auto_delete_response_seconds,
             requireReason: row.require_reason,
+            allowCustomReason: row.allow_custom_reason,
             defaultDuration: row.default_duration as CommandConfig["defaultDuration"],
             presetReasons: Array.isArray(row.preset_reasons) ? (row.preset_reasons as CommandConfig["presetReasons"]) : []
           }
@@ -527,10 +535,13 @@ export function createDatabase(pool: pg.Pool) {
         `INSERT INTO guild_command_flags (
            guild_id, command, enabled, minimum_tier, dm_on_action, delete_message_days,
            allowed_role_ids, denied_role_ids, allowed_channel_ids, denied_channel_ids,
-           cooldown_seconds, auto_delete_response_seconds, require_reason, default_duration, preset_reasons,
+           allowed_user_ids, denied_user_ids,
+           cooldown_seconds, auto_delete_response_seconds, require_reason, allow_custom_reason,
+           default_duration, preset_reasons,
            updated_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11, $12, $13, $14, $15::jsonb, now())
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb,
+                 $13, $14, $15, $16, $17, $18::jsonb, now())
          ON CONFLICT (guild_id, command) DO UPDATE
            SET enabled = EXCLUDED.enabled,
                minimum_tier = EXCLUDED.minimum_tier,
@@ -540,9 +551,12 @@ export function createDatabase(pool: pg.Pool) {
                denied_role_ids = EXCLUDED.denied_role_ids,
                allowed_channel_ids = EXCLUDED.allowed_channel_ids,
                denied_channel_ids = EXCLUDED.denied_channel_ids,
+               allowed_user_ids = EXCLUDED.allowed_user_ids,
+               denied_user_ids = EXCLUDED.denied_user_ids,
                cooldown_seconds = EXCLUDED.cooldown_seconds,
                auto_delete_response_seconds = EXCLUDED.auto_delete_response_seconds,
                require_reason = EXCLUDED.require_reason,
+               allow_custom_reason = EXCLUDED.allow_custom_reason,
                default_duration = EXCLUDED.default_duration,
                preset_reasons = EXCLUDED.preset_reasons,
                updated_at = now()`,
@@ -557,9 +571,12 @@ export function createDatabase(pool: pg.Pool) {
           JSON.stringify(config.deniedRoleIds),
           JSON.stringify(config.allowedChannelIds),
           JSON.stringify(config.deniedChannelIds),
+          JSON.stringify(config.allowedUserIds),
+          JSON.stringify(config.deniedUserIds),
           config.cooldownSeconds,
           config.autoDeleteResponseSeconds,
           config.requireReason,
+          config.allowCustomReason,
           config.defaultDuration,
           JSON.stringify(config.presetReasons)
         ]

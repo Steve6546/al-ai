@@ -20,6 +20,7 @@ import {
   DEFAULT_LOGGING_MODE,
   describeVerification,
   deriveBotStatus,
+  discordPermissionLabels,
   imageRejectionReason,
   isHeartbeatFresh,
   isLoggingMode,
@@ -76,6 +77,7 @@ import {
   fetchBotGuildIds,
   fetchGuildChannels,
   fetchGuildHierarchy,
+  fetchGuildMemberCached,
   fetchGuildPremiumTier,
   fetchGuildRoles,
   fetchBotHighestRolePosition,
@@ -773,8 +775,40 @@ app.get("/api/guilds/:guildId/commands", async (request, reply) => {
     })),
     commands: commandFlagsFor(configured),
     roles,
-    channels
+    channels,
+    // The badge text, resolved on the server. `discord-permissions.ts` is the one
+    // module that restates Discord's constants and its values are `bigint`, which
+    // is why it is deliberately absent from the browser surface of core — so the
+    // label is sent rather than imported, exactly as the category labels are.
+    permissionLabels: discordPermissionLabels
   };
+});
+
+/**
+ * Resolves the members named in per-command scopes to something readable.
+ *
+ * A separate call rather than part of the commands read, because it is the only
+ * part that can fail slowly: the scopes live in our own database and must render
+ * even when Discord does not answer. The screen shows the raw ID for any member
+ * this does not resolve, which is why a failure here degrades rather than breaks.
+ *
+ * The id list is bounded and de-duplicated before any request is made: a screen
+ * cannot ask for more names than a scope can hold, so an oversized query is a
+ * hand-crafted request rather than a real one.
+ */
+app.get("/api/guilds/:guildId/members", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
+
+  const raw = (request.query as { ids?: string } | undefined)?.ids ?? "";
+  const ids = [...new Set(raw.split(",").map(id => id.trim()).filter(id => /^\d{17,20}$/.test(id)))].slice(0, 100);
+  if (ids.length === 0 || !env.botToken) return { members: [] };
+
+  const resolved = await Promise.all(
+    ids.map(id => fetchGuildMemberCached(env.botToken!, guildId, id).catch(() => null))
+  );
+  return { members: resolved.filter((member): member is NonNullable<typeof member> => member !== null) };
 });
 
 /**

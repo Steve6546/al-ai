@@ -29,7 +29,15 @@ test("every shared permission bit matches discord.js PermissionFlagsBits", () =>
     ADMINISTRATOR: PermissionFlagsBits.Administrator,
     MANAGE_GUILD: PermissionFlagsBits.ManageGuild,
     MANAGE_NICKNAMES: PermissionFlagsBits.ManageNicknames,
-    CHANGE_NICKNAME: PermissionFlagsBits.ChangeNickname
+    CHANGE_NICKNAME: PermissionFlagsBits.ChangeNickname,
+    // The moderation and channel bits a command names as its own requirement.
+    // They are listed here for the same reason as the four above: a restated
+    // number is a second copy, and this is what stops the two disagreeing.
+    KICK_MEMBERS: PermissionFlagsBits.KickMembers,
+    BAN_MEMBERS: PermissionFlagsBits.BanMembers,
+    MANAGE_CHANNELS: PermissionFlagsBits.ManageChannels,
+    MANAGE_MESSAGES: PermissionFlagsBits.ManageMessages,
+    MODERATE_MEMBERS: PermissionFlagsBits.ModerateMembers
   };
 
   for (const [name, expected] of Object.entries(official)) {

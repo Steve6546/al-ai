@@ -94,7 +94,7 @@ const payloads: [RegExp, unknown][] = [
     snapshot: null
   }],
   [/^\/api\/guilds\/[^/]+\/commands$/, {
-    categories: [{ id: "moderation", label: "أوامر الإدارة", description: "" }],
+    categories: [{ id: "penalties", label: "العقوبات", description: "" }],
     /**
      * At least one real command, in the full `CommandFlag` shape.
      *
@@ -113,23 +113,31 @@ const payloads: [RegExp, unknown][] = [
       deniedRoleIds: [],
       allowedChannelIds: [],
       deniedChannelIds: [],
+      allowedUserIds: [],
+      deniedUserIds: [],
       cooldownSeconds: 0,
       autoDeleteResponseSeconds: 0,
       requireReason: false,
+      allowCustomReason: true,
       defaultDuration: "permanent",
       presetReasons: [],
-      category: "moderation",
+      category: "penalties",
       description: "حظر عضو من السيرفر.",
       minimumTier: "moderator",
       target: "member",
       supportsReason: true,
       supportsPurge: true,
       supportsNotify: true,
-      supportsDuration: false
+      supportsDuration: false,
+      requiredPermission: "BAN_MEMBERS"
     }],
     roles: [role],
-    channels: [{ id: "2", name: "عام", type: "text" }]
+    channels: [{ id: "2", name: "عام", type: "text" }],
+    permissionLabels: { BAN_MEMBERS: "حظر الأعضاء" }
   }],
+  // Only reached when a stored scope names a member. Empty scopes mean this is
+  // never called, which is the common case in this fixture.
+  [/^\/api\/guilds\/[^/]+\/members\?/, { members: [] }],
   [/^\/api\/guilds\/[^/]+\/channels$/, { channels: [{ id: "2", name: "عام", type: "text" }] }],
   [/^\/api\/guilds\/[^/]+\/metrics$/, {
     bot: { online: true, pingMs: 30, lastSeenAt: new Date().toISOString() },

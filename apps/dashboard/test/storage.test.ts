@@ -202,14 +202,15 @@ test("a command with no stored row reads back as its registry defaults", { skip 
   assert.equal(flags.size, 0, "nothing is stored until the operator changes something");
   assert.deepEqual(commandFlagsFor(flags).find(command => command.name === "timeout"), {
     ...commandDefaults,
-    category: "moderation",
+    category: "penalties",
     description: "إسكات مؤقت",
     minimumTier: "moderator",
     target: "member",
     supportsReason: true,
     supportsPurge: true,
     supportsNotify: true,
-    supportsDuration: true
+    supportsDuration: true,
+    requiredPermission: "MODERATE_MEMBERS"
   });
 });
 
@@ -225,9 +226,12 @@ test("every new command setting survives a round trip", { skip }, async () => {
     deniedRoleIds: ["222222222222222222"],
     allowedChannelIds: ["333333333333333333"],
     deniedChannelIds: ["444444444444444444"],
+    allowedUserIds: ["555555555555555555"],
+    deniedUserIds: ["666666666666666666"],
     cooldownSeconds: 45,
     autoDeleteResponseSeconds: 20,
     requireReason: true,
+    allowCustomReason: false,
     defaultDuration: "6h" as const,
     presetReasons: [
       { id: "spam", label: "سبام", duration: "30m" as const },
@@ -242,6 +246,25 @@ test("every new command setting survives a round trip", { skip }, async () => {
   for (const [key, value] of Object.entries(written)) {
     assert.deepEqual(stored[key as keyof typeof stored], value, `${key} survived the round trip`);
   }
+});
+
+test("the custom duration is accepted by the database, and a stray value is not", { skip }, async () => {
+  // The CHECK constraint and `commandDurations` in core are two lists that have
+  // to agree. If core gained `custom` and the constraint did not, the dashboard
+  // would offer an option every save rejected — which is the failure this pins.
+  await seedBotOwnedGuild();
+  await pool!.query("DELETE FROM guild_command_flags WHERE guild_id = $1", [GUILD_ID]);
+
+  await db!.saveCommandFlag(GUILD_ID, { ...commandDefaults, defaultDuration: "custom" });
+  assert.equal((await db!.getCommandFlags(GUILD_ID)).get("timeout")?.defaultDuration, "custom");
+
+  // Written straight to SQL, bypassing the normaliser that would have corrected
+  // it: this is the database's own guarantee, not the application's.
+  await assert.rejects(
+    pool!.query("UPDATE guild_command_flags SET default_duration = 'forever' WHERE guild_id = $1", [GUILD_ID]),
+    /guild_command_flags_duration_check/,
+    "a duration core cannot resolve is refused by the database"
+  );
 });
 
 test("saving a command twice updates rather than duplicating", { skip }, async () => {

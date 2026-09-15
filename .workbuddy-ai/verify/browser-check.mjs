@@ -25,6 +25,13 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  commandCategories,
+  commandCategoryDescriptions,
+  commandCategoryLabels,
+  commandFlagsFor,
+  discordPermissionLabels
+} from "@al-ai/core";
 
 const REPO = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 const DIST = join(REPO, "apps", "dashboard", "dist");
@@ -64,6 +71,31 @@ const roles = Array.from({ length: 30 }, (_, index) => ({
   color: 0
 }));
 
+/**
+ * The commands screen's payload, built from the real registry.
+ *
+ * Imported rather than hand-copied on purpose: a fixture written out by hand
+ * stops covering the thing it was written for the moment a command is added, and
+ * that is exactly the failure this screen has had before — a stub whose
+ * `commands` array was empty meant the board the operator actually uses was
+ * never mounted, while the test stayed green.
+ *
+ * `commandFlagsFor(new Map())` is the same call the BFF makes for a guild that
+ * has never touched a setting, so the fixture is the real shape by construction.
+ * The harness therefore runs under `tsx`, which resolves the workspace's
+ * TypeScript entry points.
+ */
+const commandsPayload = {
+  categories: commandCategories.map(id => ({ id, label: commandCategoryLabels[id], description: commandCategoryDescriptions[id] })),
+  commands: commandFlagsFor(new Map()),
+  roles,
+  channels: [
+    { id: "333333333333333333", name: "عام", type: "text" },
+    { id: "444444444444444444", name: "الإشراف", type: "text" }
+  ],
+  permissionLabels: discordPermissionLabels
+};
+
 const STUB = `
 (() => {
   const payloads = [
@@ -87,7 +119,9 @@ const STUB = `
     }],
     [/^\\/api\\/guilds\\/[^/]+\\/security$/, { events: [] }],
     [/^\\/api\\/guilds\\/[^/]+\\/tiers$/, { roles: ${JSON.stringify(roles)}, configured: { ownerRoleIds: [], adminRoleIds: [], moderatorRoleIds: [] }, botHighestRolePosition: 10, unassignable: [], warning: null }],
-    [/^\\/api\\/guilds\\/[^/]+\\/metrics$/, { bot: { online: true, pingMs: 30, lastSeenAt: new Date().toISOString() }, members: { total: 10, online: null, onlineNote: null }, punishments24h: { total: 0, ban: 0, kick: 0, timeout: 0, warn: 0 }, recentActivity: [] }]
+    [/^\\/api\\/guilds\\/[^/]+\\/metrics$/, { bot: { online: true, pingMs: 30, lastSeenAt: new Date().toISOString() }, members: { total: 10, online: null, onlineNote: null }, punishments24h: { total: 0, ban: 0, kick: 0, timeout: 0, warn: 0 }, recentActivity: [] }],
+    [/^\\/api\\/guilds\\/[^/]+\\/commands$/, ${JSON.stringify(commandsPayload)}],
+    [/^\\/api\\/guilds\\/[^/]+\\/members$/, { members: [] }]
   ];
   window.fetch = async (input) => {
     const raw = typeof input === "string" ? input : (input && input.url) || String(input);
@@ -169,11 +203,26 @@ await new Promise((done, fail) => {
 
 let nextId = 0;
 const pending = new Map();
+/**
+ * Everything the page logged or threw, so "no console errors" is a measurement
+ * rather than an assumption. A React render failure surfaces here as an
+ * exception; a component that warns about a bad prop surfaces as a console
+ * message. Both are invisible to a screenshot.
+ */
+const consoleErrors = [];
 socket.addEventListener("message", event => {
   const message = JSON.parse(event.data);
   if (message.id && pending.has(message.id)) {
     pending.get(message.id)(message);
     pending.delete(message.id);
+    return;
+  }
+  if (message.method === "Runtime.exceptionThrown") {
+    const detail = message.params?.exceptionDetails;
+    consoleErrors.push(detail?.exception?.description ?? detail?.text ?? "unknown exception");
+  }
+  if (message.method === "Runtime.consoleAPICalled" && message.params?.type === "error") {
+    consoleErrors.push(message.params.args?.map(arg => arg.value ?? arg.description ?? "").join(" ") ?? "console.error");
   }
 });
 
@@ -378,6 +427,122 @@ try {
   await visit(`/`, `document.querySelector('main') && document.body.textContent.includes('اختر سيرفراً')`);
   check("the selector's header is at the top", await evaluate(`Math.round(document.querySelector('header').getBoundingClientRect().top)`), 0);
   await shoot("guild-selector");
+
+  /* ---- 5. the commands screen ---- */
+  /*
+   * The screen this round rebuilt. Everything asserted here is something a unit
+   * test cannot reach: that the whole board lays out at 1440px, that the section
+   * nav stays put while twenty cards scroll past it, and that the browser logs
+   * nothing while all of it renders.
+   */
+  await visit(
+    `/dashboard/${GUILD_ID}/commands`,
+    `document.querySelector('nav[aria-label="أقسام الأوامر"]') && document.body.textContent.includes('إجمالي الأوامر')`
+  );
+
+  // Reset here rather than at the top: the earlier screens are not under test,
+  // and a warning from one of them would be misattributed to this one.
+  consoleErrors.length = 0;
+  await sleep(400);
+  check("the commands screen logs nothing", consoleErrors, value => value.length === 0);
+
+  const sectionNames = await evaluate(`[...document.querySelectorAll('nav[aria-label="أقسام الأوامر"] button')].map(b => b.textContent.trim())`);
+  // Fourteen sections plus the "all commands" row.
+  check("the sidebar offers every section and the all-commands row", sectionNames.length, 15);
+  check(
+    "…including the ones with no commands yet",
+    sectionNames.some(name => name.includes("سجلات العقوبات")) && sectionNames.some(name => name.includes("إدارة الصوت")),
+    true
+  );
+
+  check("the permission badge is rendered", await evaluate(`document.body.textContent.includes('يتطلب:')`), true);
+  check("a command with no requirement says so", await evaluate(`document.body.textContent.includes('متاح للجميع')`), true);
+
+  /*
+   * The tier dropdown was the thing this screen was rebuilt to remove.
+   *
+   * Scoped to the board on purpose. `document.body` also contains the app
+   * shell, which legitimately shows the viewer's *own* tier in its footer and
+   * links to the tiers screen — so a whole-page search for the word "المالك"
+   * fails on furniture that has nothing to do with this screen. The first
+   * version of this check did exactly that and reported a false failure.
+   *
+   * `/timeout` is expanded first so the check cannot pass vacuously: the
+   * default-duration picker only exists inside an open card, and "no control
+   * carries a tier" is trivially true on a board that has no controls at all.
+   * The board does keep real comboboxes, so "no combobox" would be the wrong
+   * question — the question is what they contain.
+   */
+  await evaluate(`(() => {
+    document.querySelector('[aria-label="إعدادات timeout"]').click();
+    return true;
+  })()`);
+  await sleep(300);
+
+  const tierControls = await evaluate(`(() => {
+    const board = document.querySelector('nav[aria-label="أقسام الأوامر"]').parentElement;
+    const tiers = ['المالك', 'مدير', 'مشرف'];
+    const isTier = text => tiers.includes(text.trim());
+    const controls = [...board.querySelectorAll('select, [role="combobox"]')];
+    return {
+      total: controls.length,
+      texts: controls.map(el => el.textContent.trim()).slice(0, 8),
+      offenders: controls.map(el => el.textContent.trim()).filter(isTier),
+      standalone: [...board.querySelectorAll('*')]
+        .filter(el => el.children.length === 0 && isTier(el.textContent))
+        .map(el => el.tagName.toLowerCase() + ':' + el.textContent.trim())
+    };
+  })()`);
+  check("the expanded board really does contain pickers", tierControls.total, value => value > 0);
+  check("none of those pickers carries a tier", tierControls.offenders, value => value.length === 0);
+  check("no tier name stands alone on the board", tierControls.standalone, value => value.length === 0);
+
+  /* An empty section explains itself rather than showing a blank pane. */
+  await evaluate(`(() => {
+    const target = [...document.querySelectorAll('nav[aria-label="أقسام الأوامر"] button')]
+      .find(button => button.textContent.includes('سجلات العقوبات'));
+    target.click();
+    return true;
+  })()`);
+  await sleep(250);
+  check(
+    "an empty section says the commands are coming",
+    await evaluate(`document.body.textContent.includes('سيتم توفيرها في التحديثات القادمة')`),
+    true
+  );
+  await shoot("commands-empty-section");
+
+  /* Back to the full list, then the sticky-nav measurement. */
+  await evaluate(`(() => {
+    const target = [...document.querySelectorAll('nav[aria-label="أقسام الأوامر"] button')]
+      .find(button => button.textContent.includes('كل الأوامر'));
+    target.click();
+    return true;
+  })()`);
+  await sleep(250);
+
+  const boardBefore = await evaluate(`(() => {
+    const main = document.querySelector('main');
+    const nav = document.querySelector('nav[aria-label="أقسام الأوامر"]');
+    return { navTop: Math.round(nav.getBoundingClientRect().top), scrollable: main.scrollHeight > main.clientHeight + 200 };
+  })()`);
+  check("the commands board is long enough to scroll", boardBefore.scrollable, true);
+
+  const boardAfter = await evaluate(`(() => {
+    const main = document.querySelector('main');
+    main.scrollTop = 400;
+    const nav = document.querySelector('nav[aria-label="أقسام الأوامر"]');
+    return { navTop: Math.round(nav.getBoundingClientRect().top), scrolled: Math.round(main.scrollTop) };
+  })()`);
+  check("the page really scrolled", boardAfter.scrolled, value => value > 100);
+  check(
+    "the section nav stays put while the cards scroll",
+    Math.abs(boardAfter.navTop - boardBefore.navTop),
+    value => value <= 2
+  );
+  check("the window still does not scroll", await evaluate(`document.scrollingElement.scrollHeight - document.scrollingElement.clientHeight`), 0);
+
+  await shoot("commands-screen");
 } finally {
   socket.close();
   chrome.kill();

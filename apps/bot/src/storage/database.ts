@@ -187,15 +187,20 @@ export function createBotDatabase(databaseUrl: string) {
         denied_role_ids: string[] | null;
         allowed_channel_ids: string[] | null;
         denied_channel_ids: string[] | null;
+        allowed_user_ids: string[] | null;
+        denied_user_ids: string[] | null;
         cooldown_seconds: number;
         auto_delete_response_seconds: number;
         require_reason: boolean;
+        allow_custom_reason: boolean;
         default_duration: string;
         preset_reasons: unknown;
       }>(
         `SELECT command, enabled, minimum_tier, dm_on_action, delete_message_days,
                 allowed_role_ids, denied_role_ids, allowed_channel_ids, denied_channel_ids,
-                cooldown_seconds, auto_delete_response_seconds, require_reason, default_duration, preset_reasons
+                allowed_user_ids, denied_user_ids,
+                cooldown_seconds, auto_delete_response_seconds, require_reason, allow_custom_reason,
+                default_duration, preset_reasons
          FROM guild_command_flags WHERE guild_id = $1`,
         [guildId]
       );
@@ -216,9 +221,12 @@ export function createBotDatabase(databaseUrl: string) {
             deniedRoleIds: row.denied_role_ids ?? [],
             allowedChannelIds: row.allowed_channel_ids ?? [],
             deniedChannelIds: row.denied_channel_ids ?? [],
+            allowedUserIds: row.allowed_user_ids ?? [],
+            deniedUserIds: row.denied_user_ids ?? [],
             cooldownSeconds: row.cooldown_seconds,
             autoDeleteResponseSeconds: row.auto_delete_response_seconds,
             requireReason: row.require_reason,
+            allowCustomReason: row.allow_custom_reason,
             defaultDuration: row.default_duration as CommandConfig["defaultDuration"],
             presetReasons: Array.isArray(row.preset_reasons) ? (row.preset_reasons as CommandConfig["presetReasons"]) : []
           }
@@ -237,13 +245,22 @@ export function createBotDatabase(databaseUrl: string) {
       );
     },
 
-    /** A member's warnings, newest first. Capped so `/warns` can always render. */
+    /**
+     * A member's warnings, newest first. Capped so `/warns` can always render.
+     *
+     * The `id` tiebreaker is load-bearing: `created_at` defaults to `now()`, the
+     * *transaction* timestamp, so two warnings written in one transaction share
+     * it exactly. Without a second sort key PostgreSQL may order those two
+     * either way, and `/delwarn` resolves the same index in its own statement —
+     * so a tie would make the number `/warns` printed point at a different row
+     * than the one deleted.
+     */
     async listWarnings(guildId: string, userId: string, limit = 10) {
       const { rows } = await pool.query<{ id: string; moderator_id: string; reason: string; created_at: Date }>(
         `SELECT id, moderator_id, reason, created_at
          FROM guild_warnings
          WHERE guild_id = $1 AND user_id = $2
-         ORDER BY created_at DESC
+         ORDER BY created_at DESC, id DESC
          LIMIT $3`,
         [guildId, userId, limit]
       );
@@ -271,6 +288,40 @@ export function createBotDatabase(databaseUrl: string) {
         [guildId, userId]
       );
       return rowCount ?? 0;
+    },
+
+    /**
+     * Removes one warning, identified by the number `/warns` prints beside it.
+     *
+     * `index` is 1-based and counts from the newest, which is the order `/warns`
+     * lists them in — so the number the operator read is the number they type.
+     * Resolving it inside the statement rather than reading the list first and
+     * deleting by id keeps the two from disagreeing: a warning added between the
+     * read and the delete would shift every number below it.
+     *
+     * The tiebreaker on `id` is load-bearing, not decoration. Two warnings can
+     * share a `created_at` — `now()` is the transaction timestamp, so a script or
+     * a retry can produce a tie — and without a second sort key PostgreSQL is
+     * free to order them either way, which would make index 1 mean one row on the
+     * list and a different row on the delete.
+     *
+     * Returns the removed warning's reason, or `null` when the index is past the
+     * end so the caller can say "no such warning" rather than "deleted".
+     */
+    async deleteWarningAt(guildId: string, userId: string, index: number) {
+      const offset = Math.max(Math.trunc(index), 1) - 1;
+      const { rows } = await pool.query<{ reason: string }>(
+        `DELETE FROM guild_warnings
+          WHERE id = (
+            SELECT id FROM guild_warnings
+             WHERE guild_id = $1 AND user_id = $2
+             ORDER BY created_at DESC, id DESC
+             OFFSET $3 LIMIT 1
+          )
+          RETURNING reason`,
+        [guildId, userId, offset]
+      );
+      return rows[0]?.reason ?? null;
     },
 
     // NOTE: there is deliberately no `resolveChannel` reader here.

@@ -88,13 +88,31 @@ test("nothing is published that is not in the registry", () => {
   assert.deepEqual(extra, [], "publishing an unregistered command is a governance violation");
 });
 
-test("moderation commands are hidden from everyone by default", () => {
+test("commands are hidden from everyone by default, except the informational core four", () => {
   // Discord-side default permissions are 0; AL AI decides through its own tiers,
-  // so a member without an AL AI role must not even see the command.
+  // so a member without an AL AI role must not even see a command that punishes
+  // somebody. The exceptions are the commands that only ever answer a question:
+  // a help command nobody can see is a missing feature rather than a gate, and a
+  // new member would have no way to learn what the bot does.
+  const visibleByDesign = new Set(["al-status", "help", "commands", "dashboard", "colors"]);
+
   for (const command of buildAllCommands()) {
     const name = (command as { name: string }).name;
-    if (name === "al-status") continue;
-    assert.equal((command as { default_member_permissions?: string }).default_member_permissions, "0", `${name} is hidden by default`);
+    const permissions = (command as { default_member_permissions?: string }).default_member_permissions;
+    if (visibleByDesign.has(name)) {
+      assert.equal(permissions, undefined, `${name} stays visible so it can be discovered`);
+      continue;
+    }
+    assert.equal(permissions, "0", `${name} is hidden by default`);
+  }
+});
+
+test("every informational command is in the core section", () => {
+  // Pins the split above to the registry rather than to a list of names: a new
+  // command that publishes itself to everyone has to be declared `core`, which
+  // is where an operator looks to find out why it is visible.
+  for (const name of ["help", "commands", "dashboard", "colors", "al-status"]) {
+    assert.equal(requireCommand(name).category, "core", `${name} is a core command`);
   }
 });
 
@@ -157,9 +175,46 @@ test("/al-status is an ordinary registered command", () => {
   // It used to be answered before the configuration pipeline ran, which made its
   // switch, cooldown and scopes impossible to honour.
   const definition = requireCommand("al-status");
-  assert.equal(definition.category, "general");
+  assert.equal(definition.category, "core");
   assert.equal(definition.target, "none");
   assert.equal(definition.minimumTier, "moderator");
+});
+
+test("every command in the registry is published, and every published command is registered", () => {
+  // The parity the deploy script enforces at run time, asserted here so a
+  // mismatch fails the build rather than the next deployment.
+  const registered = commandRegistry.map(command => command.name).sort();
+  const published = buildAllCommands()
+    .map(command => (command as { name: string }).name)
+    .sort();
+  assert.deepEqual(published, registered);
+});
+
+test("the two new penalty commands publish the options their handlers read", () => {
+  const published = new Map(
+    buildAllCommands().map(command => [
+      (command as { name: string }).name,
+      (command as { options?: { name: string; required?: boolean; type: number }[] }).options ?? []
+    ])
+  );
+
+  // `/delwarn` resolves a warning by the number `/warns` printed, so the option
+  // has to exist and has to be required — without it the handler reads `index 0`
+  // and deletes nothing while reporting success.
+  const delwarn = published.get("delwarn")!;
+  assert.equal(delwarn.find(option => option.name === "index")?.required, true);
+
+  // `/setnick` leaves the nickname optional on purpose: absent means "clear it",
+  // which is the only useful reading of a rename with no new name.
+  const setnick = published.get("setnick")!;
+  assert.notEqual(setnick.find(option => option.name === "nickname")?.required, true);
+  assert.ok(setnick.some(option => option.name === "nickname"), "the nickname option is published");
+
+  // `/untimeout` takes a target and a reason and nothing else.
+  assert.deepEqual(
+    published.get("untimeout")!.map(option => option.name).sort(),
+    ["reason", "user"]
+  );
 });
 
 test("the timeout duration stays inside Discord's accepted range", () => {

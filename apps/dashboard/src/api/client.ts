@@ -104,6 +104,10 @@ export const saveTiers = (guildId: string, values: TierRoles) =>
 /* ------------------------------------------------------------------ *
  * Settings: commands
  * ------------------------------------------------------------------ */
+
+/** A member named in a per-command scope, resolved to something readable. */
+export type ScopedMember = { id: string; name: string; avatarUrl: string | null };
+
 export const commands = (guildId: string) =>
   call<{
     /** The sections the screen groups commands into, in render order. */
@@ -112,7 +116,19 @@ export const commands = (guildId: string) =>
     /** Scopes are chosen from these. Read once, alongside the commands. */
     roles: DiscordRole[];
     channels: ChannelOption[];
+    /** Arabic names for the Discord permission each command asks for. */
+    permissionLabels: Record<string, string>;
   }>(`/api/guilds/${guildId}/commands`);
+
+/**
+ * Resolves the members a scope names, so the screen shows a name rather than a
+ * snowflake. Separate from `commands` on purpose: the scopes live in our own
+ * database and must render even when Discord does not answer.
+ */
+export const resolveMembers = (guildId: string, ids: string[]) =>
+  ids.length === 0
+    ? Promise.resolve({ members: [] as ScopedMember[] })
+    : call<{ members: ScopedMember[] }>(`/api/guilds/${guildId}/members?ids=${ids.join(",")}`);
 
 /**
  * One entry per changed command. Unchanged commands are not sent at all, and

@@ -33,10 +33,47 @@ export const DISCORD_PERMISSION_BITS = {
   ADMINISTRATOR: 0x8n,
   MANAGE_GUILD: 0x20n,
   MANAGE_NICKNAMES: 0x8000000n,
-  CHANGE_NICKNAME: 0x4000000n
+  CHANGE_NICKNAME: 0x4000000n,
+
+  /* The moderation and channel bits a command declares as its own requirement.
+   *
+   * These exist so the dashboard can tell the operator, in Discord's own terms,
+   * what a command asks of the person running it. They are deliberately the
+   * *native* bits rather than a re-description of AL AI's tiers: the operator
+   * already grants these in Discord's role editor, so naming them is the one
+   * explanation that does not have to be learned twice. */
+  KICK_MEMBERS: 0x2n,
+  BAN_MEMBERS: 0x4n,
+  MANAGE_CHANNELS: 0x10n,
+  MANAGE_MESSAGES: 0x2000n,
+  MODERATE_MEMBERS: 0x10000000000n
 } as const;
 
 export type DiscordPermissionBit = keyof typeof DISCORD_PERMISSION_BITS;
+
+/**
+ * Arabic names for those bits, as Discord's own client renders them.
+ *
+ * Declared here rather than in the dashboard so the label travels with the bit:
+ * a permission named in two places is a permission that will eventually be
+ * called two different things, which is exactly how `STATUS_LABELS` drifted out
+ * of core once already.
+ *
+ * `ADMINISTRATOR` and `CHANGE_NICKNAME` have no entry because no command
+ * declares them: a command asks for the narrowest bit that works, and the
+ * administrator bit is never the narrowest for anything. The test named above
+ * asserts every bit a command *does* declare has a name here, so this map
+ * cannot fall behind the registry.
+ */
+export const discordPermissionLabels: Partial<Record<DiscordPermissionBit, string>> = {
+  KICK_MEMBERS: "طرد الأعضاء",
+  BAN_MEMBERS: "حظر الأعضاء",
+  MANAGE_CHANNELS: "إدارة القنوات",
+  MANAGE_MESSAGES: "إدارة الرسائل",
+  MANAGE_GUILD: "إدارة السيرفر",
+  MANAGE_NICKNAMES: "إدارة الأسماء المستعارة",
+  MODERATE_MEMBERS: "إسكات الأعضاء"
+};
 
 /**
  * The decimal string Discord's OAuth invite expects in `permissions`.

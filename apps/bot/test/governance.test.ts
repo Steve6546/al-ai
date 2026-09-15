@@ -258,9 +258,21 @@ test("the presence is the only field the bot writes to the gateway", () => {
   const code = codeOf(discord!.source);
   assert.match(code, /applyBotPresence/, "the gateway write lives here");
 
-  // A nickname or an avatar applied from the bot would be a second writer for a
-  // field the dashboard already owns.
-  assert.equal(/setNickname|setAvatar/.test(code), false, "the bot writes no guild identity");
+  // The bot's *own* identity — its avatar, its username — is owned by the
+  // dashboard, and a write from here would be a second writer for a field
+  // `bot_identity` already holds. That is the guarantee, and it is what is
+  // asserted: no avatar and no username write exists anywhere in the module.
+  assert.equal(/setAvatar|setUsername/.test(code), false, "the bot writes its own avatar or username");
+
+  // `setNickname` is a different thing and this test used to conflate the two.
+  // The only call site is `/setnick`, which renames *a member* — moderation, not
+  // identity. So the assertion is narrowed rather than dropped: the write must
+  // exist, and it must be the moderation action and nowhere else. Counting
+  // occurrences is what makes "nowhere else" testable; a bare `false` would have
+  // banned the moderation feature along with the defect it was written for.
+  const nicknameWrites = code.match(/setNickname/g) ?? [];
+  assert.equal(nicknameWrites.length, 1, "the only nickname write is the moderation action");
+  assert.match(code, /case "setnick":[\s\S]{0,200}?setNickname/, "and it lives in the setnick branch");
 });
 
 test("the runtime applies the presence through the sync, not by hand", () => {

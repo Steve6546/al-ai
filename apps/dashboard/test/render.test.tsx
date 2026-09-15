@@ -15,7 +15,7 @@ import { Toaster } from "../src/components/toaster";
 import { AuditView } from "../src/views/audit";
 import { DashboardView } from "../src/views/dashboard";
 import { SecurityView } from "../src/views/security";
-import { CommandsBoard, CommandsView, PresetReasons, ScopeList } from "../src/views/settings/commands";
+import { CommandsBoard, CommandsView, PresetReasons, ScopeList, UserScopeList } from "../src/views/settings/commands";
 import { CustomizationView, HierarchyWarning } from "../src/views/settings/customization";
 import { BotLivePreview } from "../src/views/settings/bot-preview";
 import { LogsView } from "../src/views/settings/logs";
@@ -220,6 +220,12 @@ test("an unreadable hierarchy renders nothing rather than guessing", () => {
 
 const commandFlags = commandFlagsFor(new Map());
 const commandSections = commandCategories.map(id => ({ id, label: commandCategoryLabels[id], description: "" }));
+// The badge text arrives from the server with the commands, because
+// `discord-permissions.ts` holds `bigint` values and is deliberately absent from
+// the browser surface of core. That the labels themselves are real and Arabic is
+// asserted in core's own test; here the question is only whether the card shows
+// the one it was handed.
+const permissionLabels = { BAN_MEMBERS: "حظر الأعضاء", KICK_MEMBERS: "طرد الأعضاء", MODERATE_MEMBERS: "إسكات الأعضاء" };
 const boardProps = {
   commands: commandFlags,
   categories: commandSections,
@@ -228,23 +234,48 @@ const boardProps = {
     { id: "222222222222222222", name: "مساعد", position: 3, managed: false, isDefault: false, color: 0 }
   ],
   channels: [{ id: "333333333333333333", name: "عام", type: "text" as const }],
+  permissionLabels,
   onSave: async () => undefined,
   onSaved: async () => commandFlags
 };
 
-test("the commands board shows the totals, the search and the sections", () => {
+test("the commands board shows the totals, the search, the filters and the sections", () => {
   const html = renderToString(createElement(CommandsBoard, boardProps)).replace(/<!-- -->/g, "");
 
   assert.match(html, /إجمالي الأوامر/, "the total is labelled");
   assert.match(html, /الأوامر المفعلة/, "the enabled count is labelled");
-  assert.match(html, /الأقسام/, "the section count is labelled");
+  assert.match(html, /أقسام فيها أوامر/, "the populated-section count is labelled");
   assert.match(html, /ابحث عن أمر\.\.\. 🔍/, "the instant search is present");
   assert.match(html, /تفعيل الكل/, "the bulk enable action is offered");
   assert.match(html, /تعطيل الكل/, "the bulk disable action is offered");
 
-  assert.match(html, /أوامر الإدارة/, "the moderation section is rendered");
-  assert.match(html, /أوامر القنوات والشات/, "the channel section is rendered");
-  assert.match(html, /أوامر عامة/, "the general section is rendered");
+  // The status filter, as three pressed-state buttons rather than a dropdown.
+  assert.match(html, /aria-label="تصفية حسب الحالة"/, "the status filter is grouped and labelled");
+  for (const label of ["الكل", "مفعّل", "معطّل"]) {
+    assert.ok(html.includes(`>${label}</button>`), `the ${label} filter is offered`);
+  }
+
+  assert.match(html, /الأوامر الأساسية/, "the core section is rendered");
+  assert.match(html, /العقوبات/, "the penalties section is rendered");
+  assert.match(html, /أدوات الشات/, "the chat-tools section is rendered");
+});
+
+test("every one of the fourteen sections is offered in the sidebar, empty ones included", () => {
+  const html = renderToString(createElement(CommandsBoard, boardProps)).replace(/<!-- -->/g, "");
+  for (const category of commandCategories) {
+    assert.ok(html.includes(commandCategoryLabels[category]), `${category} is offered in the sidebar`);
+  }
+  // An empty section must still be reachable: hiding it would make a planned
+  // feature look like one that was never intended.
+  assert.match(html, /سجلات العقوبات/, "a section with no commands is still listed");
+});
+
+test("the permission badge names Discord's requirement, and says so when there is none", () => {
+  const html = renderToString(createElement(CommandsBoard, boardProps)).replace(/<!-- -->/g, "");
+  assert.match(html, /يتطلب: حظر الأعضاء/, "the ban badge names Ban Members");
+  assert.match(html, /يتطلب: طرد الأعضاء/, "the kick badge names Kick Members");
+  // `/help` asks for nothing, and a blank badge would read as a missing value.
+  assert.match(html, /متاح للجميع/, "a command with no requirement says so");
 });
 
 test("every registered command is listed under its own section", () => {
@@ -254,7 +285,8 @@ test("every registered command is listed under its own section", () => {
   }
   // `/al-status` used to be answered outside the configuration pipeline, so the
   // dashboard could not honestly offer a switch for it.
-  assert.match(html, /\/al-status/, "the general command is configurable");
+  assert.match(html, /\/al-status/, "the status command is configurable");
+  assert.match(html, /\/delwarn/, "the newly added commands are configurable too");
 });
 
 test("a command's switch is rendered checked or unchecked as stored", () => {
@@ -262,6 +294,17 @@ test("a command's switch is rendered checked or unchecked as stored", () => {
   const html = renderToString(createElement(CommandsBoard, { ...boardProps, commands: disabled }));
   assert.match(html, /aria-label="ban"[^>]*/, "the ban switch is rendered");
   assert.match(html, /data-state="unchecked"/, "a disabled command renders as off");
+});
+
+test("no tier selector is offered anywhere on the board", () => {
+  // The tier dropdown was the thing this screen was rebuilt to remove: it asked
+  // the operator to translate "moderator" into a set of people. The permission
+  // badge and the scopes are what replaced it, so a tier control reappearing
+  // here would be a silent return to the old model.
+  const html = renderToString(createElement(CommandsBoard, boardProps)).replace(/<!-- -->/g, "");
+  for (const tier of ["المالك", "مدير", "مشرف"]) {
+    assert.ok(!html.includes(`>${tier}</`), `no ${tier} tier control is rendered`);
+  }
 });
 
 test("the role and channel scope pickers render every entry", () => {
@@ -322,6 +365,37 @@ test("an empty preset list explains that the reason is typed by hand", () => {
   const ban = commandFlags.find(command => command.name === "ban")!;
   const html = renderToString(createElement(PresetReasons, { command: { ...ban, presetReasons: [] }, onChange: () => {} }));
   assert.match(html, /لا توجد أسباب جاهزة/);
+});
+
+test("the member scope resolves an id to a name, and falls back to the id", () => {
+  // A member who has left has no name to show, and the row must still render:
+  // the scope is stored in our own database and does not depend on Discord.
+  const memberById = new Map([
+    ["111111111111111111", { id: "111111111111111111", name: "أحمد", avatarUrl: null }]
+  ]);
+  const html = renderToString(
+    createElement(UserScopeList, {
+      label: "الأعضاء المسموح لهم",
+      hint: "تلميح",
+      selected: ["111111111111111111", "999888777666555444"],
+      memberById,
+      onChange: () => {}
+    })
+  ).replace(/<!-- -->/g, "");
+
+  assert.match(html, /أحمد/, "a resolvable member is shown by name");
+  assert.match(html, /999888777666555444/, "an unresolvable one degrades to its id rather than vanishing");
+  assert.match(html, /aria-label="إزالة أحمد"/, "each entry can be removed");
+  assert.match(html, /معرّف العضو/, "the operator is told what to paste");
+});
+
+test("the member scope accepts a mention as well as a bare id", () => {
+  // The operator copies a mention out of Discord far more often than an id, so
+  // both have to be accepted — and the stored value is the snowflake either way.
+  const html = renderToString(
+    createElement(UserScopeList, { label: "الأعضاء الممنوعون", hint: "تلميح", selected: [], memberById: new Map(), onChange: () => {} })
+  );
+  assert.match(html, /dir="ltr"/, "the id field is left-to-right so a pasted id is readable");
 });
 
 /* ------------------------------------------------------------------ *

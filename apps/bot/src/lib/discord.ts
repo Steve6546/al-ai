@@ -294,6 +294,30 @@ export function buildStatusCommand() {
   return new SlashCommandBuilder().setName("al-status").setDescription("عرض حالة AL AI").toJSON();
 }
 
+/**
+ * The core commands: what AL AI is, what it can do, and how to reach the panel.
+ *
+ * `/help`, `/commands`, `/dashboard` and `/colors` carry no default member
+ * permission, and that is a deliberate exception to how every other command is
+ * published. The rule elsewhere is "hidden from everyone, AL AI decides" — but a
+ * help command nobody can see is not a gate, it is a missing feature, and a new
+ * member has no way to learn what the bot does without one. These four only ever
+ * answer a question, so showing them costs nothing.
+ *
+ * `/settings` is the exception among the exceptions: it is an operator tool that
+ * hands back a link into a screen, so it stays hidden like the moderation
+ * commands and is granted per role in Discord's own integrations page.
+ */
+export function buildCoreCommands() {
+  return [
+    new SlashCommandBuilder().setName("help").setDescription("عرض قائمة الأوامر وشرح كل أمر").toJSON(),
+    new SlashCommandBuilder().setName("commands").setDescription("عرض الأوامر المتاحة لك في هذا السيرفر").toJSON(),
+    new SlashCommandBuilder().setName("settings").setDescription("الحصول على رابط إعدادات البوت في اللوحة").setDefaultMemberPermissions(0n).toJSON(),
+    new SlashCommandBuilder().setName("dashboard").setDescription("الحصول على رابط لوحة التحكم").toJSON(),
+    new SlashCommandBuilder().setName("colors").setDescription("عرض ألوان الرتب المتاحة في السيرفر").toJSON()
+  ];
+}
+
 /** Shared option builders, so the same control is described identically everywhere. */
 const targetOption = (option: SlashCommandUserOption) => option.setName("user").setDescription("العضو").setRequired(true);
 
@@ -383,6 +407,43 @@ export function buildModerationCommands() {
       .setDefaultMemberPermissions(0n)
       .toJSON(),
 
+    new SlashCommandBuilder()
+      .setName("untimeout")
+      .setDescription("رفع الإسكات المؤقت عن عضو")
+      .addUserOption(targetOption)
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    // `/delwarn` removes one record rather than all of them, so it has to say
+    // which. The number is the one `/warns` prints beside each entry, which makes
+    // it the only identifier the operator has actually seen — a raw UUID would
+    // be unusable without copying it out of the list first.
+    new SlashCommandBuilder()
+      .setName("delwarn")
+      .setDescription("حذف تحذير واحد بعينه حسب رقمه في قائمة التحذيرات")
+      .addUserOption(targetOption)
+      .addIntegerOption(option =>
+        option.setName("index").setDescription("رقم التحذير كما يظهر في /warns (1 = الأحدث)").setRequired(true).setMinValue(1)
+      )
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    // An absent `nickname` clears the member's nickname rather than doing
+    // nothing. Discord has no way to send "the empty string" as a meaningful
+    // value here, so the absence has to carry the meaning — and "reset it" is
+    // the only useful reading, since `/setnick` with no new name is otherwise a
+    // command that does nothing at all.
+    new SlashCommandBuilder()
+      .setName("setnick")
+      .setDescription("تغيير الاسم المستعار لعضو، واترك الاسم فارغاً لإزالته")
+      .addUserOption(targetOption)
+      .addStringOption(option => option.setName("nickname").setDescription("الاسم الجديد (اتركه فارغاً لإزالة الاسم)").setMaxLength(32).setRequired(false))
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
     // Channel commands. They act on the channel the command is typed in, so they
     // take no target — Discord's own `Manage Messages` / `Manage Channels`
     // permission is what the operator grants, and AL AI layers its tier on top.
@@ -432,7 +493,7 @@ export function buildModerationCommands() {
 
 /** Everything AL AI publishes. Used by scripts/deploy-commands.ts. */
 export function buildAllCommands() {
-  return [buildStatusCommand(), ...buildModerationCommands()];
+  return [buildStatusCommand(), ...buildCoreCommands(), ...buildModerationCommands()];
 }
 
 /* ------------------------------------------------------------------ *
@@ -459,11 +520,38 @@ export async function readBotHighestPosition(client: Client, guildId: string) {
   return me ? me.roles.highest.position : null;
 }
 
+/** One of a guild's coloured roles, as `/colors` lists it. */
+export type ColourRole = { id: string; name: string; color: number; position: number };
+
+/**
+ * The guild's coloured roles, highest first.
+ *
+ * Three exclusions, each for a reason rather than for tidiness: `@everyone` has
+ * no colour of its own, a managed role belongs to an integration and cannot be
+ * given to anybody by hand, and `color === 0` is Discord's "no colour" — listing
+ * those would fill the reply with grey names and hide the ones that mean
+ * something. Returns `null` when the guild or its role list cannot be read, so
+ * the caller can tell "no colours configured" from "Discord did not answer".
+ */
+export async function readColourRoles(client: Client, guildId: string): Promise<ColourRole[] | null> {
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return null;
+  const roles = await guild.roles.fetch().catch(() => null);
+  if (!roles) return null;
+  return [...roles.values()]
+    .filter(role => role.id !== guild.roles.everyone.id && !role.managed && role.color !== 0)
+    .sort((a, b) => b.position - a.position)
+    .map(role => ({ id: role.id, name: role.name, color: role.color, position: role.position }));
+}
+
 export type ModerationAction =
   | { kind: "ban"; guildId: string; targetId: string; reason: string; deleteMessageSeconds?: number }
   | { kind: "unban"; guildId: string; targetId: string; reason: string }
   | { kind: "kick"; guildId: string; targetId: string; reason: string }
-  | { kind: "timeout"; guildId: string; targetId: string; minutes: number; reason: string; deleteMessageSeconds?: number };
+  | { kind: "timeout"; guildId: string; targetId: string; minutes: number; reason: string; deleteMessageSeconds?: number }
+  | { kind: "untimeout"; guildId: string; targetId: string; reason: string }
+  /** `nickname: null` clears it. Discord takes `null` for "remove", not `""`. */
+  | { kind: "setnick"; guildId: string; targetId: string; nickname: string | null; reason: string };
 
 /** Applies one member action. Returns false when Discord refused it. */
 export async function applyModeration(client: Client, action: ModerationAction) {
@@ -490,6 +578,18 @@ export async function applyModeration(client: Client, action: ModerationAction) 
         const member = await guild.members.fetch(action.targetId);
         const seconds = Math.min(Math.max(action.minutes * 60, TIMEOUT_MIN_SECONDS), TIMEOUT_MAX_SECONDS);
         await member.timeout(seconds * 1000, action.reason);
+        return true;
+      }
+      case "untimeout": {
+        const member = await guild.members.fetch(action.targetId);
+        // `null` is Discord's own "no timeout"; `0` is not accepted and would be
+        // silently clamped to a minimum, leaving the member silenced.
+        await member.timeout(null, action.reason);
+        return true;
+      }
+      case "setnick": {
+        const member = await guild.members.fetch(action.targetId);
+        await member.setNickname(action.nickname, action.reason);
         return true;
       }
       default:
@@ -668,6 +768,7 @@ export type BotEvent =
   | { type: "moderation.unban"; guildId: string; targetId: string; actorId: string; reason?: string }
   | { type: "moderation.kick"; guildId: string; targetId: string; actorId: string; reason?: string }
   | { type: "moderation.timeout"; guildId: string; targetId: string; actorId: string; reason?: string }
+  | { type: "moderation.untimeout"; guildId: string; targetId: string; actorId: string; reason?: string }
   | { type: "voice.join"; guildId: string; memberId: string; toChannelId: string }
   | { type: "voice.leave"; guildId: string; memberId: string; fromChannelId: string }
   | { type: "voice.move"; guildId: string; memberId: string; fromChannelId: string; toChannelId: string }
@@ -787,10 +888,17 @@ export type CommandContext = {
   targetId: string | null;
   /**
    * Every integer option the command declared, keyed by its name — `minutes`,
-   * `count`, `seconds`. Kept generic so adding a command does not mean adding a
-   * field to this type, which is how `minutes` used to work.
+   * `count`, `seconds`, `index`. Kept generic so adding a command does not mean
+   * adding a field to this type, which is how `minutes` used to work.
    */
   numbers: Record<string, number>;
+  /**
+   * Every string option the command declared, keyed by its name — `nickname`,
+   * `user_id`. Generic for the same reason `numbers` is: `/setnick` needed a
+   * second string option, and a field per option would have made this type grow
+   * with the registry.
+   */
+  strings: Record<string, string>;
   reason: string;
   /**
    * Answers the interaction.
@@ -882,6 +990,16 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
     if (!wasTimedOut && isTimedOut) {
       void resolveAudit(after.guild, AuditLogEvent.MemberUpdate, after.id).then(({ actorId, reason }) =>
         emit({ type: "moderation.timeout", guildId: after.guild.id, targetId: after.id, actorId, ...(reason ? { reason } : {}) })
+      );
+      return;
+    }
+    // A timeout expiring on its own also lands here, and it is reported too. That
+    // is the honest reading: the operator's log answers "when did this member
+    // stop being silenced", and the answer is the same whether Discord's clock
+    // ran out or a moderator lifted it — the actor line says which.
+    if (wasTimedOut && !isTimedOut) {
+      void resolveAudit(after.guild, AuditLogEvent.MemberUpdate, after.id).then(({ actorId, reason }) =>
+        emit({ type: "moderation.untimeout", guildId: after.guild.id, targetId: after.id, actorId, ...(reason ? { reason } : {}) })
       );
     }
   });
@@ -1022,12 +1140,16 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
     }
 
     const target = interaction.options.getUser("user");
-    // Read every integer option the interaction carries, whatever it is called,
-    // so the handler can support a new command without a new field here.
+    // Read every option the interaction carries, whatever it is called, so the
+    // handler can support a new command without a new field here.
     const numbers: Record<string, number> = {};
+    const strings: Record<string, string> = {};
     for (const option of interaction.options.data) {
       if (option.type === ApplicationCommandOptionType.Integer && typeof option.value === "number") {
         numbers[option.name] = option.value;
+      }
+      if (option.type === ApplicationCommandOptionType.String && typeof option.value === "string") {
+        strings[option.name] = option.value;
       }
     }
 
@@ -1041,6 +1163,7 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
       commandName: interaction.commandName,
       targetId: target?.id ?? interaction.options.getString("user_id") ?? null,
       numbers,
+      strings,
       reason: interaction.options.getString("reason") ?? "",
       reply: async (content, replyOptions) => {
         // Ephemeral: a moderation reply is for the operator, not the channel.

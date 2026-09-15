@@ -22,6 +22,10 @@ const priorityOf: Record<BotEvent["type"], Priority> = {
   "moderation.unban": 1,
   "moderation.kick": 1,
   "moderation.timeout": 1,
+  // Same priority as the timeout it lifts: both are moderation actions on a
+  // member, and an operator reading the log wants them side by side rather than
+  // separated by everything Discord happened to report in between.
+  "moderation.untimeout": 1,
   "voice.join": 3,
   "voice.leave": 3,
   "voice.move": 3,

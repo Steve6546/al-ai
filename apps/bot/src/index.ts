@@ -13,6 +13,7 @@ import {
   notifyTarget,
   quarantineMember,
   readBotHighestPosition,
+  readColourRoles,
   readMemberPositions,
   readMemberRoleIds,
   sendLogEmbed,
@@ -21,12 +22,18 @@ import {
 } from "./lib/discord.js";
 import {
   assessCommandScope,
+  commandCategories,
+  commandCategoryLabels,
   commandDurationSeconds,
   CommandCooldowns,
+  commandRegistry,
   cooldownKey,
+  discordPermissionLabels,
   EMPTY_TIER_ROLES,
+  isAdmittedByAllowList,
   normaliseCommandConfig,
   requireCommand,
+  resolveCommandDuration,
   scopeReasonMessages,
   type CommandConfig
 } from "@al-ai/core";
@@ -307,11 +314,12 @@ function channelSuccessMessages(commandName: string, removed: number | undefined
  */
 const commandCooldowns = new CommandCooldowns();
 
-/** A preset reason's duration applies only when the operator gave no duration. */
-function presetDurationFor(config: CommandConfig, reason: string) {
-  const preset = config.presetReasons.find(entry => entry.label === reason);
-  return preset?.duration ?? null;
-}
+// `presetDurationFor` used to live here, deciding whether a preset reason's
+// paired length applied. It moved into core as `resolveCommandDuration`, which
+// now owns the whole order — a preset, then the stored default, then `custom`.
+// The local copy was deleted rather than left beside it: two functions
+// answering "which duration applies?" is exactly how the bot and its tests come
+// to disagree about it.
 
 bindEvents(client, guardedDispatch, {
   messageCache,
@@ -367,6 +375,7 @@ bindEvents(client, guardedDispatch, {
     commandName,
     targetId,
     numbers,
+    strings,
     reason,
     reply
   }) => {
@@ -410,20 +419,21 @@ bindEvents(client, guardedDispatch, {
     autoDeleteSeconds = config.autoDeleteResponseSeconds;
 
     // 3. The actor must hold a tier that outranks the command's requirement, or
-    //    one of the roles the operator attached to this specific command.
-    //    An unmapped guild is not a lockout: the owner tier is automatic.
+    //    be named by one of this command's own allow-lists — a role, or the
+    //    member by hand. An unmapped guild is not a lockout: the owner tier is
+    //    automatic, so the person who invited the bot can always undo anything.
     const tiers = (await database.loadTierRoles(guildId)) ?? EMPTY_TIER_ROLES;
-    const outcome = check(roleCarrierOf(roleIds, { isGuildOwner, isAdministrator }), tiers, config.allowedLevel);
-    const viaAllowedRole = roleIds.some(id => config.allowedRoleIds.includes(id));
-    if (!outcome.allowed && !viaAllowedRole) {
+    const carrier = roleCarrierOf(roleIds, { isGuildOwner, isAdministrator });
+    const outcome = check(carrier, tiers, config.allowedLevel);
+    if (!outcome.allowed && !isAdmittedByAllowList(config, { userId, roleIds })) {
       await reject("صلاحيتك لا تسمح بهذا الإجراء.", outcome.reason);
       return;
     }
 
-    // 4. The role and channel scopes, applied after the tier check so a member
-    //    without standing is told that, rather than being handed a hint about
-    //    which channels the command is restricted to.
-    const scope = assessCommandScope(config, { roleIds, channelId });
+    // 4. The member, role and channel scopes, applied after the tier check so a
+    //    member without standing is told that, rather than being handed a hint
+    //    about which channels the command is restricted to.
+    const scope = assessCommandScope(config, { userId, roleIds, channelId });
     if (!scope.allowed) {
       await reject(scopeReasonMessages[scope.reason], scope.reason);
       return;
@@ -449,6 +459,20 @@ bindEvents(client, guardedDispatch, {
       return;
     }
 
+    // The preset list can be made exhaustive, which is how an operator gets a
+    // clean, countable set of reasons without Discord's own choice list — whose
+    // entries are frozen at registration and so could never follow a setting.
+    // Checked here rather than at Discord's end for the same reason `required`
+    // is: the switch has to be able to go back off.
+    if (!config.allowCustomReason && config.presetReasons.length > 0) {
+      const known = config.presetReasons.some(preset => preset.label === trimmedReason);
+      if (!known) {
+        const offered = config.presetReasons.map(preset => preset.label).slice(0, 10).join("، ");
+        await reject(`هذا الأمر يقبل أسباباً محددة فقط: ${offered}`, "REASON_NOT_ALLOWED");
+        return;
+      }
+    }
+
     /* ---------------- Informational ---------------- */
     // `/al-status` changes nothing, so it is answered here rather than through
     // the success log: recording a read-only check as a command success would
@@ -461,6 +485,93 @@ bindEvents(client, guardedDispatch, {
       await reply(`AL AI متصل. رتبتك: ${tierLabel}. أحداث آخر دقيقة: ${stats.eventsLastMinute}/${stats.ceiling}.`, {
         autoDeleteSeconds
       });
+      return;
+    }
+
+    /**
+     * Which commands this member may actually run right now.
+     *
+     * Evaluated against the same three gates the dispatch above applies — the
+     * switch, the tier or allow-list, and the scopes — rather than against a
+     * stored summary. A list built from anything else would eventually tell a
+     * member they may run something the bot then refuses, which is the exact
+     * "saved but not honoured" defect this project treats as its worst kind.
+     *
+     * The tier roles and the flags are read once here, not once per command.
+     */
+    const runnableFor = async (configured: Map<string, Partial<CommandConfig>>) =>
+      commandRegistry.filter(entry => {
+        const entryConfig = normaliseCommandConfig(entry, configured.get(entry.name));
+        if (!entryConfig.enabled) return false;
+        if (!check(carrier, tiers, entryConfig.allowedLevel).allowed && !isAdmittedByAllowList(entryConfig, { userId, roleIds })) {
+          return false;
+        }
+        return assessCommandScope(entryConfig, { userId, roleIds, channelId }).allowed;
+      });
+
+    // `/help` is the catalogue and `/commands` is the shortlist. Keeping them as
+    // two commands rather than one with a switch is deliberate: Discord's own
+    // command list is the first thing a new member opens, and it should answer
+    // "what can I do here" without an argument.
+    if (commandName === "help" || commandName === "commands") {
+      const configured = await database.loadCommandFlags(guildId).catch(() => new Map());
+      const listed = commandName === "help" ? [...commandRegistry] : await runnableFor(configured);
+
+      if (listed.length === 0) {
+        await reply("لا يوجد أي أمر متاح لك في هذا السيرفر حالياً.", { autoDeleteSeconds });
+        return;
+      }
+
+      const sections = commandCategories
+        .map(category => {
+          const inSection = listed.filter(entry => entry.category === category);
+          if (inSection.length === 0) return null;
+          const lines = inSection.map(entry => {
+            const permission = entry.requiredPermission ? ` — يتطلب: ${discordPermissionLabels[entry.requiredPermission] ?? entry.requiredPermission}` : "";
+            return `\`/${entry.name}\` — ${entry.description}${commandName === "help" ? permission : ""}`;
+          });
+          return `**${commandCategoryLabels[category]}**\n${lines.join("\n")}`;
+        })
+        .filter((section): section is string => section !== null);
+
+      const heading =
+        commandName === "help"
+          ? `أوامر AL AI (${listed.length}) — يُنفَّذ منها ما تسمح به صلاحيتك وإعدادات السيرفر:`
+          : `الأوامر المتاحة لك الآن (${listed.length}):`;
+      await reply(`${heading}\n\n${sections.join("\n\n")}`.slice(0, 1900), { autoDeleteSeconds });
+      return;
+    }
+
+    // `/settings` and `/dashboard` hand back a link rather than re-implementing
+    // a screen: every panel route re-checks its own authorization, so a link is
+    // safe to give to anyone the command's own gate already admitted.
+    if (commandName === "settings" || commandName === "dashboard") {
+      if (!dashboardUrl) {
+        await reply("لم يُضبط عنوان اللوحة بعد. اطلب من مسؤول البوت ضبط DASHBOARD_URL.", { autoDeleteSeconds });
+        return;
+      }
+      const base = dashboardUrl.replace(/\/$/, "");
+      const link = commandName === "settings" ? `${base}/guilds/${guildId}/commands` : base;
+      const label = commandName === "settings" ? "إعدادات أوامر هذا السيرفر" : "لوحة تحكم AL AI";
+      await reply(`${label}: ${link}`, { autoDeleteSeconds });
+      return;
+    }
+
+    // `/colors` answers from Discord every time rather than from a cache: a role
+    // colour is changed in Discord's own settings, and a cached palette would go
+    // on listing a colour the operator had already removed.
+    if (commandName === "colors") {
+      const colours = await readColourRoles(client, guildId);
+      if (colours === null) {
+        await reject("تعذّر قراءة رتب السيرفر من ديسكورد.", "ROLES_UNAVAILABLE");
+        return;
+      }
+      if (colours.length === 0) {
+        await reply("لا توجد رتب ملوّنة في هذا السيرفر.", { autoDeleteSeconds });
+        return;
+      }
+      const lines = colours.slice(0, 40).map(role => `\`#${role.color.toString(16).padStart(6, "0")}\` — ${role.name}`);
+      await reply(`ألوان السيرفر (${colours.length}):\n${lines.join("\n")}`.slice(0, 1900), { autoDeleteSeconds });
       return;
     }
 
@@ -557,20 +668,50 @@ bindEvents(client, guardedDispatch, {
       return;
     }
 
+    // `/delwarn` removes one record by the number `/warns` prints beside it.
+    // Like `/warn` and `/clearwarns` it is a record rather than a Discord
+    // mutation, so the gateway reports nothing and this handler writes the log
+    // entry itself — otherwise a deleted warning would leave no trace at all.
+    if (commandName === "delwarn") {
+      const index = numbers.index ?? 0;
+      const removedReason = await database.deleteWarningAt(guildId, targetId, index);
+      if (removedReason === null) {
+        // Not a failure worth a security signal: asking for a warning that is
+        // not there is a miscount, not an intrusion.
+        await succeed(`لا يوجد تحذير بالرقم ${index} على <@${targetId}>.`);
+        return;
+      }
+      await logEvent(
+        "moderation.delwarn",
+        { guildId, actorId: userId, data: { targetId, actorId: userId, reason: trimmedReason || "—", removed: index } },
+        runtime
+      ).catch(() => undefined);
+      const total = await database.countWarnings(guildId, targetId);
+      await succeed(`تم حذف التحذير رقم ${index} عن <@${targetId}> («${removedReason}»). المتبقي: ${total}.`);
+      return;
+    }
+
     // 6. Where a duration is not given, the guild's default applies — and a
     //    preset reason carries its own length, which is the more specific
-    //    instruction. A permanent fallback is not a duration: Discord has no
-    //    permanent timeout, so it is refused with an explanation rather than
-    //    silently turned into a minute.
+    //    instruction. `resolveCommandDuration` owns the order between the two, so
+    //    the bot and its tests cannot disagree about it. A permanent fallback is
+    //    not a duration: Discord has no permanent timeout, so it is refused with
+    //    an explanation rather than silently turned into a minute.
     let timeoutMinutes: number | undefined;
     if (commandName === "timeout") {
       if (numbers.minutes !== undefined) {
         timeoutMinutes = numbers.minutes;
       } else {
-        const chosen = presetDurationFor(config, trimmedReason) ?? config.defaultDuration;
-        const seconds = commandDurationSeconds(definition, chosen);
+        const seconds = commandDurationSeconds(definition, resolveCommandDuration(config, trimmedReason));
         if (seconds === null) {
-          await reject("حدّد مدة الإسكات بالدقائق، أو اضبط مدة افتراضية لهذا الأمر.", "MISSING_DURATION");
+          // Reached for both "دائم" and "مخصص" — neither supplies a length. The
+          // two are still worth distinguishing to the operator, because the fix
+          // differs: one wants a default, the other was asked for on purpose.
+          const asked =
+            config.defaultDuration === "custom"
+              ? "هذا الأمر مضبوط على مدة مخصّصة"
+              : "لم تُضبط مدة افتراضية لهذا الأمر";
+          await reject(`${asked}، فحدّد المدة بالدقائق عند الاستخدام.`, "MISSING_DURATION");
           return;
         }
         // Discord takes whole minutes; anything shorter is still a minute.
@@ -579,11 +720,16 @@ bindEvents(client, guardedDispatch, {
     }
 
     // 7. Apply the Discord mutation. The gateway logs it; we only report back.
+    //    `/setnick` follows the same rule by a different route: the gateway
+    //    reports the nickname change itself, as `member.nickname-change`.
     const applied = await applyModeration(client, {
-      kind: commandName as "ban" | "unban" | "kick" | "timeout",
+      kind: commandName as "ban" | "unban" | "kick" | "timeout" | "untimeout" | "setnick",
       guildId,
       targetId,
       reason: trimmedReason,
+      // An absent name means "clear it", which is what `/setnick` with no
+      // nickname asks for — Discord takes `null` for "remove", never `""`.
+      ...(commandName === "setnick" ? { nickname: strings.nickname?.trim() || null } : {}),
       ...(timeoutMinutes !== undefined ? { minutes: timeoutMinutes } : {}),
       // `deleteMessageDays` is the operator's purge setting, converted to the
       // seconds Discord actually accepts. Ignored for commands without purge.

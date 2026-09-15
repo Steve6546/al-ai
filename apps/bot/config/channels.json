@@ -11,7 +11,7 @@
     {
       "id": "moderation-log",
       "label": "الإشراف",
-      "subCategories": ["moderation.ban", "moderation.unban", "moderation.kick", "moderation.timeout", "moderation.warn", "moderation.clearwarns"],
+      "subCategories": ["moderation.ban", "moderation.unban", "moderation.kick", "moderation.timeout", "moderation.untimeout", "moderation.warn", "moderation.clearwarns", "moderation.delwarn"],
       "required": false,
       "note": "يشمل أحداث الإشراف الحساسة المحصورة بالمديرين."
     },
