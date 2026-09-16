@@ -38,6 +38,9 @@
 - **مراجع التتبّع لا تُحفظ** ⇒ تحقّق بـ`git ls-remote origin refs/heads/main` **فقط**، واكتب المرجع يدوياً **آخر
   شيء**. **الدفع:** `GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true timeout 150 git push origin main`؛ **⛔
   `gh auth setup-git` يخرج 0 وهو فاشل**؛ **`git commit -F`** بمسار `C:/…` لا `/c/…`.
+- **⚠️ المرجع اليدوي يُقلَّم بأي أمر git لاحق** ⇒ اكتبه **بعد آخر أمر**، و**أعِد إنشاء المجلد**
+  (`mkdir -p .git/refs/remotes/origin`) وإلا فشل التوجيه بـ`No such file or directory`.
+  **و`[gone]` تعني «المرجع مفقود» لا «الفرع محذوف»** — رآها هذا المشروع **مع دفع ناجح في اللحظة نفسها**.
 
 ## Discord API
 - **لا `@me` في مسار عضو السيرفر** (GET ⇒ 400/403): `/users/@me` ثم `/guilds/{id}/members/{botUserId}`. الاستثناء
