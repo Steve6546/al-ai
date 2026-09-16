@@ -128,7 +128,12 @@ const commandListFields = [
   "deniedUserIds",
   "allowedChannelIds",
   "deniedChannelIds",
-  "presetReasons"
+  "presetReasons",
+  // The alias list is iterated to render the shortcut chips, so a server that
+  // predates it would hand the screen `undefined` and take the tree down —
+  // the same failure the rest of this list exists to convert into a readable
+  // message.
+  "aliases"
 ] as const;
 
 function assertCommandShape(commands: CommandFlag[]) {

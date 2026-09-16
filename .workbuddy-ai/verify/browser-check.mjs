@@ -542,6 +542,177 @@ try {
   );
   check("the window still does not scroll", await evaluate(`document.scrollingElement.scrollHeight - document.scrollingElement.clientHeight`), 0);
 
+  /* ---- 5b. the six scope selectors: closed, and opening one moves nothing ---- */
+  /*
+   * The rebuild's claim is geometric. Six always-open checkbox lists made the
+   * card taller than the screen, so the operator scrolled past four of them to
+   * reach the fifth; six closed selectors do not. That is a measurement, so it
+   * is measured here — jsdom has no layout engine and reports zero for every
+   * rectangle, and a class name only says what the markup intended.
+   *
+   * The card is re-expanded first: the empty-section check above filtered
+   * `/timeout` out of the list, which unmounted it and reset its open state.
+   */
+  await evaluate(`(() => {
+    const trigger = document.querySelector('[aria-label="إعدادات timeout"]');
+    trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 }));
+    trigger.click();
+    return true;
+  })()`);
+  await sleep(300);
+
+  const SCOPE_LABELS = [
+    "الرتب المسموحة",
+    "الرتب الممنوعة",
+    "الأشخاص المصرحين",
+    "الأشخاص الممنوعين",
+    "القنوات المسموحة",
+    "القنوات الممنوعة"
+  ];
+
+  const scopeClosed = await evaluate(`(() => {
+    const labels = ${JSON.stringify(SCOPE_LABELS)};
+    const found = labels.map(label => document.querySelector('[aria-label="' + label + '"]'));
+    return {
+      count: found.filter(Boolean).length,
+      expanded: found.map(el => el && el.getAttribute('aria-expanded')),
+      panels: document.querySelectorAll('[role="dialog"]').length,
+      summaries: found.map(el => el && el.textContent.trim())
+    };
+  })()`);
+  check("all six scope selectors are on the card", scopeClosed.count, 6);
+  check("and every one of them starts closed", scopeClosed.expanded, value => value.every(entry => entry === "false"));
+  check("so no panel is in the document yet", scopeClosed.panels, 0);
+  check(
+    "each trigger states what its empty selection means",
+    scopeClosed.summaries,
+    // Three allow-lists read "everyone may", three deny-lists read "nobody is
+    // excluded". "Nothing" would mean the opposite of the first three.
+    value => JSON.stringify(value) === JSON.stringify(["الكل مسموح", "بدون", "الكل مسموح", "بدون", "الكل مسموح", "بدون"])
+  );
+
+  const beforeOpen = await evaluate(`(() => {
+    const main = document.querySelector('main');
+    const board = document.querySelector('nav[aria-label="أقسام الأوامر"]').parentElement;
+    return {
+      mainScrollHeight: main.scrollHeight,
+      boardHeight: Math.round(board.getBoundingClientRect().height)
+    };
+  })()`);
+
+  await evaluate(`(() => {
+    const trigger = document.querySelector('[aria-label="الرتب المسموحة"]');
+    trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 }));
+    trigger.click();
+    return true;
+  })()`);
+  await sleep(300);
+
+  const opened = await evaluate(`(() => {
+    const trigger = document.querySelector('[aria-label="الرتب المسموحة"]');
+    const panel = document.querySelector('[role="dialog"][aria-label="الرتب المسموحة"]');
+    if (!panel) return { present: false };
+    const list = panel.querySelector('div.max-h-56');
+    const rect = panel.getBoundingClientRect();
+    const main = document.querySelector('main');
+    const board = document.querySelector('nav[aria-label="أقسام الأوامر"]').parentElement;
+    return {
+      present: true,
+      panels: document.querySelectorAll('[role="dialog"]').length,
+      triggerExpanded: trigger.getAttribute('aria-expanded'),
+      triggerWidth: Math.round(trigger.getBoundingClientRect().width),
+      panelWidth: Math.round(rect.width),
+      panelTop: Math.round(rect.top),
+      rows: panel.querySelectorAll('button[role="checkbox"]').length,
+      listScrolls: list ? list.scrollHeight > list.clientHeight : null,
+      listMaxHeight: list ? getComputedStyle(list).maxHeight : null,
+      boardHeight: Math.round(board.getBoundingClientRect().height),
+      mainScrollHeight: main.scrollHeight
+    };
+  })()`);
+
+  check("clicking a selector opens a panel", opened.present, true);
+  check("exactly one panel, and it is the one that was clicked", opened.panels, 1);
+  check("the trigger reports itself expanded", opened.triggerExpanded, "true");
+  // The panel is sized to its trigger so it lines up with the column it belongs
+  // to. `min-w` alone would not: the two columns are different widths.
+  check("the panel is as wide as its trigger", opened.panelWidth, value => Math.abs(value - opened.triggerWidth) <= 2);
+  check("the panel is on screen", opened.panelTop, value => value > 0 && value < 900);
+  // `> 0` before judging anything: "the list is capped" is trivially true on a
+  // list that rendered no rows at all.
+  check("the panel offers every role", opened.rows, 30);
+  check("the list scrolls inside its cap", opened.listScrolls, true);
+  check("the cap is a real max-height", opened.listMaxHeight, "224px");
+  // The claim, measured: a portalled panel is out of the document flow, so
+  // opening it cannot push the cards below it down.
+  check("opening a selector does not lengthen the board", opened.boardHeight - beforeOpen.boardHeight, value => value <= 2);
+  check("and does not lengthen the document either", opened.mainScrollHeight - beforeOpen.mainScrollHeight, value => value <= 2);
+  check("the window still does not scroll", await evaluate(`document.scrollingElement.scrollHeight - document.scrollingElement.clientHeight`), 0);
+
+  /*
+   * The "customised" badge, in both directions.
+   *
+   * It marks a command whose settings differ from what shipped, so on a guild
+   * that has never been touched it must mark almost nothing — a badge on every
+   * card is noise, and noise is how a real signal gets ignored. `/warn` is the
+   * one exception and deliberately so: "reason required" is its shipped default,
+   * because a warning with no reason is not worth recording. Asserting both the
+   * absence and the presence is what stops the badge from quietly becoming
+   * always-on or never-on.
+   */
+  const markedCustomised = await evaluate(`(() => {
+    const board = document.querySelector('nav[aria-label="أقسام الأوامر"]').parentElement;
+    const marked = [];
+    for (const name of board.querySelectorAll('p[dir="ltr"]')) {
+      const row = name.parentElement;
+      if (row && [...row.children].some(el => el.textContent.trim() === 'مخصّص')) {
+        marked.push(name.textContent.trim());
+      }
+    }
+    return marked;
+  })()`);
+  check("a command with nothing configured is not marked customised", markedCustomised.includes("/help"), false);
+  check("a command whose shipped default is non-default is marked", markedCustomised, value => value.length > 0 && value.length < 5);
+
+  await shoot("commands-scope-open");
+
+  /* Ticking an entry has to reach the draft, not just the checkbox. */
+  const ticked = await evaluate(`(() => {
+    const panel = document.querySelector('[role="dialog"][aria-label="الرتب المسموحة"]');
+    const row = panel.querySelector('label');
+    const name = row.querySelector('span.truncate').textContent.trim();
+    row.querySelector('button[role="checkbox"]').click();
+    return name;
+  })()`);
+  await sleep(300);
+
+  const afterTick = await evaluate(`(() => {
+    const trigger = document.querySelector('[aria-label="الرتب المسموحة"]');
+    return {
+      summary: trigger.textContent.trim(),
+      saveBar: document.body.textContent.includes('تغيير غير محفوظ')
+    };
+  })()`);
+  check("ticking a role names it on the trigger", afterTick.summary.startsWith(ticked), true);
+  check("…and marks the change unsaved rather than writing it", afterTick.saveBar, true);
+
+  await shoot("commands-scope-ticked");
+
+  /* Put the draft back so the screenshots after this one show the default state. */
+  await evaluate(`(() => {
+    const panel = document.querySelector('[role="dialog"][aria-label="الرتب المسموحة"]');
+    const clear = [...panel.querySelectorAll('button')].find(button => button.textContent.includes('مسح الاختيار'));
+    if (clear) clear.click();
+    return true;
+  })()`);
+  await sleep(200);
+  await evaluate(`(() => {
+    const cancel = [...document.querySelectorAll('button')].find(button => /إلغاء/.test(button.textContent));
+    if (cancel) cancel.click();
+    return true;
+  })()`);
+  await sleep(200);
+
   await shoot("commands-screen");
 } finally {
   socket.close();

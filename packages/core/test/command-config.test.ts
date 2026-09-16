@@ -12,9 +12,12 @@ import {
   commandFlagsFor,
   commandRegistry,
   cooldownKey,
+  buildAliasMap,
   defaultCommandConfig,
   durationSeconds,
   isAdmittedByAllowList,
+  isUsableAlias,
+  MAX_ALIASES_PER_COMMAND,
   MAX_AUTO_DELETE_SECONDS,
   MAX_COOLDOWN_SECONDS,
   MAX_PRESET_REASONS,
@@ -552,4 +555,153 @@ test("a stored configuration is joined to the registry without gaps", () => {
   assert.equal(ban.cooldownSeconds, 45);
   assert.deepEqual(ban.deniedRoleIds, ["999888777666555444"]);
   assert.equal(ban.allowedLevel, "admin", "an untouched field keeps the registry default");
+});
+
+/* ------------------------------------------------------------------ *
+ * Aliases
+ *
+ * Discord has no alias mechanism whatsoever. `/باند` exists only because a
+ * command *named* `باند` was published. That makes the alias charset the whole
+ * contract: one name Discord rejects fails the entire registration request and
+ * takes every well-formed command down with it.
+ * ------------------------------------------------------------------ */
+
+test("the alias charset accepts Arabic and Thai names", () => {
+  // The Arabic case is the reason this is not `\w`: an alias an Arabic-speaking
+  // operator types is the normal case here, not the exotic one.
+  assert.equal(isUsableAlias("باند"), true);
+  assert.equal(isUsableAlias("طرد"), true);
+  assert.equal(isUsableAlias("ban"), true);
+  assert.equal(isUsableAlias("time-out"), true);
+  assert.equal(isUsableAlias("time_out"), true);
+  assert.equal(isUsableAlias("x".repeat(32)), true, "32 is Discord's ceiling, inclusive");
+});
+
+test("the charset survives characters that are not letters at all", () => {
+  // U+0E31 is a Thai combining vowel sign, and it is *not* `\p{L}` — so a
+  // `\p{L}`-only class would reject a legal Thai name. The script classes are
+  // load-bearing, not decoration.
+  assert.equal(isUsableAlias("\u0e31"), true, "a Thai combining mark is not \\p{L} but is still legal");
+  assert.equal(isUsableAlias("\u093f"), true, "so is a Devanagari vowel sign");
+  assert.equal(/^\p{L}$/u.test("\u0e31"), false, "and \\p{L} alone really would have rejected it");
+});
+
+test("the alias charset is spelled the way JavaScript can parse it", () => {
+  // Discord documents the pattern as `\p{Devanagari}`, which is Rust's regex
+  // crate. A bare script name is a **syntax error** in an ECMAScript regex: it
+  // throws while the module is loading, so every importer dies with it and no
+  // assertion in this file ever gets the chance to run. ECMAScript needs the
+  // explicit `Script=` prefix.
+  //
+  // Reaching this line at all proves the module parsed, which is precisely the
+  // guarantee that was missing: the whole suite failed at import, not on an
+  // expectation.
+  assert.equal(isUsableAlias("ก"), true);
+  assert.equal(isUsableAlias("क"), true);
+});
+
+test("the alias charset refuses what Discord refuses", () => {
+  assert.equal(isUsableAlias("BAN"), false, "an ASCII uppercase letter is rejected outright");
+  assert.equal(isUsableAlias("a b"), false, "no spaces");
+  assert.equal(isUsableAlias("x".repeat(33)), false, "33 characters is one too many");
+  assert.equal(isUsableAlias(""), false);
+  assert.equal(isUsableAlias("  "), false, "whitespace is not a name");
+  assert.equal(isUsableAlias("b🎉"), false, "an emoji is not in the charset");
+  assert.equal(isUsableAlias(42), false);
+  assert.equal(isUsableAlias(null), false);
+  assert.equal(isUsableAlias(undefined), false);
+});
+
+test("aliases default to none and are normalised on the way in", () => {
+  const ban = requireCommand("ban");
+  assert.deepEqual(defaultCommandConfig(ban).aliases, [], "no aliases unless asked for");
+
+  const config = normaliseCommandConfig(ban, {
+    aliases: ["  باند  ", "BAN", "باند", "", "ban-2", 42]
+  });
+  assert.deepEqual(config.aliases, ["باند", "ban-2"], "trimmed, validated, deduplicated");
+});
+
+test("an alias that shadows a real command is dropped rather than kept", () => {
+  // `kick` is a published command. An alias `kick` on `/ban` could never fire,
+  // so storing it would be a setting that silently does nothing.
+  const config = normaliseCommandConfig(requireCommand("ban"), { aliases: ["kick", "باند"] });
+  assert.deepEqual(config.aliases, ["باند"], "the shadowing alias is gone, the usable one stays");
+});
+
+test("aliases are capped at the declared maximum", () => {
+  const many = Array.from({ length: MAX_ALIASES_PER_COMMAND + 4 }, (_, index) => `a${index}`);
+  const config = normaliseCommandConfig(requireCommand("ban"), { aliases: many });
+  assert.equal(config.aliases.length, MAX_ALIASES_PER_COMMAND);
+  assert.deepEqual(config.aliases, many.slice(0, MAX_ALIASES_PER_COMMAND), "the first ones win");
+});
+
+test("a non-array aliases value becomes an empty list rather than throwing", () => {
+  for (const value of [null, undefined, "باند", 7, {}]) {
+    assert.deepEqual(normaliseCommandConfig(requireCommand("ban"), { aliases: value }).aliases, []);
+  }
+});
+
+test("the alias map resolves an alias to its canonical command", () => {
+  const { map, dropped } = buildAliasMap([
+    { name: "ban", aliases: ["باند", "حظر"] },
+    { name: "kick", aliases: ["طرد"] }
+  ]);
+  assert.equal(map.get("باند"), "ban");
+  assert.equal(map.get("حظر"), "ban");
+  assert.equal(map.get("طرد"), "kick");
+  assert.equal(map.has("ban"), false, "a real command is not an alias of itself");
+  assert.deepEqual(dropped, []);
+});
+
+test("an alias that shadows a published command is reported, not silently dropped", () => {
+  const { map, dropped } = buildAliasMap([{ name: "ban", aliases: ["kick"] }]);
+  assert.equal(map.size, 0);
+  assert.deepEqual(dropped, [{ alias: "kick", command: "ban", reason: "shadows-command" }]);
+});
+
+test("the first command to claim an alias keeps it, and the loser is reported", () => {
+  const { map, dropped } = buildAliasMap([
+    { name: "ban", aliases: ["حظر"] },
+    { name: "kick", aliases: ["حظر"] }
+  ]);
+  assert.equal(map.get("حظر"), "ban", "first claim wins");
+  assert.deepEqual(dropped, [{ alias: "حظر", command: "kick", reason: "duplicate" }]);
+});
+
+test("a command with no aliases contributes nothing to the map", () => {
+  const { map, dropped } = buildAliasMap([{ name: "ban" }, { name: "kick", aliases: [] }]);
+  assert.equal(map.size, 0);
+  assert.deepEqual(dropped, []);
+});
+
+/* ------------------------------------------------------------------ *
+ * Delete-on-leave
+ * ------------------------------------------------------------------ */
+
+test("delete-on-leave is off unless asked for", () => {
+  const ban = requireCommand("ban");
+  assert.equal(defaultCommandConfig(ban).deleteResponseOnLeave, false, "off by default");
+  assert.equal(normaliseCommandConfig(ban, {}).deleteResponseOnLeave, false);
+  assert.equal(normaliseCommandConfig(ban, { deleteResponseOnLeave: true }).deleteResponseOnLeave, true);
+});
+
+test("delete-on-leave is refused on a command that has no member to leave", () => {
+  // `/clear` acts on a channel. There is no member whose departure could ever
+  // trigger the deletion, so honouring the flag would be a switch that does
+  // nothing — the exact defect normalisation exists to prevent.
+  const clear = requireCommand("clear");
+  assert.equal(clear.target, "none");
+  assert.equal(normaliseCommandConfig(clear, { deleteResponseOnLeave: true }).deleteResponseOnLeave, false);
+});
+
+test("delete-on-leave survives only on member-targeted commands", () => {
+  for (const definition of commandRegistry) {
+    const config = normaliseCommandConfig(definition, { deleteResponseOnLeave: true });
+    assert.equal(
+      config.deleteResponseOnLeave,
+      definition.target === "member",
+      `${definition.name} (target: ${definition.target})`
+    );
+  }
 });

@@ -15,7 +15,7 @@ import { Toaster } from "../src/components/toaster";
 import { AuditView } from "../src/views/audit";
 import { DashboardView } from "../src/views/dashboard";
 import { SecurityView } from "../src/views/security";
-import { CommandsBoard, CommandsView, PresetReasons, ScopeList, UserScopeList } from "../src/views/settings/commands";
+import { CommandsBoard, CommandsView, MemberScopeSelector, PresetReasons, ScopeSelector } from "../src/views/settings/commands";
 import { CustomizationView, HierarchyWarning } from "../src/views/settings/customization";
 import { BotLivePreview } from "../src/views/settings/bot-preview";
 import { LogsView } from "../src/views/settings/logs";
@@ -307,29 +307,88 @@ test("no tier selector is offered anywhere on the board", () => {
   }
 });
 
-test("the role and channel scope pickers render every entry", () => {
-  const roles = renderToString(
-    createElement(ScopeList, {
+/**
+ * The scope selectors are closed popovers, and these assert exactly that.
+ *
+ * Asserted on the component rather than on the board on purpose: a card's body
+ * is not mounted until the card is expanded, so a board-level assertion that
+ * "no panel is rendered" would pass because nothing is rendered — a check that
+ * succeeds on an empty set is not a check. The board-level version of this lives
+ * in `mount.test.tsx`, where the card can actually be opened.
+ */
+test("a closed scope selector shows its meaning and none of its panel", () => {
+  const html = renderToString(
+    createElement(ScopeSelector, {
       label: "الرتب المسموحة",
+      emptyLabel: "الكل مسموح",
       hint: "تلميح",
       items: boardProps.roles.map(role => ({ id: role.id, name: role.name, color: role.color })),
-      selected: ["111111111111111111"],
-      emptyLabel: "لا توجد رتب",
+      selected: [],
+      noneLabel: "لا توجد رتب",
+      noun: "رتب",
       onChange: () => {}
     })
   ).replace(/<!-- -->/g, "");
 
-  assert.match(roles, /الرتب المسموحة/);
-  assert.match(roles, /مشرف/);
-  assert.match(roles, /مساعد/);
-  assert.match(roles, /data-state="checked"/, "a selected role renders as ticked");
+  assert.match(html, /aria-label="الرتب المسموحة"/, "the trigger is labelled");
+  // An empty allow-list means "everyone", which is a sentence about behaviour.
+  // "لا شيء" would read as a restriction, which is the opposite of the truth.
+  assert.match(html, /الكل مسموح/, "an empty allow-list says who may run the command");
+  assert.doesNotMatch(html, /مسح الاختيار/, "the panel body is not in the document while it is shut");
+  assert.doesNotMatch(html, /مشرف/, "nor are the entries it would offer");
 });
 
-test("the scope picker says so when there is nothing to pick", () => {
+test("a closed selector summarises what is selected, by name or by count", () => {
+  const single = renderToString(
+    createElement(ScopeSelector, {
+      label: "الرتب المسموحة",
+      emptyLabel: "الكل مسموح",
+      hint: "تلميح",
+      items: boardProps.roles.map(role => ({ id: role.id, name: role.name, color: role.color })),
+      selected: ["111111111111111111"],
+      noneLabel: "لا توجد رتب",
+      noun: "رتب",
+      onChange: () => {}
+    })
+  ).replace(/<!-- -->/g, "");
+
+  // One entry is named. A count of "1" would make the operator open the panel to
+  // find out which role they had already chosen.
+  assert.match(single, /مشرف/, "a single selection is shown by name");
+
+  const many = renderToString(
+    createElement(ScopeSelector, {
+      label: "القنوات المسموحة",
+      emptyLabel: "الكل مسموح",
+      hint: "تلميح",
+      items: [{ id: "1", name: "عام" }, { id: "2", name: "إعلانات" }],
+      selected: ["1", "2"],
+      noneLabel: "لا توجد قنوات",
+      noun: "قنوات",
+      onChange: () => {}
+    })
+  ).replace(/<!-- -->/g, "");
+
+  assert.match(many, /2 قنوات/, "more than one is counted rather than listed");
+});
+
+test("the member selector names what it holds without opening", () => {
+  const memberById = new Map([
+    ["111111111111111111", { id: "111111111111111111", name: "أحمد", avatarUrl: null }]
+  ]);
   const html = renderToString(
-    createElement(ScopeList, { label: "القنوات", hint: "تلميح", items: [], selected: [], emptyLabel: "لا توجد قنوات", onChange: () => {} })
-  );
-  assert.match(html, /لا توجد قنوات/);
+    createElement(MemberScopeSelector, {
+      label: "الأشخاص المصرحين",
+      emptyLabel: "الكل مسموح",
+      hint: "تلميح",
+      selected: ["111111111111111111"],
+      memberById,
+      onChange: () => {}
+    })
+  ).replace(/<!-- -->/g, "");
+
+  assert.match(html, /أحمد/, "the resolved name is on the trigger, not hidden in the panel");
+  assert.match(html, /aria-label="الأشخاص المصرحين"/);
 });
 
 test("preset reasons offer a paired duration only where one can be applied", () => {
@@ -367,15 +426,16 @@ test("an empty preset list explains that the reason is typed by hand", () => {
   assert.match(html, /لا توجد أسباب جاهزة/);
 });
 
-test("the member scope resolves an id to a name, and falls back to the id", () => {
-  // A member who has left has no name to show, and the row must still render:
+test("an unresolvable member degrades to the raw id rather than vanishing", () => {
+  // A member who has left has no name to show, and the trigger must still render:
   // the scope is stored in our own database and does not depend on Discord.
   const memberById = new Map([
     ["111111111111111111", { id: "111111111111111111", name: "أحمد", avatarUrl: null }]
   ]);
   const html = renderToString(
-    createElement(UserScopeList, {
-      label: "الأعضاء المسموح لهم",
+    createElement(MemberScopeSelector, {
+      label: "الأشخاص المصرحين",
+      emptyLabel: "الكل مسموح",
       hint: "تلميح",
       selected: ["111111111111111111", "999888777666555444"],
       memberById,
@@ -383,19 +443,13 @@ test("the member scope resolves an id to a name, and falls back to the id", () =
     })
   ).replace(/<!-- -->/g, "");
 
-  assert.match(html, /أحمد/, "a resolvable member is shown by name");
-  assert.match(html, /999888777666555444/, "an unresolvable one degrades to its id rather than vanishing");
-  assert.match(html, /aria-label="إزالة أحمد"/, "each entry can be removed");
-  assert.match(html, /معرّف العضو/, "the operator is told what to paste");
-});
-
-test("the member scope accepts a mention as well as a bare id", () => {
-  // The operator copies a mention out of Discord far more often than an id, so
-  // both have to be accepted — and the stored value is the snowflake either way.
-  const html = renderToString(
-    createElement(UserScopeList, { label: "الأعضاء الممنوعون", hint: "تلميح", selected: [], memberById: new Map(), onChange: () => {} })
-  );
-  assert.match(html, /dir="ltr"/, "the id field is left-to-right so a pasted id is readable");
+  // Two entries, so the trigger counts them rather than naming one. The count is
+  // what tells the operator the field is customised without opening it.
+  assert.match(html, /2 أعضاء/, "the trigger counts what it holds");
+  // The rows themselves — including the removable one and the id field — live in
+  // the panel, so they are deliberately absent here. `mount.test.tsx` opens it
+  // and asserts them there, which is the only place they exist.
+  assert.doesNotMatch(html, /aria-label="إزالة أحمد"/, "the removable row is in the panel, not on the page");
 });
 
 /* ------------------------------------------------------------------ *

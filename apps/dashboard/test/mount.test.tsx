@@ -3,7 +3,7 @@
 import { dom } from "./dom-env.js";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createElement, StrictMode, type ReactElement } from "react";
+import { act, createElement, StrictMode, type ReactElement } from "react";
 import { App } from "../src/App";
 import { ErrorBoundary } from "../src/components/error-boundary";
 import { TooltipProvider } from "../src/components/ui/tooltip";
@@ -94,7 +94,14 @@ const payloads: [RegExp, unknown][] = [
     snapshot: null
   }],
   [/^\/api\/guilds\/[^/]+\/commands$/, {
-    categories: [{ id: "penalties", label: "العقوبات", description: "" }],
+    categories: [
+      { id: "penalties", label: "العقوبات", description: "" },
+      // `/clear` lives here. Without this entry the board never renders it —
+      // `CommandsBoard` walks the sections it was given — so the "absent where it
+      // should be absent" half of the leave-retraction test would have been
+      // asserting on a command that was not on the page at all.
+      { id: "channel-management", label: "إدارة القنوات", description: "" }
+    ],
     /**
      * At least one real command, in the full `CommandFlag` shape.
      *
@@ -121,6 +128,13 @@ const payloads: [RegExp, unknown][] = [
       allowCustomReason: true,
       defaultDuration: "permanent",
       presetReasons: [],
+      // The two fields the alias work added. `aliases` is not decoration here:
+      // the client asserts it is an array before the screen is allowed to
+      // render, so a fixture without it makes the view answer with its error
+      // card — and this test then fails on a missing marker rather than on the
+      // contract it actually broke.
+      aliases: [],
+      deleteResponseOnLeave: false,
       category: "penalties",
       description: "حظر عضو من السيرفر.",
       minimumTier: "moderator",
@@ -130,6 +144,43 @@ const payloads: [RegExp, unknown][] = [
       supportsNotify: true,
       supportsDuration: false,
       requiredPermission: "BAN_MEMBERS"
+    }, {
+      /**
+       * A command that acts on a channel, not a member.
+       *
+       * Here so the leave-retraction control can be asserted in both
+       * directions: present on `/ban`, absent on `/clear`. Asserting only the
+       * present case would pass just as well if the control were rendered on
+       * every command, which is the defect core's normalisation exists to stop.
+       */
+      name: "clear",
+      enabled: true,
+      allowedLevel: "moderator",
+      dmOnAction: false,
+      deleteMessageDays: 0,
+      allowedRoleIds: [],
+      deniedRoleIds: [],
+      allowedChannelIds: [],
+      deniedChannelIds: [],
+      allowedUserIds: [],
+      deniedUserIds: [],
+      cooldownSeconds: 0,
+      autoDeleteResponseSeconds: 0,
+      requireReason: false,
+      allowCustomReason: true,
+      defaultDuration: "permanent",
+      presetReasons: [],
+      aliases: [],
+      deleteResponseOnLeave: false,
+      category: "channel-management",
+      description: "حذف رسائل من القناة.",
+      minimumTier: "moderator",
+      target: "none",
+      supportsReason: false,
+      supportsPurge: true,
+      supportsNotify: false,
+      supportsDuration: false,
+      requiredPermission: "MANAGE_MESSAGES"
     }],
     roles: [role],
     channels: [{ id: "2", name: "عام", type: "text" }],
@@ -189,10 +240,26 @@ function stubFetch() {
   };
 }
 
-/** Mounts the app at a route and returns the rendered markup once settled. */
-async function mount(path: string): Promise<{ html: string; errors: string[] }> {
+/**
+ * Mounts the app at a route and returns the rendered markup once settled.
+ *
+ * `interact` runs against the live document after the data has settled and
+ * before anything is read or unmounted. It exists because a portalled panel —
+ * every scope selector on the commands screen is one — is rendered into
+ * `document.body`, not into the container this function returns the markup of.
+ * Asserting on a popover therefore has to happen from inside the document while
+ * the tree is still mounted, which is exactly what this hook is for.
+ */
+async function mount(path: string): Promise<{ html: string; errors: string[]; result: undefined }>;
+async function mount<T>(
+  path: string,
+  interact: (document: Document) => T | Promise<T>
+): Promise<{ html: string; errors: string[]; result: T }>;
+async function mount<T = undefined>(
+  path: string,
+  interact?: (document: Document) => T | Promise<T>
+): Promise<{ html: string; errors: string[]; result: T | undefined }> {
   const { createRoot } = await import("react-dom/client");
-  const { act } = await import("react");
 
   dom.window.history.replaceState({}, "", path);
   const container = dom.window.document.createElement("div");
@@ -213,11 +280,20 @@ async function mount(path: string): Promise<{ html: string; errors: string[] }> 
     for (let i = 0; i < 6; i += 1) {
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 15)); });
     }
+    // Interaction happens here, while the tree is mounted and its portals exist.
+    // `act` wraps it so the state change it causes is flushed before the markup
+    // is read — without that the assertion reads the pre-click render.
+    let result: T | undefined;
+    if (interact) {
+      await act(async () => {
+        result = await interact(dom.window.document);
+      });
+    }
     // Read the markup *before* unmounting: unmounting clears the container, so
     // measuring afterwards reports an empty tree for every screen.
     const html = container.innerHTML;
     root.unmount();
-    return { html, errors };
+    return { html, errors, result };
   } finally {
     console.error = originalError;
     container.remove();
@@ -654,4 +730,206 @@ test("a locked role icon cannot be picked and is left out of the save", async ()
     customizationPayload.roleIcon = gate;
     container.remove();
   }
+});
+
+/* ------------------------------------------------------------------ *
+ * The commands screen's rebuilt card
+ *
+ * Everything here needs a mounted tree. The six scope selectors are portalled
+ * popovers, so their panels exist only after a real click, and a card's body is
+ * not mounted at all until the card is expanded — which is why the closed-state
+ * assertions in `render.test.tsx` are made on the components directly.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Opens a Radix trigger and waits for what it renders.
+ *
+ * Radix records the pointer type on `pointerdown` and toggles on `click`, so a
+ * bare `.click()` is not enough — this is the same two-step the dropdown tests
+ * above use.
+ *
+ * The `act` yield is not optional: React flushes the click's state change only
+ * when the enclosing `act` scope yields, so a query made in the same tick reads
+ * the tree as it was *before* the click. Without it the card looks like it never
+ * opened, and the failure reads as a missing control rather than as a missing
+ * await.
+ */
+async function openTrigger(element: Element) {
+  element.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
+  (element as HTMLElement).click();
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 20));
+  });
+}
+
+/** The open panel for one scope field. Portalled, so it is not in the container. */
+function panelFor(doc: Document, label: string): HTMLElement | null {
+  return doc.querySelector<HTMLElement>(`[role="dialog"][aria-label="${label}"]`);
+}
+
+/** Replaces an input's value the way React notices, then fires the event. */
+function typeInto(doc: Document, input: HTMLInputElement, value: string) {
+  const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")?.set;
+  setValue?.call(input, value);
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+}
+
+const SCOPE_LABELS = [
+  "الرتب المسموحة",
+  "الرتب الممنوعة",
+  "الأشخاص المصرحين",
+  "الأشخاص الممنوعين",
+  "القنوات المسموحة",
+  "القنوات الممنوعة"
+];
+
+/** Lets React flush a state change made inside an `interact` callback. */
+async function settle(ms = 20) {
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, ms));
+  });
+}
+
+test("the commands card opens into six closed scope selectors", async () => {
+  stubFetch();
+  const { result, errors } = await mount(`/dashboard/${GUILD_ID}/commands`, async doc => {
+    await openTrigger(doc.querySelector('[aria-label="إعدادات ban"]')!);
+    return {
+      fields: SCOPE_LABELS.map(label => {
+        const trigger = doc.querySelector<HTMLElement>(`[aria-label="${label}"]`);
+        return {
+          label,
+          present: Boolean(trigger),
+          summary: trigger?.textContent?.trim() ?? "",
+          expanded: trigger?.getAttribute("aria-expanded")
+        };
+      }),
+      openPanels: doc.querySelectorAll('[role="dialog"]').length
+    };
+  });
+
+  assert.deepEqual(fatal(errors), [], "the opened card produced no render error");
+
+  // Two columns of three, so every one of the six is accounted for.
+  assert.equal(result.fields.length, 6);
+  for (const field of result.fields) {
+    assert.ok(field.present, `${field.label} is rendered`);
+    assert.equal(field.expanded, "false", `${field.label} starts closed`);
+  }
+
+  // Three allow-lists read "everyone may", three deny-lists read "nobody is
+  // excluded". Neither reads "nothing", which would mean the opposite.
+  const summaries = result.fields.map(field => field.summary);
+  assert.deepEqual(
+    summaries,
+    ["الكل مسموح", "بدون", "الكل مسموح", "بدون", "الكل مسموح", "بدون"],
+    "each trigger carries what its empty selection means"
+  );
+
+  // The whole point of the rebuild: six selectors, not six open lists.
+  assert.equal(result.openPanels, 0, "no panel is in the document until one is asked for");
+});
+
+test("a scope selector opens into a list, and ticking an entry is a pending change", async () => {
+  stubFetch();
+  const { result, errors } = await mount(`/dashboard/${GUILD_ID}/commands`, async doc => {
+    await openTrigger(doc.querySelector('[aria-label="إعدادات ban"]')!);
+    const trigger = doc.querySelector<HTMLElement>('[aria-label="الرتب المسموحة"]')!;
+    await openTrigger(trigger);
+
+    const panel = panelFor(doc, "الرتب المسموحة");
+    const panelsOpened = doc.querySelectorAll('[role="dialog"]').length;
+
+    // The name is read off the row rather than hard-coded, so this asserts the
+    // wiring — panel to trigger — rather than restating the fixture.
+    // Scoped to the panel on purpose: a role name also appears in the app
+    // shell's own navigation, so a whole-document search finds furniture.
+    const rows = panel ? [...panel.querySelectorAll("label")] : [];
+    const first = rows[0];
+    const firstName = first?.querySelector("span.truncate")?.textContent?.trim() ?? "";
+    first?.querySelector<HTMLElement>('button[role="checkbox"]')?.click();
+    await settle();
+
+    return {
+      panelsOpened,
+      entries: rows.length,
+      firstName,
+      summaryAfter: trigger.textContent?.trim() ?? "",
+      saveBar: doc.body.textContent?.includes("تغيير غير محفوظ") ?? false
+    };
+  });
+
+  assert.deepEqual(fatal(errors), [], "opening and ticking produced no render error");
+
+  // `> 0` before judging anything: "the trigger names what was ticked" is
+  // trivially satisfiable by an empty string on a panel that rendered no rows.
+  assert.ok(result.entries > 0, "the panel really did render its entries");
+  assert.ok(result.firstName.length > 0, "and the first row carries a name");
+  assert.equal(result.panelsOpened, 1, "exactly one panel is open");
+  // The trigger's text is the name followed by the count badge, so it is
+  // asserted as "starts with the name" rather than as an exact match — the exact
+  // form would be restating the markup instead of the behaviour.
+  assert.ok(
+    result.summaryAfter.startsWith(result.firstName),
+    `the trigger names what was ticked (saw ${JSON.stringify(result.summaryAfter)})`
+  );
+  assert.match(result.summaryAfter, /1$/, "and counts it, so a customised field is visible while shut");
+  assert.ok(result.saveBar, "ticking a scope makes the change pending rather than saving it");
+});
+
+test("the shortcut field turns a typed alias into a chip, and refuses a published name", async () => {
+  stubFetch();
+  const { result, errors } = await mount(`/dashboard/${GUILD_ID}/commands`, async doc => {
+    await openTrigger(doc.querySelector('[aria-label="إعدادات ban"]')!);
+    const input = doc.querySelector<HTMLInputElement>("#alias-ban")!;
+
+    typeInto(doc, input, "باند");
+    await settle();
+    const addButton = [...doc.querySelectorAll("button")].find(button => button.textContent?.trim() === "إضافة");
+    addButton?.click();
+    await settle();
+
+    const afterAdd = {
+      chip: doc.body.textContent?.includes("/باند") ?? false,
+      saveBar: doc.body.textContent?.includes("تغيير غير محفوظ") ?? false
+    };
+
+    // A published command name can never work as an alias: Discord resolves the
+    // real command first, so it would be a shortcut that silently does nothing.
+    typeInto(doc, input, "kick");
+    await settle();
+    const problem = [...doc.querySelectorAll("p")]
+      .map(node => node.textContent ?? "")
+      .find(text => text.includes("اسم أمر منشور"));
+
+    return {
+      afterAdd,
+      problem: problem ?? null,
+      addDisabled: [...doc.querySelectorAll("button")].find(button => button.textContent?.trim() === "إضافة")?.disabled ?? null
+    };
+  });
+
+  assert.deepEqual(fatal(errors), [], "editing the shortcuts produced no render error");
+  assert.ok(result.afterAdd.chip, "the alias is shown as a chip once added");
+  assert.ok(result.afterAdd.saveBar, "and it is a pending change, not an instant write");
+  assert.ok(result.problem, "a name that collides with a published command is explained, not swallowed");
+  assert.equal(result.addDisabled, true, "and it cannot be added anyway");
+});
+
+test("delete-on-leave is offered only where a member can actually leave", async () => {
+  stubFetch();
+  const { result, errors } = await mount(`/dashboard/${GUILD_ID}/commands`, async doc => {
+    await openTrigger(doc.querySelector('[aria-label="إعدادات ban"]')!);
+    const onMemberCommand = Boolean(doc.querySelector("#retract-ban"));
+    await openTrigger(doc.querySelector('[aria-label="إعدادات clear"]')!);
+    return { onMemberCommand, onChannelCommand: Boolean(doc.querySelector("#retract-clear")) };
+  });
+
+  assert.deepEqual(fatal(errors), [], "no render error");
+
+  // Both directions. `/clear` acts on a channel, so there is no departure that
+  // could ever trigger the deletion — the control would be a switch that does
+  // nothing, which is the defect this screen exists to avoid.
+  assert.equal(result.onMemberCommand, true, "/ban acts on a member, so it offers the control");
+  assert.equal(result.onChannelCommand, false, "/clear does not, so it does not");
 });

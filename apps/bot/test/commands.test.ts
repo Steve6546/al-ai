@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { commandRegistry, defaultCommandConfig, normaliseCommandConfig, requireCommand } from "@al-ai/core";
+import { buildAliasMap, commandRegistry, defaultCommandConfig, normaliseCommandConfig, requireCommand } from "@al-ai/core";
 import {
+  buildAliasCommands,
   buildAllCommands,
   CLEAR_MAX_COUNT,
   CLEAR_MIN_COUNT,
@@ -356,4 +357,89 @@ test("every command can be configured without throwing", () => {
     assert.equal(config.name, definition.name);
     assert.equal(config.enabled, false);
   }
+});
+
+/* ------------------------------------------------------------------ *
+ * Alias registration
+ *
+ * Discord has no alias mechanism: `/باند` only exists once a command *named*
+ * `باند` has been registered. So an alias is a real command, and the only thing
+ * that makes it an alias is that it carries another command's options.
+ * ------------------------------------------------------------------ */
+
+test("an alias carries its canonical command's options verbatim", () => {
+  const alias = buildAliasCommands(new Map([["باند", "ban"]]));
+  assert.equal(alias.length, 1);
+
+  const ban = buildAllCommands().find(command => (command as { name: string }).name === "ban") as
+    | Record<string, unknown>
+    | undefined;
+  const mirrored = alias[0] as Record<string, unknown>;
+
+  assert.equal(mirrored.name, "باند", "the alias is published under the alias name");
+  assert.ok(Array.isArray(ban?.options) && (ban.options as unknown[]).length > 0, "/ban really does take options");
+  // Everything but the name is the canonical definition. An alias that parsed
+  // its arguments differently from the command it stands in for would be a trap
+  // rather than a shortcut: `/باند @عضو` would fail where `/ban @عضو` works.
+  assert.deepEqual(mirrored.options, ban!.options);
+  assert.equal(mirrored.description, ban!.description);
+});
+
+test("an alias preserves the canonical command's permission lock", () => {
+  // `/settings` is locked to server administrators. An alias of it that dropped
+  // `default_member_permissions` would hand every member a command the operator
+  // deliberately restricted.
+  const locked = buildAllCommands().find(command => (command as { name: string }).name === "settings") as
+    | Record<string, unknown>
+    | undefined;
+  assert.ok(locked && "default_member_permissions" in locked, "/settings is locked in the first place");
+
+  const [mirrored] = buildAliasCommands(new Map([["اعدادات", "settings"]])) as Record<string, unknown>[];
+  assert.equal(mirrored.default_member_permissions, locked!.default_member_permissions);
+});
+
+test("an alias naming an unpublished command is dropped rather than published as a shell", () => {
+  // A shell with no options would accept `/alias` and then fail to parse the
+  // arguments its handler expects — worse than the alias not existing, because
+  // Discord would offer it in the picker.
+  assert.deepEqual(buildAliasCommands(new Map([["باند", "not-a-command"]])), []);
+});
+
+test("no aliases publishes nothing beyond the canonical set", () => {
+  assert.deepEqual(buildAliasCommands(new Map()), []);
+  assert.equal(buildAllCommands().length, commandRegistry.length);
+});
+
+test("a guild's published command names stay unique once aliases are added", () => {
+  // This is the exact shape the deploy script sends to Discord. Discord rejects
+  // the entire request if two commands share a name, so a collision does not
+  // degrade the aliases — it takes every command down with them.
+  const configs = commandRegistry.map(definition => ({
+    name: definition.name,
+    aliases:
+      definition.name === "ban"
+        ? ["باند", "حظر"]
+        : definition.name === "kick"
+          ? ["طرد", "kick"]
+          : []
+  }));
+  const { map, dropped } = buildAliasMap(configs);
+  const published = [...buildAllCommands(), ...buildAliasCommands(map)];
+  const names = published.map(command => (command as { name: string }).name);
+
+  assert.equal(new Set(names).size, names.length, "every published name is unique");
+  assert.equal(map.get("باند"), "ban");
+  assert.equal(map.get("طرد"), "kick");
+  assert.deepEqual(dropped, [{ alias: "kick", command: "kick", reason: "shadows-command" }]);
+});
+
+test("the registry parity check is run against the canonical set, never the aliases", () => {
+  // Aliases are per-guild preferences rather than registry entries, so the
+  // deploy script checks parity before it adds them. Feeding the alias set to
+  // the check would make every guild deploy report itself as having published
+  // something unregistered — and the script throws on that.
+  assert.deepEqual(compareCommandRegistry(buildAllCommands()), { missing: [], extra: [] });
+
+  const withAliases = [...buildAllCommands(), ...buildAliasCommands(new Map([["باند", "ban"]]))];
+  assert.deepEqual(compareCommandRegistry(withAliases).extra, ["باند"], "which is why aliases stay out of it");
 });

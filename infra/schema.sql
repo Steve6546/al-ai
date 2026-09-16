@@ -278,6 +278,16 @@ CREATE TABLE IF NOT EXISTS guild_command_flags (
   default_duration TEXT NOT NULL DEFAULT 'permanent',
   -- Ready-made reasons offered in Discord, as [{ id, label, duration }].
   preset_reasons JSONB NOT NULL DEFAULT '[]',
+  -- Extra names this command also answers to in this guild, as ["باند", "حظر"].
+  -- Discord has no alias mechanism of its own: an alias only works because the
+  -- deploy script registers a second command under that name, so this column is
+  -- the whole of the feature's state.
+  aliases JSONB NOT NULL DEFAULT '[]',
+  -- Remove the bot's own reply once the member it acted on leaves the guild.
+  -- Only ever the bot's message; never a human's. Off by default, because it is
+  -- the one setting here that deletes something the operator did not ask to be
+  -- deleted at the moment they set it up.
+  delete_response_on_leave BOOLEAN NOT NULL DEFAULT false,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (guild_id, command)
 );
@@ -323,6 +333,13 @@ ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS require_reason BOOLEAN 
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS allow_custom_reason BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS default_duration TEXT NOT NULL DEFAULT 'permanent';
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS preset_reasons JSONB NOT NULL DEFAULT '[]';
+-- Placed here, after the guarded `custom_role_ids` rename above and not before
+-- it: an `ADD COLUMN` ahead of that block would run first, the guard's
+-- `NOT EXISTS allowed_role_ids` check would then be evaluating a column this
+-- very file had just created, and the rename would be skipped in silence —
+-- stranding every operator's allow-list in an orphaned column nothing reads.
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS aliases JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS delete_response_on_leave BOOLEAN NOT NULL DEFAULT false;
 
 -- A database that ran an earlier build of this migration holds both columns.
 -- Carry the values across before dropping the orphan, so the allow-list survives

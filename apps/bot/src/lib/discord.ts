@@ -27,6 +27,7 @@ import {
   SEVERITY_EMBED_COLOR,
   TIMEOUT_MAX_SECONDS
 } from "@al-ai/core";
+import { createRetractionRegistry } from "./retraction.js";
 
 // GOVERNANCE rule 2: This is the only file allowed to import discord.js.
 // Every Discord API call the bot makes must be expressed as a function here.
@@ -520,6 +521,38 @@ export function compareCommandRegistry(
   };
 }
 
+/**
+ * The alias commands to register in one guild.
+ *
+ * Discord has no alias mechanism at all: `/باند` exists only because a command
+ * *named* `باند` was published. So each alias is registered as a real command
+ * carrying its canonical command's options verbatim — `/باند @عضو سبب` has to
+ * parse exactly as `/ban @عضو سبب` does, or the alias is a trap rather than a
+ * shortcut.
+ *
+ * The map is expected to come from `buildAliasMap`, which has already refused
+ * any alias that would shadow a published command or collide with another
+ * alias. That guarantee is assumed here rather than re-derived: two sources of
+ * truth for the same rule is how they drift apart.
+ */
+export function buildAliasCommands(
+  aliasMap: ReadonlyMap<string, string>,
+  canonical: readonly unknown[] = buildAllCommands()
+): unknown[] {
+  const byName = new Map(
+    canonical.map(command => [(command as { name: string }).name, command as Record<string, unknown>])
+  );
+  const built: unknown[] = [];
+  for (const [alias, target] of aliasMap) {
+    const source = byName.get(target);
+    // A map entry naming a command that is not published is dropped rather than
+    // published as a broken shell with no options.
+    if (!source) continue;
+    built.push({ ...source, name: alias });
+  }
+  return built;
+}
+
 /* ------------------------------------------------------------------ *
  * Moderation actions
  *
@@ -768,8 +801,31 @@ export async function quarantineMember(client: Client, guildId: string, userId: 
  * Deployment is intentionally separate from runtime.
  * Calling this from the bot process is a governance violation (rule 9).
  */
-export async function deploySlashCommands(token: string, clientId: string) {
-  await new REST({ version: "10" }).setToken(token).put(Routes.applicationCommands(clientId), { body: buildAllCommands() });
+/**
+ * The single deploy entry point, reached only from scripts/deploy-commands.ts.
+ *
+ * Global registration propagates for up to an hour and applies to every guild.
+ * Guild registration is immediate and applies to exactly one guild, which is
+ * what makes it the only workable route for aliases: an alias is a per-guild
+ * preference, and a shortcut that appears an hour after it was saved reads as a
+ * broken feature rather than a slow one.
+ *
+ * A guild deploy republishes the whole canonical set alongside the aliases.
+ * Registering the aliases alone would be enough on paper, since global commands
+ * still apply inside a guild — but then a guild would show nothing at all until
+ * the global set finished propagating.
+ */
+export async function deploySlashCommands(
+  token: string,
+  clientId: string,
+  options: { guildId?: string; aliases?: readonly unknown[] } = {}
+) {
+  const body = [...buildAllCommands(), ...(options.aliases ?? [])];
+  const route = options.guildId
+    ? Routes.applicationGuildCommands(clientId, options.guildId)
+    : Routes.applicationCommands(clientId);
+  await new REST({ version: "10" }).setToken(token).put(route, { body });
+  return { scope: options.guildId ? ("guild" as const) : ("global" as const), count: body.length };
 }
 
 /* ------------------------------------------------------------------ *
@@ -932,6 +988,20 @@ export type CommandContext = {
    * with bot confirmations.
    */
   reply: (content: string, options?: { autoDeleteSeconds?: number }) => Promise<void>;
+  /**
+   * Withdraws this command's own reply once the member it acted on leaves.
+   *
+   * Only ever the bot's own message: a human's messages are not AL AI's to
+   * delete, and a punishment log entry is an audit record rather than a reply.
+   *
+   * The reply is ephemeral, so Discord permits withdrawing it only while the
+   * interaction token lives — fifteen minutes. A member who leaves later than
+   * that has already lost the message along with the token, so the request is
+   * dropped rather than queued: from outside, a withdrawal that cannot happen
+   * and one that silently failed look identical, and pretending otherwise would
+   * be the worse answer.
+   */
+  retractOnLeave: (targetMemberId: string) => void;
 };
 
 /** Roles are a manager on a cached member and a raw array on an API payload. */
@@ -967,6 +1037,15 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
     }
   };
 
+  /**
+   * Bot replies waiting to be withdrawn when the member they acted on leaves.
+   *
+   * The window and the (guild, member) key live in `retraction.ts` rather than
+   * here, so both can be tested at their boundary without waiting fifteen
+   * minutes. This only supplies the withdrawal.
+   */
+  const retractions = createRetractionRegistry();
+
   client.once(Events.ClientReady, () => emit({ type: "client.ready", tag: client.user?.tag ?? "unknown", guildCount: client.guilds.cache.size }));
   client.on(Events.Error, error => emit({ type: "client.error", message: error.message }));
   // Emitted so the runtime can create the bot's own role before the operator is
@@ -974,7 +1053,13 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
   client.on(Events.GuildCreate, guild => emit({ type: "guild.joined", guildId: guild.id, name: guild.name }));
 
   client.on(Events.GuildMemberAdd, member => emit({ type: "member.join", guildId: member.guild.id, memberId: member.id }));
-  client.on(Events.GuildMemberRemove, member => emit({ type: "member.leave", guildId: member.guild.id, memberId: member.id }));
+  client.on(Events.GuildMemberRemove, member => {
+    emit({ type: "member.leave", guildId: member.guild.id, memberId: member.id });
+    // Withdraw any reply that was waiting on this member's departure. Not
+    // awaited on purpose: the withdrawal is cosmetic and the leave event is
+    // what the rest of the pipeline acts on, so it must not be delayed by it.
+    void retractions.retract(member.guild.id, member.id);
+  });
   client.on(Events.GuildMemberUpdate, (before, after) => {
     if (before.nickname !== after.nickname) {
       emit({ type: "member.nickname-change", guildId: after.guild.id, memberId: after.id, before: before.nickname ?? "", after: after.nickname ?? "" });
@@ -1201,6 +1286,12 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
         }, seconds * 1000);
         // Never hold the process open for a cosmetic cleanup.
         timer.unref?.();
+      },
+      retractOnLeave: (targetMemberId: string) => {
+        // An interaction outside a guild has no member to leave, and a member
+        // with no id cannot be matched to a departure.
+        if (!guildId || !targetMemberId) return;
+        retractions.remember(guildId, targetMemberId, () => interaction.deleteReply());
       }
     });
   });

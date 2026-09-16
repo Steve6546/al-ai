@@ -492,12 +492,14 @@ export function createDatabase(pool: pg.Pool) {
         allow_custom_reason: boolean;
         default_duration: string;
         preset_reasons: unknown;
+        aliases: unknown;
+        delete_response_on_leave: boolean;
       }>(
         `SELECT command, enabled, minimum_tier, dm_on_action, delete_message_days,
                 allowed_role_ids, denied_role_ids, allowed_channel_ids, denied_channel_ids,
                 allowed_user_ids, denied_user_ids,
                 cooldown_seconds, auto_delete_response_seconds, require_reason, allow_custom_reason,
-                default_duration, preset_reasons
+                default_duration, preset_reasons, aliases, delete_response_on_leave
          FROM guild_command_flags WHERE guild_id = $1`,
         [guildId]
       );
@@ -524,7 +526,9 @@ export function createDatabase(pool: pg.Pool) {
             requireReason: row.require_reason,
             allowCustomReason: row.allow_custom_reason,
             defaultDuration: row.default_duration as CommandConfig["defaultDuration"],
-            presetReasons: Array.isArray(row.preset_reasons) ? (row.preset_reasons as CommandConfig["presetReasons"]) : []
+            presetReasons: Array.isArray(row.preset_reasons) ? (row.preset_reasons as CommandConfig["presetReasons"]) : [],
+            aliases: Array.isArray(row.aliases) ? (row.aliases as string[]) : [],
+            deleteResponseOnLeave: row.delete_response_on_leave
           }
         ])
       );
@@ -537,11 +541,11 @@ export function createDatabase(pool: pg.Pool) {
            allowed_role_ids, denied_role_ids, allowed_channel_ids, denied_channel_ids,
            allowed_user_ids, denied_user_ids,
            cooldown_seconds, auto_delete_response_seconds, require_reason, allow_custom_reason,
-           default_duration, preset_reasons,
+           default_duration, preset_reasons, aliases, delete_response_on_leave,
            updated_at
          )
          VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb,
-                 $13, $14, $15, $16, $17, $18::jsonb, now())
+                 $13, $14, $15, $16, $17, $18::jsonb, $19::jsonb, $20, now())
          ON CONFLICT (guild_id, command) DO UPDATE
            SET enabled = EXCLUDED.enabled,
                minimum_tier = EXCLUDED.minimum_tier,
@@ -559,6 +563,8 @@ export function createDatabase(pool: pg.Pool) {
                allow_custom_reason = EXCLUDED.allow_custom_reason,
                default_duration = EXCLUDED.default_duration,
                preset_reasons = EXCLUDED.preset_reasons,
+               aliases = EXCLUDED.aliases,
+               delete_response_on_leave = EXCLUDED.delete_response_on_leave,
                updated_at = now()`,
         [
           guildId,
@@ -578,7 +584,9 @@ export function createDatabase(pool: pg.Pool) {
           config.requireReason,
           config.allowCustomReason,
           config.defaultDuration,
-          JSON.stringify(config.presetReasons)
+          JSON.stringify(config.presetReasons),
+          JSON.stringify(config.aliases),
+          config.deleteResponseOnLeave
         ]
       );
     },

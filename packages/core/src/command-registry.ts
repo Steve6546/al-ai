@@ -415,6 +415,24 @@ export type CommandConfig = {
   defaultDuration: CommandDuration;
   /** Ready-made reasons offered in Discord for this command. */
   presetReasons: PresetReason[];
+  /**
+   * Extra names this command also answers to.
+   *
+   * Discord has no alias mechanism at all: `/باند` exists only if it is
+   * published as a command *named* `باند`. So an alias is a real command whose
+   * only job is to resolve back to this one — which is why the names are
+   * validated exactly as strictly as a command name, and why they are
+   * registered per guild rather than globally. A global alias would appear in
+   * every guild's command list while working in one.
+   */
+  aliases: string[];
+  /**
+   * Remove the bot's own reply once the member it acted on leaves the guild.
+   *
+   * Only ever the bot's message. Deleting a departing member's own messages is
+   * a different action, it is irreversible, and it is not this setting.
+   */
+  deleteResponseOnLeave: boolean;
 };
 
 /** The configuration a command has before the operator changes anything. */
@@ -441,13 +459,18 @@ export function defaultCommandConfig(definition: CommandDefinition): CommandConf
     // narrowed an existing behaviour would be a regression dressed as a default.
     allowCustomReason: true,
     defaultDuration: DEFAULT_COMMAND_DURATION,
-    presetReasons: []
+    presetReasons: [],
+    aliases: [],
+    // Off by default: it is the only setting here that deletes something the
+    // operator did not ask to be deleted at the moment they set it up.
+    deleteResponseOnLeave: false
   };
 }
 
 export const MAX_CUSTOM_ROLES_PER_COMMAND = 25;
 export const MAX_SCOPED_CHANNELS_PER_COMMAND = 25;
 export const MAX_SCOPED_USERS_PER_COMMAND = 25;
+export const MAX_ALIASES_PER_COMMAND = 5;
 
 /**
  * Normalises a stored or submitted configuration against its definition.
@@ -489,7 +512,12 @@ export function normaliseCommandConfig(definition: CommandDefinition, input: Par
     requireReason,
     allowCustomReason,
     defaultDuration,
-    presetReasons: definition.supportsReason ? normalisePresetReasons(input?.presetReasons, definition) : []
+    presetReasons: definition.supportsReason ? normalisePresetReasons(input?.presetReasons, definition) : [],
+    aliases: normaliseAliases(input?.aliases),
+    // Only a command that acts on a member can outlive that member's presence,
+    // so every other command has nothing for this to delete. Same rule as the
+    // purge setting: an unsupported control is dropped, not stored and ignored.
+    deleteResponseOnLeave: definition.target === "member" ? Boolean(input?.deleteResponseOnLeave) : false
   };
 }
 
@@ -503,6 +531,94 @@ function isAllowedLevel(value: unknown): value is Tier {
 function normaliseIdList(value: unknown, limit: number): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.filter((id): id is string => typeof id === "string" && SNOWFLAKE.test(id)))].slice(0, limit);
+}
+
+/**
+ * The characters Discord accepts in a command name.
+ *
+ * Mirrors Discord's own pattern rather than approximating it with `\w`: an
+ * alias may legitimately be Arabic, and one name Discord rejects fails the whole
+ * registration request — taking the commands that were fine down with it.
+ *
+ * Discord documents this as `\p{Devanagari}` / `\p{Thai}`, but that spelling is
+ * Rust's regex crate and is a **syntax error in JavaScript** — a bare script
+ * name is not a valid Unicode property escape, and it throws at module load,
+ * which takes the whole registry down with it. ECMAScript needs the explicit
+ * `Script=` prefix. Do not "simplify" it back to Discord's notation.
+ *
+ * The two script classes are not decoration: a Thai combining mark (U+0E31) is
+ * not `\p{L}`, so `\p{L}` alone would reject a perfectly legal Thai name.
+ */
+const COMMAND_NAME = /^[-_\p{L}\p{N}\p{Script=Devanagari}\p{Script=Thai}]{1,32}$/u;
+
+/** Whether a string could be published as a command name at all. */
+export function isUsableAlias(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  if (!COMMAND_NAME.test(value)) return false;
+  // Discord rejects an ASCII uppercase letter outright.
+  return value === value.toLowerCase();
+}
+
+/** Every published command name. An alias may never spell one of these. */
+const registryNames = new Set(commandRegistry.map(entry => entry.name));
+
+function normaliseAliases(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of value) {
+    const alias = typeof entry === "string" ? entry.trim() : "";
+    if (!isUsableAlias(alias) || seen.has(alias)) continue;
+    // An alias that spells a published command can never fire: Discord resolves
+    // the real name first, so storing it would be a setting that does nothing.
+    if (registryNames.has(alias)) continue;
+    seen.add(alias);
+    out.push(alias);
+    if (out.length === MAX_ALIASES_PER_COMMAND) break;
+  }
+  return out;
+}
+
+/** Why an alias could not be honoured. */
+export type AliasDropReason = "shadows-command" | "duplicate";
+
+/**
+ * The alias-to-command map for one guild, and the aliases that had to be dropped.
+ *
+ * Two aliases cannot both be honest. One that repeats a command's real name
+ * would shadow it — `/ban` would then mean whatever the alias's owner
+ * configured, while the operator reading Discord's command list sees the real
+ * `/ban` and has no way to tell. And one claimed by two commands has no correct
+ * answer at all, so the first claim wins and the loser is reported rather than
+ * silently ignored.
+ *
+ * The registry is the authority for what is published, so the shadow check is
+ * made against it rather than against whatever subset of configs the caller
+ * happened to pass in — otherwise an alias could shadow a command simply
+ * because that command's row was not loaded yet.
+ */
+export function buildAliasMap(
+  configs: readonly { name: string; aliases?: readonly string[] }[]
+): { map: Map<string, string>; dropped: { alias: string; command: string; reason: AliasDropReason }[] } {
+  const real = new Set([...registryNames, ...configs.map(config => config.name)]);
+  const map = new Map<string, string>();
+  const dropped: { alias: string; command: string; reason: AliasDropReason }[] = [];
+
+  for (const config of configs) {
+    for (const alias of config.aliases ?? []) {
+      if (real.has(alias)) {
+        dropped.push({ alias, command: config.name, reason: "shadows-command" });
+        continue;
+      }
+      if (map.has(alias)) {
+        dropped.push({ alias, command: config.name, reason: "duplicate" });
+        continue;
+      }
+      map.set(alias, config.name);
+    }
+  }
+
+  return { map, dropped };
 }
 
 /**

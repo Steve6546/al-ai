@@ -195,12 +195,14 @@ export function createBotDatabase(databaseUrl: string) {
         allow_custom_reason: boolean;
         default_duration: string;
         preset_reasons: unknown;
+        aliases: unknown;
+        delete_response_on_leave: boolean;
       }>(
         `SELECT command, enabled, minimum_tier, dm_on_action, delete_message_days,
                 allowed_role_ids, denied_role_ids, allowed_channel_ids, denied_channel_ids,
                 allowed_user_ids, denied_user_ids,
                 cooldown_seconds, auto_delete_response_seconds, require_reason, allow_custom_reason,
-                default_duration, preset_reasons
+                default_duration, preset_reasons, aliases, delete_response_on_leave
          FROM guild_command_flags WHERE guild_id = $1`,
         [guildId]
       );
@@ -228,7 +230,9 @@ export function createBotDatabase(databaseUrl: string) {
             requireReason: row.require_reason,
             allowCustomReason: row.allow_custom_reason,
             defaultDuration: row.default_duration as CommandConfig["defaultDuration"],
-            presetReasons: Array.isArray(row.preset_reasons) ? (row.preset_reasons as CommandConfig["presetReasons"]) : []
+            presetReasons: Array.isArray(row.preset_reasons) ? (row.preset_reasons as CommandConfig["presetReasons"]) : [],
+            aliases: Array.isArray(row.aliases) ? (row.aliases as string[]) : [],
+            deleteResponseOnLeave: row.delete_response_on_leave
           }
         ])
       );

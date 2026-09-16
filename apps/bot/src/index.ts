@@ -22,6 +22,7 @@ import {
 } from "./lib/discord.js";
 import {
   assessCommandScope,
+  buildAliasMap,
   commandCategories,
   commandCategoryLabels,
   commandDurationSeconds,
@@ -306,6 +307,26 @@ function channelSuccessMessages(commandName: string, removed: number | undefined
 }
 
 /**
+ * Resolves a published command name to the command it actually stands for.
+ *
+ * Discord has no alias mechanism, so an alias is registered as a real command
+ * under its own name — `/باند` is a command, not a pointer at `/ban`. Which
+ * command it stands for is a per-guild preference, so the answer can only come
+ * from that guild's rows and never from the registry alone.
+ *
+ * Resolving to the canonical name is what keeps an alias from becoming a second
+ * command: the definition, the permission tier, the cooldown key and the stored
+ * configuration are all read for the command it stands for, so an alias cannot
+ * hold a permission of its own.
+ */
+function resolveCommandAlias(configured: Map<string, Partial<CommandConfig>>, commandName: string): string {
+  const { map } = buildAliasMap(
+    [...configured].map(([name, config]) => ({ name, aliases: config.aliases }))
+  );
+  return map.get(commandName) ?? commandName;
+}
+
+/**
  * Per-command cooldowns, keyed by guild, command and member.
  *
  * In memory on purpose: a cooldown guards against spam, not against an attacker,
@@ -333,14 +354,21 @@ bindEvents(client, guardedDispatch, {
    */
   onAutocomplete: async ({ guildId, commandName, focusedOption, focusedValue }) => {
     if (focusedOption !== "reason") return [];
+
+    // The alias is resolved here for the same reason it is resolved in the
+    // command handler: `/باند` carries `/ban`'s options, so its reason field has
+    // to offer `/ban`'s preset reasons. Without this an alias would autocomplete
+    // nothing and read as a broken copy of the command it stands for.
+    const configured = await database.loadCommandFlags(guildId).catch(() => new Map<string, Partial<CommandConfig>>());
+    const canonical = resolveCommandAlias(configured, commandName);
+
     let definition;
     try {
-      definition = requireCommand(commandName);
+      definition = requireCommand(canonical);
     } catch {
       return [];
     }
-    const configured = await database.loadCommandFlags(guildId).catch(() => new Map());
-    const config = normaliseCommandConfig(definition, configured.get(commandName));
+    const config = normaliseCommandConfig(definition, configured.get(canonical));
     const needle = focusedValue.trim().toLowerCase();
     return config.presetReasons
       .filter(preset => !needle || preset.label.toLowerCase().includes(needle))
@@ -372,22 +400,33 @@ bindEvents(client, guardedDispatch, {
     roleIds,
     isGuildOwner,
     isAdministrator,
-    commandName,
+    commandName: requestedName,
     targetId,
     numbers,
     strings,
     reason,
-    reply
+    reply,
+    retractOnLeave
   }) => {
+    // Rebound to the command this one stands for as soon as the guild's rows are
+    // read. Everything below compares against a canonical name, so resolving the
+    // alias here means the rest of the handler never has to know one was used.
+    let commandName = requestedName;
+
+    // The alias is recorded beside the command rather than instead of it: the
+    // canonical name is what ran and what the permissions were checked against,
+    // while the alias is the string the operator will search the log for.
+    const aliasNote = () => (commandName === requestedName ? {} : { alias: requestedName });
+
     const reject = async (message: string, detail: string) => {
       const signal = detector.authorizationFailure({ guildId, actorId: userId, action: commandName, reason: detail });
       await raiseSecurityEvent(signal.id, signal.data, guildId);
-      await logEvent("bot.command-failure", { guildId, actorId: userId, data: { command: commandName, reason: detail } }, runtime).catch(() => undefined);
+      await logEvent("bot.command-failure", { guildId, actorId: userId, data: { command: commandName, ...aliasNote(), reason: detail } }, runtime).catch(() => undefined);
       await reply(message, { autoDeleteSeconds });
     };
 
     const succeed = async (message: string) => {
-      await logEvent("bot.command-success", { guildId, actorId: userId, data: { command: commandName } }, runtime).catch(() => undefined);
+      await logEvent("bot.command-success", { guildId, actorId: userId, data: { command: commandName, ...aliasNote() } }, runtime).catch(() => undefined);
       await reply(message, { autoDeleteSeconds });
     };
 
@@ -395,7 +434,14 @@ bindEvents(client, guardedDispatch, {
     // including the refusals — honours the operator's tidiness setting.
     let autoDeleteSeconds = 0;
 
-    // 1. The command must exist in the registry.
+    // 1. This guild's configuration, read before the registry lookup because an
+    //    alias only means something inside the guild that configured it: `/باند`
+    //    is a real published command, but which command it stands for is a
+    //    per-guild preference, and resolving that needs this guild's own rows.
+    const configured = await database.loadCommandFlags(guildId);
+    commandName = resolveCommandAlias(configured, requestedName);
+
+    // 2. The command must exist in the registry.
     let definition;
     try {
       definition = requireCommand(commandName);
@@ -404,10 +450,9 @@ bindEvents(client, guardedDispatch, {
       return;
     }
 
-    // 2. This guild's configuration, normalised against the definition so a
-    //    control the command does not support can never be honoured — a purge
-    //    setting on `/warn` would be a switch that does nothing.
-    const configured = await database.loadCommandFlags(guildId);
+    // 3. The configuration is normalised against the definition so a control the
+    //    command does not support can never be honoured — a purge setting on
+    //    `/warn` would be a switch that does nothing.
     const config = normaliseCommandConfig(definition, configured.get(commandName));
 
     if (!config.enabled) {
@@ -745,6 +790,11 @@ bindEvents(client, guardedDispatch, {
 
     await maybeNotify(config, guildId, targetId, `تم تنفيذ إجراء إشرافي بحقك في السيرفر. السبب: ${trimmedReason || "غير محدد"}`);
     await succeed("تم تنفيذ الإجراء.");
+
+    // Registered only once the action actually applied. A refused action's reply
+    // is the operator's error message, and withdrawing it because the target
+    // later left would erase the explanation of why the command did not work.
+    if (config.deleteResponseOnLeave && targetId) retractOnLeave(targetId);
   }
 });
 
