@@ -24,6 +24,7 @@ import {
   normaliseCommandConfig,
   requireCommand,
   resolveCommandDuration,
+  ROLE_FIELD_OWNERS,
   TIMEOUT_MAX_SECONDS
 } from "../src/command-registry.js";
 import { discordPermissionLabels, DISCORD_PERMISSION_BITS } from "../src/discord-permissions.js";
@@ -122,32 +123,54 @@ test("the eleven sections with no commands really are empty", () => {
   );
 });
 
-test("the registry is exactly the twenty commands the bot publishes", () => {
+test("the registry is exactly the commands the bot publishes", () => {
   assert.deepEqual(
     [...commandRegistry].map(definition => definition.name).sort(),
     [
       "al-status",
       "ban",
+      "blacklist",
+      "block",
       "clear",
+      "clearallpunishments",
+      "clearallwarns",
       "clearwarns",
       "colors",
       "commands",
       "dashboard",
       "delwarn",
+      "down",
       "help",
       "kick",
       "lock",
+      "mute",
+      "prison",
+      "remove",
       "setnick",
       "settings",
       "slowmode",
       "timeout",
       "unban",
+      "unblacklist",
+      "unblock",
+      "undown",
       "unlock",
+      "unmute",
+      "unprison",
       "untimeout",
       "warn",
       "warns"
     ]
   );
+});
+
+test("the penalties section holds twenty-three commands", () => {
+  // The section was completed in one pass: the ten that act as an event, plus
+  // the thirteen that put a member into a state. Pinned as a number because it
+  // is the figure the dashboard shows and the operator counts against, so a
+  // command added to the wrong section would otherwise be invisible here.
+  const penalties = commandRegistry.filter(definition => definition.category === "penalties");
+  assert.equal(penalties.length, 23);
 });
 
 /* ------------------------------------------------------------------ *
@@ -703,5 +726,106 @@ test("delete-on-leave survives only on member-targeted commands", () => {
       definition.target === "member",
       `${definition.name} (target: ${definition.target})`
     );
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * The role fields the state-based punishments own
+ * ------------------------------------------------------------------ */
+
+test("every role field starts unset", () => {
+  // Unset, not guessed. A role the bot invented would have no permission
+  // overrides, so a mute built on it would silence nobody while looking applied.
+  const mute = defaultCommandConfig(requireCommand("mute"));
+  assert.equal(mute.mutedRoleId, null);
+  assert.equal(mute.prisonRoleId, null);
+  assert.equal(mute.prisonChannelId, null);
+  assert.deepEqual(mute.blacklistRoleIds, []);
+  assert.deepEqual(mute.adminRoleIdsToStrip, []);
+  assert.deepEqual(mute.blockableRoleIds, []);
+});
+
+test("a role field survives only on the command that owns it", () => {
+  // `/unmute` removes the role `/mute` assigns. A copy on `/unmute`'s own row
+  // would be a second answer to "which role is the muted role", and the operator
+  // would eventually change one of them and not the other.
+  const submitted = {
+    mutedRoleId: "111111111111111111",
+    prisonRoleId: "222222222222222222",
+    prisonChannelId: "333333333333333333",
+    blacklistRoleIds: ["444444444444444444"],
+    adminRoleIdsToStrip: ["555555555555555555"],
+    blockableRoleIds: ["666666666666666666"]
+  };
+
+  for (const definition of commandRegistry) {
+    const config = normaliseCommandConfig(definition, submitted);
+    for (const [field, owner] of Object.entries(ROLE_FIELD_OWNERS)) {
+      const stored = config[field as keyof typeof ROLE_FIELD_OWNERS];
+      const isSet = Array.isArray(stored) ? stored.length > 0 : stored !== null;
+      assert.equal(isSet, owner === definition.name, `${definition.name}.${field} (owner: ${owner})`);
+    }
+  }
+});
+
+test("a single role must be a snowflake, and anything else clears it", () => {
+  const mute = requireCommand("mute");
+  assert.equal(normaliseCommandConfig(mute, { mutedRoleId: "111111111111111111" }).mutedRoleId, "111111111111111111");
+
+  // Never coerced. A value Discord would reject, kept because it was non-empty,
+  // reads as configured on the screen while `/mute` refuses to run — and the
+  // refusal is then reported a long way from the setting that caused it.
+  for (const bad of ["everyone", "", "   ", 12345 as unknown as string, null as unknown as string]) {
+    assert.equal(normaliseCommandConfig(mute, { mutedRoleId: bad }).mutedRoleId, null, JSON.stringify(bad));
+  }
+  assert.equal(normaliseCommandConfig(mute, {}).mutedRoleId, null);
+});
+
+test("the list fields reject non-snowflakes and duplicates", () => {
+  const blacklist = requireCommand("blacklist");
+  const config = normaliseCommandConfig(blacklist, {
+    blacklistRoleIds: ["111111111111111111", "111111111111111111", "not-an-id", "222222222222222222"]
+  });
+  assert.deepEqual(config.blacklistRoleIds, ["111111111111111111", "222222222222222222"]);
+});
+
+test("an empty admin-role list means every administrative role, not none", () => {
+  const down = requireCommand("down");
+  // Load-bearing: `/down` with nothing selected still has to take something
+  // away, and the only sensible reading is "the roles that carry a permission".
+  // An empty list meaning "strip nothing" would be a punishment that punishes
+  // nobody, and the operator would have no way to tell.
+  assert.deepEqual(normaliseCommandConfig(down, {}).adminRoleIdsToStrip, []);
+  assert.equal(down.target, "member");
+  assert.equal(down.supportsDuration, true);
+});
+
+test("the server-wide wipes ask for Administrator and take no member target", () => {
+  for (const name of ["clearallwarns", "clearallpunishments"]) {
+    const definition = requireCommand(name);
+    assert.equal(definition.target, "none", name);
+    assert.equal(definition.requiredPermission, "ADMINISTRATOR", name);
+    assert.ok(discordPermissionLabels.ADMINISTRATOR, "Administrator has an Arabic name");
+  }
+});
+
+test("only /down carries a duration among the state-based punishments", () => {
+  // A mute with a timer is `/timeout`. Offering a length on `/mute` would
+  // recreate the exact overlap that got it removed the first time.
+  const stateBased = ["mute", "unmute", "prison", "unprison", "blacklist", "unblacklist", "block", "unblock", "undown", "remove"];
+  for (const name of stateBased) {
+    assert.equal(requireCommand(name).supportsDuration, undefined, name);
+  }
+  assert.equal(requireCommand("down").supportsDuration, true);
+});
+
+test("every state-based punishment acts on a member", () => {
+  // They all take someone to act on. `/clearallwarns` and
+  // `/clearallpunishments` are the exceptions and are asserted above, because
+  // they wipe a server-wide record rather than acting on one person.
+  const targeted = ["mute", "unmute", "prison", "unprison", "blacklist", "unblacklist", "block", "unblock", "down", "undown", "remove"];
+  for (const name of targeted) {
+    assert.equal(requireCommand(name).target, "member", name);
+    assert.equal(requireCommand(name).category, "penalties", name);
   }
 });

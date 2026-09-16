@@ -4,18 +4,21 @@ import {
   applyBotPresence,
   applyChannelAction,
   applyModeration,
+  applyRoleChange,
   bindEvents,
   createDiscordClient,
   dmGuildOwner,
   ensureBotRole,
   Events,
   listLoggableChannels,
+  moveMemberToChannel,
   notifyTarget,
   quarantineMember,
   readBotHighestPosition,
   readColourRoles,
   readMemberPositions,
   readMemberRoleIds,
+  readStrippableRoleIds,
   sendLogEmbed,
   sendLogEmbedToWebhook,
   type LogEnvelope
@@ -59,6 +62,7 @@ import {
   type ControlPlane
 } from "./config/control-plane.js";
 import { startIntegrationAdapter } from "./integration-adapter.js";
+import { sweepExpiredDowns } from "./punishments/expiry.js";
 import { logEvent, type LogRuntime } from "./logging/log-router.js";
 
 /* ------------------------------------------------------------------ *
@@ -305,6 +309,16 @@ function channelSuccessMessages(commandName: string, removed: number | undefined
   const seconds = numbers.seconds ?? 0;
   return seconds === 0 ? "تم إيقاف الوضع البطيء." : `تم ضبط الوضع البطيء على ${seconds} ثانية.`;
 }
+
+/** Operator-facing wording for every way a role action can fail. */
+const roleFailureMessages: Record<string, string> = {
+  GUILD_UNREACHABLE: "تعذّر الوصول إلى السيرفر.",
+  MEMBER_NOT_FOUND: "هذا العضو ليس في السيرفر.",
+  // The likely causes are named because the operator cannot tell them apart from
+  // the outside: Discord refuses a role that sits above the bot and a role that
+  // has been deleted in exactly the same way.
+  NO_ROLE_APPLIED: "لم تُطبَّق أي رتبة. تأكّد أن الرتبة ما زالت موجودة وأن رتبة البوت أعلى منها في ترتيب الرتب."
+};
 
 /**
  * Resolves a published command name to the command it actually stands for.
@@ -620,6 +634,47 @@ bindEvents(client, guardedDispatch, {
       return;
     }
 
+    /* ---------------- Server-wide wipes ---------------- */
+    // Handled before the channel branch rather than inside it. They are not
+    // channel actions — folding them into that ternary would read as though
+    // `/clearallwarns` acted on the channel it was typed in, and the success
+    // message would be built from `channelSuccessMessages`, which knows nothing
+    // about them.
+    if (commandName === "clearallwarns" || commandName === "clearallpunishments") {
+      const warningsOnly = commandName === "clearallwarns";
+      const removed = warningsOnly
+        ? { warnings: await database.clearAllWarnings(guildId), states: 0 }
+        : await database.clearAllPunishments(guildId);
+
+      const wipeData = {
+        guildId,
+        actorId: userId,
+        data: { actorId: userId, warnings: removed.warnings, states: removed.states, reason: trimmedReason || "—" }
+      };
+
+      // Logged by the handler, not by the gateway: nothing in Discord reports a
+      // deletion from our own tables, so without this the wipe would leave no
+      // trace anywhere — and it is the one action here with no undo at all.
+      //
+      // Two literal calls rather than one ternary. `routing.test.ts` matches the
+      // event ID as a literal first argument so that a declaration nothing
+      // produces cannot hide behind a variable; a ternary reads correctly, type
+      // checks, and would make both of these invisible to that guard.
+      if (warningsOnly) {
+        await logEvent("moderation.clearallwarns", wipeData, runtime).catch(() => undefined);
+      } else {
+        await logEvent("moderation.clearallpunishments", wipeData, runtime).catch(() => undefined);
+      }
+
+      // Both numbers when both moved. Reporting only the warnings after a wipe
+      // that also released muted and jailed members would understate what
+      // happened, and the operator has no undo to go and check.
+      const parts = [`${removed.warnings} تحذيراً`];
+      if (!warningsOnly) parts.push(`${removed.states} عقوبة سارية`);
+      await succeed(`تم مسح ${parts.join(" و")} في هذا السيرفر.`);
+      return;
+    }
+
     /* ---------------- Channel commands ---------------- */
     if (definition.target !== "member") {
       const action =
@@ -733,6 +788,377 @@ bindEvents(client, guardedDispatch, {
       ).catch(() => undefined);
       const total = await database.countWarnings(guildId, targetId);
       await succeed(`تم حذف التحذير رقم ${index} عن <@${targetId}> («${removedReason}»). المتبقي: ${total}.`);
+      return;
+    }
+
+    /* ---------------- The state-based punishments ----------------
+     *
+     * Everything below comes down to putting a role on or taking one off, plus a
+     * row recording what was done so the inverse can undo it exactly.
+     *
+     * The role each one uses is a guild setting on the command that applies it,
+     * and the inverse reads it from that same row — `/unmute` has no muted-role
+     * field of its own and reads `/mute`'s. That is the point of the ownership
+     * map: one place to name the role, so the two commands cannot end up
+     * disagreeing about which one is the muted role.
+     */
+    const roleConfigFor = (owner: string) => normaliseCommandConfig(requireCommand(owner), configured.get(owner));
+
+    /**
+     * The envelope for one state-based punishment.
+     *
+     * Only the envelope — the `logEvent` call itself is written out at each site
+     * with the event ID as a literal. `routing.test.ts` asserts that every
+     * declared event appears as a literal first argument somewhere, precisely so
+     * a declaration nothing produces cannot hide behind a variable. Passing the
+     * ID in here would satisfy the call and defeat the check.
+     */
+    const punishmentData = (extra: Record<string, unknown> = {}) => ({
+      guildId,
+      actorId: userId,
+      data: { targetId, actorId: userId, reason: trimmedReason || "—", ...extra }
+    });
+
+    /** A role action that failed is refused with the reason, never reported as done. */
+    const runRoleAction = async (kind: "grant" | "revoke", roleIds: readonly string[], fallbackReason: string) => {
+      const result = await applyRoleChange(client, {
+        kind,
+        guildId,
+        targetId,
+        roleIds,
+        reason: trimmedReason || fallbackReason
+      });
+      if (!result.ok) {
+        await reject(roleFailureMessages[result.reason] ?? "تعذّر تنفيذ الإجراء.", result.reason);
+        return null;
+      }
+      // Named when partial. A `/down` that stripped three of five roles must not
+      // read as though it stripped five — the operator would have no reason to
+      // go and look.
+      return result;
+    };
+
+    /* ---- /mute and /unmute ---- */
+    if (commandName === "mute" || commandName === "unmute") {
+      const granting = commandName === "mute";
+      const mutedRoleId = roleConfigFor("mute").mutedRoleId;
+      if (!mutedRoleId) {
+        // Refused rather than invented. A role the bot created itself would carry
+        // no permission overrides, so the mute would look applied and silence
+        // nobody — the exact defect this project treats as its worst kind.
+        await reject("لم تُضبط رتبة المكتوم. اضبطها من بطاقة الأمر /mute في اللوحة.", "MUTED_ROLE_UNSET");
+        return;
+      }
+
+      const applied = await runRoleAction(granting ? "grant" : "revoke", [mutedRoleId], granting ? "كتم" : "فك الكتم");
+      if (!applied) return;
+
+      if (granting) {
+        await database.setMemberState({
+          id: randomUUID(),
+          guildId,
+          userId: targetId,
+          kind: "mute",
+          moderatorId: userId,
+          reason: trimmedReason
+        });
+        await logEvent("moderation.mute", punishmentData(), runtime).catch(() => undefined);
+      } else {
+        // The snapshot is discarded rather than restored: a mute adds a role and
+        // takes none away, so there is nothing to give back.
+        await database.takeMemberState(guildId, targetId, "mute");
+        await logEvent("moderation.unmute", punishmentData(), runtime).catch(() => undefined);
+      }
+
+      await maybeNotify(config, guildId, targetId, granting ? `تم كتمك في السيرفر. السبب: ${trimmedReason || "غير محدد"}` : "تم فك الكتم عنك في السيرفر.");
+      await succeed(granting ? `تم كتم <@${targetId}>.` : `تم فك الكتم عن <@${targetId}>.`);
+      return;
+    }
+
+    /* ---- /prison and /unprison ---- */
+    if (commandName === "prison" || commandName === "unprison") {
+      const granting = commandName === "prison";
+      const prison = roleConfigFor("prison");
+      if (!prison.prisonRoleId) {
+        await reject("لم تُضبط رتبة السجن. اضبطها من بطاقة الأمر /prison في اللوحة.", "PRISON_ROLE_UNSET");
+        return;
+      }
+
+      if (granting) {
+        // Read before the role is applied, and read from Discord rather than from
+        // our own record: this is the snapshot `/unprison` gives back, and the
+        // only moment it can be taken.
+        const before = await readMemberRoleIds(client, guildId, targetId);
+        const snapshot = before.filter(roleId => roleId !== prison.prisonRoleId && roleId !== guildId);
+
+        const applied = await runRoleAction("grant", [prison.prisonRoleId], "سجن");
+        if (!applied) return;
+
+        await database.setMemberState({
+          id: randomUUID(),
+          guildId,
+          userId: targetId,
+          kind: "prison",
+          roleIds: snapshot,
+          moderatorId: userId,
+          reason: trimmedReason
+        });
+
+        // Only if a channel is configured, and only if they are in voice. There
+        // is no "move" for text: confinement there is the prison role's channel
+        // overwrites, which is the role's job and not this call's.
+        if (prison.prisonChannelId) {
+          await moveMemberToChannel(client, {
+            guildId,
+            targetId,
+            channelId: prison.prisonChannelId,
+            reason: trimmedReason || "سجن"
+          }).catch(() => false);
+        }
+
+        await logEvent("moderation.prison", punishmentData({ restoredRoles: snapshot.length }), runtime).catch(() => undefined);
+        await maybeNotify(config, guildId, targetId, `تم سجنك في السيرفر. السبب: ${trimmedReason || "غير محدد"}`);
+        await succeed(`تم سجن <@${targetId}>.`);
+        return;
+      }
+
+      // `take` rather than `get` + delete: it hands the snapshot back exactly
+      // once, so two moderators running `/unprison` together cannot both restore
+      // it and re-add roles the first had already dealt with.
+      const state = await database.takeMemberState(guildId, targetId, "prison");
+      const restored = await runRoleAction("grant", state?.roleIds ?? [], "إخراج من السجن");
+      if (!restored) return;
+      await runRoleAction("revoke", [prison.prisonRoleId], "إخراج من السجن");
+
+      await logEvent("moderation.unprison", punishmentData({ restoredRoles: restored.changed.length }), runtime).catch(() => undefined);
+      await maybeNotify(config, guildId, targetId, "تم إخراجك من السجن في السيرفر.");
+      await succeed(
+        state
+          ? `تم إخراج <@${targetId}> من السجن وإعادة ${restored.changed.length} رتبة.`
+          : `تم إخراج <@${targetId}> من السجن. لم يكن هناك سجل رتب محفوظ.`
+      );
+      return;
+    }
+
+    /* ---- /blacklist and /unblacklist ---- */
+    if (commandName === "blacklist" || commandName === "unblacklist") {
+      const granting = commandName === "blacklist";
+      const blacklistRoleIds = roleConfigFor("blacklist").blacklistRoleIds;
+      if (blacklistRoleIds.length === 0) {
+        await reject("لم تُضبط رتب البلاك ليست. اضبطها من بطاقة الأمر /blacklist في اللوحة.", "BLACKLIST_ROLES_UNSET");
+        return;
+      }
+
+      const applied = await runRoleAction(granting ? "grant" : "revoke", blacklistRoleIds, granting ? "بلاك ليست" : "فك البلاك ليست");
+      if (!applied) return;
+
+      if (granting) {
+        await database.setMemberState({
+          id: randomUUID(),
+          guildId,
+          userId: targetId,
+          kind: "blacklist",
+          moderatorId: userId,
+          reason: trimmedReason
+        });
+        await logEvent("moderation.blacklist", punishmentData({ roles: blacklistRoleIds.length }), runtime).catch(() => undefined);
+      } else {
+        await database.takeMemberState(guildId, targetId, "blacklist");
+        await logEvent("moderation.unblacklist", punishmentData({ roles: blacklistRoleIds.length }), runtime).catch(() => undefined);
+      }
+
+      await maybeNotify(config, guildId, targetId, granting ? "تم إدراجك في القائمة السوداء في السيرفر." : "تم فك القائمة السوداء عنك.");
+      await succeed(granting ? `تم إدراج <@${targetId}> في القائمة السوداء.` : `تم فك القائمة السوداء عن <@${targetId}>.`);
+      return;
+    }
+
+    /* ---- /block and /unblock ---- */
+    if (commandName === "block" || commandName === "unblock") {
+      const blockableRoleIds = roleConfigFor("block").blockableRoleIds;
+      const requested = strings.role?.trim();
+
+      if (commandName === "block") {
+        // Discord's own role picker supplies the value, but a picker is not a
+        // permission check: it can offer every role in the guild. The guild's
+        // `blockableRoleIds` is what decides, and it is read here rather than
+        // baked into the command's choices because a choice list is frozen at
+        // registration and this one has to follow a setting.
+        if (!requested) {
+          await reject("حدّد الرتبة المطلوبة.", "MISSING_ROLE");
+          return;
+        }
+        if (!blockableRoleIds.includes(requested)) {
+          await reject(
+            blockableRoleIds.length === 0
+              ? "لم تُضبط رتب البلوك. اضبطها من بطاقة الأمر /block في اللوحة."
+              : "هذه الرتبة ليست ضمن رتب البلوك المسموح بها لهذا الأمر.",
+            "ROLE_NOT_BLOCKABLE"
+          );
+          return;
+        }
+
+        const state = await database.getMemberState(guildId, targetId, "block");
+        // Added to the existing set rather than replacing it: blocking a second
+        // role must not silently lift the block on the first, which is what an
+        // upsert that overwrote `blocked_role_ids` would do.
+        const blocked = [...new Set([...(state?.blockedRoleIds ?? []), requested])];
+
+        // Taken away as well as blocked. Without this, `/block` on a member who
+        // already holds the role would leave them holding it and report that they
+        // are blocked from it.
+        await runRoleAction("revoke", [requested], "منع من رتبة");
+
+        await database.setMemberState({
+          id: randomUUID(),
+          guildId,
+          userId: targetId,
+          kind: "block",
+          blockedRoleIds: blocked,
+          roleIds: state?.roleIds ?? [],
+          moderatorId: userId,
+          reason: trimmedReason
+        });
+
+        await logEvent("moderation.block", punishmentData({ roleId: requested, blocked: blocked.length }), runtime).catch(() => undefined);
+        await maybeNotify(config, guildId, targetId, "تم منعك من الحصول على رتبة في السيرفر.");
+        await succeed(`تم منع <@${targetId}> من الرتبة <@&${requested}>.`);
+        return;
+      }
+
+      // No role given means lift every block this member has. That is the only
+      // useful reading: `/unblock` with nothing specified should not silently do
+      // nothing while reporting success.
+      const state = await database.takeMemberState(guildId, targetId, "block");
+      const blocked = state?.blockedRoleIds ?? [];
+      const lifted = requested ? blocked.filter(roleId => roleId === requested) : blocked;
+
+      if (requested && lifted.length === 0) {
+        await succeed(`لا يوجد منع على <@${targetId}> من الرتبة <@&${requested}>.`);
+        return;
+      }
+
+      // The remaining blocks are written back, so lifting one does not lift all.
+      const remaining = blocked.filter(roleId => !lifted.includes(roleId));
+      if (remaining.length > 0) {
+        await database.setMemberState({
+          id: randomUUID(),
+          guildId,
+          userId: targetId,
+          kind: "block",
+          blockedRoleIds: remaining,
+          roleIds: state?.roleIds ?? [],
+          moderatorId: userId,
+          reason: trimmedReason
+        });
+      }
+
+      await logEvent("moderation.unblock", punishmentData({ roleId: requested ?? "all", lifted: lifted.length }), runtime).catch(() => undefined);
+      await maybeNotify(config, guildId, targetId, "تم فك المنع عن رتبة في السيرفر.");
+      await succeed(
+        requested
+          ? `تم فك المنع عن <@${targetId}> من الرتبة <@&${requested}>.`
+          : `تم فك المنع عن <@${targetId}> من ${lifted.length} رتبة.`
+      );
+      return;
+    }
+
+    /* ---- /down and /undown ---- */
+    if (commandName === "down" || commandName === "undown") {
+      const down = roleConfigFor("down");
+
+      if (commandName === "down") {
+        const strippable = await readStrippableRoleIds(client, {
+          guildId,
+          targetId,
+          configured: down.adminRoleIdsToStrip
+        });
+        if (strippable.length === 0) {
+          await reject("لا توجد رتب إدارية قابلة للسحب من هذا العضو.", "NO_STRIPPABLE_ROLES");
+          return;
+        }
+
+        // The snapshot is taken before the roles go, and is what `/undown` gives
+        // back. Restoring from `adminRoleIdsToStrip` instead would mean editing
+        // that setting after a `/down` could strand a member with the roles it no
+        // longer lists.
+        const before = await readMemberRoleIds(client, guildId, targetId);
+        const snapshot = before.filter(roleId => strippable.includes(roleId));
+
+        // `/down` is the one state-based punishment with a length, so it is the
+        // only one that resolves a duration. An unresolvable one is not an error
+        // here the way it is for `/timeout`: "permanent" is meaningful, because
+        // the roles stay off until `/undown` — a state someone can reverse.
+        let minutes: number | undefined = numbers.minutes;
+        if (minutes === undefined) {
+          const seconds = commandDurationSeconds(definition, resolveCommandDuration(config, trimmedReason));
+          minutes = seconds === null ? undefined : Math.max(1, Math.round(seconds / 60));
+        }
+        const expiresAt = minutes === undefined ? null : new Date(Date.now() + minutes * 60_000);
+
+        const applied = await runRoleAction("revoke", strippable, "سحب الرتب الإدارية");
+        if (!applied) return;
+
+        await database.setMemberState({
+          id: randomUUID(),
+          guildId,
+          userId: targetId,
+          kind: "down",
+          // Only the roles actually taken, not every role considered: restoring
+          // the difference would re-add roles the member never lost.
+          roleIds: applied.changed.filter(roleId => snapshot.includes(roleId)),
+          moderatorId: userId,
+          reason: trimmedReason,
+          expiresAt
+        });
+
+        await logEvent(
+          "moderation.down",
+          punishmentData({ stripped: applied.changed.length, minutes: minutes ?? "permanent" }),
+          runtime
+        ).catch(() => undefined);
+        await maybeNotify(config, guildId, targetId, "تم سحب رتبك الإدارية مؤقتاً في السيرفر.");
+        await succeed(
+          minutes === undefined
+            ? `تم سحب ${applied.changed.length} رتبة إدارية من <@${targetId}> حتى /undown.`
+            : `تم سحب ${applied.changed.length} رتبة إدارية من <@${targetId}> لمدة ${minutes} دقيقة.`
+        );
+        return;
+      }
+
+      const state = await database.takeMemberState(guildId, targetId, "down");
+      const restored = await runRoleAction("grant", state?.roleIds ?? [], "استعادة الرتب الإدارية");
+      if (!restored) return;
+
+      await logEvent("moderation.undown", punishmentData({ restored: restored.changed.length }), runtime).catch(() => undefined);
+      await maybeNotify(config, guildId, targetId, "تم إرجاع رتبك الإدارية في السيرفر.");
+      await succeed(
+        state
+          ? `تم إرجاع ${restored.changed.length} رتبة إدارية إلى <@${targetId}>.`
+          : `لا توجد رتب إدارية مسحوبة عن <@${targetId}>.`
+      );
+      return;
+    }
+
+    /* ---- /remove ---- */
+    // Broader than `/delwarn`, which only sees warnings. This reads the member's
+    // whole punishment record — warnings and standing states together — because
+    // an operator looking at a member does not think of "a warning" and "a mute"
+    // as living in two different places.
+    if (commandName === "remove") {
+      const index = numbers.index ?? 0;
+      const removed = await database.deletePunishmentAt(guildId, targetId, index);
+      if (!removed) {
+        // A miscount, not an intrusion — the same reasoning as `/delwarn`.
+        await succeed(`لا توجد عقوبة بالرقم ${index} على <@${targetId}>.`);
+        return;
+      }
+
+      // The row is gone, but the Discord side is not touched: `/remove` deletes a
+      // record, it does not lift a punishment. Lifting is what the inverse
+      // commands are for, and doing it here would make a deletion silently
+      // restore roles.
+      await logEvent("moderation.remove", punishmentData({ removed: index, kind: removed.kind }), runtime).catch(() => undefined);
+      await succeed(`تم حذف العقوبة رقم ${index} عن <@${targetId}> (${removed.kind}: «${removed.reason}»).`);
       return;
     }
 
@@ -872,6 +1298,50 @@ const securityProbe = setInterval(async () => {
 }, 30_000);
 securityProbe.unref?.();
 
+/* ------------------------------------------------------------------ *
+ * Expiring punishments
+ * ------------------------------------------------------------------ */
+/**
+ * `/down` is the one state-based punishment that carries a length, so something
+ * has to end it. Without this the duration would save and change nothing — the
+ * defect this project treats as its worst kind, and the hardest to notice: the
+ * roles stay off, the card reads as configured, and only the member knows.
+ *
+ * The state is consumed whatever the outcome, matching `/unprison`: the snapshot
+ * is handed back exactly once, and a restore that could not happen is reported
+ * rather than retried every minute forever. A member who left, or a role that was
+ * deleted in the meantime, would otherwise fill the log with the same failure
+ * and bury the one entry that matters.
+ */
+const downSweep = setInterval(() => {
+  void sweepExpiredDowns({
+    due: () => database.listDueMemberStates(new Date()),
+    restore: state =>
+      applyRoleChange(client, {
+        kind: "grant",
+        guildId: state.guildId,
+        targetId: state.userId,
+        roleIds: state.roleIds,
+        reason: "انتهاء مدة سحب الرتب الإدارية"
+      }),
+    consume: state => database.takeMemberState(state.guildId, state.userId, "down").then(() => undefined),
+    // Both numbers, always. Reporting only the restored count after a partial
+    // failure would read as a clean expiry, and the member would be left short of
+    // roles with nothing in the log to explain it.
+    record: (state, counts) =>
+      logEvent(
+        "moderation.down-expired",
+        {
+          guildId: state.guildId,
+          actorId: "system",
+          data: { targetId: state.userId, ...counts, reason: state.reason }
+        },
+        runtime
+      ).catch(() => undefined)
+  }).catch(error => console.error("AL AI failed to expire a /down", error));
+}, 60_000);
+downSweep.unref?.();
+
 const supervisor = startSupervisor({
   pipeline,
   database,
@@ -957,6 +1427,7 @@ async function shutdown(signal: string) {
   watchdog.stop();
   clearInterval(securityProbe);
   clearInterval(presenceTimer);
+  clearInterval(downSweep);
   await adapter?.close().catch(() => undefined);
   const flushed = await pipeline.flush(5_000);
   if (!flushed) console.warn("AL AI shutdown with undelivered log jobs.");

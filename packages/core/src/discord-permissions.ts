@@ -46,6 +46,7 @@ export const DISCORD_PERMISSION_BITS = {
   BAN_MEMBERS: 0x4n,
   MANAGE_CHANNELS: 0x10n,
   MANAGE_MESSAGES: 0x2000n,
+  MANAGE_ROLES: 0x10000000n,
   MODERATE_MEMBERS: 0x10000000000n
 } as const;
 
@@ -59,19 +60,26 @@ export type DiscordPermissionBit = keyof typeof DISCORD_PERMISSION_BITS;
  * called two different things, which is exactly how `STATUS_LABELS` drifted out
  * of core once already.
  *
- * `ADMINISTRATOR` and `CHANGE_NICKNAME` have no entry because no command
- * declares them: a command asks for the narrowest bit that works, and the
- * administrator bit is never the narrowest for anything. The test named above
- * asserts every bit a command *does* declare has a name here, so this map
- * cannot fall behind the registry.
+ * `ADMINISTRATOR` now has an entry, which reverses what this comment used to say.
+ * Two commands genuinely need it: `/clearallwarns` and `/clearallpunishments`
+ * wipe a server-wide record with no undo, and no narrower bit expresses "may
+ * destroy every punishment this server has ever recorded" — `MANAGE_GUILD`
+ * covers renaming a channel as well, so it would be the wider grant of the two,
+ * not the narrower. Every other command still asks for the narrowest bit that
+ * works. `CHANGE_NICKNAME` has no entry because nothing declares it.
+ *
+ * The test named above asserts every bit a command *does* declare has a name
+ * here, so this map cannot fall behind the registry.
  */
 export const discordPermissionLabels: Partial<Record<DiscordPermissionBit, string>> = {
+  ADMINISTRATOR: "المشرف العام",
   KICK_MEMBERS: "طرد الأعضاء",
   BAN_MEMBERS: "حظر الأعضاء",
   MANAGE_CHANNELS: "إدارة القنوات",
   MANAGE_MESSAGES: "إدارة الرسائل",
   MANAGE_GUILD: "إدارة السيرفر",
   MANAGE_NICKNAMES: "إدارة الأسماء المستعارة",
+  MANAGE_ROLES: "إدارة الرتب",
   MODERATE_MEMBERS: "إسكات الأعضاء"
 };
 

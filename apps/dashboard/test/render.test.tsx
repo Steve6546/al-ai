@@ -239,15 +239,28 @@ const boardProps = {
   onSaved: async () => commandFlags
 };
 
-test("the commands board shows the totals, the search, the filters and the sections", () => {
+test("the commands board drops the totals cards and lifts the filter row to the top", () => {
   const html = renderToString(createElement(CommandsBoard, boardProps)).replace(/<!-- -->/g, "");
 
-  assert.match(html, /إجمالي الأوامر/, "the total is labelled");
-  assert.match(html, /الأوامر المفعلة/, "the enabled count is labelled");
-  assert.match(html, /أقسام فيها أوامر/, "the populated-section count is labelled");
+  // Asserted by the label text rather than by a component name: the cards were
+  // removed by request, and what the operator should stop seeing is the copy.
+  for (const label of ["إجمالي الأوامر", "الأوامر المفعلة", "أقسام فيها أوامر"]) {
+    assert.equal(html.includes(label), false, `the «${label}» card is gone`);
+  }
+
   assert.match(html, /ابحث عن أمر\.\.\. 🔍/, "the instant search is present");
   assert.match(html, /تفعيل الكل/, "the bulk enable action is offered");
   assert.match(html, /تعطيل الكل/, "the bulk disable action is offered");
+
+  // "Rose to the top" has to mean something in markup, or it is a claim about a
+  // screenshot. The content column's own first heading now follows the filter
+  // row. The `</h3>` anchor matters: the section *nav* renders the same labels
+  // as buttons, and it precedes the column, so a bare label search would match
+  // the sidebar and prove nothing.
+  const search = html.indexOf("ابحث عن أمر");
+  const firstHeading = html.indexOf(">الأوامر الأساسية</h3>");
+  assert.ok(search >= 0, "the instant search is present");
+  assert.ok(firstHeading > search, "the filter row sits above the first section heading");
 
   // The status filter, as three pressed-state buttons rather than a dropdown.
   assert.match(html, /aria-label="تصفية حسب الحالة"/, "the status filter is grouped and labelled");
@@ -258,6 +271,18 @@ test("the commands board shows the totals, the search, the filters and the secti
   assert.match(html, /الأوامر الأساسية/, "the core section is rendered");
   assert.match(html, /العقوبات/, "the penalties section is rendered");
   assert.match(html, /أدوات الشات/, "the chat-tools section is rendered");
+});
+
+test("the section badge reads enabled over total, so an unfinished section is visible", () => {
+  const html = renderToString(createElement(CommandsBoard, boardProps)).replace(/<!-- -->/g, "");
+
+  // The figure the operator counts the completed suite against, asserted here so
+  // the number on screen and the number in the registry cannot drift apart.
+  const penalties = commandFlagsFor(new Map()).filter(command => command.category === "penalties");
+  assert.equal(penalties.length, 23, "the penalties section holds the completed suite");
+  assert.ok(penalties.every(command => command.enabled), "and every one starts enabled");
+
+  assert.ok(html.includes("23/23"), "the badge reads enabled over total, not the enabled count alone");
 });
 
 test("every one of the fourteen sections is offered in the sidebar, empty ones included", () => {

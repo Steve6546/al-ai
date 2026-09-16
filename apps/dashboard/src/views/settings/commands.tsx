@@ -32,7 +32,8 @@ import {
   MAX_AUTO_DELETE_SECONDS,
   MAX_COOLDOWN_SECONDS,
   MAX_PRESET_REASONS,
-  MAX_PURGE_DAYS
+  MAX_PURGE_DAYS,
+  ROLE_FIELD_OWNERS
 } from "@al-ai/core/browser";
 import { api, type CommandChange, type ScopedMember } from "@/api";
 import { EmptyState } from "@/components/empty-state";
@@ -40,7 +41,7 @@ import { SaveBar } from "@/components/save-bar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -270,7 +271,20 @@ export function CommandsBoard({
       defaultDuration: command.defaultDuration,
       presetReasons: command.presetReasons,
       aliases: command.aliases,
-      deleteResponseOnLeave: command.deleteResponseOnLeave
+      deleteResponseOnLeave: command.deleteResponseOnLeave,
+      // Sent for every command, not only the six that own one. Core drops what a
+      // command does not support — `normaliseCommandConfig` forces it back to its
+      // default — and it does that without reporting anything, so the guard
+      // cannot be "the server will tell us". It is structural instead: the
+      // control exists only on the owning card, so a *meaningful* value is never
+      // sent for a command that would not read it. What travels here for the
+      // others is the default, and dropping a default changes nothing.
+      mutedRoleId: command.mutedRoleId,
+      prisonRoleId: command.prisonRoleId,
+      prisonChannelId: command.prisonChannelId,
+      blacklistRoleIds: command.blacklistRoleIds,
+      adminRoleIdsToStrip: command.adminRoleIdsToStrip,
+      blockableRoleIds: command.blockableRoleIds
     }));
   }, [saved, draft]);
 
@@ -313,13 +327,14 @@ export function CommandsBoard({
     return map;
   }, [draft, categories]);
 
+  // Only the two numbers the section nav actually renders. The third total the
+  // header used to show was dropped with its card rather than kept for nothing.
   const stats = useMemo(
     () => ({
       total: draft.length,
-      enabled: draft.filter(command => command.enabled).length,
-      sections: categories.filter(category => (counts.get(category.id)?.total ?? 0) > 0).length
+      enabled: draft.filter(command => command.enabled).length
     }),
-    [draft, categories, counts]
+    [draft]
   );
 
   const patch = (name: string, next: Partial<CommandFlag>) =>
@@ -376,15 +391,14 @@ export function CommandsBoard({
       </nav>
 
       {/* ---------------------------------------------------------------- *
-       * Totals, filters and the list
+       * Filters and the list
+       *
+       * The filter row is the first thing in the column. It used to sit under
+       * three totals cards, which cost a whole row of vertical space to repeat
+       * two numbers the section nav already shows beside «كل الأوامر» — and a
+       * third («أقسام فيها أوامر») that no operator ever acted on.
        * ---------------------------------------------------------------- */}
       <div className="min-w-0 space-y-4">
-        <div className="grid gap-3 sm:grid-cols-3">
-          <StatCard label="إجمالي الأوامر" value={stats.total} />
-          <StatCard label="الأوامر المفعلة" value={stats.enabled} tone="positive" />
-          <StatCard label="أقسام فيها أوامر" value={stats.sections} />
-        </div>
-
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-56 flex-1">
             <Search className="pointer-events-none absolute inset-y-0 start-2.5 my-auto size-4 text-muted-foreground" />
@@ -495,9 +509,13 @@ export function CommandsBoard({
 /**
  * One row of the section nav.
  *
- * The badge shows how many of the section's commands are enabled, which is the
- * number an operator is looking for — a section with four commands and none
- * enabled reads as `0` and is worth investigating, while `4/4` is not.
+ * The badge reads `enabled/total`, and it used to read the enabled count alone.
+ * The argument for the single number was that `4/4` carries nothing a bare `4`
+ * does not. That reasoning missed what this list is for: the operator opens this
+ * screen to *finish* a section, and "is العقوبات complete?" is a question about
+ * the pair. With one number the only way to answer it was to open the section and
+ * count the cards — and an incomplete section looked identical to a finished one
+ * whose commands happened to be switched off.
  */
 function SectionButton({
   label,
@@ -525,19 +543,10 @@ function SectionButton({
     >
       <Icon className="size-4 shrink-0" aria-hidden />
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      <span className={`tabular text-xs ${total === 0 ? "text-muted-foreground/60" : ""}`}>{enabled}</span>
+      <span className={`tabular text-xs ${total === 0 ? "text-muted-foreground/60" : ""}`}>
+        {enabled}/{total}
+      </span>
     </button>
-  );
-}
-
-function StatCard({ label, value, tone }: { label: string; value: number; tone?: "positive" }) {
-  return (
-    <Card>
-      <CardContent className="py-4">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className={`text-2xl font-semibold tabular ${tone === "positive" ? "text-primary" : ""}`}>{value}</p>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -552,7 +561,13 @@ const COMPARED_KEYS = [
   "requireReason",
   "allowCustomReason",
   "defaultDuration",
-  "deleteResponseOnLeave"
+  "deleteResponseOnLeave",
+  // The three single-role fields. Scalars, so `!==` is the whole comparison —
+  // and `null` (unset) has to be distinguishable from a snowflake, which is why
+  // they are here rather than in the list block below.
+  "mutedRoleId",
+  "prisonRoleId",
+  "prisonChannelId"
 ] as const;
 
 /**
@@ -562,7 +577,7 @@ const COMPARED_KEYS = [
  * server's `commandFlagsFor`, one by spreading and patching that — so a key that
  * arrives in a different position would stringify differently and be reported as
  * a change the operator never made. Comparing the fields that are actually sent,
- * plus the six lists and the presets in order, is what makes "unchanged" mean
+ * plus the lists and the presets in order, is what makes "unchanged" mean
  * unchanged.
  */
 function commandDiffers(a: CommandFlag, b: CommandFlag | undefined): boolean {
@@ -577,6 +592,11 @@ function commandDiffers(a: CommandFlag, b: CommandFlag | undefined): boolean {
     !sameList(a.deniedChannelIds, b.deniedChannelIds) ||
     !sameList(a.allowedUserIds, b.allowedUserIds) ||
     !sameList(a.deniedUserIds, b.deniedUserIds) ||
+    // The role fields the punishment commands own. Omitting these would let the
+    // operator change «رتب البلاك ليست» and be told there was nothing to save.
+    !sameList(a.blacklistRoleIds, b.blacklistRoleIds) ||
+    !sameList(a.adminRoleIdsToStrip, b.adminRoleIdsToStrip) ||
+    !sameList(a.blockableRoleIds, b.blockableRoleIds) ||
     !sameList(a.aliases, b.aliases) ||
     !samePresets(a.presetReasons, b.presetReasons)
   );
@@ -623,6 +643,21 @@ function CommandCard({
   onPatch: (next: Partial<CommandFlag>) => void;
 }) {
   const [open, setOpen] = useState(false);
+
+  /**
+   * Which of the role fields this command owns, asked of core rather than
+   * hard-coded here.
+   *
+   * `ROLE_FIELD_OWNERS` is what `normaliseCommandConfig` uses to force a field
+   * that arrives on the wrong row back to its default, so reading it is what keeps
+   * this card and the server's normalisation from disagreeing about who owns
+   * what. A hand-written list of command names would be a second copy of that map,
+   * and the two would drift — with the drift showing up as a field that renders
+   * on one card and is discarded by the other.
+   */
+  const owns = (field: keyof typeof ROLE_FIELD_OWNERS) => ROLE_FIELD_OWNERS[field] === command.name;
+  const ownsRoleField = owns("mutedRoleId") || owns("prisonRoleId") || owns("blacklistRoleIds") || owns("adminRoleIdsToStrip") || owns("blockableRoleIds");
+
   const customised =
     command.allowedRoleIds.length > 0 ||
     command.deniedRoleIds.length > 0 ||
@@ -635,7 +670,15 @@ function CommandCard({
     command.autoDeleteResponseSeconds > 0 ||
     command.deleteResponseOnLeave ||
     command.requireReason ||
-    !command.allowCustomReason;
+    !command.allowCustomReason ||
+    // A command with no muted role refuses to run at all, so setting one is the
+    // most consequential edit on this card — it must not read as "default".
+    command.mutedRoleId !== null ||
+    command.prisonRoleId !== null ||
+    command.prisonChannelId !== null ||
+    command.blacklistRoleIds.length > 0 ||
+    command.adminRoleIdsToStrip.length > 0 ||
+    command.blockableRoleIds.length > 0;
 
   const permission = command.requiredPermission ? permissionLabels[command.requiredPermission] : null;
   // A command acts on a member or it does not, and only the first kind has a
@@ -885,6 +928,98 @@ function CommandCard({
                 </div>
               </>
             )}
+
+            {/* -------------------------------------------------------- *
+             * (هـ) الأدوار الخاصة — only on the commands that own one
+             *
+             * These are not scope fields. «الرتب المسموحة» decides who may run
+             * a command; these decide what the command acts on, and only one
+             * command applies each of them. That is why they live on the card
+             * of their owner and nowhere else, and why the inverse command
+             * reads the value from here rather than asking for it again.
+             * -------------------------------------------------------- */}
+            {ownsRoleField && (
+              <>
+                <Separator />
+                <SectionTitle>الأدوار الخاصة</SectionTitle>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {owns("mutedRoleId") && (
+                    <SingleChoiceField
+                      id={`muted-role-${command.name}`}
+                      label="رتبة المكتوم"
+                      noneLabel="بلا رتبة — الأمر لا ينفّذ"
+                      hint="الرتبة التي يمنحها /mute. أنشئها في ديسكورد بصلاحياتها بنفسك؛ البوت لا يُنشئ رتبة، لأن رتبة بلا تجاوزات تُكتم بصمت ولا تُسكِت أحداً."
+                      items={roles.map(role => ({ id: role.id, name: role.name }))}
+                      value={command.mutedRoleId}
+                      onChange={mutedRoleId => onPatch({ mutedRoleId })}
+                    />
+                  )}
+
+                  {owns("prisonRoleId") && (
+                    <SingleChoiceField
+                      id={`prison-role-${command.name}`}
+                      label="رتبة السجن"
+                      noneLabel="بلا رتبة — الأمر لا ينفّذ"
+                      hint="الرتبة التي يمنحها /prison. يحفظ البوت رتب العضو قبل السجن ويعيدها عند /unprison، فتأكّد أن رتبة السجن أدنى من رتبة البوت."
+                      items={roles.map(role => ({ id: role.id, name: role.name }))}
+                      value={command.prisonRoleId}
+                      onChange={prisonRoleId => onPatch({ prisonRoleId })}
+                    />
+                  )}
+
+                  {owns("prisonChannelId") && (
+                    <SingleChoiceField
+                      id={`prison-channel-${command.name}`}
+                      label="قناة السجن الصوتية"
+                      noneLabel="بلا قناة — لا نقل"
+                      hint="قناة صوتية يُنقل إليها العضو عند السجن. اختيارية: بلا قناة يبقى السجن رتبة فقط، وهو ما يكفي للقنوات النصية."
+                      items={channels.filter(channel => channel.type === "voice").map(channel => ({ id: channel.id, name: channel.name }))}
+                      value={command.prisonChannelId}
+                      onChange={prisonChannelId => onPatch({ prisonChannelId })}
+                    />
+                  )}
+
+                  {owns("blacklistRoleIds") && (
+                    <ScopeSelector
+                      label="رتب البلاك ليست"
+                      emptyLabel="بدون"
+                      hint="الرتب التي يمنحها /blacklist ويسحبها /unblacklist. لا بد من رتبة واحدة على الأقل، وإلا رُفض الأمر بدل أن يُبلَّغ بنجاح لم يقع."
+                      items={roles.map(role => ({ id: role.id, name: role.name, color: role.color }))}
+                      selected={command.blacklistRoleIds}
+                      noneLabel="لا توجد رتب"
+                      noun="رتب"
+                      onChange={blacklistRoleIds => onPatch({ blacklistRoleIds })}
+                    />
+                  )}
+
+                  {owns("adminRoleIdsToStrip") && (
+                    <ScopeSelector
+                      label="الرتب الإدارية"
+                      emptyLabel="كل رتبة ذات صلاحيات"
+                      hint="الرتب التي يسحبها /down. اتركها فارغة لسحب كل الرتب ذات الصلاحيات تلقائياً، وهي الحالة الافتراضية. الاستعادة تعيد ما سُحب فعلاً لا ما تسرده هذه القائمة."
+                      items={roles.map(role => ({ id: role.id, name: role.name, color: role.color }))}
+                      selected={command.adminRoleIdsToStrip}
+                      noneLabel="لا توجد رتب"
+                      noun="رتب"
+                      onChange={adminRoleIdsToStrip => onPatch({ adminRoleIdsToStrip })}
+                    />
+                  )}
+
+                  {owns("blockableRoleIds") && (
+                    <ScopeSelector
+                      label="رتب البلوك"
+                      emptyLabel="بدون"
+                      hint="الرتب التي يقبلها /block. منتقي ديسكورد يعرض كل الرتب، وهذه القائمة هي ما يقرّر فعلاً: رتبة خارجها يرفضها البوت."
+                      items={roles.map(role => ({ id: role.id, name: role.name, color: role.color }))}
+                      selected={command.blockableRoleIds}
+                      noneLabel="لا توجد رتب"
+                      noun="رتب"
+                      onChange={blockableRoleIds => onPatch({ blockableRoleIds })}
+                    />
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </CollapsibleContent>
       </Card>
@@ -894,6 +1029,70 @@ function CommandCard({
 
 /** What a fresh auto-delete field starts at, so switching it on is never a no-op. */
 const DEFAULT_AUTO_DELETE_SECONDS = 5;
+
+/**
+ * The sentinel standing for "unset" in a `SingleChoiceField`.
+ *
+ * Radix reserves the empty string — an item cannot carry `value=""` — and unset
+ * has to stay *selectable*, because a muted role that could be set but never
+ * cleared would be a trap.
+ */
+const NO_CHOICE = "__none__";
+
+/**
+ * A single-value picker for the one role or channel a command applies.
+ *
+ * Not `ScopeSelector`: that one is a checklist, and these fields hold one value.
+ * Checkboxes would let the operator tick two roles and have one of them silently
+ * win — a control that looks like it saved something and did not.
+ *
+ * Radix's select rather than a native `<select>`, which draws its list with the
+ * operating system and comes out white on a dark theme.
+ *
+ * A stored value that is no longer in the list is shown as such rather than
+ * falling back to the placeholder: a deleted role would otherwise make a set
+ * field look unset, which is the opposite of what the operator needs to see.
+ */
+function SingleChoiceField({
+  id,
+  label,
+  hint,
+  items,
+  value,
+  noneLabel,
+  onChange
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  items: { id: string; name: string }[];
+  value: string | null;
+  noneLabel: string;
+  onChange: (id: string | null) => void;
+}) {
+  const missing = value !== null && !items.some(item => item.id === value);
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Select value={value ?? NO_CHOICE} onValueChange={next => onChange(next === NO_CHOICE ? null : next)}>
+        <SelectTrigger id={id} aria-label={label}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NO_CHOICE}>{noneLabel}</SelectItem>
+          {items.map(item => (
+            <SelectItem key={item.id} value={item.id}>
+              {item.name}
+            </SelectItem>
+          ))}
+          {missing && <SelectItem value={value}>{`${value} — لم تُعد موجودة`}</SelectItem>}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">{hint}</p>
+    </div>
+  );
+}
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{children}</p>;

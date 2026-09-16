@@ -4,6 +4,7 @@ import { dom } from "./dom-env.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { act, createElement, StrictMode, type ReactElement } from "react";
+import { commandFlagsFor } from "@al-ai/core/browser";
 import { App } from "../src/App";
 import { ErrorBoundary } from "../src/components/error-boundary";
 import { TooltipProvider } from "../src/components/ui/tooltip";
@@ -135,6 +136,16 @@ const payloads: [RegExp, unknown][] = [
       // contract it actually broke.
       aliases: [],
       deleteResponseOnLeave: false,
+      // The six role fields the punishment suite added. Not decoration either:
+      // the board's change diff reads the three lists as arrays, so a fixture
+      // without them throws before the screen renders — a failure that reads
+      // like a layout problem rather than the contract it actually broke.
+      mutedRoleId: null,
+      prisonRoleId: null,
+      prisonChannelId: null,
+      blacklistRoleIds: [],
+      adminRoleIdsToStrip: [],
+      blockableRoleIds: [],
       category: "penalties",
       description: "حظر عضو من السيرفر.",
       minimumTier: "moderator",
@@ -172,6 +183,12 @@ const payloads: [RegExp, unknown][] = [
       presetReasons: [],
       aliases: [],
       deleteResponseOnLeave: false,
+      mutedRoleId: null,
+      prisonRoleId: null,
+      prisonChannelId: null,
+      blacklistRoleIds: [],
+      adminRoleIdsToStrip: [],
+      blockableRoleIds: [],
       category: "channel-management",
       description: "حذف رسائل من القناة.",
       minimumTier: "moderator",
@@ -331,7 +348,11 @@ const views = ["dashboard", "commands", "customization", "roles", "logs", "audit
  */
 const loadedMarkers: Record<string, RegExp> = {
   dashboard: /شريط النشاط الأخير/,
-  commands: /إجمالي الأوامر/,
+  // Was `/إجمالي الأوامر/`, one of the three totals cards. Those were removed by
+  // request, so the marker moved to the section label — which is stronger anyway:
+  // the old one was a static string that any render of the board would produce,
+  // while this one can only appear once `categories` came back from the API.
+  commands: /العقوبات/,
   customization: /الهوية العالمية/,
   roles: /المالك/,
   logs: /التسجيل المركزي/,
@@ -828,6 +849,76 @@ test("the commands card opens into six closed scope selectors", async () => {
 
   // The whole point of the rebuild: six selectors, not six open lists.
   assert.equal(result.openPanels, 0, "no panel is in the document until one is asked for");
+});
+
+/**
+ * The punishment commands that own a role field, built by core rather than
+ * hand-written.
+ *
+ * `commandFlagsFor` is what the server actually sends, so a fixture built from
+ * it cannot be missing a field the board reads. That is precisely how the two
+ * hand-written stubs above failed when this work landed: they carried the shape
+ * as it was the day they were written, and the board's change diff had started
+ * reading three arrays that were not in them.
+ */
+const roleFieldCommands = commandFlagsFor(new Map()).filter(command =>
+  ["ban", "mute", "prison", "blacklist", "down", "block"].includes(command.name)
+);
+
+/** Serves a different commands payload for the duration of `run`. */
+async function withCommands<T>(commands: unknown[], run: () => Promise<T>): Promise<T> {
+  const entry = payloads.find(([pattern]) => pattern.test(`/api/guilds/${GUILD_ID}/commands`))!;
+  const original = entry[1];
+  entry[1] = { ...(original as Record<string, unknown>), commands };
+  try {
+    return await run();
+  } finally {
+    entry[1] = original;
+  }
+}
+
+test("each role field is offered on the card of the command that applies it, and nowhere else", async () => {
+  const expected: [string, string][] = [
+    ["mute", "رتبة المكتوم"],
+    ["prison", "رتبة السجن"],
+    ["prison", "قناة السجن الصوتية"],
+    ["blacklist", "رتب البلاك ليست"],
+    ["down", "الرتب الإدارية"],
+    ["block", "رتب البلوك"]
+  ];
+
+  for (const [name, label] of expected) {
+    stubFetch();
+    const { result, errors } = await withCommands(roleFieldCommands, () =>
+      mount(`/dashboard/${GUILD_ID}/commands`, async doc => {
+        await openTrigger(doc.querySelector(`[aria-label="إعدادات ${name}"]`)!);
+        return {
+          present: Boolean(doc.querySelector(`[aria-label="${label}"]`)),
+          section: (doc.body.textContent ?? "").includes("الأدوار الخاصة")
+        };
+      })
+    );
+
+    assert.deepEqual(fatal(errors), [], `the /${name} card produced no render error`);
+    assert.ok(result.present, `/${name} offers «${label}»`);
+    assert.ok(result.section, `/${name} shows the role-fields section`);
+  }
+
+  // And the negative direction, without which the six assertions above would pass
+  // just as well if the section were rendered on every card. `/ban` owns no role
+  // field, so it must not offer the section at all — a control there would be one
+  // that stores nothing and is then dropped by core's normalisation.
+  stubFetch();
+  const banOnly = await withCommands(
+    roleFieldCommands.filter(command => command.name === "ban"),
+    () =>
+      mount(`/dashboard/${GUILD_ID}/commands`, async doc => {
+        await openTrigger(doc.querySelector('[aria-label="إعدادات ban"]')!);
+        return (doc.body.textContent ?? "").includes("الأدوار الخاصة");
+      })
+  );
+  assert.deepEqual(fatal(banOnly.errors), [], "the /ban card produced no render error");
+  assert.equal(banOnly.result, false, "/ban offers no role-fields section");
 });
 
 test("a scope selector opens into a list, and ticking an entry is a pending change", async () => {

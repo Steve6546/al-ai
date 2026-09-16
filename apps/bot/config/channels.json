@@ -11,7 +11,7 @@
     {
       "id": "moderation-log",
       "label": "الإشراف",
-      "subCategories": ["moderation.ban", "moderation.unban", "moderation.kick", "moderation.timeout", "moderation.untimeout", "moderation.warn", "moderation.clearwarns", "moderation.delwarn"],
+      "subCategories": ["moderation.ban", "moderation.unban", "moderation.kick", "moderation.timeout", "moderation.untimeout", "moderation.warn", "moderation.clearwarns", "moderation.delwarn", "moderation.mute", "moderation.unmute", "moderation.prison", "moderation.unprison", "moderation.blacklist", "moderation.unblacklist", "moderation.block", "moderation.unblock", "moderation.down", "moderation.undown", "moderation.down-expired", "moderation.remove", "moderation.clearallwarns", "moderation.clearallpunishments"],
       "required": false,
       "note": "يشمل أحداث الإشراف الحساسة المحصورة بالمديرين."
     },

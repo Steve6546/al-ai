@@ -292,6 +292,18 @@ export const CLEAR_MAX_COUNT = 100;
 /** `/slowmode` bounds, in seconds. Discord's own maximum is six hours. */
 export const SLOWMODE_MAX_SECONDS = 6 * 60 * 60;
 
+/**
+ * `/down`'s ceiling, in minutes.
+ *
+ * Discord imposes nothing here — `/down` strips roles with our own call, not
+ * through a timed Discord API — so the cap is ours. It exists because the value
+ * becomes a timer, and an unbounded one would let a typo schedule a restore
+ * further out than the process could ever be expected to live. Thirty days is
+ * the longest duration `/timeout` can express, so it is also the longest an
+ * operator can already reason about.
+ */
+export const DOWN_MAX_MINUTES = 30 * 24 * 60;
+
 export function buildStatusCommand() {
   return new SlashCommandBuilder().setName("al-status").setDescription("عرض حالة AL AI").toJSON();
 }
@@ -442,6 +454,141 @@ export function buildModerationCommands() {
       .setDescription("تغيير الاسم المستعار لعضو، واترك الاسم فارغاً لإزالته")
       .addUserOption(targetOption)
       .addStringOption(option => option.setName("nickname").setDescription("الاسم الجديد (اتركه فارغاً لإزالة الاسم)").setMaxLength(32).setRequired(false))
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    /* ---- The state-based punishments ----
+     *
+     * These take a member into a condition rather than applying an event, which
+     * is why none of them takes a duration: a mute with a timer is `/timeout`.
+     * `/down` is the exception and is the only one with a length.
+     *
+     * `/blacklist` and `/mute` take no role option on purpose. The role they
+     * apply is a guild setting on the command's own card, so the operator names
+     * it once instead of every time the command runs. */
+    new SlashCommandBuilder()
+      .setName("mute")
+      .setDescription("كتم عضو عبر رتبة المكتوم")
+      .addUserOption(targetOption)
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("unmute")
+      .setDescription("فك الكتم عن عضو")
+      .addUserOption(targetOption)
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("prison")
+      .setDescription("عزل عضو في رتبة وقناة السجن")
+      .addUserOption(targetOption)
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("unprison")
+      .setDescription("إخراج عضو من السجن وإعادة رتبه")
+      .addUserOption(targetOption)
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("blacklist")
+      .setDescription("إدراج عضو في القائمة السوداء")
+      .addUserOption(targetOption)
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("unblacklist")
+      .setDescription("فك القائمة السوداء عن عضو")
+      .addUserOption(targetOption)
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    // The role comes from Discord's own picker, not a fixed choice list: a
+    // choice list is frozen at registration and this one has to follow a guild
+    // setting. `blockableRoleIds` is enforced when the command runs, which is
+    // the only moment the current setting is known.
+    new SlashCommandBuilder()
+      .setName("block")
+      .setDescription("منع عضو من الحصول على رتبة")
+      .addUserOption(targetOption)
+      .addRoleOption(option => option.setName("role").setDescription("الرتبة الممنوعة").setRequired(true))
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("unblock")
+      .setDescription("فك المنع عن رتبة لعضو، واترك الرتبة فارغة لفك الكل")
+      .addUserOption(targetOption)
+      .addRoleOption(option =>
+        option.setName("role").setDescription("الرتبة (اتركها فارغة لفك كل المنع)").setRequired(false)
+      )
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("down")
+      .setDescription("سحب الرتب الإدارية من عضو لمدة محددة")
+      .addUserOption(targetOption)
+      .addIntegerOption(option =>
+        option
+          .setName("minutes")
+          .setDescription("المدة بالدقائق (اتركها فارغة لاستخدام المدة الافتراضية)")
+          // Optional for the same reason `/timeout`'s is: a hard-required option
+          // would make the guild's `defaultDuration` setting unreachable.
+          .setRequired(false)
+          .setMinValue(1)
+          .setMaxValue(DOWN_MAX_MINUTES)
+      )
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("undown")
+      .setDescription("استعادة الرتب الإدارية المسحوبة")
+      .addUserOption(targetOption)
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("remove")
+      .setDescription("حذف عقوبة محددة من سجلات عضو حسب رقمها في قائمة عقوباته")
+      .addUserOption(targetOption)
+      .addIntegerOption(option =>
+        option.setName("index").setDescription("رقم العقوبة في القائمة (1 = الأحدث)").setRequired(true).setMinValue(1)
+      )
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    // Server-wide, so there is no member option at all. Asking for a target and
+    // then ignoring it would be worse than not asking — and these two are the
+    // only commands in the section with nobody to name.
+    new SlashCommandBuilder()
+      .setName("clearallwarns")
+      .setDescription("مسح جميع التحذيرات في السيرفر")
+      .addStringOption(option => reasonOption(option))
+      .setDefaultMemberPermissions(0n)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("clearallpunishments")
+      .setDescription("تصفير سجل العقوبات في السيرفر")
       .addStringOption(option => reasonOption(option))
       .setDefaultMemberPermissions(0n)
       .toJSON(),
@@ -655,6 +802,146 @@ export async function applyModeration(client: Client, action: ModerationAction) 
   } catch {
     return false;
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Role actions
+ *
+ * Every state-based punishment in the penalties section comes down to adding or
+ * removing roles: `/mute`, `/prison`, `/blacklist` and `/down` take something
+ * away or put something on, and their inverses put it back. They are kept out of
+ * `applyModeration` for the same reason the channel actions are kept out of it —
+ * `applyModeration` asks Discord to apply an event that is over when it returns,
+ * and these change what a member *is*. Keeping them apart means that difference
+ * is visible in the types instead of buried in a branch.
+ * ------------------------------------------------------------------ */
+
+export type RoleAction = {
+  kind: "grant" | "revoke";
+  guildId: string;
+  targetId: string;
+  roleIds: readonly string[];
+  reason: string;
+};
+
+export type RoleActionResult =
+  | { ok: true; changed: string[]; failed: string[] }
+  | { ok: false; reason: "GUILD_UNREACHABLE" | "MEMBER_NOT_FOUND" | "NO_ROLE_APPLIED" };
+
+/**
+ * Adds or removes roles on one member.
+ *
+ * One role per call rather than a single bulk call. Discord rejects the *whole*
+ * request when one role sits above the bot in the hierarchy, so a bulk call
+ * would let a single unreachable role cancel every other one — and would report
+ * nothing about which. Applying them one at a time costs a few requests and
+ * turns that into "these worked, these did not", which is the answer the
+ * operator needs.
+ *
+ * `failed` is returned rather than swallowed. A caller that reports "تم الكتم"
+ * while half the roles were refused is the failure this whole section exists to
+ * avoid, so the list travels back and the reply names it.
+ */
+export async function applyRoleChange(client: Client, action: RoleAction): Promise<RoleActionResult> {
+  const guild = await client.guilds.fetch(action.guildId).catch(() => null);
+  if (!guild) return { ok: false, reason: "GUILD_UNREACHABLE" };
+
+  const member = await guild.members.fetch(action.targetId).catch(() => null);
+  if (!member) return { ok: false, reason: "MEMBER_NOT_FOUND" };
+
+  // Fetched rather than read from cache: a role deleted a moment ago would
+  // otherwise still look present here and every call would fail with an error
+  // that blames the bot's permissions instead of the missing role.
+  await guild.roles.fetch().catch(() => undefined);
+
+  const changed: string[] = [];
+  const failed: string[] = [];
+
+  for (const roleId of action.roleIds) {
+    if (!guild.roles.cache.has(roleId)) {
+      failed.push(roleId);
+      continue;
+    }
+    const applied =
+      action.kind === "grant"
+        ? await member.roles.add(roleId, action.reason).then(() => true).catch(() => false)
+        : await member.roles.remove(roleId, action.reason).then(() => true).catch(() => false);
+    if (applied) changed.push(roleId);
+    else failed.push(roleId);
+  }
+
+  // Nothing applied is a refusal, not a success with an empty list — otherwise a
+  // `/mute` that reached no role would report that it muted.
+  if (action.roleIds.length > 0 && changed.length === 0) return { ok: false, reason: "NO_ROLE_APPLIED" };
+
+  return { ok: true, changed, failed };
+}
+
+/**
+ * The roles `/down` should take off a member.
+ *
+ * Two readings, decided by whether the operator curated a list. A non-empty
+ * `configured` list is honoured as given. An empty one means "the roles that
+ * carry a permission", which is the only useful reading of "strip the
+ * administrative roles" on a server where nobody has written down which ones
+ * those are — and a list that meant "strip nothing" would be a punishment that
+ * punishes nobody, with nothing on screen to say so.
+ *
+ * Two roles are never in the answer even when named. `@everyone` cannot be
+ * removed from anyone, and a `managed` role belongs to an integration — Discord
+ * refuses to remove either, so including them would turn a working `/down` into
+ * a refusal that blames the bot's permissions.
+ */
+export async function readStrippableRoleIds(
+  client: Client,
+  options: { guildId: string; targetId: string; configured: readonly string[] }
+): Promise<string[]> {
+  const guild = await client.guilds.fetch(options.guildId).catch(() => null);
+  if (!guild) return [];
+
+  const member = await guild.members.fetch(options.targetId).catch(() => null);
+  if (!member) return [];
+
+  await guild.roles.fetch().catch(() => undefined);
+
+  const candidates =
+    options.configured.length > 0
+      ? [...options.configured]
+      : [...member.roles.cache.values()]
+          .filter(role => role.id !== guild.id && !role.managed && role.permissions.bitfield !== 0n)
+          .map(role => role.id);
+
+  return candidates.filter(roleId => {
+    const role = guild.roles.cache.get(roleId);
+    // `!== undefined` rather than `Boolean(role)`: a truthiness check does not
+    // narrow the type, so the two reads after it would still be on a possibly
+    // absent role.
+    return role !== undefined && role.id !== guild.id && !role.managed;
+  });
+}
+
+/**
+ * Moves a member into a voice channel, if they are in one.
+ *
+ * Only voice. There is no "move" for a text channel — confinement there is a
+ * role's channel overwrites, which is the prison role's job and not this
+ * function's. Returning `false` when the member is not in voice is the honest
+ * answer rather than a failure: `/prison` still jailed them.
+ */
+export async function moveMemberToChannel(
+  client: Client,
+  options: { guildId: string; targetId: string; channelId: string; reason: string }
+) {
+  const guild = await client.guilds.fetch(options.guildId).catch(() => null);
+  if (!guild) return false;
+
+  const member = await guild.members.fetch(options.targetId).catch(() => null);
+  if (!member?.voice.channelId) return false;
+
+  const channel = await guild.channels.fetch(options.channelId).catch(() => null);
+  if (!channel?.isVoiceBased()) return false;
+
+  return member.voice.setChannel(channel, options.reason).then(() => true).catch(() => false);
 }
 
 /* ------------------------------------------------------------------ *

@@ -437,7 +437,10 @@ try {
    */
   await visit(
     `/dashboard/${GUILD_ID}/commands`,
-    `document.querySelector('nav[aria-label="أقسام الأوامر"]') && document.body.textContent.includes('إجمالي الأوامر')`
+    // The totals cards used to be the marker here. They were removed by request,
+    // so the wait is now on the nav plus a real card — a marker that survives the
+    // next round of copy changes.
+    `document.querySelector('nav[aria-label="أقسام الأوامر"]') && document.querySelector('[aria-label^="إعدادات "]')`
   );
 
   // Reset here rather than at the top: the earlier screens are not under test,
@@ -446,8 +449,55 @@ try {
   await sleep(400);
   check("the commands screen logs nothing", consoleErrors, value => value.length === 0);
 
-  const sectionNames = await evaluate(`[...document.querySelectorAll('nav[aria-label="أقسام الأوامر"] button')].map(b => b.textContent.trim())`);
-  // Fourteen sections plus the "all commands" row.
+  /*
+   * The three totals cards came off the top of the column and the filter row took
+   * their place.
+   *
+   * Measured rather than asserted in DOM order. "Rose to the top" is a statement
+   * about position, and a jsdom test can only compare indices in the markup — it
+   * would pass on a layout that still drew something above the row.
+   *
+   * The reference is the grid row itself, not the nav. The nav carries
+   * `lg:top-6`, and a sticky element whose natural position is above its offset is
+   * pushed *down* to it — so the nav renders 24px below the top of the row by
+   * design. Comparing against it reported a false failure the first time this ran,
+   * which is exactly the kind of "measured the wrong thing" result the geometry
+   * pass exists to avoid.
+   */
+  const columnTop = await evaluate(`(() => {
+    const nav = document.querySelector('nav[aria-label="أقسام الأوامر"]');
+    const grid = nav.parentElement;
+    const column = grid.children[1];
+    return {
+      text: document.body.textContent,
+      firstRowTop: Math.round(column.firstElementChild.getBoundingClientRect().top),
+      gridTop: Math.round(grid.getBoundingClientRect().top)
+    };
+  })()`);
+  check(
+    "the three totals cards are gone",
+    ["إجمالي الأوامر", "الأوامر المفعلة", "أقسام فيها أوامر"].filter(label => columnTop.text.includes(label)),
+    value => value.length === 0
+  );
+  check(
+    "the filter row is the first thing in the column, at the top of the row",
+    columnTop.firstRowTop - columnTop.gridTop,
+    value => Math.abs(value) <= 4
+  );
+
+  /*
+   * The section badge reads enabled over total. The completed suite is the number
+   * the operator checks this screen against, so it is asserted here against the
+   * real bundle rather than only in core.
+   */
+  const penaltiesRow = await evaluate(`(() => {
+    const row = [...document.querySelectorAll('nav[aria-label="أقسام الأوامر"] button')]
+      .find(button => button.textContent.includes('العقوبات'));
+    return row ? row.textContent.trim() : null;
+  })()`);
+  check("the penalties row reads 23/23", penaltiesRow, value => typeof value === "string" && value.includes("23/23"));
+
+  const sectionNames = await evaluate(`[...document.querySelectorAll('nav[aria-label="أقسام الأوامر"] button')].map(b => b.textContent.trim())`);  // Fourteen sections plus the "all commands" row.
   check("the sidebar offers every section and the all-commands row", sectionNames.length, 15);
   check(
     "…including the ones with no commands yet",

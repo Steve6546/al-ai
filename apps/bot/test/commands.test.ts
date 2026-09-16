@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildAliasMap, commandRegistry, defaultCommandConfig, normaliseCommandConfig, requireCommand } from "@al-ai/core";
+import { buildAliasMap, commandRegistry, defaultCommandConfig, normaliseCommandConfig, requireCommand, ROLE_FIELD_OWNERS } from "@al-ai/core";
 import {
   buildAliasCommands,
   buildAllCommands,
@@ -278,12 +278,28 @@ test("the registry's minimum tiers match the directive", () => {
   assert.equal(byName.get("slowmode"), "moderator");
 });
 
-test("/mute is retired: a native timeout replaces it", () => {
-  // Keeping both would leave two commands that silence a member, and the weaker
-  // one would inevitably be the one people reached for.
-  assert.equal(commandRegistry.some(command => command.name === "mute"), false);
-  assert.equal(buildAllCommands().some(command => (command as { name: string }).name === "mute"), false);
-  assert.ok(commandRegistry.some(command => command.name === "timeout"));
+test("/mute returns as role-based silence, and no longer overlaps /timeout", () => {
+  // This reverses a recorded decision, so it is worth saying why rather than
+  // quietly deleting the old assertion. `/mute` was retired because a voice mute
+  // duplicated Discord's native timeout. What that reasoning missed is that a
+  // timeout always ends and a mute never does: they are two different sentences,
+  // not two spellings of one. `/timeout` owns the timed one, `/mute` owns the
+  // indefinite one through a muted role, and the overlap is gone. The thing to
+  // guard is the overlap, not the name.
+  const mute = commandRegistry.find(command => command.name === "mute");
+  assert.ok(mute, "/mute is published again");
+  assert.equal(buildAllCommands().some(command => (command as { name: string }).name === "mute"), true);
+
+  // Exactly one of the pair carries a length — the whole point of the reversal.
+  assert.equal(mute.supportsDuration ?? false, false);
+  assert.ok(
+    commandRegistry.some(command => command.name === "timeout" && command.supportsDuration === true),
+    "/timeout still owns the timed case"
+  );
+
+  // And a mute cannot run without the role it applies, which is why the field is
+  // owned by this command and no other.
+  assert.equal(ROLE_FIELD_OWNERS.mutedRoleId, "mute");
 });
 
 test("tier resolution prefers the highest tier when several are held", () => {

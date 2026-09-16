@@ -494,18 +494,31 @@ export function createDatabase(pool: pg.Pool) {
         preset_reasons: unknown;
         aliases: unknown;
         delete_response_on_leave: boolean;
+        muted_role_id: string | null;
+        prison_role_id: string | null;
+        prison_channel_id: string | null;
+        blacklist_role_ids: unknown;
+        admin_role_ids_to_strip: unknown;
+        blockable_role_ids: unknown;
       }>(
         `SELECT command, enabled, minimum_tier, dm_on_action, delete_message_days,
                 allowed_role_ids, denied_role_ids, allowed_channel_ids, denied_channel_ids,
                 allowed_user_ids, denied_user_ids,
                 cooldown_seconds, auto_delete_response_seconds, require_reason, allow_custom_reason,
-                default_duration, preset_reasons, aliases, delete_response_on_leave
+                default_duration, preset_reasons, aliases, delete_response_on_leave,
+                muted_role_id, prison_role_id, prison_channel_id,
+                blacklist_role_ids, admin_role_ids_to_strip, blockable_role_ids
          FROM guild_command_flags WHERE guild_id = $1`,
         [guildId]
       );
       // Values are passed through raw and cleaned by `normaliseCommandConfig`,
       // which is the same function the bot reads through — so a row written by an
       // older build cannot mean two different things on the two sides.
+      //
+      // The six role fields are read here even for commands that do not own them.
+      // That is deliberate: `normaliseCommandConfig` is what decides, and it drops
+      // a field onto the wrong row rather than trusting it — so the drop happens
+      // in one place instead of being re-implemented as a filter here.
       return new Map<string, Partial<CommandConfig>>(
         rows.map(row => [
           row.command,
@@ -528,7 +541,13 @@ export function createDatabase(pool: pg.Pool) {
             defaultDuration: row.default_duration as CommandConfig["defaultDuration"],
             presetReasons: Array.isArray(row.preset_reasons) ? (row.preset_reasons as CommandConfig["presetReasons"]) : [],
             aliases: Array.isArray(row.aliases) ? (row.aliases as string[]) : [],
-            deleteResponseOnLeave: row.delete_response_on_leave
+            deleteResponseOnLeave: row.delete_response_on_leave,
+            mutedRoleId: row.muted_role_id,
+            prisonRoleId: row.prison_role_id,
+            prisonChannelId: row.prison_channel_id,
+            blacklistRoleIds: Array.isArray(row.blacklist_role_ids) ? (row.blacklist_role_ids as string[]) : [],
+            adminRoleIdsToStrip: Array.isArray(row.admin_role_ids_to_strip) ? (row.admin_role_ids_to_strip as string[]) : [],
+            blockableRoleIds: Array.isArray(row.blockable_role_ids) ? (row.blockable_role_ids as string[]) : []
           }
         ])
       );
@@ -542,10 +561,13 @@ export function createDatabase(pool: pg.Pool) {
            allowed_user_ids, denied_user_ids,
            cooldown_seconds, auto_delete_response_seconds, require_reason, allow_custom_reason,
            default_duration, preset_reasons, aliases, delete_response_on_leave,
+           muted_role_id, prison_role_id, prison_channel_id,
+           blacklist_role_ids, admin_role_ids_to_strip, blockable_role_ids,
            updated_at
          )
          VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb,
-                 $13, $14, $15, $16, $17, $18::jsonb, $19::jsonb, $20, now())
+                 $13, $14, $15, $16, $17, $18::jsonb, $19::jsonb, $20,
+                 $21, $22, $23, $24::jsonb, $25::jsonb, $26::jsonb, now())
          ON CONFLICT (guild_id, command) DO UPDATE
            SET enabled = EXCLUDED.enabled,
                minimum_tier = EXCLUDED.minimum_tier,
@@ -565,6 +587,12 @@ export function createDatabase(pool: pg.Pool) {
                preset_reasons = EXCLUDED.preset_reasons,
                aliases = EXCLUDED.aliases,
                delete_response_on_leave = EXCLUDED.delete_response_on_leave,
+               muted_role_id = EXCLUDED.muted_role_id,
+               prison_role_id = EXCLUDED.prison_role_id,
+               prison_channel_id = EXCLUDED.prison_channel_id,
+               blacklist_role_ids = EXCLUDED.blacklist_role_ids,
+               admin_role_ids_to_strip = EXCLUDED.admin_role_ids_to_strip,
+               blockable_role_ids = EXCLUDED.blockable_role_ids,
                updated_at = now()`,
         [
           guildId,
@@ -586,7 +614,13 @@ export function createDatabase(pool: pg.Pool) {
           config.defaultDuration,
           JSON.stringify(config.presetReasons),
           JSON.stringify(config.aliases),
-          config.deleteResponseOnLeave
+          config.deleteResponseOnLeave,
+          config.mutedRoleId,
+          config.prisonRoleId,
+          config.prisonChannelId,
+          JSON.stringify(config.blacklistRoleIds),
+          JSON.stringify(config.adminRoleIdsToStrip),
+          JSON.stringify(config.blockableRoleIds)
         ]
       );
     },

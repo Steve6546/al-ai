@@ -37,8 +37,19 @@ test("every shared permission bit matches discord.js PermissionFlagsBits", () =>
     BAN_MEMBERS: PermissionFlagsBits.BanMembers,
     MANAGE_CHANNELS: PermissionFlagsBits.ManageChannels,
     MANAGE_MESSAGES: PermissionFlagsBits.ManageMessages,
+    MANAGE_ROLES: PermissionFlagsBits.ManageRoles,
     MODERATE_MEMBERS: PermissionFlagsBits.ModerateMembers
   };
+
+  // The map and this record are two lists, and only the record is iterated — so
+  // a bit added to the map alone would never be compared against discord.js.
+  // Asserting the key sets match is what keeps this test covering the module
+  // rather than covering the subset someone remembered to write down.
+  assert.deepEqual(
+    Object.keys(DISCORD_PERMISSION_BITS).sort(),
+    Object.keys(official).sort(),
+    "every shared bit is compared against discord.js"
+  );
 
   for (const [name, expected] of Object.entries(official)) {
     assert.equal(

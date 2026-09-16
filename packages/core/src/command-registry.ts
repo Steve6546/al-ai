@@ -11,10 +11,22 @@ import type { Tier } from "./permissions.js";
  * command nobody can reach, and a published command with no entry bypasses the
  * whole configuration pipeline.
  *
- * `/mute` is deliberately gone. A voice mute is not what moderation means here:
- * Discord's native timeout already silences a member everywhere, including
- * voice, and it expires on its own. Keeping a second, weaker command with an
- * overlapping name only invited the wrong one to be used.
+ * `/mute` is back, reversing an earlier decision that is worth recording rather
+ * than deleting, because the reversal is not a contradiction of the reason.
+ *
+ * It was removed on the argument that Discord's native timeout already silences
+ * a member everywhere, including voice, and expires on its own — so a second,
+ * weaker command with an overlapping name would only invite the wrong one to be
+ * used. That argument holds for a *timed* silence, and `/timeout` is still the
+ * right tool for one.
+ *
+ * What it did not cover is an *indefinite* silence. A timeout cannot exceed 28
+ * days and cannot be extended by anything the member does, so a server that
+ * needs "stay silent until a human says otherwise" has no native equivalent.
+ * That is a muted role, and it is what `/mute` now is: it assigns a role the
+ * operator designates, and `/unmute` takes it away. The two commands no longer
+ * overlap in meaning — one is a timer, the other is a state — which is the
+ * condition the original removal was protecting.
  */
 
 /**
@@ -191,6 +203,37 @@ export const commandRegistry: readonly CommandDefinition[] = [
   { name: "delwarn", category: "penalties", description: "حذف تحذير واحد بعينه", minimumTier: "moderator", target: "member", supportsReason: true, requiredPermission: "MODERATE_MEMBERS" },
   { name: "clearwarns", category: "penalties", description: "مسح كل تحذيرات عضو", minimumTier: "admin", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "MODERATE_MEMBERS" },
   { name: "setnick", category: "penalties", description: "تغيير الاسم المستعار لعضو", minimumTier: "moderator", target: "member", supportsReason: true, requiredPermission: "MANAGE_NICKNAMES" },
+
+  /* The state-based half of the section.
+   *
+   * These differ from the commands above in one way that decides several of the
+   * flags: they put a member into a condition that lasts until someone reverses
+   * it, rather than applying an event that is over when it returns. So none of
+   * them takes a duration — a mute with a timer is `/timeout`, and offering a
+   * length here would recreate exactly the overlap that got `/mute` removed the
+   * first time. `/down` is the exception, and is the only one that declares
+   * `supportsDuration`.
+   *
+   * Each one owns the roles it applies; its inverse reads them back off the same
+   * row rather than asking the operator to name the same role twice. */
+  { name: "mute", category: "penalties", description: "كتم عضو عبر رتبة المكتوم", minimumTier: "moderator", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "MODERATE_MEMBERS" },
+  { name: "unmute", category: "penalties", description: "فك الكتم عن عضو", minimumTier: "moderator", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "MODERATE_MEMBERS" },
+  { name: "prison", category: "penalties", description: "عزل عضو في رتبة وقناة السجن", minimumTier: "moderator", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "MODERATE_MEMBERS" },
+  { name: "unprison", category: "penalties", description: "إخراج عضو من السجن وإعادة رتبه", minimumTier: "moderator", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "MODERATE_MEMBERS" },
+  { name: "blacklist", category: "penalties", description: "إدراج عضو في القائمة السوداء", minimumTier: "admin", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "BAN_MEMBERS" },
+  { name: "unblacklist", category: "penalties", description: "فك القائمة السوداء عن عضو", minimumTier: "admin", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "BAN_MEMBERS" },
+  { name: "block", category: "penalties", description: "منع عضو من الحصول على رتبة", minimumTier: "admin", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "MANAGE_ROLES" },
+  { name: "unblock", category: "penalties", description: "فك المنع عن رتبة لعضو", minimumTier: "admin", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "MANAGE_ROLES" },
+  { name: "down", category: "penalties", description: "سحب الرتب الإدارية من عضو لمدة محددة", minimumTier: "admin", target: "member", supportsReason: true, supportsNotify: true, supportsDuration: true, requiredPermission: "MODERATE_MEMBERS" },
+  { name: "undown", category: "penalties", description: "استعادة الرتب الإدارية المسحوبة", minimumTier: "admin", target: "member", supportsReason: true, supportsNotify: true, requiredPermission: "MODERATE_MEMBERS" },
+  { name: "remove", category: "penalties", description: "حذف عقوبة محددة من سجلات عضو حسب رقمها", minimumTier: "moderator", target: "member", supportsReason: true, requiredPermission: "MODERATE_MEMBERS" },
+
+  /* The two server-wide wipes. No member target, so the member hierarchy check
+   * does not apply and no single member can be named as the subject — which is
+   * why they ask for ADMINISTRATOR rather than the moderation bits the rest of
+   * the section uses. Both destroy a record with no undo. */
+  { name: "clearallwarns", category: "penalties", description: "مسح جميع التحذيرات في السيرفر", minimumTier: "admin", target: "none", supportsReason: true, requiredPermission: "ADMINISTRATOR" },
+  { name: "clearallpunishments", category: "penalties", description: "تصفير سجل العقوبات في السيرفر", minimumTier: "admin", target: "none", supportsReason: true, requiredPermission: "ADMINISTRATOR" },
 
   /* ---------------- Chat tools ----------------
    * No member target, so no member hierarchy check applies. */
@@ -433,7 +476,64 @@ export type CommandConfig = {
    * a different action, it is irreversible, and it is not this setting.
    */
   deleteResponseOnLeave: boolean;
+
+  /* ---------------------------------------------------------------- *
+   * Role fields owned by the state-based punishment commands
+   *
+   * Each is stored on exactly one command's row — the one that applies the
+   * role — and its inverse reads it back from there. Letting both commands
+   * carry the field would be two places to name the same role, and therefore
+   * two answers to "which role is the muted role" the moment an operator
+   * changes one and not the other.
+   * ---------------------------------------------------------------- */
+
+  /**
+   * The role that silences a member. Owned by `/mute`.
+   *
+   * One role, not a list: permissions in Discord are additive, so a second mute
+   * role would not stack into a stronger mute — it would only be a second thing
+   * to remember to remove.
+   *
+   * `null` means unset. `/mute` refuses to run without it rather than inventing
+   * a role, because a role the operator did not choose has no permission
+   * overrides and would therefore silence nobody.
+   */
+  mutedRoleId: string | null;
+  /** The role that marks a jailed member. Owned by `/prison`. */
+  prisonRoleId: string | null;
+  /** The channel a jailed member is confined to. Owned by `/prison`. */
+  prisonChannelId: string | null;
+  /** The roles a blacklisted member is given. Owned by `/blacklist`. */
+  blacklistRoleIds: string[];
+  /**
+   * The roles `/down` strips. Owned by `/down`.
+   *
+   * Empty is meaningful rather than unset: it means "every role that carries a
+   * permission", which is what an operator wants when they have not curated a
+   * list. `/undown` restores from the snapshot of what was actually taken, not
+   * from this list, so editing this setting cannot strand a member with their
+   * roles missing.
+   */
+  adminRoleIdsToStrip: string[];
+  /** The roles `/block` may withhold from a member. Owned by `/block`. */
+  blockableRoleIds: string[];
 };
+
+/**
+ * Which command owns each role field.
+ *
+ * Declared once so the normaliser, the dashboard and the bot cannot disagree
+ * about whose row a field lives on. A field stored on two rows reads back as
+ * two different answers depending on which command asked for it.
+ */
+export const ROLE_FIELD_OWNERS = {
+  mutedRoleId: "mute",
+  prisonRoleId: "prison",
+  prisonChannelId: "prison",
+  blacklistRoleIds: "blacklist",
+  adminRoleIdsToStrip: "down",
+  blockableRoleIds: "block"
+} as const;
 
 /** The configuration a command has before the operator changes anything. */
 export function defaultCommandConfig(definition: CommandDefinition): CommandConfig {
@@ -463,7 +563,16 @@ export function defaultCommandConfig(definition: CommandDefinition): CommandConf
     aliases: [],
     // Off by default: it is the only setting here that deletes something the
     // operator did not ask to be deleted at the moment they set it up.
-    deleteResponseOnLeave: false
+    deleteResponseOnLeave: false,
+    // Unset, not guessed. A role the bot picked for the operator would be a role
+    // whose permission overrides nobody configured, so the commands that need one
+    // refuse to run and say so instead of applying a mute that does not mute.
+    mutedRoleId: null,
+    prisonRoleId: null,
+    prisonChannelId: null,
+    blacklistRoleIds: [],
+    adminRoleIdsToStrip: [],
+    blockableRoleIds: []
   };
 }
 
@@ -495,6 +604,12 @@ export function normaliseCommandConfig(definition: CommandDefinition, input: Par
     ? normaliseDuration(input?.defaultDuration, definition)
     : DEFAULT_COMMAND_DURATION;
 
+  // A role field the command does not own is dropped rather than stored.
+  // `/unmute` reading the muted role off `/mute`'s row is the entire point of the
+  // ownership map; a stray value on the inverse command's row would be a second
+  // answer to the same question, and a setting nothing reads.
+  const owns = (field: keyof typeof ROLE_FIELD_OWNERS) => ROLE_FIELD_OWNERS[field] === definition.name;
+
   return {
     name: definition.name,
     enabled: input?.enabled === undefined ? base.enabled : Boolean(input.enabled),
@@ -517,7 +632,13 @@ export function normaliseCommandConfig(definition: CommandDefinition, input: Par
     // Only a command that acts on a member can outlive that member's presence,
     // so every other command has nothing for this to delete. Same rule as the
     // purge setting: an unsupported control is dropped, not stored and ignored.
-    deleteResponseOnLeave: definition.target === "member" ? Boolean(input?.deleteResponseOnLeave) : false
+    deleteResponseOnLeave: definition.target === "member" ? Boolean(input?.deleteResponseOnLeave) : false,
+    mutedRoleId: owns("mutedRoleId") ? normaliseSingleId(input?.mutedRoleId) : null,
+    prisonRoleId: owns("prisonRoleId") ? normaliseSingleId(input?.prisonRoleId) : null,
+    prisonChannelId: owns("prisonChannelId") ? normaliseSingleId(input?.prisonChannelId) : null,
+    blacklistRoleIds: owns("blacklistRoleIds") ? normaliseIdList(input?.blacklistRoleIds, MAX_CUSTOM_ROLES_PER_COMMAND) : [],
+    adminRoleIdsToStrip: owns("adminRoleIdsToStrip") ? normaliseIdList(input?.adminRoleIdsToStrip, MAX_CUSTOM_ROLES_PER_COMMAND) : [],
+    blockableRoleIds: owns("blockableRoleIds") ? normaliseIdList(input?.blockableRoleIds, MAX_CUSTOM_ROLES_PER_COMMAND) : []
   };
 }
 
@@ -531,6 +652,19 @@ function isAllowedLevel(value: unknown): value is Tier {
 function normaliseIdList(value: unknown, limit: number): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.filter((id): id is string => typeof id === "string" && SNOWFLAKE.test(id)))].slice(0, limit);
+}
+
+/**
+ * One id, or `null`.
+ *
+ * A value that is not a snowflake clears the field rather than being stored. It
+ * is never coerced: an id Discord would reject, kept because it was non-empty,
+ * would look configured on the screen while the command that needs it refuses
+ * to run — the failure would be reported a long way from the setting that
+ * caused it.
+ */
+function normaliseSingleId(value: unknown): string | null {
+  return typeof value === "string" && SNOWFLAKE.test(value) ? value : null;
 }
 
 /**

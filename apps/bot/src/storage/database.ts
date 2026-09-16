@@ -43,6 +43,46 @@ export const emptyLoggingConfig: GuildLoggingConfig = {
   categoryChannels: {}
 };
 
+/**
+ * The reversible punishments: the ones that put a member into a state rather
+ * than applying an event that is over when it returns.
+ *
+ * The names match the `kind` values the schema constrains, because `kind` is
+ * what selects which inverse command can find a row again — a mismatch here
+ * would leave a member punished with nothing that admits to it.
+ */
+export type MemberStateKind = "mute" | "prison" | "blacklist" | "block" | "down";
+
+/** One row of `guild_member_states`, with the column names mapped to camelCase. */
+export type MemberState = {
+  id: string;
+  guildId: string;
+  userId: string;
+  kind: MemberStateKind;
+  /** The roles the member held before the punishment took any away. */
+  roleIds: string[];
+  /** `/block` only: the roles this member may not be given. */
+  blockedRoleIds: string[];
+  moderatorId: string;
+  reason: string;
+  /** `null` means "until someone reverses it". */
+  expiresAt: Date | null;
+  createdAt: Date;
+};
+
+const MEMBER_STATE_COLUMNS = `
+  id,
+  guild_id         AS "guildId",
+  user_id          AS "userId",
+  kind,
+  role_ids         AS "roleIds",
+  blocked_role_ids AS "blockedRoleIds",
+  moderator_id     AS "moderatorId",
+  reason,
+  expires_at       AS "expiresAt",
+  created_at       AS "createdAt"
+`;
+
 export type BotDatabase = ReturnType<typeof createBotDatabase>;
 
 export function createBotDatabase(databaseUrl: string) {
@@ -326,6 +366,207 @@ export function createBotDatabase(databaseUrl: string) {
         [guildId, userId, offset]
       );
       return rows[0]?.reason ?? null;
+    },
+
+    /* ---------------- Reversible punishments ---------------- */
+
+    /**
+     * Records the state a reversible punishment put a member into.
+     *
+     * Upsert on `(guild_id, user_id, kind)` rather than an insert: a second
+     * `/mute` on an already-muted member must leave exactly one row, so
+     * `/unmute` has one thing to undo. Two rows would let an unmute remove the
+     * newer one, report success, and leave the member silenced.
+     *
+     * `roleIds` is the snapshot taken *before* any roles were removed, which is
+     * the only record of what to give back — Discord cannot be asked which roles
+     * the bot took away, and by the time the inverse runs the member may have
+     * gained and lost roles for reasons of their own.
+     */
+    async setMemberState(state: {
+      id: string;
+      guildId: string;
+      userId: string;
+      kind: MemberStateKind;
+      roleIds?: readonly string[];
+      blockedRoleIds?: readonly string[];
+      moderatorId: string;
+      reason: string;
+      expiresAt?: Date | null;
+    }) {
+      await pool.query(
+        `INSERT INTO guild_member_states
+           (id, guild_id, user_id, kind, role_ids, blocked_role_ids, moderator_id, reason, expires_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9)
+         ON CONFLICT (guild_id, user_id, kind) DO UPDATE
+            SET role_ids = EXCLUDED.role_ids,
+                blocked_role_ids = EXCLUDED.blocked_role_ids,
+                moderator_id = EXCLUDED.moderator_id,
+                reason = EXCLUDED.reason,
+                expires_at = EXCLUDED.expires_at,
+                -- The punishment restarted, so its clock restarts with it.
+                created_at = now()`,
+        [
+          state.id,
+          state.guildId,
+          state.userId,
+          state.kind,
+          JSON.stringify(state.roleIds ?? []),
+          JSON.stringify(state.blockedRoleIds ?? []),
+          state.moderatorId,
+          state.reason,
+          state.expiresAt ?? null
+        ]
+      );
+    },
+
+    /** The standing state for one member and kind, or `null`. */
+    async getMemberState(guildId: string, userId: string, kind: MemberStateKind) {
+      const { rows } = await pool.query<MemberState>(
+        `SELECT ${MEMBER_STATE_COLUMNS} FROM guild_member_states
+          WHERE guild_id = $1 AND user_id = $2 AND kind = $3`,
+        [guildId, userId, kind]
+      );
+      return rows[0] ?? null;
+    },
+
+    /**
+     * Removes the state and hands it back, in one statement.
+     *
+     * `DELETE ... RETURNING` rather than a read followed by a delete. Two
+     * moderators running `/unprison` at the same moment would otherwise both
+     * read the snapshot and both restore it, and the second restore would re-add
+     * roles the first had already dealt with. One statement means exactly one
+     * caller receives the snapshot and the other receives `null` — so the
+     * outcome is "restored once", not "restored, then restored again".
+     */
+    async takeMemberState(guildId: string, userId: string, kind: MemberStateKind) {
+      const { rows } = await pool.query<MemberState>(
+        `DELETE FROM guild_member_states
+          WHERE guild_id = $1 AND user_id = $2 AND kind = $3
+          RETURNING ${MEMBER_STATE_COLUMNS}`,
+        [guildId, userId, kind]
+      );
+      return rows[0] ?? null;
+    },
+
+    /** Every standing state in a guild, optionally of one kind. */
+    async listMemberStates(guildId: string, kind?: MemberStateKind) {
+      const { rows } = await pool.query<MemberState>(
+        `SELECT ${MEMBER_STATE_COLUMNS} FROM guild_member_states
+          WHERE guild_id = $1 AND ($2::text IS NULL OR kind = $2)
+          ORDER BY created_at ASC`,
+        [guildId, kind ?? null]
+      );
+      return rows;
+    },
+
+    /**
+     * The states whose expiry has passed. The sweeper's query.
+     *
+     * Capped because it runs on a timer: a backlog should be worked through over
+     * several passes rather than held in memory in one, and the cap makes that
+     * bounded rather than a function of how long the bot was down.
+     */
+    async listDueMemberStates(now: Date, limit = 100) {
+      const { rows } = await pool.query<MemberState>(
+        `SELECT ${MEMBER_STATE_COLUMNS} FROM guild_member_states
+          WHERE expires_at IS NOT NULL AND expires_at <= $1
+          ORDER BY expires_at ASC
+          LIMIT $2`,
+        [now, limit]
+      );
+      return rows;
+    },
+
+    /* ---------------- Guild-wide wipes ---------------- */
+
+    /** Empties a guild's warnings. `/clearallwarns`. */
+    async clearAllWarnings(guildId: string) {
+      const { rowCount } = await pool.query(`DELETE FROM guild_warnings WHERE guild_id = $1`, [guildId]);
+      return rowCount ?? 0;
+    },
+
+    /**
+     * Empties a guild's punishment record: the warnings *and* the standing
+     * states. `/clearallpunishments`.
+     *
+     * Both, in one statement. Deleting only the warnings would leave the log
+     * reading empty while members were still muted, jailed or stripped — a wipe
+     * that removed the evidence and left the punishment in place, which is the
+     * worst of both.
+     *
+     * A single statement with data-modifying CTEs is atomic in PostgreSQL, so
+     * there is no window where the warnings are gone and the states are not.
+     */
+    async clearAllPunishments(guildId: string) {
+      const { rows } = await pool.query<{ warnings: number; states: number }>(
+        `WITH removed_warnings AS (
+           DELETE FROM guild_warnings WHERE guild_id = $1 RETURNING 1
+         ), removed_states AS (
+           DELETE FROM guild_member_states WHERE guild_id = $1 RETURNING 1
+         )
+         SELECT (SELECT count(*)::int FROM removed_warnings) AS warnings,
+                (SELECT count(*)::int FROM removed_states)   AS states`,
+        [guildId]
+      );
+      return rows[0] ?? { warnings: 0, states: 0 };
+    },
+
+    /**
+     * Every punishment on record for one member, newest first.
+     *
+     * Warnings and standing states in one list, because `/remove` deletes by the
+     * number `/warns`-style listings print — and an operator looking at a member
+     * does not think of "a warning" and "a mute" as living in different places.
+     * The `kind` travels with each entry so the caller knows which table to
+     * delete from and whether the Discord side needs reversing too.
+     */
+    async listPunishments(guildId: string, userId: string, limit = 25) {
+      const { rows } = await pool.query<{
+        kind: string;
+        id: string;
+        reason: string;
+        moderatorId: string;
+        createdAt: Date;
+        expiresAt: Date | null;
+      }>(
+        `SELECT 'warn' AS kind, id::text AS id, reason,
+                moderator_id AS "moderatorId", created_at AS "createdAt",
+                NULL::timestamptz AS "expiresAt"
+           FROM guild_warnings WHERE guild_id = $1 AND user_id = $2
+         UNION ALL
+         SELECT kind, id::text, reason,
+                moderator_id, created_at, expires_at
+           FROM guild_member_states WHERE guild_id = $1 AND user_id = $2
+         ORDER BY "createdAt" DESC, id DESC
+         LIMIT $3`,
+        [guildId, userId, limit]
+      );
+      return rows;
+    },
+
+    /**
+     * Removes the punishment at `index` (1-based, newest first) and reports what
+     * it was, or `null` when the index is past the end.
+     *
+     * Resolved first and then deleted by id, rather than in one statement: the
+     * entry may live in either of two tables, and a single statement would have
+     * to guess. The delete is still conditional on the id, so a row that
+     * disappeared in between removes nothing and says so instead of reporting a
+     * success that did not happen.
+     */
+    async deletePunishmentAt(guildId: string, userId: string, index: number) {
+      const list = await this.listPunishments(guildId, userId);
+      const target = list[Math.max(Math.trunc(index), 1) - 1];
+      if (!target) return null;
+
+      const table = target.kind === "warn" ? "guild_warnings" : "guild_member_states";
+      const { rowCount } = await pool.query(
+        `DELETE FROM ${table} WHERE id = $1 AND guild_id = $2 AND user_id = $3`,
+        [target.id, guildId, userId]
+      );
+      return rowCount ? target : null;
     },
 
     // NOTE: there is deliberately no `resolveChannel` reader here.

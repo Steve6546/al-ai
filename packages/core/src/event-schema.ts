@@ -68,6 +68,37 @@ const entries: EventDefinition[] = [
   { id: "moderation.clearwarns", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "warning" },
   { id: "moderation.delwarn", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "warning" },
 
+  /* The state-based punishments, and the same rule as the three above: these
+   * write a row in `guild_member_states`, which nothing in the gateway knows
+   * about, so the command handler is the only thing that can report them.
+   *
+   * The role change they cause is reported separately by Discord as
+   * `member.role-add` / `member.role-remove`, and that is deliberate rather than
+   * duplicated here: the member log answers "what happened to this member", and
+   * a role changing is exactly that. This section answers "what did a moderator
+   * decide", which the role change alone does not say — a role can be added by
+   * hand, by another bot, or by a join, and only one of those is a punishment. */
+  { id: "moderation.mute", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "warning" },
+  { id: "moderation.unmute", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "info" },
+  { id: "moderation.prison", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "warning" },
+  { id: "moderation.unprison", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "info" },
+  { id: "moderation.blacklist", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "critical" },
+  { id: "moderation.unblacklist", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "info" },
+  { id: "moderation.block", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "warning" },
+  { id: "moderation.unblock", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "info" },
+  { id: "moderation.down", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "critical" },
+  { id: "moderation.undown", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "info" },
+  /* The same outcome as `moderation.undown`, reached by a timer instead of a
+   * moderator — so it carries no `actorId`. Naming the moderator who applied the
+   * punishment would put a person in the log who did not lift it, and folding it
+   * into `undown` would make "who ended this?" unanswerable. */
+  { id: "moderation.down-expired", category: "moderation-log", requiredFields: ["targetId"], severity: "info" },
+  { id: "moderation.remove", category: "moderation-log", requiredFields: ["targetId", "actorId"], severity: "warning" },
+  /* The two server-wide wipes carry no `targetId`: there is no member to name,
+   * and inventing one would put a fabricated id in the operator's log. */
+  { id: "moderation.clearallwarns", category: "moderation-log", requiredFields: ["actorId"], severity: "critical" },
+  { id: "moderation.clearallpunishments", category: "moderation-log", requiredFields: ["actorId"], severity: "critical" },
+
   // voice-log
   { id: "voice.join", category: "voice-log", requiredFields: ["memberId", "toChannelId"], severity: "info" },
   { id: "voice.leave", category: "voice-log", requiredFields: ["memberId", "fromChannelId"], severity: "info" },

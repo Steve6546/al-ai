@@ -341,6 +341,27 @@ ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS preset_reasons JSONB NO
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS aliases JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS delete_response_on_leave BOOLEAN NOT NULL DEFAULT false;
 
+-- Role fields owned by the state-based punishment commands. Each lives on the
+-- row of the command that applies the role, and its inverse reads it back from
+-- there, so an operator never names the same role twice and the two commands
+-- cannot disagree about which role is the muted role. ROLE_FIELD_OWNERS in
+-- packages/core/src/command-registry.ts is the authority; this is its storage.
+--
+-- Like `aliases` above, these must stay AFTER the guarded `custom_role_ids`
+-- rename for the reason given at the top of that block.
+--
+-- The two single roles are nullable with no default, so `NULL` means "unset"
+-- rather than "unset, but spelled like a value" — the commands that need one
+-- refuse to run and say so, instead of applying a mute built on no role.
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS muted_role_id TEXT;
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS prison_role_id TEXT;
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS prison_channel_id TEXT;
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS blacklist_role_ids JSONB NOT NULL DEFAULT '[]';
+-- Empty is meaningful here, not unset: it means every role carrying a
+-- permission. See the field's note in the registry.
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS admin_role_ids_to_strip JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE guild_command_flags ADD COLUMN IF NOT EXISTS blockable_role_ids JSONB NOT NULL DEFAULT '[]';
+
 -- A database that ran an earlier build of this migration holds both columns.
 -- Carry the values across before dropping the orphan, so the allow-list survives
 -- the upgrade instead of being silently discarded.
@@ -407,6 +428,57 @@ CREATE TABLE IF NOT EXISTS guild_warnings (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS guild_warnings_guild_user_idx ON guild_warnings (guild_id, user_id, created_at DESC);
+
+-- The state a reversible punishment put a member into, and what is needed to
+-- undo it exactly.
+--
+-- `/prison` and `/down` take roles away. Restoring them by guessing from the
+-- member's current roles is not possible: by the time `/unprison` runs, the
+-- member may have gained roles legitimately, lost others, or been moved by
+-- something else entirely, and no amount of reading Discord tells the bot which
+-- roles *it* removed. So the roles are written down at the moment they are taken.
+--
+-- `/block` is the same table used the other way round: it records a standing
+-- decision that must outlive the command, because the thing being prevented —
+-- the member receiving a role — happens later, in an event the command is not
+-- present for.
+--
+-- One row per (guild, member, kind): a second `/mute` updates the standing state
+-- rather than stacking a second one, so `/unmute` has exactly one thing to undo
+-- and cannot leave half a punishment behind.
+CREATE TABLE IF NOT EXISTS guild_member_states (
+  id UUID PRIMARY KEY,
+  guild_id TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  -- 'mute' | 'prison' | 'blacklist' | 'block' | 'down'.
+  kind TEXT NOT NULL,
+  -- The roles the member held when the punishment landed, so the inverse can
+  -- restore what was actually taken rather than what the setting says today.
+  -- Editing `admin_role_ids_to_strip` after a `/down` must not strand a member
+  -- with the roles it no longer lists.
+  role_ids JSONB NOT NULL DEFAULT '[]',
+  -- `/block` only: the roles this member may not be given.
+  blocked_role_ids JSONB NOT NULL DEFAULT '[]',
+  moderator_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  -- NULL means "until someone reverses it". `/mute` and `/prison` are states, not
+  -- timers; a length on them is `/timeout`, which is why they write NULL here.
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (guild_id, user_id, kind)
+);
+CREATE INDEX IF NOT EXISTS guild_member_states_guild_kind_idx ON guild_member_states (guild_id, kind);
+-- The sweeper asks "what is due?" across every guild, so it needs its own index
+-- rather than the one above, which is keyed by guild first.
+CREATE INDEX IF NOT EXISTS guild_member_states_expiry_idx ON guild_member_states (expires_at) WHERE expires_at IS NOT NULL;
+
+-- The kind is constrained rather than left as free text. `kind` selects which
+-- inverse command can find the row again, so a typo would not fail loudly — it
+-- would write a row that no `/unprison` or `/undown` ever looks for, leaving a
+-- member punished with nothing in the database that admits to it.
+ALTER TABLE guild_member_states DROP CONSTRAINT IF EXISTS guild_member_states_kind_check;
+ALTER TABLE guild_member_states ADD CONSTRAINT guild_member_states_kind_check
+  CHECK (kind IN ('mute','prison','blacklist','block','down'));
 
 -- Anti-nuke settings, one row per guild.
 --

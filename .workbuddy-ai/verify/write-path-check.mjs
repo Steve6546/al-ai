@@ -83,7 +83,16 @@ const COLUMNS = [
   "default_duration",
   "preset_reasons",
   "aliases",
-  "delete_response_on_leave"
+  "delete_response_on_leave",
+  // The six role fields the punishment suite added. In this list for the same
+  // reason as the rest: a column the restore does not cover is a column this
+  // script leaves changed behind it.
+  "muted_role_id",
+  "prison_role_id",
+  "prison_channel_id",
+  "blacklist_role_ids",
+  "admin_role_ids_to_strip",
+  "blockable_role_ids"
 ];
 
 const readRowFor = async name => {
@@ -113,7 +122,13 @@ const rowToChange = (row, name = command) => ({
   defaultDuration: row.default_duration,
   presetReasons: row.preset_reasons ?? [],
   aliases: row.aliases ?? [],
-  deleteResponseOnLeave: row.delete_response_on_leave
+  deleteResponseOnLeave: row.delete_response_on_leave,
+  mutedRoleId: row.muted_role_id,
+  prisonRoleId: row.prison_role_id,
+  prisonChannelId: row.prison_channel_id,
+  blacklistRoleIds: row.blacklist_role_ids ?? [],
+  adminRoleIdsToStrip: row.admin_role_ids_to_strip ?? [],
+  blockableRoleIds: row.blockable_role_ids ?? []
 });
 
 const put = async change => {
@@ -155,8 +170,24 @@ await db.connect();
 /** Every row this run touches, so the `finally` puts all of them back. */
 const originals = new Map();
 
+/** Rows this run created, so the `finally` removes them again. */
+const createdRows = new Set();
+
 const restoreAll = async () => {
   try {
+    // Deletions first: a row that did not exist before this run must not exist
+    // after it either, or the next run's "it stayed false" probes would be
+    // reading a row this one left behind.
+    for (const name of createdRows) {
+      try {
+        await db.query("delete from guild_command_flags where guild_id = $1 and command = $2", [guildId, name]);
+        const gone = await readRowFor(name);
+        check(`/${name}: the row this run created was removed`, gone, undefined);
+      } catch (error) {
+        check(`/${name}: the row this run created was removed`, `delete failed — ${error.message}`, true);
+      }
+    }
+
     for (const [name, row] of originals) {
       try {
         await put(rowToChange(row, name));
@@ -253,6 +284,83 @@ try {
       "delete_response_on_leave reached the database",
       `/${command} is target "${subject.target}", not "member" — the field does not apply`
     );
+  }
+
+  /* ------------------------------------------------------------------ *
+   * The role fields the punishment suite added
+   *
+   * Six columns on one table, each owned by exactly one command. Two things
+   * are worth probing rather than one: that the value reaches the column, and
+   * that the board reads it back. A field that saves and is then dropped on
+   * read is the same defect as one that never saved — it just takes one more
+   * screen to notice, and the screen is where the operator lives.
+   *
+   * A partial PUT is not used here. The route normalises the body against the
+   * registry, so a change carrying one field resets every other column to its
+   * default — the row is sent whole, which is also what the board sends.
+   * ------------------------------------------------------------------ */
+  const roleFieldProbes = [
+    { owner: "mute", field: "mutedRoleId", column: "muted_role_id", value: PROBE_USER, shape: "single" },
+    { owner: "prison", field: "prisonRoleId", column: "prison_role_id", value: PROBE_USER, shape: "single" },
+    { owner: "prison", field: "prisonChannelId", column: "prison_channel_id", value: PROBE_USER, shape: "single" },
+    { owner: "blacklist", field: "blacklistRoleIds", column: "blacklist_role_ids", value: [PROBE_USER], shape: "list" },
+    { owner: "down", field: "adminRoleIdsToStrip", column: "admin_role_ids_to_strip", value: [PROBE_USER], shape: "list" },
+    { owner: "block", field: "blockableRoleIds", column: "blockable_role_ids", value: [PROBE_USER], shape: "list" }
+  ];
+
+  for (const probe of roleFieldProbes) {
+    const row = await readRowFor(probe.owner);
+    const onBoard = before.commands.find(entry => entry.name === probe.owner);
+    if (!onBoard) {
+      skip(`/${probe.owner}.${probe.field} round-trips`, `/${probe.owner} is not on this guild's board`);
+      continue;
+    }
+
+    // A row that does not exist yet is created and then deleted in the restore.
+    // The skip rule this script uses elsewhere exists so a *negative* assertion
+    // ("it stayed false") is not made about a row the script brought into
+    // existence. A positive one is different: the claim is that the value
+    // reached the column, and a column that can only be written on rows that
+    // already exist is not a column this feature can use.
+    if (row) originals.set(probe.owner, row);
+    else createdRows.add(probe.owner);
+
+    await put({ ...rowToChange(row ?? {}, probe.owner), [probe.field]: probe.value });
+
+    const stored = (await readRowFor(probe.owner))?.[probe.column];
+    check(
+      `/${probe.owner}: ${probe.field} reached ${probe.column}`,
+      stored,
+      value => JSON.stringify(value) === JSON.stringify(probe.value)
+    );
+
+    const seen = (await boardCommand(probe.owner))[probe.field];
+    check(
+      `/${probe.owner}: the board reads back ${probe.field}`,
+      seen,
+      value => JSON.stringify(value) === JSON.stringify(probe.value)
+    );
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Ownership is enforced by the server, not just hidden by the card
+   *
+   * `ROLE_FIELD_OWNERS` is the single map the dashboard reads to decide which
+   * card shows which field. If the server did not enforce the same map, the
+   * two could disagree — and the way that shows up is a field that renders on
+   * one command and is written onto another.
+   * ------------------------------------------------------------------ */
+  {
+    const other = command === "mute" ? "ban" : command;
+    const row = await readRowFor(other);
+    if (!row) {
+      skip("a role field sent to a command that does not own it is refused", `/${other} has no stored row to probe`);
+    } else {
+      originals.set(other, row);
+      await put({ ...rowToChange(row, other), mutedRoleId: PROBE_USER });
+      const stored = (await readRowFor(other)).muted_role_id;
+      check(`/${other} did not store a muted role it does not own`, stored, null);
+    }
   }
 
   // The negative half. Without it, "reached the database" only proves the
