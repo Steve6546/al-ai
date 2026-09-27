@@ -35,6 +35,7 @@ import {
   SESSION_COOKIE_OPTIONS,
   SESSION_MAX_AGE_SECONDS,
   signActor,
+  normaliseWelcomeSettings,
   validateEvent,
   verifyHmac,
   verifyLayerRequest
@@ -484,4 +485,18 @@ test("an absent duration normalises to no window rather than throwing", () => {
   const identity = normaliseBotIdentity({ status: "idle" });
   assert.equal(identity.statusDuration, null);
   assert.equal(identity.statusExpiresAt, null);
+});
+
+test("welcome settings normalise rather than trust", () => {
+  // A missing row is the feature, off — never an error and never half-armed.
+  assert.deepEqual(normaliseWelcomeSettings(undefined), { enabled: false, memberRoleId: null, botRoleId: null });
+  // Only the literal true arms it: a truthy string from a stale client does not.
+  assert.equal(normaliseWelcomeSettings({ enabled: "yes" }).enabled, false);
+  // A snowflake survives; anything else degrades to null, which the bot reads
+  // as "no auto-role for this kind of arrival" instead of a grant that cannot
+  // exist.
+  const written = { enabled: true, memberRoleId: "1540515175826985080", botRoleId: "1540515175826985081" };
+  assert.deepEqual(normaliseWelcomeSettings(written), written);
+  assert.equal(normaliseWelcomeSettings({ memberRoleId: "not-a-snowflake" }).memberRoleId, null);
+  assert.equal(normaliseWelcomeSettings({ memberRoleId: 123 }).memberRoleId, null);
 });

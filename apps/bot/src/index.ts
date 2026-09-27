@@ -21,6 +21,7 @@ import {
   readStrippableRoleIds,
   sendLogEmbed,
   sendLogEmbedToWebhook,
+  type GuildMember,
   type LogEnvelope
 } from "./lib/discord.js";
 import {
@@ -255,6 +256,28 @@ const dispatch = createDispatcher({
  * ------------------------------------------------------------------ */
 
 const securityConfigs = new ConfigCache(guildId => database.loadSecurity(guildId));
+// The welcome screen's settings, cached on the same 30 second terms: a join is
+// the trigger, joins burst, and a dashboard save should land within half a
+// minute rather than within a round trip.
+const welcomeFlags = new ConfigCache(guildId => database.loadWelcome(guildId));
+
+/**
+ * Grants the welcome auto-role, re-checking Discord's hierarchy at assign time.
+ *
+ * The dashboard validated the role when the setting was saved, but ranks move:
+ * a role raised above the bot's since then is refused by Discord, and a role an
+ * integration owns cannot be granted at all. Every guard here mirrors a Discord
+ * refusal rather than a guess, so a silent `return` always means "Discord would
+ * have refused this anyway" — never "we skipped it for no reason".
+ */
+async function grantAutoRole(member: GuildMember, roleId: string | null, reason: string): Promise<void> {
+  if (!roleId) return;
+  const role = member.guild.roles.cache.get(roleId);
+  const me = member.guild.members.me;
+  if (!role || role.managed || !me || role.position >= me.roles.highest.position) return;
+  if (member.roles.cache.has(roleId)) return;
+  await member.roles.add(roleId, `AL AI — ${reason}`);
+}
 
 const antiNuke = createAntiNukeEngine({
   configFor: guildId => securityConfigs.get(guildId),
@@ -376,6 +399,22 @@ const commandCooldowns = new CommandCooldowns();
 bindEvents(client, guardedDispatch, {
   messageCache,
   inviteTracker,
+
+  /**
+   * The welcome feature's half: a human join earns the members' auto-role and a
+   * bot's arrival earns the bots' — each only when the switch is armed and the
+   * guild picked a role for that kind of arrival.
+   */
+  onMemberJoin: async member => {
+    const settings = await welcomeFlags.get(member.guild.id).catch(() => null);
+    if (!settings?.enabled) return;
+    await grantAutoRole(member, settings.memberRoleId, "رتبة تلقائية لعضو جديد");
+  },
+  onBotJoin: async member => {
+    const settings = await welcomeFlags.get(member.guild.id).catch(() => null);
+    if (!settings?.enabled) return;
+    await grantAutoRole(member, settings.botRoleId, "رتبة تلقائية لبوت جديد");
+  },
 
   /**
    * Serves the operator's ready-made reasons to Discord's autocomplete.

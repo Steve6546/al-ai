@@ -174,6 +174,31 @@ test("saving twice updates rather than duplicating", { skip }, async () => {
   assert.equal((await db!.getSecurity(GUILD_ID)).enabled, true);
 });
 
+/* ------------------------------------------------------------------ *
+ * Welcome & auto-role
+ * ------------------------------------------------------------------ */
+
+test("welcome settings survive a round trip", { skip }, async () => {
+  await seedBotOwnedGuild();
+  await pool!.query("DELETE FROM guild_welcome WHERE guild_id = $1", [GUILD_ID]);
+
+  // A guild that arms members' auto-role but leaves bots alone is the shape the
+  // screen is designed around — the two ids are independent, and null means
+  // "leave them alone", not "unsettled default".
+  const written = { enabled: true, memberRoleId: "1540515175826985080", botRoleId: null };
+  await db!.saveWelcome(GUILD_ID, written);
+  assert.deepEqual(await db!.getWelcome(GUILD_ID), written);
+
+  // A save over an existing row updates it rather than duplicating.
+  await db!.saveWelcome(GUILD_ID, { enabled: false, memberRoleId: null, botRoleId: null });
+  const { rows } = await pool!.query<{ count: string }>(
+    "SELECT count(*)::text AS count FROM guild_welcome WHERE guild_id = $1",
+    [GUILD_ID]
+  );
+  assert.equal(rows[0]?.count, "1");
+  assert.deepEqual(await db!.getWelcome(GUILD_ID), { enabled: false, memberRoleId: null, botRoleId: null });
+});
+
 test("the database refuses a limit of zero even if code lets one through", { skip }, async () => {
   // The code clamps to >= 1; this proves the table does too, so a direct write
   // cannot create an engine that trips on the first innocent action.

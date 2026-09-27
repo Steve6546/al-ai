@@ -235,6 +235,10 @@ const payloads: [RegExp, unknown][] = [
   }],
   [/^\/api\/guilds\/[^/]+\/audit$/, { counts: { total: 0, critical: 0 }, entries: [] }],
   [/^\/api\/guilds\/[^/]+\/security$/, { events: [] }],
+  [/^\/api\/guilds\/[^/]+\/welcome$/, {
+    settings: { enabled: false, memberRoleId: null, botRoleId: null },
+    roles: [role]
+  }],
   /**
    * The anti-nuke payload, in the shape the route actually returns:
    * `{ config, roles, actions }` — not a flat config.
@@ -341,7 +345,7 @@ function fatal(errors: string[]): string[] {
   );
 }
 
-const views = ["dashboard", "commands", "customization", "roles", "logs", "audit", "security"];
+const views = ["dashboard", "commands", "customization", "welcome", "roles", "logs", "audit", "security"];
 
 /**
  * A marker that only the *loaded* screen can render, per view.
@@ -364,6 +368,7 @@ const loadedMarkers: Record<string, RegExp> = {
   // while this one can only appear once `categories` came back from the API.
   commands: /العقوبات/,
   customization: /الهوية العالمية/,
+  welcome: /رتبة تلقائية/,
   roles: /المالك/,
   logs: /التسجيل المركزي/,
   audit: /آخر الأحداث/,

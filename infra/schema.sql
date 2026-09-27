@@ -551,6 +551,21 @@ CREATE TABLE IF NOT EXISTS guild_security (
 -- that has explicitly disarmed the engine stays disarmed.
 ALTER TABLE guild_security ALTER COLUMN enabled SET DEFAULT true;
 
+-- Auto-role on join: one role for arriving members and a different one for
+-- arriving bots, per the operator's welcome screen. Both are nullable — a guild
+-- may want one without the other, or neither while keeping the switch armed for
+-- later. The BFF validates a saved role against Discord (it exists, is not
+-- managed, sits below the bot's highest position) at write time; the bot
+-- re-checks the hierarchy at assign time, because ranks move after a setting
+-- was written and Discord refuses, rather than errors, the out-of-range grant.
+CREATE TABLE IF NOT EXISTS guild_welcome (
+  guild_id TEXT PRIMARY KEY REFERENCES guilds(id) ON DELETE CASCADE,
+  enabled BOOLEAN NOT NULL DEFAULT false,
+  member_role_id TEXT,
+  bot_role_id TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Bot tokens are retired (GOVERNANCE rule 19). AL AI runs on exactly one master
 -- token held in the server environment; the dashboard never accepts a credential
 -- from the browser. The tables are dropped rather than left dormant, because an

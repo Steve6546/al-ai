@@ -1,6 +1,6 @@
 import pg from "pg";
 import type { AntiNukeConfig, LoggingSettings, CustomizationSettings, CommandConfig, TierRoles } from "@al-ai/core";
-import { DEFAULT_ANTI_NUKE_CONFIG, DEFAULT_BOT_IDENTITY, DEFAULT_CUSTOMIZATION, DEFAULT_EMBED_COLOR, DEFAULT_LOGGING_MODE, isLoggingMode, isTier, normaliseAntiNukeConfig, normaliseBotIdentity, normaliseTierRoles, PUNISHMENT_EVENT_IDS, SESSION_MAX_AGE_SECONDS, type BotIdentitySettings } from "@al-ai/core";
+import { DEFAULT_ANTI_NUKE_CONFIG, DEFAULT_BOT_IDENTITY, DEFAULT_CUSTOMIZATION, DEFAULT_EMBED_COLOR, DEFAULT_LOGGING_MODE, DEFAULT_WELCOME_SETTINGS, isLoggingMode, isTier, normaliseAntiNukeConfig, normaliseBotIdentity, normaliseTierRoles, normaliseWelcomeSettings, PUNISHMENT_EVENT_IDS, SESSION_MAX_AGE_SECONDS, type BotIdentitySettings, type WelcomeSettings } from "@al-ai/core";
 
 const { Pool } = pg;
 
@@ -290,6 +290,34 @@ export function createDatabase(pool: pg.Pool) {
           config.limits.roleChangesPerMinute,
           config.quarantineRoleId
         ]
+      );
+    },
+
+    async getWelcome(guildId: string): Promise<WelcomeSettings> {
+      const { rows } = await pool.query<{
+        enabled: boolean;
+        member_role_id: string | null;
+        bot_role_id: string | null;
+      }>(`SELECT enabled, member_role_id, bot_role_id FROM guild_welcome WHERE guild_id = $1`, [guildId]);
+      const row = rows[0];
+      if (!row) return DEFAULT_WELCOME_SETTINGS;
+      return normaliseWelcomeSettings({
+        enabled: row.enabled,
+        memberRoleId: row.member_role_id,
+        botRoleId: row.bot_role_id
+      });
+    },
+
+    async saveWelcome(guildId: string, settings: WelcomeSettings) {
+      await pool.query(
+        `INSERT INTO guild_welcome (guild_id, enabled, member_role_id, bot_role_id, updated_at)
+         VALUES ($1, $2, $3, $4, now())
+         ON CONFLICT (guild_id) DO UPDATE
+           SET enabled = EXCLUDED.enabled,
+               member_role_id = EXCLUDED.member_role_id,
+               bot_role_id = EXCLUDED.bot_role_id,
+               updated_at = now()`,
+        [guildId, settings.enabled, settings.memberRoleId, settings.botRoleId]
       );
     },
 

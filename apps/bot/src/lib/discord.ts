@@ -22,6 +22,10 @@ import {
   type SlashCommandStringOption,
   type SlashCommandUserOption
 } from "discord.js";
+// Re-exported so callers can type callback parameters without importing
+// discord.js themselves — GOVERNANCE rule 2 keeps that import in this module.
+export type { GuildMember } from "discord.js";
+import type { GuildMember } from "discord.js";
 import type { ActivityType, BotStatus, LogDestination, Severity } from "@al-ai/core";
 import {
   activityTypeNumbers,
@@ -1361,6 +1365,20 @@ export type BindOptions = {
    */
   onCommand?: (context: CommandContext) => Promise<void>;
   /**
+   * Runs after a human member's join is logged — the auto-role grant. It is a
+   * *write*, so it lives with the caller (who owns the settings caches and the
+   * command surfaces) rather than beside the logging listeners; this module
+   * only guarantees it fires on the same join event, once, and never for bots
+   * — a bot's arrival has its own option.
+   */
+  onMemberJoin?: (member: GuildMember) => Promise<void>;
+  /**
+   * Same contract for a bot's arrival, so the welcome feature can hand bots a
+   * different role from members — or none at all — without the caller having to
+   * re-ask Discord whether the join was a bot.
+   */
+  onBotJoin?: (member: GuildMember) => Promise<void>;
+  /**
    * Supplies the ready-made reasons for the focused option.
    *
    * Answers an autocomplete interaction, which Discord expects within three
@@ -1538,9 +1556,13 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
     // rather than as an ordinary member arrival.
     if (member.user.bot) {
       emit({ type: "bot.join", guildId: member.guild.id, memberId: member.id });
+      void options.onBotJoin?.(member).catch(error => console.error("AL AI bot auto-role failed", error));
       return;
     }
     emit({ type: "member.join", guildId: member.guild.id, memberId: member.id });
+    // Auto-role is a write, not a log entry: it must not delay or block the
+    // join being reported, so it runs detached and reports its own failures.
+    void options.onMemberJoin?.(member).catch(error => console.error("AL AI auto-role failed", error));
     // Which invite brought the member in is a diff, not a field: Discord names
     // no invite on the join, so the guild's invites are fetched once here and
     // compared against the snapshot the tracker holds — the one whose use count

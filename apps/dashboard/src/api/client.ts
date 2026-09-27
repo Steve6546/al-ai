@@ -15,6 +15,7 @@ import type {
   GuildMetrics,
   HealthSnapshot,
   LoggingSettings,
+  WelcomeSettings,
   PermissionStatus,
   RoleHierarchyVerdict,
   RoleIconGate,
@@ -287,4 +288,15 @@ export const saveSecurityConfig = (guildId: string, config: AntiNukeConfig) =>
   call<{ config: AntiNukeConfig; savedAt: string }>(`/api/guilds/${guildId}/security/config`, {
     method: "PUT",
     body: JSON.stringify(config)
+  });
+
+/* ------------------------------------------------------------------ *
+ * Settings: welcome & auto-role
+ * ------------------------------------------------------------------ */
+export const welcome = (guildId: string) =>
+  call<{ settings: WelcomeSettings; roles: DiscordRole[] }>(`/api/guilds/${guildId}/welcome`);
+export const saveWelcome = (guildId: string, settings: WelcomeSettings) =>
+  call<{ settings: WelcomeSettings; savedAt: string }>(`/api/guilds/${guildId}/welcome`, {
+    method: "PUT",
+    body: JSON.stringify(settings)
   });

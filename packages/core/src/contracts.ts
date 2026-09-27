@@ -1,4 +1,5 @@
 import type { LogDestination, Severity } from "./event-schema.js";
+import { normaliseSnowflake } from "./snowflake.js";
 import type { Tier } from "./permissions.js";
 
 /**
@@ -848,4 +849,44 @@ export function widgetOnlineNote(widget: WidgetPresenceResult): string | null {
   return widget.reason === "widget-disabled"
     ? "فعّل «Server Widget» في إعدادات السيرفر لعرض عدد المتصلين."
     : "تعذّر قراءة عدد المتصلين من Discord.";
+}
+
+/* ------------------------------------------------------------------ *
+ * Welcome & auto-role
+ * ------------------------------------------------------------------ */
+
+/**
+ * The welcome screen's settings: whether the feature is armed and which role a
+ * new member — and, separately, a new bot — is granted on arrival.
+ *
+ * Both role ids are nullable on purpose: a guild may want an auto-role for
+ * members but not bots, or the reverse, and `null` means "leave them alone"
+ * rather than "unsettled default".
+ */
+export type WelcomeSettings = {
+  enabled: boolean;
+  memberRoleId: string | null;
+  botRoleId: string | null;
+};
+
+export const DEFAULT_WELCOME_SETTINGS: WelcomeSettings = {
+  enabled: false,
+  memberRoleId: null,
+  botRoleId: null
+};
+
+/**
+ * Normalised, not trusted: the same helper the BFF writes through and the bot
+ * reads through, so a value that survives one side means the same thing on the
+ * other. Anything that is not a snowflake becomes `null` rather than an error —
+ * a truncated id from an old client degrades to "no auto-role", which is the
+ * honest reading, instead of the bot trying to grant a role that cannot exist.
+ */
+export function normaliseWelcomeSettings(value: unknown): WelcomeSettings {
+  const source = (value ?? {}) as Partial<WelcomeSettings>;
+  return {
+    enabled: source.enabled === true,
+    memberRoleId: normaliseSnowflake(source.memberRoleId),
+    botRoleId: normaliseSnowflake(source.botRoleId)
+  };
 }

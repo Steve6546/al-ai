@@ -50,6 +50,7 @@ export type {
   HealthSnapshot,
   LogDestination,
   LoggingSettings,
+  WelcomeSettings,
   NukeAction,
   PermissionStatus,
   PresetReason,

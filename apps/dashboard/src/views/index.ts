@@ -12,3 +12,4 @@ export { CommandsView } from "./settings/commands";
 export { CustomizationView } from "./settings/customization";
 export { LogsView } from "./settings/logs";
 export { RolesView } from "./settings/roles";
+export { WelcomeView } from "./settings/welcome";

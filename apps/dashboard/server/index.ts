@@ -45,6 +45,7 @@ import {
   normaliseSnowflake,
   normaliseTierRoles,
   normaliseAntiNukeConfig,
+  normaliseWelcomeSettings,
   requireCommand,
   SESSION_COOKIE_NAME,
   summarisePunishments,
@@ -52,6 +53,7 @@ import {
   widgetOnlineNote,
   type ActivityEntry,
   type AntiNukeConfig,
+  type WelcomeSettings,
   type BotIdentitySettings,
   type ChannelOption,
   type CommandConfig,
@@ -995,6 +997,81 @@ app.put("/api/guilds/:guildId/security/config", async (request, reply) => {
   });
 
   return { config, savedAt: new Date().toISOString() };
+});
+
+/* ------------------------------------------------------------------ *
+ * Welcome & auto-role
+ * ------------------------------------------------------------------ */
+
+app.get("/api/guilds/:guildId/welcome", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
+
+  const settings = await db.getWelcome(guildId);
+  // The pickers are fed from Discord, so a stored id can only name a role that
+  // was selectable when it was saved. `botHighestRolePosition` is what makes a
+  // role grantable at all: anything at or above it is refused by Discord's own
+  // hierarchy, and offering it would be offering a setting that cannot work.
+  const [roles, botHighestRolePosition] = await Promise.all([
+    env.botToken ? fetchGuildRoles(env.botToken, guildId).catch(() => []) : Promise.resolve([]),
+    env.botToken ? fetchBotHighestRolePosition(env.botToken, guildId).catch(() => null) : Promise.resolve(null)
+  ]);
+
+  return {
+    settings,
+    roles: roles.filter(
+      role => !role.managed && !role.isDefault && botHighestRolePosition !== null && role.position < botHighestRolePosition
+    )
+  };
+});
+
+app.put("/api/guilds/:guildId/welcome", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
+
+  const body = request.body as Partial<WelcomeSettings> | undefined;
+  if (!body || typeof body !== "object") {
+    return reply.code(400).send({ error: "INVALID_BODY", message: "يلزم جسم الطلب يحتوي إعدادات الترحيب." });
+  }
+  const settings = normaliseWelcomeSettings(body);
+
+  // Each chosen role is re-checked against Discord at save time, not trusted
+  // from the picker: the roles list the screen saw can be minutes old, and a
+  // role deleted or raised in between would store a setting that silently does
+  // nothing on the first join.
+  if (settings.memberRoleId || settings.botRoleId) {
+    const [roles, botHighestRolePosition] = await Promise.all([
+      env.botToken ? fetchGuildRoles(env.botToken, guildId).catch(() => []) : Promise.resolve([]),
+      env.botToken ? fetchBotHighestRolePosition(env.botToken, guildId).catch(() => null) : Promise.resolve(null)
+    ]);
+    const grantable = (roleId: string | null) =>
+      roleId === null ||
+      (botHighestRolePosition !== null &&
+        roles.some(role => role.id === roleId && !role.managed && !role.isDefault && role.position < botHighestRolePosition));
+    if (!grantable(settings.memberRoleId) || !grantable(settings.botRoleId)) {
+      return reply.code(409).send({
+        error: "ROLE_NOT_GRANTABLE",
+        message: "إحدى الرتب المختارة محذوفة، أو مُدارة بواسطة تكامل، أو فوق أعلى رتبة البوت — ولا يمكن منحها."
+      });
+    }
+  }
+
+  await db.saveWelcome(guildId, settings);
+  await appendAudit(db, env, {
+    guildId,
+    eventId: "bot.command-success",
+    actorId: context.session!.discordUserId,
+    payload: {
+      action: "welcome.save",
+      enabled: settings.enabled,
+      memberRoleId: settings.memberRoleId,
+      botRoleId: settings.botRoleId
+    }
+  });
+
+  return { settings, savedAt: new Date().toISOString() };
 });
 
 /* ------------------------------------------------------------------ *

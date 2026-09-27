@@ -4,6 +4,7 @@ import {
   DEFAULT_BOT_IDENTITY,
   DEFAULT_EMBED_COLOR,
   DEFAULT_LOGGING_MODE,
+  DEFAULT_WELCOME_SETTINGS,
   encryptSecret,
   isLoggingMode,
   isTier,
@@ -11,12 +12,14 @@ import {
   normaliseLoggingMode,
   normaliseBotIdentity,
   normaliseTierRoles,
+  normaliseWelcomeSettings,
   type AntiNukeConfig,
   type BotIdentitySettings,
   type CommandConfig,
   type LogDestination,
   type LoggingMode,
-  type TierRoles
+  type TierRoles,
+  type WelcomeSettings
 } from "@al-ai/core";
 
 const { Pool } = pg;
@@ -177,6 +180,30 @@ export function createBotDatabase(databaseUrl: string) {
           bansPerMinute: row.bans_per_minute,
           roleChangesPerMinute: row.role_changes_per_minute
         }
+      });
+    },
+
+    /**
+     * The welcome screen's settings. Read-only from the bot's side — only the
+     * dashboard writes them — and normalised through the same helper, so a row
+     * the BFF wrote and a row the bot reads cannot disagree about what a
+     * half-typed id means. A missing row is simply the feature, off.
+     */
+    async loadWelcome(guildId: string): Promise<WelcomeSettings> {
+      const { rows } = await pool.query<{
+        enabled: boolean;
+        member_role_id: string | null;
+        bot_role_id: string | null;
+      }>(
+        `SELECT enabled, member_role_id, bot_role_id FROM guild_welcome WHERE guild_id = $1`,
+        [guildId]
+      );
+      const row = rows[0];
+      if (!row) return DEFAULT_WELCOME_SETTINGS;
+      return normaliseWelcomeSettings({
+        enabled: row.enabled,
+        memberRoleId: row.member_role_id,
+        botRoleId: row.bot_role_id
       });
     },
 

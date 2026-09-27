@@ -18,7 +18,8 @@ import {
   ScrollText,
   ShieldAlert,
   SquareTerminal,
-  UserCog
+  UserCog,
+  UserPlus
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -46,7 +47,7 @@ import { tierLabels, type Guild, type HealthSnapshot, type SessionInfo } from "@
  * into. It owns navigation and identity only — no view-specific state lives here.
  */
 
-export type ViewKey = "dashboard" | "commands" | "customization" | "roles" | "logs" | "audit" | "security";
+export type ViewKey = "dashboard" | "commands" | "customization" | "welcome" | "roles" | "logs" | "audit" | "security";
 
 /**
  * Every view key, in one place.
@@ -60,6 +61,7 @@ const viewKeys: readonly ViewKey[] = [
   "dashboard",
   "commands",
   "customization",
+  "welcome",
   "roles",
   "logs",
   "audit",
@@ -99,6 +101,7 @@ const navSections: { id: string; title: string | null; items: NavItem[] }[] = [
     title: "الإعدادات العامة",
     items: [
       { key: "roles", label: "رتب الإدارة والمشرفين", icon: UserCog, needs: "canManageTiers", requiresBot: true },
+      { key: "welcome", label: "الترحيب والمغادرة", icon: UserPlus, needs: "canManage", requiresBot: true },
       { key: "customization", label: "هوية البوت", icon: Palette, needs: "canManageIdentity", requiresBot: true }
     ]
   },

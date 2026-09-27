@@ -8,7 +8,7 @@ import { InviteBotPanel } from "@/components/invite-bot";
 import { LoginScreen } from "@/components/login-screen";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { guildPath, guildsPath, navigate, useRoute } from "@/lib/router";
-import { AuditView, CommandsView, CustomizationView, DashboardView, LogsView, RolesView, SecurityView } from "@/views";
+import { AuditView, CommandsView, CustomizationView, DashboardView, LogsView, RolesView, SecurityView, WelcomeView } from "@/views";
 import type { Guild, HealthSnapshot, SessionInfo } from "@/types";
 
 /**
@@ -228,6 +228,7 @@ export function App() {
           {view === "roles" && <RolesView guild={guild} />}
           {view === "customization" && <CustomizationView guild={guild} />}
           {view === "logs" && <LogsView guild={guild} />}
+          {view === "welcome" && <WelcomeView guild={guild} />}
           {view === "audit" && <AuditView guild={guild} />}
           {view === "security" && <SecurityView guild={guild} />}
         </ErrorBoundary>
