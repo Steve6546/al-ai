@@ -59,7 +59,7 @@ export type PreviewGuild = {
  * Both come from `@al-ai/core/browser`, which is where the status picker beside
  * this preview already reads them. They used to be re-declared here, and the
  * two copies had already drifted: the preview said «لا تزعجني» and «غير مرئي»
- * while the menu two inches away said «لا تُزعجني» and «غير ظاهر». One status,
+ * while the menu two inches away said «مشغول» and «غير ظاهر». One status,
  * two words, on one screen — which is exactly what a second copy buys you.
  */
 

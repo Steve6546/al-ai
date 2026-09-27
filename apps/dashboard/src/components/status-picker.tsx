@@ -58,7 +58,7 @@ export const STATUS_COLORS: Record<BotStatus, string> = {
 const STATUS_DESCRIPTIONS: Record<BotStatus, string> = {
   online: "يظهر متصلاً للجميع",
   idle: "يظهر بجانبه هلال أصفر",
-  dnd: "يُظهر أنه لا يريد الإزعاج",
+  dnd: "يُظهر أنه مشغول ولا يريد الإزعاج",
   invisible: "يظهر غير متصل للجميع"
 };
 
@@ -181,14 +181,20 @@ export function StatusPicker({
         disabled={disabled}
         aria-label="حالة البوت"
         className={cn(
-          "inline-flex h-8 items-center gap-2 rounded-md border border-input bg-transparent px-2.5 text-sm",
+          // `h-9` is the design system's control height — input, select and the
+          // default button all share it, and this trigger sits beside a Select
+          // in «الحالة والنشاط». At the old h-8 the pair read as two different
+          // generations of control.
+          "inline-flex h-9 items-center gap-2 rounded-md border border-input bg-transparent px-3 text-sm",
           "hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
           "disabled:cursor-not-allowed disabled:opacity-50"
         )}
       >
         {/* The mask is the trigger's own background so the crescent's bite reads
-            as a hole rather than a pale dot. */}
-        <StatusDot status={status} maskColor="hsl(var(--background))" />
+            as a hole rather than a pale dot. The theme tokens are plain oklch
+            values since Tailwind 4 — wrapping them in hsl() produced an invalid
+            colour and a black bite. */}
+        <StatusDot status={status} maskColor="var(--background)" />
         <span>{botStatusLabels[status]}</span>
         {activeDuration ? (
           <span className="text-xs text-muted-foreground">
@@ -202,7 +208,7 @@ export function StatusPicker({
           const description = STATUS_DESCRIPTIONS[candidate];
           const body = (
             <>
-              <StatusDot status={candidate} size={11} maskColor="hsl(var(--popover))" />
+              <StatusDot status={candidate} size={11} maskColor="var(--popover)" />
               <span className="flex-1">{botStatusLabels[candidate]}</span>
             </>
           );

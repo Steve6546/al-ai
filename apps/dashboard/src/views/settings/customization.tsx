@@ -439,7 +439,10 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                 <Label>الحالة والنشاط</Label>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <span className="text-xs text-muted-foreground">الحالة</span>
+                    {/* <Label>, like every sibling field on this screen — the
+                        pair used to read as muted captions rather than as two
+                        labelled controls sitting side by side. */}
+                    <Label>الحالة</Label>
                     <div>
                       <StatusPicker
                         status={identityDraft?.status ?? "online"}
@@ -460,7 +463,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <span className="text-xs text-muted-foreground">نوع النشاط</span>
+                    <Label>نوع النشاط</Label>
                     {/*
                      * A real Select, not a native `<select>`.
                      *

@@ -1561,21 +1561,23 @@ function SectionCard({
 
         {/*
           The two bulk state moves, side by side and colour-coded: green turns
-          every record in the section on, red turns them all off. They write the
-          section flag for every record, which is the coarse move; the
+          every record in the section on, red turns them all off. They use the
+          theme's own success/destructive tokens rather than raw palette steps,
+          so they shift with the theme like every other semantic colour. They
+          write the section flag for every record, which is the coarse move; the
           per-record switch is the fine one.
         */}
         <div className="flex gap-2">
           <Button
             size="sm"
-            className="flex-1 border-transparent bg-emerald-600 text-white hover:bg-emerald-700"
+            className="flex-1 bg-success text-white hover:bg-success/85"
             onClick={onEnableAll}
           >
             تفعيل الكل
           </Button>
           <Button
             size="sm"
-            className="flex-1 border-transparent bg-red-600 text-white hover:bg-red-700"
+            className="flex-1 bg-destructive text-white hover:bg-destructive/85"
             onClick={onDisableAll}
           >
             تعطيل الكل

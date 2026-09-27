@@ -115,7 +115,10 @@ export const botStatuses = ["online", "idle", "dnd", "invisible"] as const;
 export const botStatusLabels: Record<BotStatus, string> = {
   online: "متصل",
   idle: "خامل",
-  dnd: "لا تُزعجني",
+  // Discord's own Arabic string for Do Not Disturb — not a literal translation
+  // of the English. The four labels must be the ones the real client shows,
+  // since the operator compares this picker against Discord side by side.
+  dnd: "مشغول",
   invisible: "غير ظاهر"
 };
 

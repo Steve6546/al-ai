@@ -670,7 +670,7 @@ test("the status menu opens, and its duration sub-menu opens inside it", async (
     // The sub-trigger is found by its own label, not by position, so adding a
     // status to core does not silently retarget this test.
     const subTrigger = [...dom.window.document.querySelectorAll('[role="menuitem"]')].find(item =>
-      item.textContent?.includes("لا تُزعجني")
+      item.textContent?.includes("مشغول")
     );
     assert.ok(subTrigger, "the timed status grew a sub-trigger");
 
