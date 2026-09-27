@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { FileClock, Loader2, Lock } from "lucide-react";
+import { FileClock, Lock } from "lucide-react";
 import { api } from "@/api";
 import { EmptyState } from "@/components/empty-state";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { LoadError, LoadingRow } from "@/components/view-states";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -45,11 +45,7 @@ export function AuditView({ guild }: { guild: Guild }) {
   }, [guild.id]);
 
   if (error) {
-    return (
-      <Alert variant="destructive">
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
-    );
+    return <LoadError message={error} />;
   }
 
   return (
@@ -81,10 +77,7 @@ export function AuditView({ guild }: { guild: Guild }) {
         </CardHeader>
         <CardContent>
           {!entries ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              جارٍ التحميل
-            </div>
+            <LoadingRow />
           ) : entries.length === 0 ? (
             <EmptyState
               icon={FileClock}

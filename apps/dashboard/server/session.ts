@@ -11,7 +11,14 @@ export function parseCookies(header: string | undefined): Record<string, string>
       if (index < 0) return [];
       const key = part.slice(0, index).trim();
       const value = part.slice(index + 1).trim();
-      return key ? [[key, decodeURIComponent(value)]] : [];
+      // A stray percent sign makes `decodeURIComponent` throw `URIError`, which
+      // would turn one malformed cookie into a 500 on every authenticated route.
+      // A value that cannot be decoded is not a value this site set; skip it.
+      try {
+        return key ? [[key, decodeURIComponent(value)]] : [];
+      } catch {
+        return [];
+      }
     })
   );
 }
@@ -32,6 +39,14 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 export function sessionCookieHeader(sessionId: string) {
   return serializeCookie(SESSION_COOKIE_NAME, sessionId, SESSION_MAX_AGE_SECONDS);
+}
+
+/**
+ * Any other short-lived cookie this site sets, built on the same policy as the
+ * session cookie so the two cannot drift on `Secure`, `SameSite` or `HttpOnly`.
+ */
+export function policyCookieHeader(name: string, value: string, maxAgeSeconds: number) {
+  return serializeCookie(name, value, maxAgeSeconds);
 }
 
 export function clearedCookieHeader() {

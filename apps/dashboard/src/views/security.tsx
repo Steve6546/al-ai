@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Loader2, ShieldAlert, ShieldCheck, ShieldOff } from "lucide-react";
 import { api } from "@/api";
+import { useDraftForm } from "@/lib/use-draft-form";
 import { SaveBar } from "@/components/save-bar";
+import { LoadError, LoadingRow } from "@/components/view-states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { ANTI_NUKE_LIMIT_KEYS } from "@al-ai/core/browser";
 import { formatDateTime } from "@/lib/format";
 import type { AntiNukeConfig, AntiNukeSettings, Guild, SecurityEvent } from "@/types";
 
@@ -40,11 +43,7 @@ export function SecurityView({ guild }: { guild: Guild }) {
   }, [guild.id]);
 
   if (error) {
-    return (
-      <Alert variant="destructive">
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
-    );
+    return <LoadError message={error} />;
   }
 
   return (
@@ -127,23 +126,21 @@ const NO_ROLE = "__none__";
  */
 function AntiNukePanel({ guild }: { guild: Guild }) {
   const [loaded, setLoaded] = useState<AntiNukeSettings | null>(null);
-  const [saved, setSaved] = useState<AntiNukeConfig | null>(null);
-  const [draft, setDraft] = useState<AntiNukeConfig | null>(null);
+  const [config, setConfig] = useState<AntiNukeConfig | null>(null);
+  const { saved, draft, dirty, setDraft, reset, commit } = useDraftForm(config);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoaded(null);
-    setSaved(null);
-    setDraft(null);
+    setConfig(null);
     setError(null);
     api
       .securityConfig(guild.id)
       .then(result => {
         if (cancelled) return;
         setLoaded(result);
-        setSaved(result.config);
-        setDraft(result.config);
+        setConfig(result.config);
       })
       .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
     return () => {
@@ -152,29 +149,23 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
   }, [guild.id]);
 
   if (error) {
-    return (
-      <Alert variant="destructive">
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
-    );
+    return <LoadError message={error} />;
   }
   if (!loaded || !saved || !draft) {
     return (
       <Card>
-        <CardContent className="flex items-center gap-2 p-5 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
-          جارٍ تحميل إعدادات الأمان
+        <CardContent className="p-5">
+          <LoadingRow label="جارٍ تحميل إعدادات الأمان" />
         </CardContent>
       </Card>
     );
   }
 
-  const dirty = JSON.stringify(saved) !== JSON.stringify(draft);
   const canEdit = guild.canManageCommands;
   const setLimit = (action: (typeof loaded.actions)[number]["action"], value: number) =>
     setDraft({
       ...draft,
-      limits: { ...draft.limits, [keyFor(action)]: value }
+      limits: { ...draft.limits, [ANTI_NUKE_LIMIT_KEYS[action]]: value }
     });
 
   return (
@@ -226,7 +217,7 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
                 dir="ltr"
                 className="w-24 tabular"
                 disabled={!canEdit}
-                value={draft.limits[keyFor(action)]}
+                value={draft.limits[ANTI_NUKE_LIMIT_KEYS[action]]}
                 onChange={event => setLimit(action, Number(event.target.value))}
               />
             </div>
@@ -267,26 +258,13 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
 
       {dirty && (
         <SaveBar
-          onCancel={() => setDraft(saved)}
+          onCancel={reset}
           onSave={async () => {
             const result = await api.saveSecurityConfig(guild.id, draft);
-            setSaved(result.config);
-            setDraft(result.config);
+            commit(result.config);
           }}
         />
       )}
     </Card>
   );
-}
-
-/** Maps an action onto its limit key, mirroring `ANTI_NUKE_LIMIT_KEYS` in core. */
-function keyFor(action: string): keyof AntiNukeConfig["limits"] {
-  switch (action) {
-    case "channel-delete":
-      return "channelDeletesPerMinute";
-    case "ban":
-      return "bansPerMinute";
-    default:
-      return "roleChangesPerMinute";
-  }
 }

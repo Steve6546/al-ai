@@ -15,6 +15,13 @@ export type CachedMessage = {
   channelId: string;
   authorId: string;
   content: string;
+  /**
+   * Filenames of the attachments, without URLs. Discord does not announce a
+   * deleted file at all, so the names are what the log can recover — and a URL
+   * would be dead by the time anyone reads the entry, which is worse than a name
+   * that still means something.
+   */
+  attachments: string[];
   /** The message's own timestamp, kept for the log entry. */
   createdAt: number;
 };

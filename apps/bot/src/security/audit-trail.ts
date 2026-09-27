@@ -37,11 +37,3 @@ export async function guardAuditWrite(write: () => Promise<unknown>): Promise<Au
     return { ok: false, tamper: false, error };
   }
 }
-
-/** Raised when the audit trail has been touched by something other than an append. */
-export class AuditTamperError extends Error {
-  constructor(public readonly attempt: string) {
-    super(`audit_trail was tampered with: ${attempt}`);
-    this.name = "AuditTamperError";
-  }
-}

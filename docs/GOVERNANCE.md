@@ -30,16 +30,18 @@ test together.
    from Discord's own guild ownership and the Administrator permission bit, so a  
    guild that has configured nothing still has a working owner. Every operation  
    is re-checked on the server.
-4. **Exactly seven log destinations.** Channel IDs appear only in  
+4. **Exactly fourteen log destinations** — thirteen the operator configures,  
+   plus the internal `bot-log`. Channel IDs appear only in  
    config/channels.json, the channel registry, and guild_log_channels —  
    never scattered through the code. The channel registry is the only module that  
    turns a destination into a channel ID, and it reads guild_logging. The  
    guild_log_channels table is a write-only mirror that the dashboard maintains  
    so the database itself enforces one channel per destination; it is never a  
-   read source.
+   read source. An event moves between destinations by changing its `category`  
+   and never by renaming its id — ids are written into the encrypted audit trail.
 5. **logEvent() is the only log router.** Event IDs are registered in  
    event-schema.ts, are unique, and use the domain.action form.
-6. **Zero duplication across the seven rooms.** Each event is written once, to  
+6. **Zero duplication across the fourteen rooms.** Each event is written once, to  
    one destination. The Category value is a field inside the embed; it is  
    never a reason to copy the same event into a second room. "Executed by" is  
    likewise a field, not a second entry.

@@ -242,6 +242,34 @@ export const saveLogging = (guildId: string, settings: LoggingSettings) =>
     body: JSON.stringify(settings)
   });
 
+/** The shape both setup modes and the teardown answer with. */
+export type ChannelSetupResult = {
+  settings: LoggingSettings;
+  savedAt: string;
+  created?: { name: string; channelId: string }[];
+  deleted?: string[];
+  failed: { name?: string; channelId?: string; message: string }[];
+};
+
+/**
+ * Creates the log category and its channels.
+ *
+ * This is a slow call by design: up to 107 channels, created one at a time so
+ * Discord's rate limit is honoured. The screen waits rather than polling,
+ * because there is no second endpoint to poll — the result is the response.
+ */
+export const setupLoggingChannels = (guildId: string, mode: "normal" | "detailed") =>
+  call<ChannelSetupResult>(`/api/guilds/${guildId}/logging/setup`, {
+    method: "POST",
+    body: JSON.stringify({ mode })
+  });
+
+/**
+ * Deletes the bound log channels and the category, and disables logging.
+ */
+export const deleteLoggingChannels = (guildId: string) =>
+  call<ChannelSetupResult>(`/api/guilds/${guildId}/logging/channels`, { method: "DELETE" });
+
 /* ------------------------------------------------------------------ *
  * Read-only views
  * ------------------------------------------------------------------ */

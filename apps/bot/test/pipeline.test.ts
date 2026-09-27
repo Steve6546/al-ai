@@ -126,3 +126,22 @@ test("flush drains buffered debounced work on shutdown", async () => {
   assert.equal(flushed, true);
   assert.equal(runs, 1);
 });
+
+test("a job arriving mid-drain is drained rather than stranded", async () => {
+  const pipeline = new EventPipeline({ now: () => 1_000_000, ceiling: 10, windowMs: 60_000 });
+  const ran: string[] = [];
+  // The first job enqueues the second from inside its own run, so the enqueue
+  // happens while `draining` is still true. The microtask that enqueue schedules
+  // therefore no-ops and clears `drainScheduled` — without the re-check in
+  // `drain()`'s finally, the late job would sit in the queue until some later
+  // arrival happened to drain it, while `stats().queued` reported a backlog.
+  pipeline.enqueue(0, {
+    run: async () => {
+      ran.push("first");
+      pipeline.enqueue(0, { run: async () => void ran.push("late") });
+      await tick();
+    }
+  });
+  for (let attempt = 0; attempt < 10 && ran.length < 2; attempt += 1) await tick(10);
+  assert.deepEqual(ran, ["first", "late"], "the drain that started the burst picks up its own tail");
+});

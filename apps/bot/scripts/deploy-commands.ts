@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { buildAliasMap, commandFlagsFor } from "@al-ai/core";
+import { buildAliasMap, commandFlagsFor, isSnowflake } from "@al-ai/core";
 import {
   buildAliasCommands,
   buildAllCommands,
@@ -23,8 +23,6 @@ import { createBotDatabase } from "../src/storage/database.js";
  *   npm run deploy-commands --workspace=@al-ai/bot -- --guild 123456789012345678
  */
 
-const SNOWFLAKE = /^\d{17,20}$/;
-
 /** Reads `--guild <id>` and `--guild=<id>`, rejecting anything else outright. */
 function guildArgs(args: readonly string[]): string[] {
   const found: string[] = [];
@@ -39,7 +37,7 @@ function guildArgs(args: readonly string[]): string[] {
     } else {
       throw new Error(`Unknown argument: ${arg}. Only --guild <id> is accepted.`);
     }
-    if (!value || !SNOWFLAKE.test(value)) {
+    if (!isSnowflake(value)) {
       throw new Error(`--guild needs a Discord guild ID (17 to 20 digits), got: ${value ?? "nothing"}`);
     }
     found.push(value);

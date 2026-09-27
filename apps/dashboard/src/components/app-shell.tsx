@@ -56,7 +56,7 @@ export type ViewKey = "dashboard" | "commands" | "customization" | "roles" | "lo
  * would be circular — the navigation needs the type, and this needs the values —
  * so the values are stated once here and a test asserts they match the nav.
  */
-export const viewKeys: readonly ViewKey[] = [
+const viewKeys: readonly ViewKey[] = [
   "dashboard",
   "commands",
   "customization",
@@ -114,7 +114,7 @@ const navSections: { id: string; title: string | null; items: NavItem[] }[] = [
     id: "monitoring",
     title: "السجلات والمراقبة",
     items: [
-      { key: "logs", label: "سجلات السيرفر", icon: ScrollText, needs: "canManageLogging", requiresBot: true },
+      { key: "logs", label: "السجلات", icon: ScrollText, needs: "canManageLogging", requiresBot: true },
       { key: "audit", label: "سجل تدقيق اللوحة", icon: FileClock }
     ]
   }
@@ -243,7 +243,12 @@ export function AppShell({
           </Sheet>
 
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <h1 className="truncate text-sm font-semibold">{viewTitle(view)}</h1>
+            <div className="min-w-0">
+              <h1 className="truncate text-sm font-semibold">{viewTitle(view)}</h1>
+              <p className="truncate text-[10px] text-muted-foreground">
+                إعدادات البوت لسيرفر <span className="font-medium">{guild.name}</span>
+              </p>
+            </div>
             <Badge variant="outline" className="hidden shrink-0 gap-1 text-[10px] sm:inline-flex">
               <Avatar className="size-3.5 rounded-sm">
                 {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}

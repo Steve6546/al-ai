@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isSnowflake } from "@al-ai/core/browser";
 
 /**
  * The smallest router that does the job.
@@ -19,8 +20,6 @@ export type Route =
   /** Anything unrecognised, including the bare `/` of a mistyped link. */
   | { kind: "unknown"; path: string };
 
-const GUILD_SEGMENT = /^\d{17,20}$/;
-
 /** Turns a pathname into a route. Never throws: bad input is a route, not a crash. */
 export function parsePath(pathname: string): Route {
   const segments = pathname.split("/").filter(Boolean);
@@ -31,7 +30,7 @@ export function parsePath(pathname: string): Route {
   // A snowflake check rather than a truthiness check: `/dashboard/abc` is a
   // broken link, and treating it as a guild id would send a nonsense id to the
   // API and produce a confusing 404 from Discord.
-  if (!guildId || !GUILD_SEGMENT.test(guildId)) return { kind: "unknown", path: pathname };
+  if (!isSnowflake(guildId)) return { kind: "unknown", path: pathname };
 
   return { kind: "guild", guildId, view: segments[2] ?? null };
 }

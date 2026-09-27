@@ -1,4 +1,50 @@
 import type { LogDestination, Severity } from "./event-schema.js";
+import type { Tier } from "./permissions.js";
+
+/**
+ * The wire shape of `GET /api/guilds` — one entry per guild the caller can see.
+ *
+ * Owned here rather than in the dashboard because both sides read it: the BFF
+ * builds it, the SPA consumes it, and a field added on one side must appear on
+ * the other or it silently arrives as `undefined` rather than as a type error.
+ * `memberCount` is `null` when unknowable — never `0`, which would be a number
+ * the dashboard invented.
+ */
+export type GuildSummary = {
+  id: string;
+  name: string;
+  /** Resolved on the server: the browser never builds a Discord CDN URL itself. */
+  iconUrl: string | null;
+  memberCount: number | null;
+  tier: Tier | null;
+  botPresent: boolean;
+  /** The caller holds ADMINISTRATOR or MANAGE_GUILD in Discord. */
+  canManage: boolean;
+  canManageIdentity: boolean;
+  canManageLogging: boolean;
+  canManageCommands: boolean;
+  /** Owner-only: binding tiers decides who can do everything else. */
+  canManageTiers: boolean;
+  canInvite: boolean;
+};
+
+/**
+ * A Discord role as the dashboard renders it: assignable roles for the tier
+ * screen, command scopes, and the anti-nuke quarantine picker.
+ *
+ * `color` is Discord's packed RGB integer; `0` means "no colour" (the default
+ * grey), which is why the swatches treat it as `#000000` and not as an error.
+ */
+export type DiscordRoleWire = {
+  id: string;
+  name: string;
+  position: number;
+  /** Roles owned by an integration, which can never be granted to a human. */
+  managed: boolean;
+  /** True for the @everyone role, which cannot carry a tier. */
+  isDefault: boolean;
+  color: number;
+};
 
 /** A channel the operator can choose as a log destination. */
 export type ChannelOption = { id: string; name: string; type: "text" | "voice" | "category" };
@@ -198,6 +244,17 @@ export function normaliseHexColor(value: unknown): string | null {
   const short = /^#([0-9a-f]{3})$/.exec(raw);
   if (short) return `#${short[1].split("").map(char => char + char).join("")}`;
   return /^#[0-9a-f]{6}$/.test(raw) ? raw : null;
+}
+
+/**
+ * Discord's packed RGB integer as a CSS colour, or `null` for the default grey.
+ *
+ * `0` is not a colour — it is what Discord sends for a role that has none, and
+ * painting it `#000000` would show the operator a black swatch for something
+ * Discord renders as grey. The caller renders `null` as no swatch at all.
+ */
+export function roleColorCss(color: number): string | null {
+  return color ? `#${color.toString(16).padStart(6, "0")}` : null;
 }
 
 /**
@@ -554,18 +611,32 @@ export const IMAGE_TARGET_SIZES = {
 /**
  * How the operator wants the rooms laid out.
  *
- * `single` sends everything to one channel; `granular` gives each destination
- * its own. The mode is explicit rather than inferred from which fields happen to
- * be filled, because an operator switching to `single` should not silently lose
- * the per-category channels they configured earlier — those stay stored and come
- * back when they switch to `granular` again.
+ * `normal` gives each of the thirteen sections its own channel; `detailed` goes
+ * one level further and gives each individual event its own. The mode is
+ * explicit rather than inferred from which fields happen to be filled, because
+ * it decides what the one-click channel setup creates — 13 rooms or 107 — and
+ * an operator switching between them should not silently lose the bindings they
+ * configured earlier. Resolution never branches on it, though: an event binding
+ * wins, then a section binding, then the global channel, in every mode.
+ *
+ * Rows saved by the earlier schema carry `single` or `granular`; both are read
+ * as `normal`, which preserves what they actually configured (a single global
+ * room still resolves for every event, because it is the fallback).
  */
-export type LoggingMode = "single" | "granular";
+export type LoggingMode = "normal" | "detailed";
 
-export const DEFAULT_LOGGING_MODE: LoggingMode = "single";
+export const DEFAULT_LOGGING_MODE: LoggingMode = "normal";
 
 export function isLoggingMode(value: unknown): value is LoggingMode {
-  return value === "single" || value === "granular";
+  return value === "normal" || value === "detailed";
+}
+
+/**
+ * The two legacy mode names a stored row may carry, mapped to `normal` on read.
+ * They are not part of the type on purpose: nothing new should ever write them.
+ */
+export function normaliseLoggingMode(value: unknown): LoggingMode {
+  return value === "detailed" ? "detailed" : "normal";
 }
 
 export type LoggingSettings = {
@@ -576,9 +647,29 @@ export type LoggingSettings = {
   /** Members holding any of these roles are left out of the logs entirely. */
   ignoredRoleIds: string[];
   embedColor: string;
+  /**
+   * Per-destination embed colours, as "#rrggbb". A destination that is absent
+   * falls back to `embedColor`, which itself falls back to the shipped default.
+   *
+   * Kept separate from `embedColor` rather than replacing it: the global colour
+   * is the one a new section inherits, and an operator who sets only that should
+   * not see thirteen identical pickers reporting a value they never chose.
+   */
+  categoryColors: Partial<Record<LogDestination, string>>;
   /** Keyed by destination *or* by individual event ID; the event ID wins. */
   eventFlags: Record<string, boolean>;
   categoryChannels: Partial<Record<LogDestination, string>>;
+  /**
+   * Per-event channel overrides, keyed by event ID. Absent means "fall back to
+   * the section's channel, then the global one". `detailed` mode populates this
+   * for every event; `normal` mode leaves it empty and relies on the section
+   * map. Kept in the settings row rather than `guild_log_channels` because that
+   * table is one-row-per-destination by design, and an event binding is finer
+   * than a destination.
+   */
+  eventChannels: Record<string, string>;
+  /** Per-event embed colours, same resolution order and same "#rrggbb" shape. */
+  eventColors: Record<string, string>;
 };
 
 export type HealthSnapshot = {

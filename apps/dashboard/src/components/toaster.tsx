@@ -30,7 +30,7 @@ export type Toast = {
 let counter = 0;
 
 /** Monotonic, so React keys stay stable even for two toasts in the same tick. */
-export function nextToastId(): string {
+function nextToastId(): string {
   counter += 1;
   return `toast-${counter}`;
 }

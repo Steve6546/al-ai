@@ -133,16 +133,62 @@ async function attempt(field: AppearanceField, write: () => Promise<unknown>): P
 }
 
 /**
+ * Is a host one this server may fetch an operator-supplied URL from?
+ *
+ * The icon URL comes from the operator, and the fetch happens from the BFF's
+ * network position — which is not the operator's browser's. A loopback,
+ * private, link-local or metadata address would answer a request the operator
+ * could not have made from their own machine, and the response does not have to
+ * be an image to be a leak: issuing the request is the problem. Cloud metadata
+ * endpoints sit in `169.254.169.254`, which is why link-local is refused rather
+ * than merely unusual.
+ */
+function isPublicHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
+    return false;
+  }
+  // An IPv4-mapped IPv6 address (`::ffff:127.0.0.1`) is another spelling of a
+  // private address and has to be checked as one.
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(host);
+  if (mapped) return isPublicHost(mapped[1]!);
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    // 0/8 (this network), 10/8, 127/8 (loopback), 169.254/16 (link-local),
+    // 172.16/12 and 192.168/16 (private) are all "this machine or its network".
+    return a !== 0 && a !== 10 && a !== 127 && !(a === 169 && b === 254) && !(a === 172 && b >= 16 && b <= 31) && !(a === 192 && b === 168);
+  }
+  // IPv6: unspecified and loopback, unique-local `fc00::/7` (`fc`/`fd`) and
+  // link-local `fe80::/10` (`fe80`–`febf`).
+  return host !== "::" && host !== "::1" && !host.startsWith("fc") && !host.startsWith("fd") && !/^fe[89ab]/.test(host);
+}
+
+/** An operator-supplied URL the BFF is willing to fetch: public HTTPS only. */
+function isFetchableUrl(raw: string): boolean {
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === "https:" && isPublicHost(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Downloads a role icon and returns it as a data URL.
  *
  * Discord's role endpoint takes image *data*, not a link, so a URL has to be
  * fetched first. Returns null when the value cannot be used, which the caller
- * reports rather than silently dropping.
+ * reports rather than silently dropping. The host is checked before the request
+ * and on the final URL after redirects, which can land somewhere the first
+ * check refused.
  */
-export async function fetchRoleIconAsDataUrl(url: string): Promise<string | null> {
+async function fetchRoleIconAsDataUrl(url: string): Promise<string | null> {
+  if (!isFetchableUrl(url)) return null;
   try {
     const response = await fetch(url, { redirect: "follow" });
-    if (!response.ok) return null;
+    if (!response.ok || !isFetchableUrl(response.url)) return null;
     const contentType = response.headers.get("content-type") ?? "";
     if (!contentType.startsWith("image/")) return null;
     const buffer = Buffer.from(await response.arrayBuffer());
@@ -172,7 +218,7 @@ async function resolveRoleIcon(value: string): Promise<string | null | undefined
 }
 
 /** Finds the role AL AI created for itself. */
-export async function findBotRoleId(token: string, guildId: string): Promise<string | null> {
+async function findBotRoleId(token: string, guildId: string): Promise<string | null> {
   const roles = await fetchGuildRoles(token, guildId).catch(() => []);
   return roles.find(role => role.name === BOT_ROLE_NAME && !role.managed)?.id ?? null;
 }
@@ -422,7 +468,7 @@ export type AppearanceSnapshot = {
  * avatar rule (`a_` hashes need `.gif`) would get forgotten in one of the two
  * places. The route resolves them on the way out.
  */
-export async function fetchAppearanceSnapshot(token: string): Promise<AppearanceSnapshot> {
+async function fetchAppearanceSnapshot(token: string): Promise<AppearanceSnapshot> {
   const user = await requestJson<{ username: string; avatar: string | null; banner: string | null }>("/users/@me", {
     token,
     method: "GET"

@@ -8,9 +8,9 @@ import {
   isLoggingMode,
   isTier,
   normaliseAntiNukeConfig,
+  normaliseLoggingMode,
   normaliseBotIdentity,
   normaliseTierRoles,
-  signActor,
   type AntiNukeConfig,
   type BotIdentitySettings,
   type CommandConfig,
@@ -28,8 +28,11 @@ export type GuildLoggingConfig = {
   ignoredChannelIds: string[];
   ignoredRoleIds: string[];
   embedColor: string;
+  categoryColors: Partial<Record<LogDestination, string>>;
   eventFlags: Record<string, boolean>;
   categoryChannels: Partial<Record<LogDestination, string>>;
+  eventChannels: Record<string, string>;
+  eventColors: Record<string, string>;
 };
 
 export const emptyLoggingConfig: GuildLoggingConfig = {
@@ -39,8 +42,11 @@ export const emptyLoggingConfig: GuildLoggingConfig = {
   ignoredChannelIds: [],
   ignoredRoleIds: [],
   embedColor: DEFAULT_EMBED_COLOR,
+  categoryColors: {},
   eventFlags: {},
-  categoryChannels: {}
+  categoryChannels: {},
+  eventChannels: {},
+  eventColors: {}
 };
 
 /**
@@ -97,7 +103,7 @@ export function createBotDatabase(databaseUrl: string) {
 
     async loadLogging(guildId: string): Promise<GuildLoggingConfig> {
       const { rows } = await pool.query(
-        `SELECT enabled, mode, global_channel_id, ignored_channel_ids, ignored_role_ids, embed_color, event_flags, category_channels
+        `SELECT enabled, mode, global_channel_id, ignored_channel_ids, ignored_role_ids, embed_color, category_colors, event_flags, category_channels, event_channels, event_colors
          FROM guild_logging WHERE guild_id = $1`,
         [guildId]
       );
@@ -105,15 +111,22 @@ export function createBotDatabase(databaseUrl: string) {
       if (!row) return { ...emptyLoggingConfig };
       return {
         enabled: row.enabled,
-        // A row written before the mode existed carries no value; falling back to
-        // the shared default keeps an old guild behaving exactly as it did.
-        mode: isLoggingMode(row.mode) ? row.mode : DEFAULT_LOGGING_MODE,
+        // A row written before the mode existed carries no value, and a row
+        // written by the earlier schema carries `single` or `granular`. Both
+        // reach `normal`, which keeps what the guild actually configured: the
+        // global room is still the fallback every event resolves to.
+        mode: normaliseLoggingMode(row.mode),
         globalChannelId: row.global_channel_id,
         ignoredChannelIds: row.ignored_channel_ids ?? [],
         ignoredRoleIds: row.ignored_role_ids ?? [],
         embedColor: row.embed_color,
+        // Absent on a row written before the column existed: the destination then
+        // inherits `embedColor`, which is the behaviour it had before.
+        categoryColors: row.category_colors ?? {},
         eventFlags: row.event_flags ?? {},
-        categoryChannels: row.category_channels ?? {}
+        categoryChannels: row.category_channels ?? {},
+        eventChannels: row.event_channels ?? {},
+        eventColors: row.event_colors ?? {}
       };
     },
 
@@ -450,16 +463,6 @@ export function createBotDatabase(databaseUrl: string) {
       return rows[0] ?? null;
     },
 
-    /** Every standing state in a guild, optionally of one kind. */
-    async listMemberStates(guildId: string, kind?: MemberStateKind) {
-      const { rows } = await pool.query<MemberState>(
-        `SELECT ${MEMBER_STATE_COLUMNS} FROM guild_member_states
-          WHERE guild_id = $1 AND ($2::text IS NULL OR kind = $2)
-          ORDER BY created_at ASC`,
-        [guildId, kind ?? null]
-      );
-      return rows;
-    },
 
     /**
      * The states whose expiry has passed. The sweeper's query.
@@ -550,15 +553,40 @@ export function createBotDatabase(databaseUrl: string) {
      * Removes the punishment at `index` (1-based, newest first) and reports what
      * it was, or `null` when the index is past the end.
      *
-     * Resolved first and then deleted by id, rather than in one statement: the
-     * entry may live in either of two tables, and a single statement would have
-     * to guess. The delete is still conditional on the id, so a row that
-     * disappeared in between removes nothing and says so instead of reporting a
-     * success that did not happen.
+     * Resolved inside one statement by `OFFSET` rather than fetched as a list and
+     * indexed in JS: the list carried a default limit of 25, so `/remove 26` on a
+     * member with thirty punishments was answered "no such punishment" for one
+     * that exists. The entry may live in either of two tables, so a single DELETE
+     * would have to guess; the id is resolved first and the delete is conditional
+     * on it, so a row that disappeared in between removes nothing and says so
+     * instead of reporting a success that did not happen.
      */
     async deletePunishmentAt(guildId: string, userId: string, index: number) {
-      const list = await this.listPunishments(guildId, userId);
-      const target = list[Math.max(Math.trunc(index), 1) - 1];
+      const position = Math.max(Math.trunc(index), 1);
+      const { rows } = await pool.query<{
+        kind: string;
+        id: string;
+        reason: string;
+        moderatorId: string;
+        createdAt: Date;
+        expiresAt: Date | null;
+      }>(
+        `SELECT kind, id::text AS id, reason,
+                moderator_id AS "moderatorId", created_at AS "createdAt",
+                expires_at AS "expiresAt"
+           FROM (
+             SELECT 'warn' AS kind, id, reason, moderator_id, created_at,
+                    NULL::timestamptz AS expires_at
+               FROM guild_warnings WHERE guild_id = $1 AND user_id = $2
+             UNION ALL
+             SELECT kind, id, reason, moderator_id, created_at, expires_at
+               FROM guild_member_states WHERE guild_id = $1 AND user_id = $2
+           ) entries
+         ORDER BY "createdAt" DESC, id DESC
+         LIMIT 1 OFFSET $3`,
+        [guildId, userId, position - 1]
+      );
+      const target = rows[0];
       if (!target) return null;
 
       const table = target.kind === "warn" ? "guild_warnings" : "guild_member_states";
@@ -638,10 +666,6 @@ export function createBotDatabase(databaseUrl: string) {
                checked_at = now()`,
         [guildId, botPresent, gatewayEvents, uniqueUsers, pingMs, state]
       );
-    },
-
-    hashActor(actorId: string, secret: string) {
-      return signActor(actorId, secret);
     },
 
     /**

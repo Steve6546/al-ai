@@ -1,3 +1,5 @@
+import { isSnowflake } from "./snowflake.js";
+
 /**
  * The AL AI access model.
  *
@@ -81,7 +83,6 @@ export function resolveTier(holder: TierHolder, roles: TierRoles): Tier | null {
  * exists so an ID can be validated without ever being parsed as one: a number
  * loses precision above 2^53 and Discord's IDs sit well past it.
  */
-const SNOWFLAKE = /^\d{17,20}$/;
 
 /**
  * Narrows an untrusted value into a clean role-ID list: non-strings dropped,
@@ -94,7 +95,7 @@ export function normaliseRoleIds(value: unknown): string[] {
   for (const entry of value) {
     if (typeof entry !== "string") continue;
     const trimmed = entry.trim();
-    if (!SNOWFLAKE.test(trimmed) || seen.has(trimmed)) continue;
+    if (!isSnowflake(trimmed) || seen.has(trimmed)) continue;
     seen.add(trimmed);
   }
   return [...seen];

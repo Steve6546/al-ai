@@ -13,6 +13,8 @@ import {
   eventsByCategory,
   logDestinations,
   type AntiNukeConfig,
+  type DiscordRoleWire,
+  type GuildSummary,
   type LogDestination,
   type NukeAction,
   type Tier,
@@ -77,30 +79,13 @@ export type BotIdentitySnapshot = {
   bio: string;
 };
 
-export type Guild = {
-  id: string;
-  name: string;
-  /** Resolved on the server: the browser never builds a Discord CDN URL itself. */
-  iconUrl: string | null;
-  /**
-   * Real member count, or `null` when it is not knowable.
-   *
-   * Only the bot can count members, so a guild it has not joined has no count —
-   * and showing `0` there would be a number the dashboard invented. The selector
-   * renders `null` as "غير محدد" rather than as a server with nobody in it.
-   */
-  memberCount: number | null;
-  tier: Tier | null;
-  botPresent: boolean;
-  /** The caller holds ADMINISTRATOR or MANAGE_GUILD in Discord. */
-  canManage: boolean;
-  canManageIdentity: boolean;
-  canManageLogging: boolean;
-  canManageCommands: boolean;
-  /** Owner-only: binding tiers decides who can do everything else. */
-  canManageTiers: boolean;
-  canInvite: boolean;
-};
+/**
+ * The guild list the BFF serves at `GET /api/guilds`.
+ *
+ * Declared in core and aliased here so the SPA keeps its own word for it while
+ * the shape itself can only ever change in one place.
+ */
+export type Guild = GuildSummary;
 
 export type AuditEntry = {
   id: string;
@@ -122,15 +107,8 @@ export type SecurityEvent = {
   payload: Record<string, unknown> | null;
 };
 
-export type DiscordRole = {
-  id: string;
-  name: string;
-  position: number;
-  managed: boolean;
-  isDefault: boolean;
-  /** Discord's packed RGB integer. 0 means "no colour" (the default grey). */
-  color: number;
-};
+/** A Discord role as the tier and command-scope pickers render it. */
+export type DiscordRole = DiscordRoleWire;
 
 export type TierConfig = {
   roles: DiscordRole[];
@@ -190,58 +168,171 @@ export const tierLabels: Record<Tier, string> = {
  * exists in the schema — the operator simply cannot mute it.
  */
 const categoryCopy: Record<string, { label: string; description: string }> = {
-  "member-log": { label: "الأعضاء", description: "الدخول والخروج والاسم والرتب" },
-  "moderation-log": { label: "الإشراف", description: "العقوبات والتغييرات الحساسة" },
-  "voice-log": { label: "الصوت", description: "حركة الغرف والمستضيف الصوتي" },
-  "message-log": { label: "الرسائل", description: "حذف وتعديل الرسائل" },
-  "server-log": { label: "السيرفر", description: "القنوات والدعوات والتعبيرات والرتب" }
+  "member-log": { label: "الأعضاء", description: "انضمام الأعضاء وخروجهم وتغييراتهم، والعقوبات التي تقع عليهم" },
+  "role-log": { label: "الرتب", description: "إنشاء الرتب وتعديلها وحذفها، وإسنادها للأعضاء" },
+  "channel-log": { label: "القنوات", description: "إنشاء القنوات والخيوط وتعديلها وحذفها وصلاحياتها" },
+  "message-log": { label: "الرسائل", description: "حذف الرسائل وتعديلها وتثبيتها والتفاعلات معها" },
+  "voice-log": { label: "الصوت", description: "دخول الغرف الصوتية وخروجها، والكتم والصمم" },
+  "moderation-log": { label: "الإشراف", description: "قرارات المشرفين: التحذيرات والقوائم والعقوبات المعتمدة على الحالة" },
+  "server-log": { label: "السيرفر", description: "تغييرات اسم السيرفر وأيقونته وإعداداته" },
+  "invite-log": { label: "الدعوات", description: "إنشاء الدعوات وحذفها وانتهاء صلاحيتها" },
+  "expression-log": { label: "الإيموجي والاستيكرز", description: "إضافة الإيموجي والاستيكرز وتعديلها وحذفها" },
+  "event-log": { label: "الأحداث", description: "الأحداث المجدولة ومراحلها والمشاركون فيها" },
+  "integration-log": { label: "التكاملات", description: "انضمام البوتات والويبهوكات والتكاملات" },
+  "automod-log": { label: "الأوتو مود", description: "قواعد التلقين التلقائي والإجراءات التي تتخذها" },
+  "platform-log": { label: "المنصة", description: "قنوات Stage المباشرة والمتحدثون فيها" }
 };
 
-/** Arabic copy for every event inside those destinations. */
+/**
+ * Arabic copy for every event inside those destinations.
+ *
+ * Kept complete by `log-labels.test.ts`: a missing entry falls back to the raw
+ * id, which renders and toggles correctly while reading as an identifier in a
+ * list of Arabic labels — a gap nothing else in the build would surface.
+ */
 const eventCopy: Record<string, string> = {
-  "member.join": "انضمام عضو",
+  /* member-log */
+  "member.join": "دخول عضو",
   "member.leave": "خروج عضو",
-  "member.nickname-change": "تغيير الاسم",
-  "member.role-add": "إسناد رتبة",
-  "member.role-remove": "سحب رتبة",
-  "moderation.ban": "حظر",
-  "moderation.unban": "رفع حظر",
-  "moderation.kick": "طرد",
-  "moderation.timeout": "إسكات مؤقت",
-  "moderation.untimeout": "رفع الإسكات المؤقت",
-  "moderation.warn": "تحذير",
-  "moderation.clearwarns": "مسح التحذيرات",
-  "moderation.delwarn": "حذف تحذير",
-  "moderation.mute": "كتم",
-  "moderation.unmute": "فك الكتم",
-  "moderation.prison": "سجن",
+  "member.nickname-change": "تغيير الاسم المستعار",
+  "member.username-change": "تغيير اسم المستخدم",
+  "member.avatar-change": "تغيير الصورة",
+  "member.boost-add": "بوست السيرفر",
+  "member.boost-remove": "إزالة البوست",
+  "member.suspicious-account": "حساب مشبوه",
+  "moderation.ban": "حظر عضو",
+  "moderation.unban": "فك حظر عضو",
+  "moderation.kick": "طرد عضو",
+  "moderation.timeout": "عزل عضو",
+  "moderation.untimeout": "إزالة العزل",
+  "moderation.mute": "إسكات كتابي",
+  "moderation.unmute": "إلغاء إسكات كتابي",
+  "moderation.prison": "سجن عضو",
   "moderation.unprison": "إخراج من السجن",
-  "moderation.blacklist": "بلاك ليست",
-  "moderation.unblacklist": "فك البلاك ليست",
-  "moderation.block": "منع من رتبة",
+  "moderation.remove": "حذف عقوبة من السجل",
+
+  /* role-log */
+  "role.create": "إنشاء رتبة",
+  "role.update": "تعديل رتبة",
+  "role.delete": "حذف رتبة",
+  "role.managed-change": "رتبة خاصة",
+  "member.role-add": "إضافة رتبة لعضو",
+  "member.role-remove": "إزالة رتبة من عضو",
+
+  /* channel-log */
+  "server.channel-create": "إنشاء قناة",
+  "server.channel-update": "تعديل قناة",
+  "server.channel-delete": "حذف قناة",
+  "channel.permission-update": "تعديل صلاحيات قناة",
+  "thread.create": "إنشاء ثريد",
+  "thread.update": "تعديل ثريد",
+  "thread.delete": "حذف ثريد",
+
+  /* message-log */
+  "message.delete": "حذف رسالة",
+  "message.edit": "تعديل رسالة",
+  "message.bulk-delete": "حذف رسائل جماعي",
+  "message.delete-attachment": "حذف صورة",
+  "message.pin": "تثبيت رسالة",
+  "message.unpin": "إلغاء تثبيت رسالة",
+  "message.reaction-add": "إضافة تفاعل",
+  "message.reaction-remove": "إزالة تفاعل",
+  "message.reaction-clear": "مسح جميع التفاعلات",
+
+  /* voice-log */
+  "voice.join": "دخول روم صوتي",
+  "voice.leave": "خروج من روم صوتي",
+  "voice.move": "نقل بين الرومات",
+  "voice.self-move": "تبديل الرومات",
+  "voice.disconnect": "فصل من الصوتية",
+  "voice.server-mute": "كتم عضو",
+  "voice.server-unmute": "إلغاء كتم عضو",
+  "voice.server-deafen": "إصمات عضو",
+  "voice.server-undeafen": "إلغاء إصمات عضو",
+  "voice.self-mute": "سيلف ميوت",
+  "voice.self-unmute": "إلغاء السيلف ميوت",
+  "voice.self-deafen": "سيلف ديفن",
+  "voice.self-undeafen": "إلغاء السيلف ديفن",
+  "voice.stream-start": "بدء بث",
+  "voice.stream-end": "إنهاء بث",
+  "voice.camera-on": "تشغيل الكاميرا",
+  "voice.camera-off": "إيقاف الكاميرا",
+
+  /* moderation-log */
+  "moderation.warn": "إعطاء تحذير",
+  "moderation.delwarn": "إزالة تحذير",
+  "moderation.clearwarns": "مسح التحذيرات",
+  "moderation.block": "إعطاء بلوك",
+  "moderation.blacklist": "إضافة بلاك لست",
+  "moderation.unblacklist": "إزالة بلاك لست",
+  /* Still emitted, still audited — but internal now, so these labels serve the
+   * audit trail's event column rather than the logs panel. */
   "moderation.unblock": "فك المنع من رتبة",
   "moderation.down": "سحب الرتب الإدارية",
   "moderation.undown": "استعادة الرتب الإدارية",
   "moderation.down-expired": "انتهاء مدة سحب الرتب الإدارية",
-  "moderation.remove": "حذف عقوبة",
   "moderation.clearallwarns": "مسح كل التحذيرات",
   "moderation.clearallpunishments": "تصفير سجل العقوبات",
-  "voice.join": "دخول غرفة صوتية",
-  "voice.leave": "خروج من غرفة صوتية",
-  "voice.move": "انتقال بين غرفتين",
-  "voice.state-change": "كتم/صمّ/بث",
-  "message.delete": "حذف رسالة",
-  "message.edit": "تعديل رسالة",
-  "message.bulk-delete": "حذف جماعي",
-  "server.channel-create": "إنشاء قناة",
-  "server.channel-update": "تعديل قناة",
-  "server.channel-delete": "حذف قناة",
+  "server.afk-change": "تغيير إعدادات الخمول",
+  "server.system-channel-change": "تغيير قناة النظام",
+
+  /* server-log */
+  "server.settings-change": "تعديل السيرفر",
+  "server.name-change": "تغيير اسم السيرفر",
+  "server.icon-change": "تغيير أيقونة السيرفر",
+  "server.banner-change": "تغيير بانر السيرفر",
+  "server.vanity-url-change": "تغيير رابط الفانيتي",
+  "server.boost-tier-up": "رفع مستوى البوست",
+  "server.boost-tier-down": "انخفاض مستوى البوست",
+
+  /* invite-log */
   "server.invite-create": "إنشاء دعوة",
-  "server.expression-create": "إضافة إيموجي/ستيكر",
-  "server.expression-delete": "حذف إيموجي/ستيكر",
-  "role.create": "إنشاء رتبة",
-  "role.update": "تعديل رتبة",
-  "role.delete": "حذف رتبة"
+  "invite.delete": "حذف دعوة",
+  "invite.use": "استخدام دعوة",
+
+  /* expression-log */
+  "server.expression-create": "إضافة إيموجي",
+  "server.expression-delete": "حذف إيموجي",
+  "emoji.update": "تعديل إيموجي",
+  "sticker.create": "إضافة ستيكر",
+  "sticker.delete": "حذف ستيكر",
+  "sticker.update": "تعديل ستيكر",
+
+  /* event-log */
+  "scheduled-event.create": "إنشاء حدث",
+  "scheduled-event.delete": "حذف حدث",
+  "scheduled-event.update": "تعديل حدث",
+  "scheduled-event.start": "بدء حدث",
+  "scheduled-event.complete": "انتهاء حدث",
+  "scheduled-event.user-add": "اشتراك في حدث",
+  "scheduled-event.user-remove": "إلغاء اشتراك",
+
+  /* integration-log */
+  "integration.update": "تعديل تكامل",
+  "webhook.create": "إنشاء ويب هوك",
+  "webhook.delete": "حذف ويب هوك",
+  "webhook.update": "تعديل ويب هوك",
+  "bot.join": "إضافة بوت للسيرفر",
+  "bot.leave": "إزالة بوت من السيرفر",
+  "bot.role-create": "إنشاء رتبة بوت",
+  "bot.role-remove": "حذف رتبة بوت",
+
+  /* automod-log */
+  "automod.rule-create": "إنشاء قاعدة أوتو مود",
+  "automod.rule-delete": "حذف قاعدة أوتو مود",
+  "automod.rule-update": "تعديل قاعدة أوتو مود",
+  "automod.alert": "إجراء أوتو مود",
+  "automod.block-message": "حجب محتوى تلقائياً",
+  "automod.timeout": "عزل تلقائي",
+  "automod.member-block": "حجب عضو تلقائياً",
+
+  /* platform-log */
+  "stage.create": "إنشاء منصة صوتية",
+  "stage.delete": "حذف منصة",
+  "stage.update": "تعديل منصة",
+  "stage.speaker": "إضافة متحدث",
+  "stage.suppress": "إزالة متحدث",
+  "stage.request-speak": "طلب التحدث"
 };
 
 export type LogCategory = {
@@ -253,7 +344,7 @@ export type LogCategory = {
 };
 
 /**
- * The five destinations, described in the operator's language.
+ * The thirteen destinations, described in the operator's language.
  *
  * The event lists are derived from the compiled schema rather than retyped, so
  * the dashboard can never offer a toggle for an event the bot does not emit.

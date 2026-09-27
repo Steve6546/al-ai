@@ -45,6 +45,7 @@ import { checkHierarchy, hierarchyMessages } from "./permissions/permission-guar
 import { createBotDatabase } from "./storage/database.js";
 import { ConfigCache } from "./storage/config-cache.js";
 import { createMessageCache } from "./logging/message-cache.js";
+import { createInviteTracker } from "./logging/invite-tracker.js";
 import { EventPipeline } from "./runtime/event-pipeline.js";
 import { createDispatcher } from "./events/dispatch.js";
 import { acquireInstanceLock, startSupervisor } from "./runtime/supervisor.js";
@@ -61,7 +62,7 @@ import {
   undecidedSettings,
   type ControlPlane
 } from "./config/control-plane.js";
-import { startIntegrationAdapter } from "./integration-adapter.js";
+import { APPLYABLE_KEYS, startIntegrationAdapter } from "./integration-adapter.js";
 import { sweepExpiredDowns } from "./punishments/expiry.js";
 import { logEvent, type LogRuntime } from "./logging/log-router.js";
 
@@ -131,7 +132,18 @@ const developerWebhookUrl = process.env.DEVELOPER_WEBHOOK_URL?.trim() || null;
 const lock = acquireInstanceLock();
 const database = createBotDatabase(databaseUrl);
 const cache = new ConfigCache(guildId => database.loadLogging(guildId));
+// Autocomplete only. The command handler reads `loadCommandFlags` directly: a
+// setting saved a moment ago has to change how the next command executes, and a
+// stale read there would be a silent regression. Autocomplete offers preset
+// reasons, where a 30 second lag is the same trade the logging and anti-nuke
+// caches already make, and it is the read that fires on every keystroke.
+const autocompleteFlags = new ConfigCache(guildId => database.loadCommandFlags(guildId));
 const messageCache = createMessageCache();
+// Discord names no invite on a join, so the invites the gateway reports are
+// held here as one snapshot per guild and a member join is attributed by
+// diffing a fresh fetch against it. Created once and shared with `bindEvents`
+// so the snapshot the diff reads is the one the listeners wrote to.
+const inviteTracker = createInviteTracker();
 // GOVERNANCE rule 15: the ceiling and the voice window come from config/, not
 // from constants that happen to agree with it. Built without these arguments
 // the pipeline silently used its own defaults, so editing
@@ -160,7 +172,12 @@ function raiseSecurityEvent(id: string, data: Record<string, unknown>, guildId =
  */
 const watchdog = createWatchdog({
   onSilent: (component, silentForMs) => {
-    void raiseSecurityEvent("security.watchdog-down", { component, silentForMs });
+    // Through the detector rather than built by hand: that module owns every
+    // `security.*` id, and hand-building one here is how a signal and its
+    // builder quietly drift apart — the sibling `auditTamper` call in the probe
+    // loop already goes through it.
+    const signal = detector.watchdogDown({ component, silentForMs });
+    void raiseSecurityEvent(signal.id, signal.data);
   }
 });
 
@@ -358,6 +375,7 @@ const commandCooldowns = new CommandCooldowns();
 
 bindEvents(client, guardedDispatch, {
   messageCache,
+  inviteTracker,
 
   /**
    * Serves the operator's ready-made reasons to Discord's autocomplete.
@@ -373,7 +391,7 @@ bindEvents(client, guardedDispatch, {
     // command handler: `/باند` carries `/ban`'s options, so its reason field has
     // to offer `/ban`'s preset reasons. Without this an alias would autocomplete
     // nothing and read as a broken copy of the command it stands for.
-    const configured = await database.loadCommandFlags(guildId).catch(() => new Map<string, Partial<CommandConfig>>());
+    const configured = await autocompleteFlags.get(guildId).catch(() => new Map<string, Partial<CommandConfig>>());
     const canonical = resolveCommandAlias(configured, commandName);
 
     let definition;
@@ -573,7 +591,11 @@ bindEvents(client, guardedDispatch, {
     // command list is the first thing a new member opens, and it should answer
     // "what can I do here" without an argument.
     if (commandName === "help" || commandName === "commands") {
-      const configured = await database.loadCommandFlags(guildId).catch(() => new Map());
+      // `configured` was already read at the top of the handler for the alias
+      // lookup. This used to read the same flags a second time — two identical
+      // round trips on one command, and the second could not even fail: the
+      // first read is awaited without a catch, so a rejection would have thrown
+      // long before reaching here.
       const listed = commandName === "help" ? [...commandRegistry] : await runnableFor(configured);
 
       if (listed.length === 0) {
@@ -1005,8 +1027,19 @@ bindEvents(client, guardedDispatch, {
 
         // Taken away as well as blocked. Without this, `/block` on a member who
         // already holds the role would leave them holding it and report that they
-        // are blocked from it.
-        await runRoleAction("revoke", [requested], "منع من رتبة");
+        // are blocked from it. Best-effort rather than refusing: unlike a mute,
+        // the block is the standing decision this command exists to record, and
+        // it still holds the next time the role is handed out even if taking it
+        // away right now failed. `runRoleAction` is the wrong tool here — it
+        // replies and logs a `bot.command-failure` on a miss, which would put a
+        // failure and this command's success in the audit trail for one action.
+        const revoked = await applyRoleChange(client, {
+          kind: "revoke",
+          guildId,
+          targetId,
+          roleIds: [requested],
+          reason: trimmedReason || "منع من رتبة"
+        });
 
         await database.setMemberState({
           id: randomUUID(),
@@ -1019,9 +1052,17 @@ bindEvents(client, guardedDispatch, {
           reason: trimmedReason
         });
 
-        await logEvent("moderation.block", punishmentData({ roleId: requested, blocked: blocked.length }), runtime).catch(() => undefined);
+        await logEvent(
+          "moderation.block",
+          punishmentData({ roleId: requested, blocked: blocked.length, revoked: revoked.ok ? revoked.changed.length : 0 }),
+          runtime
+        ).catch(() => undefined);
         await maybeNotify(config, guildId, targetId, "تم منعك من الحصول على رتبة في السيرفر.");
-        await succeed(`تم منع <@${targetId}> من الرتبة <@&${requested}>.`);
+        await succeed(
+          revoked.ok && revoked.failed.length > 0
+            ? `تم منع <@${targetId}> من الرتبة <@&${requested}>، لكن تعذّر سحبها منه الآن.`
+            : `تم منع <@${targetId}> من الرتبة <@&${requested}>.`
+        );
         return;
       }
 
@@ -1260,8 +1301,10 @@ client.once(Events.ClientReady, async () => {
       console.error(`AL AI could not ensure its role in ${guild.name}`, error)
     );
 
-    // GOVERNANCE rule 14: member counts seed the unique-user budget.
-    intentUsage.observeGuildSizes([guild.memberCount]);
+    // GOVERNANCE rule 14: the privileged-intent budget is seeded from the real
+    // member list. A member count would be a cheaper stand-in but a wrong one —
+    // it double-counts anybody in two guilds — so the fetch is what feeds the
+    // tracker, and a guild it fails for is simply not counted yet.
     await guild.members
       .fetch()
       .then(members => intentUsage.observe(members.keys()))
@@ -1373,7 +1416,7 @@ const adapter =
             undecidedSettings: undecidedSettings(controlPlane)
           }),
           readLogs: async () => ({ note: "GOVERNANCE rule 6: logs live in Discord and in the audit trail.", stats: pipeline.stats() }),
-          suggestConfig: async () => ({ applyableKeys: ["logging.enabled", "logging.globalChannelId", "logging.embedColor"] }),
+          suggestConfig: async () => ({ applyableKeys: APPLYABLE_KEYS }),
           applyConfig: async () => {
             throw new Error("CONFIG_WRITE_REQUIRES_DASHBOARD");
           },

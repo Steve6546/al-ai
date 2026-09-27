@@ -1,50 +1,210 @@
 {
-  "schemaVersion": 2,
-  "note": "الوجهات الست ثابتة: خمس يراها المشغّل في اللوحة (member/moderation/voice/message/server) وواحدة داخلية (bot-log). هذا الملف هو المرجع الثابت للأسماء؛ أما ربط القنوات فعلياً فيتم لكل سيرفر في جدول guild_log_channels. حُذفت role-log في الإصدار 2: إنشاء الرتب وتعديلها صار مع server-log، وإسناد الرتب لعضو بقي في member-log.",
+  "schemaVersion": 5,
+  "note": "الوجهات الأربع عشرة ثابتة: ثلاث عشرة يراها المشغّل في اللوحة (member/role/channel/message/voice/moderation/server/invite/expression/event/integration/automod/platform) وواحدة داخلية (bot-log). هذا الملف هو المرجع الثابت للأسماء؛ أما ربط القنوات فعلياً فيتم لكل سيرفر في جدول guild_log_channels. الإصدار 5 يطابق قائمة الإشراف الحرفية (block/blacklist/unblacklist تعود من bot-log؛ clearallwarns/clearallpunishments/down-expired تنتاح إليه)، ويقسم تغيّر مستوى البوست بالاتجاه (boost-tier-up/down بدل boost-tier-change)، ويضيف تغيّر البانر واستخدام الدعوة، ويتقاعد invite.expire، وينقل afk/system-channel إلى bot-log. المعرّفات المنقولة بين الوجهات لم تتغير إطلاقاً.",
   "destinations": [
     {
       "id": "member-log",
       "label": "الأعضاء",
-      "subCategories": ["member.join", "member.leave", "member.nickname-change", "member.role-add", "member.role-remove"],
+      "subCategories": [
+        "member.join",
+        "member.leave",
+        "member.nickname-change",
+        "member.username-change",
+        "member.avatar-change",
+        "member.boost-add",
+        "member.boost-remove",
+        "member.suspicious-account",
+        "moderation.ban",
+        "moderation.unban",
+        "moderation.kick",
+        "moderation.timeout",
+        "moderation.untimeout",
+        "moderation.mute",
+        "moderation.unmute",
+        "moderation.prison",
+        "moderation.unprison",
+        "moderation.remove"
+      ],
       "required": false
     },
     {
-      "id": "moderation-log",
-      "label": "الإشراف",
-      "subCategories": ["moderation.ban", "moderation.unban", "moderation.kick", "moderation.timeout", "moderation.untimeout", "moderation.warn", "moderation.clearwarns", "moderation.delwarn", "moderation.mute", "moderation.unmute", "moderation.prison", "moderation.unprison", "moderation.blacklist", "moderation.unblacklist", "moderation.block", "moderation.unblock", "moderation.down", "moderation.undown", "moderation.down-expired", "moderation.remove", "moderation.clearallwarns", "moderation.clearallpunishments"],
+      "id": "role-log",
+      "label": "الرتب",
+      "subCategories": [
+        "role.create",
+        "role.update",
+        "role.delete",
+        "role.managed-change",
+        "member.role-add",
+        "member.role-remove"
+      ],
       "required": false,
-      "note": "يشمل أحداث الإشراف الحساسة المحصورة بالمديرين."
+      "note": "دورة حياة الرتب وإسنادها. الرتب المُدارة (التي يملكها تكامل أو بوت) يُبلَّغ عنها في integration-log."
     },
     {
-      "id": "voice-log",
-      "label": "الصوت",
-      "subCategories": ["voice.join", "voice.leave", "voice.move", "voice.state-change"],
-      "required": false,
-      "note": "أي انتقال أسرع من 2000ms يُجمَع في حدث واحد."
+      "id": "channel-log",
+      "label": "القنوات",
+      "subCategories": [
+        "server.channel-create",
+        "server.channel-update",
+        "server.channel-delete",
+        "channel.permission-update",
+        "thread.create",
+        "thread.update",
+        "thread.delete"
+      ],
+      "required": false
     },
     {
       "id": "message-log",
       "label": "الرسائل",
-      "subCategories": ["message.delete", "message.edit", "message.bulk-delete"],
+      "subCategories": [
+        "message.delete",
+        "message.edit",
+        "message.bulk-delete",
+        "message.delete-attachment",
+        "message.pin",
+        "message.unpin",
+        "message.reaction-add",
+        "message.reaction-remove",
+        "message.reaction-clear"
+      ],
       "required": false,
-      "note": "يعتمد على الكاش الداخلي للرسائل لاستعادة المحتوى المحذوف."
+      "note": "يعتمد على الكاش الداخلي للرسائل لاستعادة المحتوى والمرفقات المحذوفة."
+    },
+    {
+      "id": "voice-log",
+      "label": "الصوت",
+      "subCategories": [
+        "voice.join",
+        "voice.leave",
+        "voice.move",
+        "voice.self-move",
+        "voice.disconnect",
+        "voice.server-mute",
+        "voice.server-unmute",
+        "voice.server-deafen",
+        "voice.server-undeafen",
+        "voice.self-mute",
+        "voice.self-unmute",
+        "voice.self-deafen",
+        "voice.self-undeafen",
+        "voice.stream-start",
+        "voice.stream-end",
+        "voice.camera-on",
+        "voice.camera-off"
+      ],
+      "required": false,
+      "note": "أي انتقال أسرع من 2000ms يُجمَع في حدث واحد. الكتم والصمم مفصولان: سيرفر مقابل ذاتي. voice.move هو نقل المشرف (يُؤكَّد من سجل التدقيق MEMBER_MOVE) وvoice.self-move هو انتقال العضو بنفسه؛ وvoice.disconnect هو فصل المشرف (MEMBER_DISCONNECT) وvoice.leave هو الخروج الذاتي."
+    },
+    {
+      "id": "moderation-log",
+      "label": "الإشراف",
+      "subCategories": [
+        "moderation.warn",
+        "moderation.delwarn",
+        "moderation.clearwarns",
+        "moderation.block",
+        "moderation.blacklist",
+        "moderation.unblacklist"
+      ],
+      "required": false,
+      "note": "قرارات المشرف التي لا يبلِّغ عنها Gateway: عائلة الإنذار + البلوك والبلاك ليست. فك البلوك (moderation.unblock) يبقى في الوجهة الداخلية لأن قائمة المشغّل لا تذكره. المسح الشامل (clearallwarns/clearallpunishments) وانتهاء سحب الرتب انتقلت إلى bot-log. أحداث العقوبات في Discord (ban/kick/timeout/mute/prison) في member-log."
     },
     {
       "id": "server-log",
       "label": "السيرفر",
       "subCategories": [
-        "server.channel-create",
-        "server.channel-update",
-        "server.channel-delete",
-        "server.invite-create",
-        "server.expression-create",
-        "server.expression-delete",
-        "role.create",
-        "role.update",
-        "role.delete"
+        "server.settings-change",
+        "server.name-change",
+        "server.icon-change",
+        "server.banner-change",
+        "server.vanity-url-change",
+        "server.boost-tier-up",
+        "server.boost-tier-down"
       ],
       "required": false,
-      "note": "يشمل تغييرات بنية السيرفر: القنوات والدعوات والتعبيرات، وأيضاً إنشاء الرتب وتعديلها وحذفها (كانت سابقاً في role-log)."
+      "note": "كلها من GuildUpdate الذي يعيد الحالتين. مستوى البوست مقسوم بالاتجاه: صعود وانخفاض حدثان. afk-change وsystem-channel-change حدثان حقيقيان انتقلا إلى bot-log."
+    },
+    {
+      "id": "invite-log",
+      "label": "الدعوات",
+      "subCategories": ["server.invite-create", "invite.delete", "invite.use"],
+      "required": false,
+      "note": "invite.use يُستنتج بالفرق: Discord لا يسمّي الدعوة على الانضمام، فيُجلب список الدعوات ويُقارن باللقطة السابقة. invite.expire اتقاعد في الإصدار 5."
+    },
+    {
+      "id": "expression-log",
+      "label": "الإيموجي والاستيكرز",
+      "subCategories": [
+        "server.expression-create",
+        "server.expression-delete",
+        "emoji.update",
+        "sticker.create",
+        "sticker.update",
+        "sticker.delete"
+      ],
+      "required": false
+    },
+    {
+      "id": "event-log",
+      "label": "الأحداث",
+      "subCategories": [
+        "scheduled-event.create",
+        "scheduled-event.delete",
+        "scheduled-event.update",
+        "scheduled-event.start",
+        "scheduled-event.complete",
+        "scheduled-event.user-add",
+        "scheduled-event.user-remove"
+      ],
+      "required": false,
+      "note": "يتطلب نية GuildScheduledEvents."
+    },
+    {
+      "id": "integration-log",
+      "label": "التكاملات",
+      "subCategories": [
+        "bot.join",
+        "bot.leave",
+        "integration.update",
+        "webhook.create",
+        "webhook.update",
+        "webhook.delete",
+        "bot.role-create",
+        "bot.role-remove"
+      ],
+      "required": false,
+      "note": "يتطلب نيتي GuildWebhooks و GuildIntegrations."
+    },
+    {
+      "id": "automod-log",
+      "label": "الأوتو مود",
+      "subCategories": [
+        "automod.rule-create",
+        "automod.rule-update",
+        "automod.rule-delete",
+        "automod.block-message",
+        "automod.alert",
+        "automod.timeout",
+        "automod.member-block"
+      ],
+      "required": false,
+      "note": "يتطلب نيتي AutoModerationConfiguration و AutoModerationExecution."
+    },
+    {
+      "id": "platform-log",
+      "label": "المنصة",
+      "subCategories": [
+        "stage.create",
+        "stage.update",
+        "stage.delete",
+        "stage.speaker",
+        "stage.request-speak",
+        "stage.suppress"
+      ],
+      "required": false,
+      "note": "قنوات Stage التفاعلية المباشرة والمتحدثون فيها."
     },
     {
       "id": "bot-log",
@@ -55,6 +215,14 @@
         "bot.gateway-throttle",
         "bot.security-rejection",
         "bot.health",
+        "moderation.unblock",
+        "moderation.down",
+        "moderation.undown",
+        "moderation.down-expired",
+        "moderation.clearallwarns",
+        "moderation.clearallpunishments",
+        "server.afk-change",
+        "server.system-channel-change",
         "security.invalid-role-attempt",
         "security.hmac-invalid",
         "security.abnormal-request",

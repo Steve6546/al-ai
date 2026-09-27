@@ -187,6 +187,7 @@ const message = (id: string, channelId = "c1", createdAt = 0) => ({
   channelId,
   authorId: "u1",
   content: `body-${id}`,
+  attachments: [] as string[],
   createdAt
 });
 

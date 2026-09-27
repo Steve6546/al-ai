@@ -64,7 +64,7 @@ export function createWatchdog(deps: WatchdogDeps) {
   return {
     beat,
     snapshot,
-    /** Exposed so tests and the supervisor can drive the loop deterministically. */
+    /** Exposed so a test can drive the loop deterministically, on its own clock. */
     tick,
     stop() {
       clearInterval(timer);

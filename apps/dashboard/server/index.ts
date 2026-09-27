@@ -10,7 +10,6 @@ import {
   ANTI_NUKE_LIMIT_KEYS,
   assessRoleHierarchy,
   assessRoleIconGate,
-  BOT_HEARTBEAT_STALE_MS,
   commandFlagsFor,
   commandCategories,
   commandCategoryDescriptions,
@@ -24,8 +23,10 @@ import {
   imageRejectionReason,
   isHeartbeatFresh,
   isLoggingMode,
+  INTERNAL_DESTINATIONS,
   LAYER_SIGNATURE_TTL_MS,
   logDestinations,
+  LOG_CATEGORY_NAME,
   MAX_ACTIVITY_TEXT_LENGTH,
   MAX_BIO_LENGTH,
   MAX_IMAGE_DATA_URL_LENGTH,
@@ -33,16 +34,15 @@ import {
   durationToMs,
   isBotStatusDuration,
   isTimedBotStatus,
-  normaliseActivityText,
-  normaliseBio,
   normaliseBotIdentity,
   normaliseCommandConfig,
+  eventSchema,
   normaliseHexColor,
-  normaliseIconUrl,
   normaliseImageDataUrl,
   normaliseImageValue,
   normaliseNickname,
   normaliseRoleIds,
+  normaliseSnowflake,
   normaliseTierRoles,
   normaliseAntiNukeConfig,
   requireCommand,
@@ -58,6 +58,7 @@ import {
   type CustomizationSettings,
   type GuildMetrics,
   type LogDestination,
+  type LoggingMode,
   type LoggingSettings,
   type HealthSnapshot,
   type PermissionStatus,
@@ -67,7 +68,7 @@ import {
 } from "@al-ai/core";
 import { loadEnv } from "./env.js";
 import { createDatabase, createPool } from "./db.js";
-import { clearedCookieHeader, destroySession, issueSession, parseCookies, readSession, sessionAccessToken, sessionCookieHeader } from "./session.js";
+import { clearedCookieHeader, destroySession, issueSession, parseCookies, policyCookieHeader, readSession, sessionAccessToken, sessionCookieHeader } from "./session.js";
 import { assertTier, AuthorizationError, botIdentityPermissionStatus, resolveActorTier } from "./authorization.js";
 import { appendAudit } from "./audit.js";
 import {
@@ -76,6 +77,7 @@ import {
   exchangeCode,
   fetchBotGuildIds,
   fetchGuildChannels,
+  fetchBotPermissions,
   fetchGuildHierarchy,
   fetchGuildMemberCached,
   fetchGuildPremiumTier,
@@ -92,6 +94,15 @@ import {
   userAvatarUrl,
   userBannerUrl,
   hasPermission,
+  createGuildChannel,
+  deleteGuildChannel,
+  describeChannelFailure,
+  categoryHasChildren,
+  findGuildCategory,
+  fetchRawChannels,
+  DISCORD_GUILD_CHANNEL_CAP,
+  fetchExistingChannelIds,
+  writeWithRetry,
   type DiscordApiError,
   type DiscordRole
 } from "./discord.js";
@@ -99,8 +110,6 @@ import { clientKey, RequestThrottle } from "./cache.js";
 import { describeGuildAccess, isAdministrable } from "./guild-access.js";
 import {
   applyAppearance,
-  changedAppearanceFields,
-  describeAppearanceFailure,
   invalidateAppearanceSnapshot,
   readAppearanceSnapshot,
   resolveRoleIconWrite,
@@ -122,11 +131,19 @@ const app = Fastify({ logger: true, trustProxy: true });
  * the Discord budget AL AI needs for its own reads — a 429 from Discord is what
  * makes the dashboard look broken, and the operator has no way to see why.
  *
- * The rule that matters most: **a signed-in session is never throttled.** The
- * operator must not be locked out of their own dashboard by a protection meant
- * for strangers. Requests carrying a session cookie are exempt, and that is not
- * a loophole: the cookie is verified against the database by `requireSession`
- * before any route reaches Discord, so a forged one buys a 401, not a free ride.
+ * The rule that matters most: **a real session is never throttled in
+ * practice.** The operator must not be locked out of their own dashboard by a
+ * protection meant for strangers. The limit below is sized so a dashboard
+ * session cannot reach it — a screen load is a handful of calls and the
+ * slowest poll is one every 30 seconds — while still bounding a flood to a
+ * rate the BFF and Discord can absorb.
+ *
+ * Exempting any request whose cookie header merely *contains* the session name
+ * was the earlier approach, and it was bypassable: the exemption ran in an
+ * `onRequest` hook before the cookie was ever validated, so a forged or empty
+ * `al_ai_session=` bought a free ride for exactly the traffic this exists to
+ * bound. The session is verified by `requireSession` inside each route, which
+ * is *after* this hook, so it cannot be the thing the exemption leans on.
  *
  * `/internal/` is exempt for the same reason from the other side — it is the
  * bot's own signed heartbeat, arriving every 30 seconds from loopback.
@@ -141,9 +158,10 @@ app.addHook("onRequest", async (request, reply) => {
   // handful of them, and none of them touch Discord.
   if (!url.startsWith("/api/") && !url.startsWith("/auth/")) return;
   if (url.startsWith("/internal/")) return;
-  if (typeof request.headers.cookie === "string" && request.headers.cookie.includes(`${SESSION_COOKIE_NAME}=`)) return;
 
-  const verdict = throttle.check(clientKey(request.headers as Record<string, unknown>, request.ip), Date.now());
+  // The socket peer, not `request.ip`: `trustProxy` makes `request.ip` whatever
+  // the caller put in `x-forwarded-for`, which would hand the flood its own key.
+  const verdict = throttle.check(clientKey(request.socket.remoteAddress), Date.now());
   if (verdict.allowed) return;
 
   return reply
@@ -158,8 +176,6 @@ app.addHook("onRequest", async (request, reply) => {
 /* ------------------------------------------------------------------ *
  * Helpers
  * ------------------------------------------------------------------ */
-
-type Ctx = { session: Awaited<ReturnType<typeof readSession>>; guildId: string };
 
 async function requireSession(request: FastifyRequest, reply: FastifyReply) {
   const session = await readSession(db, request as unknown as { headers: Record<string, unknown> });
@@ -456,10 +472,11 @@ app.post("/internal/layer/health", async (request, reply) => {
  * alike — and checked on the way back. `SameSite=Lax` is what lets it survive
  * Discord's cross-site redirect while still being withheld from cross-site
  * POSTs. The value is single-use in effect: the callback compares it and the
- * next leg overwrites it.
+ * next leg overwrites it. Built on the shared policy serializer so it inherits
+ * the session cookie's `Secure` flag instead of hand-rolling a second copy.
  */
 function stateCookieHeader(state: string) {
-  return `${SESSION_COOKIE_NAME}_state=${state}; Path=/; Max-Age=600; HttpOnly; SameSite=Lax`;
+  return policyCookieHeader(`${SESSION_COOKIE_NAME}_state`, state, 600);
 }
 
 function newOAuthState() {
@@ -495,9 +512,41 @@ app.get("/auth/discord/callback", async (request, reply) => {
     return reply.redirect("/?auth=state_mismatch");
   }
 
+  // Discord returns `guild_id` only when this leg was a bot authorization — the
+  // operator added AL AI to a server — and it answers that leg with an
+  // *application-level* code, not the operator's. Exchanging it would mint a
+  // session whose Discord identity is the bot application itself, and whose
+  // `/users/@me/guilds` read returns every guild the bot occupies carrying the
+  // Administrator permissions the invite requests: owner-tier dashboard access
+  // to servers the operator does not run. This leg never needed a session at
+  // all — only a fresh bot-guild list, so the selector flips from «غير مضاف»
+  // to «نشط» instead of waiting for the TTL. The `state` check above is still
+  // what guards the redirect.
+  if (query.guild_id) {
+    invalidateBotGuildCache();
+    return reply.redirect("/?auth=bot_added");
+  }
+
   try {
     const tokens = await exchangeCode({ clientId: env.clientId, clientSecret: env.clientSecret, redirectUri: env.redirectUri, code: query.code });
+
+    // The token must actually grant the login scopes. A code issued for any
+    // other authorization does not carry them, and trusting it would let a
+    // wrong-legged code through the front door.
+    const granted = tokens.scope.split(/\s+/).filter(Boolean);
+    if (!LOGIN_SCOPES.every(scope => granted.includes(scope))) {
+      app.log.warn({ scope: tokens.scope }, "Discord token does not cover the dashboard login scopes");
+      return reply.redirect("/?auth=denied");
+    }
+
     const identity = await fetchIdentity(tokens.access_token);
+    // The resolved identity must be a user, never this application. A code that
+    // somehow reaches here on application credentials would make the bot itself
+    // the signed-in operator.
+    if (env.botToken && identity.id === (await resolveBotUserId(env.botToken))) {
+      app.log.warn({ userId: identity.id }, "OAuth callback resolved the bot's own application id");
+      return reply.redirect("/?auth=denied");
+    }
 
     // A sign-in always begins a new session. Any session the browser was still
     // carrying is destroyed first, for two reasons: a second account must never
@@ -523,15 +572,6 @@ app.get("/auth/discord/callback", async (request, reply) => {
       scopes: tokens.scope
     });
     reply.header("Set-Cookie", sessionCookieHeader(id));
-
-    // Discord returns `guild_id` when this leg was a bot authorization rather
-    // than a sign-in. Two things follow: the memoised bot guild list is stale
-    // the instant the bot joins, and the selector has to refresh so the guild
-    // flips from «غير مضاف» to «نشط» instead of waiting for the TTL.
-    if (query.guild_id) {
-      invalidateBotGuildCache();
-      return reply.redirect("/?auth=bot_added");
-    }
     return reply.redirect("/?auth=ok");
   } catch (error) {
     app.log.error(error, "Discord OAuth callback failed");
@@ -570,14 +610,16 @@ app.get("/api/guilds", async (request, reply) => {
   // and its failure must not reject the route *after* `loadUserGuilds` has
   // already answered the request — that produced a 500 and a "reply was already
   // sent" error stacked on top of the real message, which is what made a rate
-  // limit look like a crash.
+  // limit look like a crash. The login read itself never rejects: it catches
+  // every failure class and answers with its own status, so the settled pair's
+  // left half is always fulfilled — the `allSettled` is for the right half.
   const [userGuilds, botGuilds] = await Promise.allSettled([
     loadUserGuilds(request, reply, session),
     env.botToken ? fetchBotGuildIds(env.botToken) : Promise.resolve(new Set<string>())
   ]);
 
   // A dead token or a rate limit has already been answered with its own status.
-  if (userGuilds.status === "rejected" || !userGuilds.value) return;
+  if (userGuilds.status !== "fulfilled" || !userGuilds.value) return;
 
   // Without the bot's guild list we cannot tell "AL AI is not here yet" from
   // "AL AI is here". Guessing the former would badge a guild «غير مضاف» and
@@ -730,14 +772,6 @@ app.put("/api/guilds/:guildId/tiers", async (request, reply) => {
 
   return { configured: roles };
 });
-
-/** Discord snowflakes are numeric strings; anything else is treated as unset. */
-/** Discord snowflakes are 17-20 digits. Anything else is rejected before use. */
-function normaliseSnowflake(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return /^\d{17,20}$/.test(trimmed) ? trimmed : null;
-}
 
 /* ------------------------------------------------------------------ *
  * Commands
@@ -935,6 +969,12 @@ app.put("/api/guilds/:guildId/security/config", async (request, reply) => {
   if (!context) return;
 
   const body = request.body as Partial<AntiNukeConfig> | undefined;
+  // Without this the route would fall through to the normaliser's defaults —
+  // armed, with the tuned limits and the quarantine role replaced by null —
+  // and an empty PUT would silently reset the engine instead of refusing.
+  if (!body || typeof body !== "object") {
+    return reply.code(400).send({ error: "INVALID_BODY", message: "يلزم جسم الطلب يحتوي إعدادات الحماية." });
+  }
   // Normalised, not trusted: the same helper the bot reads through, so a value
   // that survives here means the same thing on both sides of the database.
   const config = normaliseAntiNukeConfig(body);
@@ -983,11 +1023,6 @@ app.put("/api/guilds/:guildId/security/config", async (request, reply) => {
  *    values handed to Discord, so a partial failure cannot leave the database
  *    claiming something the bot never received.
  * ------------------------------------------------------------------ */
-
-/** True for the transport-level failures the caller must answer itself. */
-function isTokenFailure(error: unknown): boolean {
-  return isAuthFailure(error);
-}
 
 /**
  * Answers for a Discord token that was refused, so every write path says the
@@ -1197,16 +1232,19 @@ app.put("/api/bot/identity", async (request, reply) => {
     // a status lives on the gateway, so this is the one value whose writer is
     // the bot. Claiming it here would be the fourth column of a promise nobody
     // keeps.
+    // Read once: nothing between the two slots can change it, and a second
+    // round trip per save is a query this route does not need.
+    const customization = await db.getCustomization(guildId);
     outcomes.push(
       ...(await applyAppearance({
         token: env.botToken,
         guildId,
-        previous: { customization: await db.getCustomization(guildId), identity: previous },
-        next: { customization: await db.getCustomization(guildId), identity: next }
+        previous: { customization, identity: previous },
+        next: { customization, identity: next }
       }))
     );
   } catch (error) {
-    if (isTokenFailure(error)) return answerBotTokenRefused(reply, error);
+    if (isAuthFailure(error)) return answerBotTokenRefused(reply, error);
     app.log.error(error, "Appearance write failed before any field was attempted");
     return reply.code(503).send({ error: "DISCORD_UNAVAILABLE", message: "تعذّر الوصول إلى Discord. أعد المحاولة." });
   }
@@ -1392,9 +1430,12 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
   let outcomes: FieldOutcome[] = [];
   if (env.botToken) {
     try {
-      outcomes = await applyAppearance({ token: env.botToken, guildId, previous: { customization: previous, identity: await db.getBotIdentity() }, next: { customization: settings, identity: await db.getBotIdentity() } });
+      // Read once: nothing between the two slots can change it, and a second
+      // round trip per save is a query this route does not need.
+      const identity = await db.getBotIdentity();
+      outcomes = await applyAppearance({ token: env.botToken, guildId, previous: { customization: previous, identity }, next: { customization: settings, identity } });
     } catch (error) {
-      if (isTokenFailure(error)) return answerBotTokenRefused(reply, error);
+      if (isAuthFailure(error)) return answerBotTokenRefused(reply, error);
       app.log.error(error, "Per-guild appearance write failed before any field was attempted");
       return reply.code(503).send({ error: "DISCORD_UNAVAILABLE", message: "تعذّر الوصول إلى Discord. أعد المحاولة." });
     }
@@ -1502,6 +1543,56 @@ function normaliseCategoryChannels(value: unknown): Partial<Record<LogDestinatio
   return result;
 }
 
+/**
+ * Keeps only a valid "#rrggbb" colour, and only for a destination that exists.
+ *
+ * Shares the colour rule with `embedColor` rather than restating it, so a
+ * short-form "#rgb" the global field accepts is accepted here too — and a key
+ * the dashboard no longer offers is dropped instead of lingering in the row.
+ */
+function normaliseCategoryColors(value: unknown): Partial<Record<LogDestination, string>> {
+  if (!value || typeof value !== "object") return {};
+  const result: Partial<Record<LogDestination, string>> = {};
+  for (const destination of logDestinations) {
+    const colour = normaliseHexColor((value as Record<string, unknown>)[destination]);
+    if (colour) result[destination] = colour;
+  }
+  return result;
+}
+
+/**
+ * Keeps only a binding for an event the schema actually declares.
+ *
+ * The event map is keyed by ID rather than by destination, so the validator here
+ * is the schema itself: a key the schema no longer lists is dropped rather than
+ * stored, which is what keeps a retired event from holding a channel hostage.
+ * `bot-log`'s events cannot appear here at all — they are not in the operator
+ * surface — so this never opens the internal surface to a customer's room.
+ */
+function normaliseEventChannels(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") return {};
+  const result: Record<string, string> = {};
+  for (const eventId of eventSchema.keys()) {
+    const channelId = (value as Record<string, unknown>)[eventId];
+    if (typeof channelId === "string" && channelId) result[eventId] = channelId;
+  }
+  return result;
+}
+
+/**
+ * Keeps only a valid "#rrggbb" colour, and only for an event that exists.
+ * Same rule as `normaliseCategoryColors`, keyed by event ID.
+ */
+function normaliseEventColors(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") return {};
+  const result: Record<string, string> = {};
+  for (const eventId of eventSchema.keys()) {
+    const colour = normaliseHexColor((value as Record<string, unknown>)[eventId]);
+    if (colour) result[eventId] = colour;
+  }
+  return result;
+}
+
 app.get("/api/guilds/:guildId/logging", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
   if (!(await requireGuildAccess(request, reply, guildId))) return;
@@ -1523,19 +1614,30 @@ app.put("/api/guilds/:guildId/logging", async (request, reply) => {
     // database and then silently never match a role the bot sees.
     ignoredRoleIds: normaliseRoleIds(body?.ignoredRoleIds),
     embedColor: /^#[0-9a-f]{6}$/i.test(body?.embedColor ?? "") ? body!.embedColor! : DEFAULT_EMBED_COLOR,
+    // Only a colour the shared validator accepts is kept, and only for a
+    // destination that exists: a key the dashboard no longer offers would
+    // otherwise persist and colour an embed nobody sees.
+    categoryColors: normaliseCategoryColors(body?.categoryColors),
     eventFlags: body?.eventFlags ?? {},
-    categoryChannels: normaliseCategoryChannels(body?.categoryChannels)
+    categoryChannels: normaliseCategoryChannels(body?.categoryChannels),
+    // Per-record bindings. A record with neither inherits its section, which is
+    // what every record does in normal mode — these only carry weight when the
+    // operator has switched to detailed and given one record a room of its own.
+    eventChannels: normaliseEventChannels(body?.eventChannels),
+    eventColors: normaliseEventColors(body?.eventColors)
   };
 
-  // One destination may never resolve to two channels.
+  // One channel may never serve two purposes, whether those are two sections, two
+  // records, or one of each.
   try {
-    assertUniqueChannelAssignment(settings.categoryChannels);
+    assertUniqueChannelAssignment(settings.categoryChannels, settings.eventChannels);
   } catch (error) {
     return reply.code(400).send({ error: "DUPLICATE_CHANNEL", message: (error as Error).message });
   }
 
+  const bindings = [...Object.values(settings.categoryChannels), ...Object.values(settings.eventChannels)];
   const ignored = new Set(settings.ignoredChannelIds);
-  const conflict = Object.values(settings.categoryChannels).find(channelId => channelId && ignored.has(channelId));
+  const conflict = bindings.find(channelId => channelId && ignored.has(channelId));
   if (conflict) {
     return reply.code(400).send({ error: "IGNORED_CHANNEL_CONFLICT", message: "قناة مستثناة لا يمكن أن تكون وجهة سجل." });
   }
@@ -1550,10 +1652,292 @@ app.put("/api/guilds/:guildId/logging", async (request, reply) => {
       enabled: settings.enabled,
       mode: settings.mode,
       destinations: Object.keys(settings.categoryChannels).length,
+      eventBindings: Object.keys(settings.eventChannels).length,
       ignoredRoles: settings.ignoredRoleIds.length
     }
   });
   return { settings, savedAt: new Date().toISOString() };
+});
+
+/* ------------------------------------------------------------------ *
+ * One-click log channel setup and teardown
+ *
+ * These two are the only guild-structure mutations in the dashboard, and they
+ * are held to three rules:
+ *
+ *  - **The bot's permission is checked, not assumed.** Creating up to 107
+ *    channels without MANAGE_CHANNELS would answer the operator with 107
+ *    identical refusals they cannot act on, so the read happens first. A read
+ *    that fails is *unknown*, never "no" (rule 22), and the route refuses to
+ *    proceed on an unknown rather than discovering the truth a hundred calls in.
+ *  - **Creation is sequential, honouring `retry_after`.** Discord rate-limits
+ *    channel creation per guild, so a parallel batch of 107 answers 106 of
+ *    them with a 429. Each rate-limited call waits as long as Discord asks
+ *    and tries once more; a channel that still fails is reported and the
+ *    sequence moves on.
+ *  - **Both are idempotent.** A channel that already carries the name is reused
+ *    rather than duplicated, so a second press repairs a partial setup instead
+ *    of doubling the list — and teardown deletes only what is still there.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The channels one setup mode creates, and the routing keys they bind to.
+ *
+ * `normal` gives each of the thirteen sections its own room. `detailed` gives
+ * each of the 107 records its own, which is the maximum the schema offers: a
+ * section is not created for itself, and every record belongs to exactly one.
+ *
+ * Discord forbids anything but lowercase letters, digits, dashes and underscores
+ * in a channel name, and an event ID carries a dot, so the name is a slug of the
+ * ID. The pair is carried together rather than re-derived on the way back,
+ * because two IDs cannot be allowed to collapse onto one slug: `a.b-c` and
+ * `a.b.c` would both become `a-b-c` and silently share a room. No two schema IDs
+ * differ only by dots and dashes, which the pairing keeps true by construction
+ * rather than by hope.
+ */
+function plannedBindings(mode: LoggingMode): { key: string; name: string }[] {
+  if (mode === "normal") return logDestinations.map(destination => ({ key: destination, name: destination }));
+  // The internal destination is delivered to the developer webhook and cannot be
+  // routed to a customer channel, so building rooms for it would spend the
+  // guild's channel budget on channels the registry refuses to use. Version 5
+  // also made this matter arithmetically: detailed was trying to create 125
+  // rooms for a 107-record panel, which is how a full guild hit Discord's cap
+  // partway through and left fifty rooms of failure behind it.
+  return [...eventSchema.keys()]
+    .filter(eventId => !INTERNAL_DESTINATIONS.includes(eventSchema.get(eventId)!.category))
+    .map(eventId => ({ key: eventId, name: slugifyEvent(eventId) }));
+}
+
+function slugifyEvent(eventId: string): string {
+  return eventId.replace(/\./g, "-");
+}
+
+type ChannelOutcome = { name: string; ok: true; channelId: string } | { name: string; ok: false; message: string };
+
+app.post("/api/guilds/:guildId/logging/setup", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
+
+  const body = request.body as { mode?: unknown } | undefined;
+  const mode = isLoggingMode(body?.mode) ? body.mode : DEFAULT_LOGGING_MODE;
+
+  if (!env.botToken) {
+    return reply.code(503).send({ error: "BOT_NOT_CONFIGURED", message: "البوت غير مهيأ لإنشاء القنوات." });
+  }
+
+  const permissions = await fetchBotPermissions(env.botToken, guildId);
+  if (permissions === null) {
+    return reply
+      .code(503)
+      .send({ error: "PERMISSION_UNKNOWN", message: "تعذّر قراءة صلاحيات البوت في هذا السيرفر. أعد المحاولة." });
+  }
+  if (!hasPermission(permissions, DISCORD_PERMISSION_BITS.MANAGE_CHANNELS)) {
+    return reply.code(409).send({
+      error: "MISSING_PERMISSION",
+      message: "البوت لا يملك صلاحية «إدارة القنوات» (Manage Channels) في هذا السيرفر."
+    });
+  }
+
+  // Idempotency: reuse a channel that already carries the name. A second press
+  // of the same button repairs what a rate limit interrupted instead of adding a
+  // second `member-log` beside the first.
+  const existing = await fetchGuildChannels(env.botToken, guildId).catch(() => [] as ChannelOption[]);
+  const existingByName = new Map(
+    existing.filter(channel => channel.type === "text").map(channel => [channel.name, channel.id] as const)
+  );
+
+  // Discord caps a guild at 500 channels, categories included. Failing at the
+  // half-way mark leaves fifty rooms behind and a screen of identical errors;
+  // counting first turns that into one refusal before anything is built. The
+  // count reads the raw list because the cap counts categories too, and the
+  // reuse credit matters because a retry after a partial run creates only the
+  // missing remainder.
+  const planned = plannedBindings(mode);
+  const rawCount = (await fetchRawChannels(env.botToken, guildId).catch(() => [] as { id: string }[])).length;
+  const stillToCreate = planned.filter(binding => !existingByName.has(binding.name)).length;
+  const needsCategory = (await findGuildCategory(env.botToken, guildId, LOG_CATEGORY_NAME)) === null;
+  if (rawCount + stillToCreate + (needsCategory ? 1 : 0) > DISCORD_GUILD_CHANNEL_CAP) {
+    return reply.code(409).send({
+      error: "GUILD_CHANNEL_CAP",
+      message: `سيرفرك فيه ${rawCount} قناة من حد Discord البالغ 500. هذا الإعداد يحتاج إنشاء ${stillToCreate + (needsCategory ? 1 : 0)} قناة إضافية — احذف القنوات غير المستعملة أولاً.`
+    });
+  }
+
+  let categoryId = await findGuildCategory(env.botToken, guildId, LOG_CATEGORY_NAME);
+  if (!categoryId) {
+    try {
+      const category = await writeWithRetry(() =>
+        createGuildChannel(env.botToken!, guildId, { name: LOG_CATEGORY_NAME, type: "category" })
+      );
+      categoryId = category.id;
+    } catch (error) {
+      const failure = describeChannelFailure(error);
+      return reply.code(failure.status).send({ error: "CATEGORY_FAILED", message: failure.message });
+    }
+  }
+
+  // Sequential on purpose: see the section comment on rate limits.
+  const outcomes: ChannelOutcome[] = [];
+  for (const binding of planned) {
+    const reused = existingByName.get(binding.name);
+    if (reused) {
+      outcomes.push({ name: binding.name, ok: true, channelId: reused });
+      continue;
+    }
+    try {
+      const channel = await writeWithRetry(() =>
+        createGuildChannel(env.botToken!, guildId, { name: binding.name, type: "text", parentId: categoryId })
+      );
+      outcomes.push({ name: binding.name, ok: true, channelId: channel.id });
+    } catch (error) {
+      outcomes.push({ name: binding.name, ok: false, message: describeChannelFailure(error).message });
+    }
+  }
+
+  const created = outcomes.filter((outcome): outcome is Extract<ChannelOutcome, { ok: true }> => outcome.ok);
+  const failed = outcomes.filter((outcome): outcome is Extract<ChannelOutcome, { ok: false }> => !outcome.ok);
+
+  // Nothing landed: the routing table would be bound to channels that do not
+  // exist, and logging would be announced enabled while delivering nowhere. A
+  // partial setup is a 200 whose `failed` list names what to retry. The read
+  // cache is dropped even here: the category this run may have created lives in
+  // it, and a fast retry served from the stale list would build a second
+  // «AL AI» beside the first.
+  if (created.length === 0) {
+    invalidateGuildReadCache(guildId);
+    return reply
+      .code(502)
+      .send({ error: "CHANNEL_SETUP_FAILED", message: failed[0]?.message ?? "لم يُنشأ أي قسم.", failed });
+  }
+
+  const byName = new Map(created.map(outcome => [outcome.name, outcome.channelId]));
+  const previous = await db.getLogging(guildId);
+  // The mode the operator just chose owns the layout outright: a channel bound
+  // by the other mode is not carried over, because a `normal` room and a
+  // `detailed` room for the same section are not the same operator intent.
+  // The global channel is cleared in both modes — every section gets its own
+  // room now, so a leftover global would only be the room events fall into when
+  // the section above them failed to bind.
+  const settings: LoggingSettings = {
+    ...previous,
+    enabled: true,
+    mode,
+    globalChannelId: null,
+    categoryChannels: mode === "normal" ? Object.fromEntries(plannedBindings("normal").map(binding => [binding.key, byName.get(binding.name)!]).filter(([, id]) => id)) : {},
+    eventChannels: mode === "detailed" ? Object.fromEntries(plannedBindings("detailed").map(binding => [binding.key, byName.get(binding.name)!]).filter(([, id]) => id)) : {}
+  };
+
+  await db.saveLogging(guildId, settings);
+  // The channel list this screen and every other picker reads is now stale.
+  invalidateGuildReadCache(guildId);
+
+  await appendAudit(db, env, {
+    guildId,
+    eventId: "bot.command-success",
+    actorId: context.session!.discordUserId,
+    payload: {
+      action: "logging.setup",
+      mode,
+      created: created.map(outcome => outcome.name),
+      failed: failed.map(outcome => outcome.name)
+    }
+  });
+
+  return { settings, created, failed, savedAt: new Date().toISOString() };
+});
+
+app.delete("/api/guilds/:guildId/logging/channels", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
+
+  if (!env.botToken) {
+    return reply.code(503).send({ error: "BOT_NOT_CONFIGURED", message: "البوت غير مهيأ لحذف القنوات." });
+  }
+
+  const previous = await db.getLogging(guildId);
+  const bound = new Set<string>([
+    ...(previous.globalChannelId ? [previous.globalChannelId] : []),
+    ...Object.values(previous.categoryChannels),
+    ...Object.values(previous.eventChannels)
+  ]);
+
+  // The category is looked up first, because the delete set is wider than the
+  // bindings: a partial setup — the kind that stops halfway against Discord's
+  // channel cap — leaves created-but-unbound rooms behind, and a teardown that
+  // removed only the bound ones would strand them inside «AL AI» forever (the
+  // category then never empties, so it is never deleted either). Every channel
+  // the bot's own category holds goes with the setup; that is what pressing
+  // «حذف قنوات السجلات» asks for, and the count the confirm dialog shows comes
+  // from the same union on the client.
+  const categoryId = await findGuildCategory(env.botToken, guildId, LOG_CATEGORY_NAME);
+  const raw = await fetchRawChannels(env.botToken, guildId).catch(() => []);
+  const orphans = categoryId
+    ? raw.filter(channel => channel.parent_id === categoryId && !bound.has(channel.id)).map(channel => channel.id)
+    : [];
+  if (bound.size === 0 && orphans.length === 0) {
+    return reply.code(404).send({ error: "NO_LOG_CHANNELS", message: "لا توجد قنوات سجلات مربوطة بهذا السيرفر." });
+  }
+
+  const existing = await fetchExistingChannelIds(env.botToken, guildId);
+  const deleted: string[] = [];
+  const failed: { channelId: string; message: string }[] = [];
+
+  for (const channelId of [...bound, ...orphans]) {
+    // A channel the operator removed by hand in Discord is already gone; counting
+    // it as a failure would describe a problem that does not exist.
+    if (!existing.has(channelId)) {
+      deleted.push(channelId);
+      continue;
+    }
+    try {
+      await writeWithRetry(() => deleteGuildChannel(env.botToken!, channelId));
+      deleted.push(channelId);
+    } catch (error) {
+      failed.push({ channelId, message: describeChannelFailure(error).message });
+    }
+  }
+
+  // The category goes last and only when nothing refused: Discord orphans a
+  // category's children rather than refusing the delete, so removing it while
+  // channels remain would leave them visible but parentless. After the sweep
+  // above the only children left are ones a failure just refused to release.
+  if (categoryId) {
+    invalidateGuildReadCache(guildId);
+    const remaining = await categoryHasChildren(env.botToken, guildId, categoryId);
+    if (!remaining && failed.length === 0) {
+      try {
+        await writeWithRetry(() => deleteGuildChannel(env.botToken!, categoryId));
+      } catch (error) {
+        failed.push({ channelId: categoryId, message: describeChannelFailure(error).message });
+      }
+    }
+  }
+
+  // Logging is disabled and the routing table cleared, even when some channels
+  // survived: the operator asked for the setup to go, and a half-deleted set of
+  // destinations is not a working logging configuration. What survived is in
+  // `failed` for them to remove by hand.
+  const settings: LoggingSettings = {
+    ...previous,
+    enabled: false,
+    globalChannelId: null,
+    categoryChannels: {},
+    eventChannels: {}
+  };
+
+  await db.saveLogging(guildId, settings);
+  invalidateGuildReadCache(guildId);
+
+  await appendAudit(db, env, {
+    guildId,
+    eventId: "bot.command-success",
+    actorId: context.session!.discordUserId,
+    payload: { action: "logging.teardown", deleted: deleted.length, failed: failed.map(entry => entry.channelId) }
+  });
+
+  return { settings, deleted, failed, savedAt: new Date().toISOString() };
 });
 
 /* ------------------------------------------------------------------ *
@@ -1585,3 +1969,27 @@ const housekeeping = setInterval(async () => {
 housekeeping.unref();
 
 await app.listen({ port: env.port, host: "0.0.0.0" });
+
+/**
+ * Graceful shutdown.
+ *
+ * SIGTERM is how the container orchestrator stops this process and SIGINT is how
+ * a developer does, and neither is an error. Closing the server first drains the
+ * listening socket so in-flight requests get a reply rather than a reset, then
+ * the pool ends its connections instead of leaving them for the OS to notice.
+ * Without this the housekeeping interval and the pool were simply abandoned on
+ * every stop — `db.close()` existed and nothing called it.
+ */
+async function shutdown(signal: NodeJS.Signals) {
+  app.log.info({ signal }, "AL AI dashboard is shutting down");
+  try {
+    await app.close();
+    await db.close();
+  } catch (error) {
+    app.log.error(error, "Shutdown failed");
+  }
+  process.exit(0);
+}
+
+process.on("SIGTERM", signal => void shutdown(signal));
+process.on("SIGINT", signal => void shutdown(signal));

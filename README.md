@@ -27,7 +27,7 @@ Several of them are enforced by tests in `apps/bot/test/governance.test.ts`.
 │  server/             │        │  bot_identity, audit trail   │
 │                      │        └──────────────────────────────┘
 │  • session + tier    │
-│  • TtlCache 45s      │        ┌──────────────────────────────┐
+│  • TtlCache 60s      │        ┌──────────────────────────────┐
 │  • RequestThrottle   │───────▶│  Discord REST API v10        │
 │  • appearance writer │  HTTPS │  (the BFF is the only writer│
 └──────────────────────┘        │   of every appearance field) │
@@ -159,7 +159,7 @@ bot killed uncleanly needs its stale lock removed before it will boot.
 |---|---|---|
 | Dashboard (BFF + SPA) | 3000 | `0.0.0.0` |
 | Integration adapter | 3400 | `127.0.0.1` only |
-| PostgreSQL | 55432 | `127.0.0.1` |
+| PostgreSQL | 55432 locally, 5432 by Compose default | `127.0.0.1` |
 
 ## 4. Deploy slash commands
 
@@ -183,15 +183,15 @@ npm run verify   # lint → check:schema → test → build, in that order
 
 | Suite | Tests | Covers |
 |---|---|---|
-| `apps/bot/test` | 173 | crypto, nonces, routing, permissions, pipeline, presence sync, governance, Discord-constant alignment, anti-nuke, adapter, security |
-| `apps/dashboard/test` | 197 | every screen renders without throwing (real jsdom mount, not `renderToString`); the error boundary contains a failure and recovers on retry; a gated role icon is disabled and omitted from the write; Discord read shapes; storage round-trips; appearance field outcomes; route guards; cache |
-| `packages/core/test` | 137 | event schema, tiers, session policy, appearance normalisation, commands, metrics, hierarchy, anti-nuke limits |
+| `apps/bot/test` | 246 | crypto, nonces, routing, permissions, pipeline, presence sync, governance, Discord-constant alignment, anti-nuke, adapter, security |
+| `apps/dashboard/test` | 242 | every screen renders without throwing (real jsdom mount, not `renderToString`); the error boundary contains a failure and recovers on retry; a gated role icon is disabled and omitted from the write; the unsaved-changes bar driven through the interface — absent until an edit, cleared by «إعادة ضبط», cleared by a clean save, and kept with the server's reason when the save is refused; Discord read shapes; storage round-trips; appearance field outcomes; route guards; cache |
+| `packages/core/test` | 177 | event schema, tiers, session policy, appearance normalisation, commands, metrics, hierarchy, anti-nuke limits |
 
 **Read `# skipped`, not `# pass`.** `apps/dashboard/test/storage.test.ts` reads
 `DATABASE_URL`; with no reachable database it logs
-`{ skip: "no reachable database" }` for each case. The suite still *reports* 197
-tests — it is `# pass 173, # skipped 24` — and `npm run verify` **still exits 0**.
-Start PostgreSQL first or the green tick means nothing.
+`{ skip: "no reachable database" }` for each case. The suite still *reports* the
+same number of tests with every one of them skipped, and `npm run verify`
+**still exits 0**. Start PostgreSQL first or the green tick means nothing.
 
 Two more checks are enforced by tests rather than by eye:
 `apps/bot/test/governance.test.ts` fails if `docs/GOVERNANCE.md` and the source
@@ -213,10 +213,10 @@ three are needed — a retry in the client alone treats the symptom:
    once. On a failed refresh it serves the stale value ("old beats wrong"), and a
    `finally` releases the in-flight slot — without it, the first failure would
    poison every later call for that key forever.
-   - `GUILD_READ_CACHE_MS = 45_000` for channels and roles.
+   - `GUILD_READ_CACHE_MS = 60_000` for channels and roles.
    - `BOT_GUILD_CACHE_MS = 15_000` for the bot's guild list.
    - Call `invalidateGuildReadCache(guildId)` after any write, or the screen
-     shows the old value for the full 45 seconds.
+     shows the old value for the full 60 seconds.
 2. **The bot's live Gateway cache.** The adapter's `listChannels` reads
    `client.guilds.cache`, which is already in memory in the connected client and
    spends **zero** REST quota. A read answered from the Gateway can never

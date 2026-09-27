@@ -25,12 +25,6 @@ export function resolveTier(member: RoleCarrier, roles: TierRoles): Tier | null 
   return resolveTierFromRoles(member, roles);
 }
 
-export function authorize(member: RoleCarrier, roles: TierRoles, required: Tier) {
-  const actor = resolveTier(member, roles);
-  requireTier(actor, required);
-  return actor;
-}
-
 export type GuardOutcome = { allowed: true; tier: Tier } | { allowed: false; reason: "NO_TIER" | "TIER_TOO_LOW" };
 
 /** Non-throwing variant used on the event path. */

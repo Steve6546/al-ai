@@ -198,7 +198,7 @@ export function createDatabase(pool: pg.Pool) {
 
     async getLogging(guildId: string): Promise<LoggingSettings> {
       const { rows } = await pool.query(
-        `SELECT enabled, mode, global_channel_id, ignored_channel_ids, ignored_role_ids, embed_color, event_flags, category_channels
+        `SELECT enabled, mode, global_channel_id, ignored_channel_ids, ignored_role_ids, embed_color, category_colors, event_flags, category_channels, event_channels, event_colors
          FROM guild_logging WHERE guild_id = $1`,
         [guildId]
       );
@@ -211,8 +211,11 @@ export function createDatabase(pool: pg.Pool) {
           ignoredChannelIds: [],
           ignoredRoleIds: [],
           embedColor: DEFAULT_EMBED_COLOR,
+          categoryColors: {},
           eventFlags: {},
-          categoryChannels: {}
+          categoryChannels: {},
+          eventChannels: {},
+          eventColors: {}
         };
       }
       return {
@@ -224,8 +227,15 @@ export function createDatabase(pool: pg.Pool) {
         ignoredChannelIds: row.ignored_channel_ids ?? [],
         ignoredRoleIds: row.ignored_role_ids ?? [],
         embedColor: row.embed_color,
+        // Absent on a row written before the column existed: the destination then
+        // inherits `embedColor`, which is the behaviour it had before.
+        categoryColors: row.category_colors ?? {},
         eventFlags: row.event_flags ?? {},
-        categoryChannels: row.category_channels ?? {}
+        categoryChannels: row.category_channels ?? {},
+        // Absent on a row written before version 4: every record then inherits
+        // its section's channel and colour, which is what the operator had.
+        eventChannels: row.event_channels ?? {},
+        eventColors: row.event_colors ?? {}
       };
     },
 
@@ -288,8 +298,8 @@ export function createDatabase(pool: pg.Pool) {
       try {
         await client.query("BEGIN");
         await client.query(
-          `INSERT INTO guild_logging (guild_id, enabled, mode, global_channel_id, ignored_channel_ids, ignored_role_ids, embed_color, event_flags, category_channels, updated_at)
-           VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9::jsonb, now())
+          `INSERT INTO guild_logging (guild_id, enabled, mode, global_channel_id, ignored_channel_ids, ignored_role_ids, embed_color, category_colors, event_flags, category_channels, event_channels, event_colors, updated_at)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, now())
            ON CONFLICT (guild_id) DO UPDATE
              SET enabled = EXCLUDED.enabled,
                  mode = EXCLUDED.mode,
@@ -297,8 +307,11 @@ export function createDatabase(pool: pg.Pool) {
                  ignored_channel_ids = EXCLUDED.ignored_channel_ids,
                  ignored_role_ids = EXCLUDED.ignored_role_ids,
                  embed_color = EXCLUDED.embed_color,
+                 category_colors = EXCLUDED.category_colors,
                  event_flags = EXCLUDED.event_flags,
                  category_channels = EXCLUDED.category_channels,
+                 event_channels = EXCLUDED.event_channels,
+                 event_colors = EXCLUDED.event_colors,
                  updated_at = now()`,
           [
             guildId,
@@ -308,8 +321,11 @@ export function createDatabase(pool: pg.Pool) {
             JSON.stringify(settings.ignoredChannelIds),
             JSON.stringify(settings.ignoredRoleIds),
             settings.embedColor,
+            JSON.stringify(settings.categoryColors),
             JSON.stringify(settings.eventFlags),
-            JSON.stringify(settings.categoryChannels)
+            JSON.stringify(settings.categoryChannels),
+            JSON.stringify(settings.eventChannels),
+            JSON.stringify(settings.eventColors)
           ]
         );
         // Mirror the routing table so the one-channel-per-destination rule is
@@ -377,7 +393,16 @@ export function createDatabase(pool: pg.Pool) {
     },
 
     async touchSession(id: string) {
-      await pool.query(`UPDATE oauth_sessions SET last_seen_at = now() WHERE id = $1`, [id]);
+      // Nothing reads `last_seen_at`; it is a liveness signal for an operator's
+      // own query, not a value a request needs. Writing it on every
+      // authenticated request made each one a SELECT *and* an UPDATE, so it is
+      // refreshed at most once a minute per session — one statement either way,
+      // no extra round trip, and a request inside the window writes nothing.
+      await pool.query(
+        `UPDATE oauth_sessions SET last_seen_at = now()
+          WHERE id = $1 AND last_seen_at < now() - interval '1 minute'`,
+        [id]
+      );
     },
 
     async deleteSession(id: string) {
@@ -459,11 +484,6 @@ export function createDatabase(pool: pg.Pool) {
       );
       const value = rows[0]?.checked_at ?? null;
       return value ? new Date(value) : null;
-    },
-
-    async listGuildIds() {
-      const { rows } = await pool.query<{ id: string }>(`SELECT id FROM guilds`);
-      return rows.map(row => row.id);
     },
 
     /**

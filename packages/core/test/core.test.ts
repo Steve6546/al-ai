@@ -20,6 +20,7 @@ import {
   isTimedBotStatus,
   layerSignature,
   logDestinations,
+  type LogDestination,
   MAX_NICKNAME_LENGTH,
   newNonce,
   normaliseBotIdentity,
@@ -101,7 +102,9 @@ test("event schema rejects incomplete data", () => assert.throws(() => validateE
 test("event schema accepts data that carries every required field", () => {
   const definition = validateEvent("moderation.ban", { targetId: "1", actorId: "2" });
   assert.equal(definition.id, "moderation.ban");
-  assert.equal(definition.category, "moderation-log");
+  // The recategorisation moved the Discord-side punishments to الأعضاء, so a ban
+  // is now found there. The id is unchanged — only its category moved.
+  assert.equal(definition.category, "member-log");
 
   // A `null` counts as missing, not as a supplied value, so the two spellings
   // of "absent" must both be rejected.
@@ -110,7 +113,7 @@ test("event schema accepts data that carries every required field", () => {
 });
 
 test("requireEvent looks up a definition and rejects an unknown id", () => {
-  assert.equal(requireEvent("moderation.ban").category, "moderation-log");
+  assert.equal(requireEvent("moderation.ban").category, "member-log");
   assert.throws(() => requireEvent("moderation.explode"), /Unregistered event/);
 });
 test("unregistered event IDs are rejected", () => assert.throws(() => requireEvent("member.explode")));
@@ -118,7 +121,7 @@ test("unregistered event IDs are rejected", () => assert.throws(() => requireEve
 test("every event ID is unique and uses the domain.action form", () => {
   const ids = [...eventSchema.keys()];
   assert.equal(new Set(ids).size, ids.length);
-  for (const id of ids) assert.match(id, /^[a-z]+(\.[a-z-]+)+$/);
+  for (const id of ids) assert.match(id, /^[a-z][a-z-]*(\.[a-z-]+)+$/);
 });
 
 test("every destination has at least one registered event", () => {
@@ -128,21 +131,92 @@ test("every destination has at least one registered event", () => {
   }
 });
 
-test("the operator sees five destinations and the internal one is hidden", () => {
+test("the operator sees thirteen destinations and the internal one is hidden", () => {
   // `bot-log` is delivered to the developer webhook, so it must never appear in
   // the list the dashboard offers channels for.
-  assert.equal(logDestinations.length, 5);
-  assert.equal(allDestinations.length, 6);
+  assert.equal(logDestinations.length, 13);
+  assert.equal(allDestinations.length, 14);
   assert.ok(!logDestinations.includes("bot-log"));
   assert.deepEqual([...INTERNAL_DESTINATIONS], ["bot-log"]);
 });
 
-test("the retired role-log destination is gone from the schema", () => {
-  assert.ok(!allDestinations.includes("role-log" as never));
-  // Its events did not disappear; they moved to server-log.
-  const serverEvents = eventsByCategory("server-log");
-  for (const id of ["role.create", "role.update", "role.delete"]) {
-    assert.ok(serverEvents.includes(id), `${id} travels with server-log`);
+test("every destination carries exactly the events its section promises", () => {
+  // The dashboard renders a count beside each section, and the channels config
+  // is checked against the same schema, so a count drifting here would show the
+  // operator a number the bot does not log.
+  const expected: [LogDestination, number][] = [
+    ["member-log", 18],
+    ["role-log", 6],
+    ["channel-log", 7],
+    ["message-log", 9],
+    // Version 4 split the move and the leave in two each: a moderator's drag and
+    // a member's own switch are different questions, and so are a disconnect and
+    // a departure. Going live and opening the camera are their own entries too.
+    ["voice-log", 17],
+    // Version 5 matched the operator's list exactly: the block and blacklist
+    // pair returned from bot-log, the server-wide wipes and down-expired moved
+    // the other way. Still six, different six.
+    ["moderation-log", 6],
+    // Version 5 split the boost tier by direction and added the banner; the AFK
+    // and system-channel events are real but moved to bot-log.
+    ["server-log", 7],
+    ["invite-log", 3],
+    ["expression-log", 6],
+    ["event-log", 7],
+    ["integration-log", 8],
+    ["automod-log", 7],
+    ["platform-log", 6],
+    // The punishments that left moderation, unblock, the two guild settings the
+    // operator's seven does not carry, the bot's own events, and security.
+    ["bot-log", 20]
+  ];
+  for (const [destination, count] of expected) {
+    assert.equal(eventsByCategory(destination).length, count, `${destination} should carry ${count} events`);
+  }
+  // 107 the operator can mute, plus the 20 internal ones.
+  assert.equal([...eventSchema.keys()].length, 127);
+});
+
+test("the recategorisation moved events without renaming them", () => {
+  // Event ids are written into the encrypted audit trail, so a recategorisation
+  // may move an event between destinations and may never rename it. A rename
+  // would orphan every row already stored under the old name.
+  assert.equal(requireEvent("moderation.ban").category, "member-log");
+  assert.equal(requireEvent("member.role-add").category, "role-log");
+  assert.equal(requireEvent("role.create").category, "role-log");
+  assert.equal(requireEvent("server.channel-create").category, "channel-log");
+  assert.equal(requireEvent("server.invite-create").category, "invite-log");
+  assert.equal(requireEvent("server.expression-create").category, "expression-log");
+  // The retired single voice event is gone, replaced by the specific ones.
+  assert.ok(!eventSchema.has("voice.state-change"));
+  for (const id of ["voice.server-mute", "voice.self-deafen"]) assert.ok(eventSchema.has(id));
+  // Version 5's swaps, both directions: the operator's moderation list now
+  // carries block and the blacklist pair, while the server-wide wipes, the
+  // timed-out down and the two guild settings are internal — present, audited,
+  // and invisible to an operator's mute switches.
+  for (const id of ["moderation.block", "moderation.blacklist", "moderation.unblacklist"]) {
+    assert.equal(requireEvent(id).category, "moderation-log", `${id} returned to the operator's moderation section`);
+  }
+  for (const id of [
+    "moderation.unblock",
+    "moderation.down",
+    "moderation.undown",
+    "moderation.clearallwarns",
+    "moderation.clearallpunishments",
+    "moderation.down-expired",
+    "server.afk-change",
+    "server.system-channel-change"
+  ]) {
+    assert.equal(requireEvent(id).category, "bot-log", `${id} lives in the internal destination`);
+  }
+  // Version 5's new events and its two retirements. An id the schema has
+  // dropped must never come back as a zombie: the audit trail holds the old
+  // rows, the panel must not offer the record again.
+  for (const id of ["server.banner-change", "server.boost-tier-up", "server.boost-tier-down", "invite.use"]) {
+    assert.ok(eventSchema.has(id), `${id} is registered`);
+  }
+  for (const id of ["server.boost-tier-change", "invite.expire", "voice.state-change"]) {
+    assert.ok(!eventSchema.has(id), `${id} stays retired`);
   }
 });
 

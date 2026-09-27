@@ -77,17 +77,6 @@ export function createIntentUsageTracker(options: IntentUsageTrackerOptions = {}
       return users.size;
     },
 
-    /**
-     * Seeds the set from per-guild member counts when a full member fetch is too
-     * expensive. Counts are summed, so this is an upper bound — the tracker
-     * deliberately keeps it as a floor for the *warning* only.
-     */
-    observeGuildSizes(sizes: Iterable<number>) {
-      let total = 0;
-      for (const size of sizes) total += Number.isFinite(size) ? size : 0;
-      return total;
-    },
-
     setRenewedAt(iso: string) {
       renewedAt = iso;
     },
@@ -115,10 +104,6 @@ export function createIntentUsageTracker(options: IntentUsageTrackerOptions = {}
         return "حان موعد تجديد توثيق الـ intents السنوي.";
       }
       return `داخل الحد: ${current.uniqueUsers}/${current.limit} مستخدم فريد.`;
-    },
-
-    reset() {
-      users.clear();
     }
   };
 }

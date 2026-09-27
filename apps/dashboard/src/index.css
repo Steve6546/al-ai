@@ -8,13 +8,14 @@
   --radius: 0.7rem;
 
   /* Dark-only palette. The neutrals are true grey (hue 0) so nothing competes
-     with the brand, and the brand itself is AL AI's indigo — the same #4f46e5
-     the favicon and the theme-color meta tag already declare.
+     with the brand, and the brand itself is AL AI's blue — the same #3b82f6
+     every log embed ships with by default, so the chrome and the content the
+     bot posts read as one product.
 
-     `--primary` was left at shadcn's near-white default, which made every
+     `--primary` was left at shadcn's near-white default once, which made every
      primary button render as a white box with dark text: on a dark page that
      reads as plain text rather than as the one action to take. Anything tinted
-     here must stay legible against `--background`, so the indigo sits at 600
+     here must stay legible against `--background`, so the blue sits at 600
      (≈6:1 with white text) rather than a lighter step. */
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
@@ -25,8 +26,8 @@
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
 
-  /* AL AI indigo (indigo-600). */
-  --primary: oklch(0.511 0.262 276.966);
+  /* AL AI blue (blue-600) — the embed default, not a second brand colour. */
+  --primary: oklch(0.546 0.245 262.881);
   --primary-foreground: oklch(0.985 0 0);
 
   --secondary: oklch(0.269 0 0);
@@ -47,16 +48,16 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   /* Focus rings carry the brand, so a keyboard user can see where they are. */
-  --ring: oklch(0.673 0.182 276.935);
+  --ring: oklch(0.623 0.214 259.815);
 
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.511 0.262 276.966);
+  --sidebar-primary: oklch(0.546 0.245 262.881);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.673 0.182 276.935);
+  --sidebar-ring: oklch(0.623 0.214 259.815);
 }
 
 @theme inline {

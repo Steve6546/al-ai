@@ -1,3 +1,5 @@
+import { isSnowflake } from "./snowflake.js";
+
 /**
  * Anti-nuke: rate limits on destructive actions, and what a breach means.
  *
@@ -80,7 +82,6 @@ export const DEFAULT_ANTI_NUKE_CONFIG: AntiNukeConfig = {
   quarantineRoleId: null
 };
 
-const SNOWFLAKE = /^\d{17,20}$/;
 
 /**
  * Coerces a stored or submitted value into a limit.
@@ -129,7 +130,7 @@ export function normaliseAntiNukeConfig(value: unknown): AntiNukeConfig {
     },
     // A malformed ID is dropped rather than stored: it would never match a role,
     // so mitigation would silently do nothing while claiming to be configured.
-    quarantineRoleId: SNOWFLAKE.test(quarantineRoleId) ? quarantineRoleId : null
+    quarantineRoleId: isSnowflake(quarantineRoleId) ? quarantineRoleId : null
   };
 }
 

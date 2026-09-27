@@ -120,9 +120,12 @@ END $$;
 CREATE TABLE IF NOT EXISTS guild_logging (
   guild_id TEXT PRIMARY KEY REFERENCES guilds(id) ON DELETE CASCADE,
   enabled BOOLEAN NOT NULL DEFAULT false,
-  -- 'single' routes everything to global_channel_id; 'granular' gives each
-  -- destination its own channel. Must match DEFAULT_LOGGING_MODE in contracts.ts.
-  mode TEXT NOT NULL DEFAULT 'single' CHECK (mode IN ('single','granular')),
+  -- 'normal' routes a destination to one channel per section; 'detailed' lets
+  -- each individual event carry its own channel. Must match DEFAULT_LOGGING_MODE
+  -- in contracts.ts. The resolution never branches on mode though: an event
+  -- binding simply wins over the section binding, so a detailed mapping left in
+  -- place after a switch back to normal is inert, not a leak.
+  mode TEXT NOT NULL DEFAULT 'normal' CHECK (mode IN ('normal','detailed')),
   global_channel_id TEXT,
   ignored_channel_ids JSONB NOT NULL DEFAULT '[]',
   -- Members holding any of these roles are left out of the logs, as actor or
@@ -130,25 +133,44 @@ CREATE TABLE IF NOT EXISTS guild_logging (
   ignored_role_ids JSONB NOT NULL DEFAULT '[]',
   -- Must match DEFAULT_EMBED_COLOR in packages/core/src/event-schema.ts.
   embed_color TEXT NOT NULL DEFAULT '#3b82f6',
+  -- Per-destination colour overrides as "#rrggbb". Absent means "inherit
+  -- embed_color". See `categoryColors` in packages/core/src/contracts.ts.
+  category_colors JSONB NOT NULL DEFAULT '{}',
   event_flags JSONB NOT NULL DEFAULT '{}',
   category_channels JSONB NOT NULL DEFAULT '{}',
+  -- Per-event overrides, keyed by event ID. Absent means "inherit the section's
+  -- channel/colour". See `eventChannels`/`eventColors` in contracts.ts.
+  event_channels JSONB NOT NULL DEFAULT '{}',
+  event_colors JSONB NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- Idempotent upgrade: retire the old violet default everywhere it was stored.
 ALTER TABLE guild_logging ALTER COLUMN embed_color SET DEFAULT '#3b82f6';
 UPDATE guild_logging SET embed_color = '#3b82f6' WHERE lower(embed_color) = '#7c3aed';
+-- Idempotent upgrade for databases created before the category-colour column.
+ALTER TABLE guild_logging ADD COLUMN IF NOT EXISTS category_colors JSONB NOT NULL DEFAULT '{}';
+-- Idempotent upgrade for databases created before the per-event columns.
+ALTER TABLE guild_logging ADD COLUMN IF NOT EXISTS event_channels JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE guild_logging ADD COLUMN IF NOT EXISTS event_colors JSONB NOT NULL DEFAULT '{}';
 -- Idempotent upgrade for databases created before the mode/ignored-role columns.
-ALTER TABLE guild_logging ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'single';
+-- The NOT NULL on an ADD COLUMN needs a real value for pre-existing rows.
+ALTER TABLE guild_logging ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'normal';
 ALTER TABLE guild_logging ADD COLUMN IF NOT EXISTS ignored_role_ids JSONB NOT NULL DEFAULT '[]';
 -- The CHECK lives in the CREATE above, which an existing table ignores, so it is
--- re-added by hand. Any value that predates the column is normalised first.
-UPDATE guild_logging SET mode = 'single' WHERE mode IS NULL OR mode NOT IN ('single','granular');
+-- re-added by hand. It is dropped *first*, before the values are normalised:
+-- the version-3 constraint admitted only 'single' and 'granular', so an UPDATE
+-- to 'normal' written before the drop would be rejected by the very guard this
+-- block is replacing. Both old names become 'normal', which is the behaviour
+-- either of them expressed for a guild that had not bound a channel per section.
 ALTER TABLE guild_logging DROP CONSTRAINT IF EXISTS guild_logging_mode_check;
-ALTER TABLE guild_logging ADD CONSTRAINT guild_logging_mode_check CHECK (mode IN ('single','granular'));
--- Drop any retired destination that an older dashboard had stored, so the
--- router never reads a channel binding it no longer understands.
-UPDATE guild_logging SET category_channels = category_channels - 'role-log'
-  WHERE category_channels ? 'role-log';
+UPDATE guild_logging SET mode = 'normal'
+  WHERE mode IS NULL OR mode NOT IN ('normal','detailed');
+ALTER TABLE guild_logging ADD CONSTRAINT guild_logging_mode_check CHECK (mode IN ('normal','detailed'));
+-- No destination is retired in schema version 3: the five version-2 destinations
+-- all still exist, and `role-log` — which version 2 stripped here — is live
+-- again. The strip statement is deliberately gone rather than left as a no-op,
+-- because a guard that cannot fire is indistinguishable from a guard aimed at
+-- the wrong destination.
 
 -- Dashboard sessions. Tokens are stored encrypted, never in plaintext.
 CREATE TABLE IF NOT EXISTS oauth_sessions (
@@ -221,14 +243,30 @@ CREATE TABLE IF NOT EXISTS guild_log_channels (
   UNIQUE (guild_id, channel_id)
 );
 -- `CREATE TABLE IF NOT EXISTS` leaves an existing table's constraints alone, so
--- the allowed-destination list is replaced explicitly. `role-log` was retired in
--- schema version 2; its events moved to `server-log`.
+-- the allowed-destination list is replaced explicitly. Schema version 3 expanded
+-- the operator surface from five sections to thirteen: `role-log` returns (it
+-- was retired in version 2 and its events are back where an operator looks for
+-- them), and channel/expression/invite splits moved from `server-log`.
+-- Version 4 changed only which events belong to a destination (voice grew to
+-- seventeen, moderation shrank to six) — the destinations themselves are
+-- unchanged, so this constraint needed no edit.
 ALTER TABLE guild_log_channels DROP CONSTRAINT IF EXISTS guild_log_channels_destination_check;
 -- Rows bound to a destination that no longer exists would violate the new
--- constraint, so they are cleared before it is added.
-DELETE FROM guild_log_channels WHERE destination = 'role-log';
+-- constraint, so they are cleared before it is added. Every destination from
+-- version 2 still exists in version 3, so in practice nothing is deleted here —
+-- the statement stays as the guard for a future retirement.
+DELETE FROM guild_log_channels
+  WHERE destination NOT IN (
+    'member-log','role-log','channel-log','message-log','voice-log','moderation-log',
+    'server-log','invite-log','expression-log','event-log','integration-log',
+    'automod-log','platform-log'
+  );
 ALTER TABLE guild_log_channels ADD CONSTRAINT guild_log_channels_destination_check
-  CHECK (destination IN ('member-log','moderation-log','voice-log','message-log','server-log'));
+  CHECK (destination IN (
+    'member-log','role-log','channel-log','message-log','voice-log','moderation-log',
+    'server-log','invite-log','expression-log','event-log','integration-log',
+    'automod-log','platform-log'
+  ));
 
 -- Per-command configuration for the dashboard's Commands screen.
 CREATE TABLE IF NOT EXISTS guild_command_flags (

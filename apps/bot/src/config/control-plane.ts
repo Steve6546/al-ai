@@ -9,7 +9,7 @@ import { allDestinations, eventsByCategory, type LogDestination } from "@al-ai/c
  * `_todo` so a production deploy fails loudly instead of inventing a default.
  */
 
-export const CONFIG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "config");
+const CONFIG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "config");
 
 /**
  * The file layout this build understands. Declared in code as well as in the
@@ -19,7 +19,7 @@ export const CONFIG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".
  * only moment the difference is still cheap to fix.
  */
 export const CONTROL_PLANE_SCHEMA_VERSION = 1;
-export const CHANNEL_SCHEMA_VERSION = 2;
+const CHANNEL_SCHEMA_VERSION = 5;
 
 export type ControlPlane = {
   schemaVersion: number;

@@ -5,11 +5,19 @@
  */
 export const SESSION_COOKIE_NAME = "al_ai_session";
 export const SESSION_MAX_AGE_SECONDS = 24 * 60 * 60;
+/**
+ * `Secure` follows the environment rather than a flag that has to be remembered:
+ * a session id must never cross cleartext HTTP, and the only deployment with any
+ * business sending one is production, which sits behind TLS termination. Local
+ * dev stays plain HTTP on localhost, where the flag would stop the cookie from
+ * being sent at all — so it is off unless `NODE_ENV` says otherwise.
+ */
+export const SESSION_COOKIE_SECURE = process.env.NODE_ENV === "production";
 export const SESSION_COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: "lax",
   path: "/",
-  secure: false // set true behind TLS termination; VPS deploys must enable this
+  secure: SESSION_COOKIE_SECURE
 } as const;
 
 /** OAuth scopes are frozen: identify + guilds for login, bot + commands for invites. */

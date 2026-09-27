@@ -4,9 +4,9 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isCategoryEnabled, logDestinations } from "@al-ai/core";
-import { resolveChannel } from "../src/logging/channel-registry.ts";
+import { resolveChannel, resolveEmbedColor } from "../src/logging/channel-registry.ts";
 import { check, roleCarrierOf } from "../src/permissions/permission-guard.ts";
-import { emptyLoggingConfig, type GuildLoggingConfig } from "../src/storage/database.ts";
+import { emptyLoggingConfig } from "../src/storage/database.ts";
 import { ConfigCache } from "../src/storage/config-cache.ts";
 import { logEvent, type LogRuntime } from "../src/logging/log-router.ts";
 
@@ -21,11 +21,11 @@ test("logging disabled resolves to no channel", () => {
   });
 });
 
-test("a category channel wins over the global channel in granular mode", () => {
+test("a section channel wins over the global channel", () => {
   const config = {
     ...emptyLoggingConfig,
     enabled: true,
-    mode: "granular" as const,
+    mode: "detailed" as const,
     globalChannelId: "global",
     categoryChannels: { "member-log": "members" }
   };
@@ -33,37 +33,44 @@ test("a category channel wins over the global channel in granular mode", () => {
   assert.deepEqual(resolveChannel(config, "voice-log"), { channelId: "global", reason: "global" });
 });
 
-test("single mode sends every destination to the global channel", () => {
-  // The whole point of the mode: an operator who wants one room should not have
-  // a stale per-category binding quietly splitting the stream.
-  const config = {
+test("the mode never changes how a binding resolves", () => {
+  // `mode` decides only what the one-click setup creates — one room per section,
+  // or one per event. It does not gate the resolution itself, so an operator who
+  // switches back from detailed to normal does not lose the per-event channels
+  // they picked: those stay bound and simply stop being offered in the panel.
+  // A resolution that read the mode would make that switch silently reroute
+  // a hundred events the operator had placed by hand.
+  const bound = {
     ...emptyLoggingConfig,
     enabled: true,
-    mode: "single" as const,
     globalChannelId: "global",
-    categoryChannels: { "member-log": "members", "moderation-log": "mod" }
+    categoryChannels: { "member-log": "members" },
+    eventChannels: { "member.join": "joins" }
   };
-  for (const destination of logDestinations) {
-    assert.deepEqual(resolveChannel(config, destination), { channelId: "global", reason: "global" }, destination);
+  for (const mode of ["normal", "detailed"] as const) {
+    const config = { ...bound, mode };
+    assert.deepEqual(resolveChannel(config, "member-log"), { channelId: "members", reason: "category" }, mode);
+    assert.deepEqual(resolveChannel(config, "member-log", "member.join"), { channelId: "joins", reason: "event" }, mode);
+    assert.deepEqual(resolveChannel(config, "voice-log"), { channelId: "global", reason: "global" }, mode);
   }
 });
 
-test("granular mode without a matching category falls back to the global channel", () => {
+test("a section without its own channel falls back to the global channel", () => {
   const config = {
     ...emptyLoggingConfig,
     enabled: true,
-    mode: "granular" as const,
+    mode: "detailed" as const,
     globalChannelId: "global",
     categoryChannels: { "member-log": "members" }
   };
   assert.deepEqual(resolveChannel(config, "moderation-log"), { channelId: "global", reason: "global" });
 });
 
-test("granular mode without a category or a global channel resolves to nothing", () => {
+test("no section channel and no global channel resolves to nothing", () => {
   const config = {
     ...emptyLoggingConfig,
     enabled: true,
-    mode: "granular" as const,
+    mode: "detailed" as const,
     globalChannelId: null,
     categoryChannels: {}
   };
@@ -84,13 +91,52 @@ test("an event resolves to exactly one channel", () => {
   const config = {
     ...emptyLoggingConfig,
     enabled: true,
-    mode: "granular" as const,
+    mode: "detailed" as const,
     globalChannelId: "global",
     categoryChannels: { "member-log": "members", "moderation-log": "mod" }
   };
   const resolved = resolveChannel(config, "moderation-log");
   assert.equal(resolved.channelId, "mod");
   assert.notEqual(resolved.channelId, config.globalChannelId);
+});
+
+test("an event's own channel wins over its section's channel", () => {
+  // The detailed mode's whole point: one record can leave the section and take a
+  // room of its own, without the section's other 106 records following it.
+  const config = {
+    ...emptyLoggingConfig,
+    enabled: true,
+    globalChannelId: "global",
+    categoryChannels: { "voice-log": "voice" },
+    eventChannels: { "voice.move": "moves-only" }
+  };
+  assert.deepEqual(resolveChannel(config, "voice-log", "voice.move"), { channelId: "moves-only", reason: "event" });
+  assert.deepEqual(resolveChannel(config, "voice-log", "voice.join"), { channelId: "voice", reason: "category" });
+});
+
+test("an event's own colour wins over its section's colour", () => {
+  const config = {
+    ...emptyLoggingConfig,
+    embedColor: "#111111",
+    categoryColors: { "voice-log": "#222222" },
+    eventColors: { "voice.move": "#33aabb" }
+  };
+  assert.equal(resolveEmbedColor(config, "voice-log", "voice.move"), "#33aabb");
+  assert.equal(resolveEmbedColor(config, "voice-log", "voice.join"), "#222222");
+  assert.equal(resolveEmbedColor(config, "member-log"), "#111111");
+});
+
+test("a binding for a section another guild uses does not leak into this one", () => {
+  // A stale per-event binding left over from an earlier layout is still honoured
+  // for the event it names, and is inert for every other event in the section.
+  const config = {
+    ...emptyLoggingConfig,
+    enabled: true,
+    globalChannelId: "global",
+    eventChannels: { "role.create": "roles" }
+  };
+  assert.deepEqual(resolveChannel(config, "role-log", "role.create"), { channelId: "roles", reason: "event" });
+  assert.deepEqual(resolveChannel(config, "role-log", "role.delete"), { channelId: "global", reason: "global" });
 });
 
 test("the global fallback works, which is why routing never reads the mirror table", () => {
@@ -160,18 +206,18 @@ test("an explicit event flag overrides its category flag in both directions", ()
   assert.deepEqual(resolveChannel(on, "message-log", "message.delete"), { channelId: null, reason: "category-muted" });
 });
 
-test("a retired destination can no longer be muted or bound", () => {
-  // `role-log` is gone from the schema; a stale flag or binding for it is inert.
+test("an unknown event ID still resolves by its section", () => {
+  // `requireEvent` rejects an unknown ID before routing is ever reached, so a
+  // caller that gets this far has a real event. The resolution does not double
+  // check: an event with no binding of its own simply inherits the section.
   const config = {
     ...emptyLoggingConfig,
     enabled: true,
-    mode: "granular" as const,
+    mode: "detailed" as const,
     globalChannelId: "global",
-    // Values an older dashboard may have written for the retired destination.
-    eventFlags: { "role-log": false } as Record<string, boolean>,
-    categoryChannels: { "role-log": "roles" } as GuildLoggingConfig["categoryChannels"]
+    categoryChannels: { "role-log": "roles" }
   };
-  assert.deepEqual(resolveChannel(config, "server-log", "role.create"), { channelId: "global", reason: "global" });
+  assert.deepEqual(resolveChannel(config, "role-log", "role.create"), { channelId: "roles", reason: "category" });
 });
 
 /* ---------------- ignored roles ---------------- */

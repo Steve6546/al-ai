@@ -87,11 +87,11 @@ function knownStatus(value: BotStatus | null | undefined): BotStatus {
   return value && value in botStatusLabels ? value : "online";
 }
 
-export function statusLabel(status: BotStatus): string {
+function statusLabel(status: BotStatus): string {
   return botStatusLabels[status] ?? botStatusLabels.online;
 }
 
-export function activityLabel(type: ActivityType): string {
+function activityLabel(type: ActivityType): string {
   return activityTypeLabels[type] ?? activityTypeLabels.playing;
 }
 

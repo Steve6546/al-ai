@@ -108,11 +108,6 @@ export function createAntiNukeTracker(options: AntiNukeTrackerOptions = {}) {
     countFor(guildId: string, actorId: string, action: NukeAction) {
       const current = now();
       return (hits.get(`${actorKey(guildId, actorId)}:${action}`) ?? []).filter(at => current - at < windowMs).length;
-    },
-
-    reset() {
-      hits.clear();
-      latched.clear();
     }
   };
 }

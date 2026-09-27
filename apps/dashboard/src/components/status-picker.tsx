@@ -20,8 +20,15 @@
  * picker, the trigger and the live preview.
  */
 
-import { botStatusDurations, botStatusLabels, botStatuses, type BotStatus, type BotStatusDuration } from "@al-ai/core/browser";
-import { Check, ChevronRight } from "lucide-react";
+import {
+  botStatusDurations,
+  botStatusLabels,
+  botStatuses,
+  isTimedBotStatus,
+  type BotStatus,
+  type BotStatusDuration
+} from "@al-ai/core/browser";
+import { Check } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,8 +61,6 @@ const STATUS_DESCRIPTIONS: Record<BotStatus, string> = {
   dnd: "يُظهر أنه لا يريد الإزعاج",
   invisible: "يظهر غير متصل للجميع"
 };
-
-const TIMED: BotStatus[] = ["idle", "dnd", "invisible"];
 
 /**
  * Discord's four presence glyphs.
@@ -203,7 +208,7 @@ export function StatusPicker({
           );
 
           // Only the three timed states grow a sub-menu, matching Discord.
-          if (!TIMED.includes(candidate)) {
+          if (!isTimedBotStatus(candidate)) {
             return (
               <DropdownMenuItem
                 key={candidate}

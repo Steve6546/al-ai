@@ -2,14 +2,23 @@
  * Discord access for the dashboard.
  *
  * SCOPE BOUNDARY (see docs/GOVERNANCE.md rule 2):
- * - The bot's guild mutations stay in `apps/bot/src/lib/discord.ts`.
+ * - The bot's gateway-driven mutations stay in `apps/bot/src/lib/discord.ts`,
+ *   the only module allowed to import discord.js. Handlers receive normalised
+ *   plain objects, never Discord classes.
  * - This module is the BFF's only Discord entry point. It performs the user
- *   OAuth exchange and a small set of READ-ONLY bot-token lookups needed to
- *   authorize dashboard actions. It never mutates a guild and never returns a
- *   token to the browser.
+ *   OAuth exchange, the read-only bot-token lookups the screens authorise
+ *   against, and the small set of operator-driven writes that must report their
+ *   own outcome back to the form — the bot identity (see `appearance.ts`) and
+ *   the log-channel setup below. It never returns a token to the browser.
  */
 
-import { BOT_INVITE_PERMISSIONS, BOT_INVITE_SCOPES, DISCORD_PERMISSION_BITS, type ChannelOption } from "@al-ai/core";
+import {
+  BOT_INVITE_PERMISSIONS,
+  BOT_INVITE_SCOPES,
+  DISCORD_PERMISSION_BITS,
+  type ChannelOption,
+  type DiscordRoleWire
+} from "@al-ai/core";
 import { TtlCache } from "./cache.js";
 
 const API = "https://discord.com/api/v10";
@@ -115,7 +124,7 @@ async function request<T>(path: string, init: RequestInit & { token: string; sch
  */
 export async function requestJson<T>(
   path: string,
-  init: { token: string; method: "GET" | "PATCH" | "POST"; body?: unknown }
+  init: { token: string; method: "GET" | "PATCH" | "POST" | "DELETE"; body?: unknown }
 ): Promise<T> {
   const response = await fetch(`${API}${path}`, {
     method: init.method,
@@ -279,7 +288,6 @@ const BOT_GUILD_CACHE_MS = 15_000;
 const GUILD_READ_CACHE_MS = 60_000;
 
 const botGuildCache = new TtlCache<string, Set<string>>(BOT_GUILD_CACHE_MS);
-const guildChannelCache = new TtlCache<string, ChannelOption[]>(GUILD_READ_CACHE_MS);
 const guildRoleCache = new TtlCache<string, DiscordRole[]>(GUILD_READ_CACHE_MS);
 
 /**
@@ -341,18 +349,19 @@ export function invalidateBotGuildCache() {
 /**
  * Drop the memoised roles and channels for one guild, or for all of them.
  *
- * Nothing in the dashboard edits either list, so this exists for the screens
- * that change what Discord would report next — and for tests, which must not
- * inherit another case's cache.
+ * The role list is never edited from here, but the channel list now is — the
+ * log setup and teardown routes create and delete channels, and the next reader
+ * must see the result rather than the cached pre-change list. Tests call it too,
+ * so one case does not inherit another's channels.
  */
 export function invalidateGuildReadCache(guildId?: string) {
   if (guildId === undefined) {
-    guildChannelCache.clear();
+    guildRawChannelCache.clear();
     guildRoleCache.clear();
     guildRoleListCache.clear();
     return;
   }
-  guildChannelCache.clear(guildId);
+  guildRawChannelCache.clear(guildId);
   guildRoleCache.clear(guildId);
   guildRoleListCache.clear(guildId);
 }
@@ -417,9 +426,7 @@ export async function fetchGuildMember(token: string, guildId: string, userId: s
   // Nickname, then global name, then username — the same order Discord's own
   // client shows, so the operator recognises the person they picked.
   const name = member.nick || member.user.global_name || member.user.username || member.user.id;
-  const avatarUrl = member.user.avatar
-    ? `https://cdn.discordapp.com/avatars/${member.user.id}/${member.user.avatar}.${member.user.avatar.startsWith("a_") ? "gif" : "png"}?size=64`
-    : null;
+  const avatarUrl = member.user.avatar ? userAvatarUrl(member.user.id, member.user.avatar, 64) : null;
   return { id: member.user.id, name, avatarUrl };
 }
 
@@ -503,7 +510,7 @@ export function resetBotUserIdCache() {
  * the role list was first shared. Tests call this in `beforeEach`.
  */
 export function resetGuildReadCaches() {
-  guildChannelCache.clear();
+  guildRawChannelCache.clear();
   guildRoleCache.clear();
   guildRoleListCache.clear();
   userGuildCache.clear();
@@ -525,7 +532,7 @@ export type BotMember = {
  * Returns null when the read fails, letting callers say "unknown" rather than
  * invent a position or a permission set.
  */
-export async function fetchBotMember(botToken: string, guildId: string): Promise<BotMember | null> {
+async function fetchBotMember(botToken: string, guildId: string): Promise<BotMember | null> {
   const botUserId = await resolveBotUserId(botToken).catch(() => null);
   if (!botUserId) return null;
   return request<BotMember>(`/guilds/${guildId}/members/${botUserId}`, { token: botToken }).catch(() => null);
@@ -546,7 +553,7 @@ export async function fetchBotMember(botToken: string, guildId: string): Promise
  * settles. That duplicate was half of why clicking through the tabs hit
  * Discord's rate limit.
  */
-export async function fetchBotMemberShared(botToken: string, guildId: string): Promise<BotMember | null> {
+async function fetchBotMemberShared(botToken: string, guildId: string): Promise<BotMember | null> {
   const running = botMemberInFlight.get(guildId);
   if (running) return running;
 
@@ -561,19 +568,196 @@ export async function fetchBotMemberShared(botToken: string, guildId: string): P
  * Memoised for 45 seconds per guild. The same list is asked for by the logging
  * screen, the command scopes and the anti-nuke quarantine picker, so switching
  * between them used to fire the same request three times.
+ *
+ * Categories are deliberately absent: a destination picker offers places to read,
+ * and a category is not one. The setup and teardown routes read the raw list
+ * underneath (`fetchRawChannels`) when they need the category itself.
  */
 export async function fetchGuildChannels(botToken: string, guildId: string): Promise<ChannelOption[]> {
-  return guildChannelCache.resolve(guildId, async () => {
-    const channels = await request<{ id: string; name: string; type: number; position: number }[]>(
-      `/guilds/${guildId}/channels`,
-      { token: botToken }
-    );
-    const typeOf = (type: number): ChannelOption["type"] => (type === 2 ? "voice" : type === 4 ? "category" : "text");
-    return channels
-      .filter(channel => channel.type === 0 || channel.type === 2 || channel.type === 5)
-      .sort((a, b) => a.position - b.position)
-      .map(channel => ({ id: channel.id, name: channel.name, type: typeOf(channel.type) }));
+  const channels = await fetchRawChannels(botToken, guildId);
+  const typeOf = (type: number): ChannelOption["type"] => (type === 2 ? "voice" : type === 4 ? "category" : "text");
+  return channels
+    .filter(channel => channel.type === 0 || channel.type === 2 || channel.type === 5)
+    .sort((a, b) => a.position - b.position)
+    .map(channel => ({ id: channel.id, name: channel.name, type: typeOf(channel.type) }));
+}
+
+/** The raw `/guilds/{id}/channels` payload, memoised and shared by every reader. */
+type RawChannel = { id: string; name: string; type: number; position: number; parent_id?: string | null };
+const guildRawChannelCache = new TtlCache<string, RawChannel[]>(GUILD_READ_CACHE_MS);
+
+/**
+ * Discord caps a guild at 500 channels, categories counted in. It is a fact
+ * about Discord rather than about this app, so it lives next to the channel
+ * helpers — the setup route reads it before promising a build it cannot finish.
+ */
+export const DISCORD_GUILD_CHANNEL_CAP = 500;
+
+export async function fetchRawChannels(botToken: string, guildId: string): Promise<RawChannel[]> {
+  return guildRawChannelCache.resolve(guildId, () => request<RawChannel[]>(`/guilds/${guildId}/channels`, { token: botToken }));
+}
+
+/**
+ * Read-only: the id of one category by name, or null when it is not there.
+ *
+ * Teardown needs this because the log category's id is stored nowhere — only the
+ * channels are bound in `guild_logging`. A missing category means "nothing to
+ * delete", which is a success and not an error.
+ */
+export async function findGuildCategory(botToken: string, guildId: string, name: string): Promise<string | null> {
+  const channels = await fetchRawChannels(botToken, guildId);
+  return channels.find(channel => channel.type === 4 && channel.name === name)?.id ?? null;
+}
+
+/**
+ * Read-only: the ids of the channels that currently exist.
+ *
+ * Teardown deletes a bound channel only if it is still there: a channel the
+ * operator removed by hand in Discord is already gone, and reporting it as a
+ * failure would describe a problem that does not exist.
+ */
+export async function fetchExistingChannelIds(botToken: string, guildId: string): Promise<Set<string>> {
+  const channels = await fetchRawChannels(botToken, guildId);
+  return new Set(channels.map(channel => channel.id));
+}
+
+/**
+ * Read-only: whether a category still holds channels.
+ *
+ * Teardown will not delete a category that has children. Discord does not refuse
+ * the delete — it orphans them, leaving them visible but parentless — so the
+ * operator would lose the grouping of channels they filed under it themselves
+ * while asking only for the log setup to go.
+ */
+export async function categoryHasChildren(botToken: string, guildId: string, categoryId: string): Promise<boolean> {
+  const channels = await fetchRawChannels(botToken, guildId);
+  return channels.some(channel => channel.parent_id === categoryId);
+}
+
+/* ------------------------------------------------------------------ *
+ * Log channel setup — the one guild-structure write
+ *
+ * Creating a log category and its channels changes the guild itself, which is
+ * a different thing from the reads above and from the bot-identity writes in
+ * `appearance.ts`. It lives here rather than in the bot for the same reason the
+ * appearance does: the operator pressed the button and needs to be told *which*
+ * of the thirteen channels Discord refused, not that "setup" failed.
+ *
+ * Two constraints shape the implementation:
+ *
+ *   - **Sequential.** Discord rate-limits channel creation per guild, so a
+ *     parallel batch of thirteen turns into twelve 429s. One at a time, a 429
+ *     waits `retry_after` and tries again.
+ *   - **Reported, never swallowed.** A channel that did not appear must not
+ *     become a routing entry pointing at nothing, and must not be silently
+ *     dropped from the response either.
+ * ------------------------------------------------------------------ */
+
+export type CreatedChannel = { id: string; name: string };
+
+/** Discord's channel-type numbers. The gateway enum is not importable here. */
+const CHANNEL_TYPE_TEXT = 0;
+const CHANNEL_TYPE_CATEGORY = 4;
+
+/**
+ * Creates one channel — a text channel under a category, or a category itself.
+ *
+ * The name is validated by Discord, not by us: it lowercases, strips spaces and
+ * rejects an empty result, and that is the authority the operator's request
+ * should meet. Our own mapping ships names that are already valid.
+ */
+export async function createGuildChannel(
+  botToken: string,
+  guildId: string,
+  input: { name: string; type: "text" | "category"; parentId?: string }
+): Promise<CreatedChannel> {
+  const channel = await requestJson<{ id: string; name: string }>(`/guilds/${guildId}/channels`, {
+    token: botToken,
+    method: "POST",
+    body: {
+      name: input.name,
+      type: input.type === "category" ? CHANNEL_TYPE_CATEGORY : CHANNEL_TYPE_TEXT,
+      parent_id: input.parentId
+    }
   });
+  return { id: channel.id, name: channel.name };
+}
+
+/** Deletes one channel or category by its ID. Discord answers 204. */
+export async function deleteGuildChannel(botToken: string, channelId: string): Promise<void> {
+  await requestJson<void>(`/channels/${channelId}`, { token: botToken, method: "DELETE" });
+}
+
+/** A 429's `retry_after` in milliseconds, floored and ceilinged. */
+function rateLimitDelayMs(error: DiscordApiError): number {
+  // `retryAfterSeconds` may be fractional; a small floor stops us from re-hitting
+  // a bucket at exactly the instant it reopens, and the ceiling stops one wedged
+  // route from holding the request hostage.
+  const ms = Math.ceil((error.retryAfterSeconds ?? 1) * 1000) + 250;
+  return Math.min(Math.max(ms, 250), 10_000);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * One Discord write, retried once after a rate limit and never more.
+ *
+ * A 429 is the expected outcome of a thirteen-channel sequence, and the honest
+ * response is to wait and try the *same* call again. A second 429 after the wait
+ * is a saturated bucket — it is raised so the caller can report the channel as
+ * not created and move on, rather than looping until the request times out.
+ */
+export async function writeWithRetry<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (!isRateLimited(error)) throw error;
+    await sleep(rateLimitDelayMs(error as DiscordApiError));
+    return await call();
+  }
+}
+
+/**
+ * The Arabic reason a Discord refusal becomes for the operator.
+ *
+ * 403 with code 50013 is a missing permission — the bot needs MANAGE_CHANNELS,
+ * and that is fixable from Discord's own role screen. A 400 that names the
+ * guild's channel cap is reported as exactly that, because "setup failed" over
+ * seventy channels in a row is not an answer an operator can act on. Anything
+ * else quotes Discord's own wording — `requestJson` embeds the response body in
+ * the error message, and pulling the `message` field back out of it beats both
+ * discarding it and guessing a reason.
+ */
+export function describeChannelFailure(error: unknown): { status: number; message: string } {
+  if (!(error instanceof DiscordApiError)) return { status: 503, message: "تعذّر الوصول إلى Discord. أعد المحاولة." };
+  if (error.status === 403 || /"code"\s*:\s*50013/.test(error.message)) {
+    return {
+      status: 403,
+      message: "البوت لا يملك صلاحية «إدارة القنوات» (Manage Channels) في هذا السيرفر، أو رتبته أقل من القنوات المطلوبة."
+    };
+  }
+  if (error.status === 429) {
+    return { status: 429, message: "وصلنا إلى حد Discord لإنشاء القنوات. انتظر دقيقة ثم أعد المحاولة." };
+  }
+  if (/maximum number of channels/i.test(error.message)) {
+    return {
+      status: 502,
+      message: "وصل السيرفر إلى الحد الأقصى لعدد القنوات في Discord (500). احذف قنوات غير مستعملة ثم أعد المحاولة."
+    };
+  }
+  const quoted = /failed with \d+:\s*(.+)$/s.exec(error.message)?.[1]?.trim();
+  let reason = quoted;
+  if (quoted) {
+    try {
+      reason = (JSON.parse(quoted) as { message?: string }).message ?? quoted;
+    } catch {
+      // The body was truncated at 200 characters or was never JSON; the raw text
+      // is still closer to the truth than no reason at all.
+    }
+  }
+  return { status: 502, message: `رفض Discord إنشاء القناة (${error.status})${reason ? `: ${reason}` : "."}` };
 }
 
 /**
@@ -605,7 +789,7 @@ export async function fetchBotPermissions(botToken: string, guildId: string): Pr
  * The base set is the union of `@everyone` and every role the member holds,
  * which is why the role list has to be read alongside the member.
  */
-export function computeBasePermissions(
+function computeBasePermissions(
   guildId: string,
   roles: { id: string; permissions: string }[],
   memberRoleIds: readonly string[]
@@ -620,16 +804,7 @@ export function computeBasePermissions(
   return bits;
 }
 
-export type DiscordRole = {
-  id: string;
-  name: string;
-  position: number;
-  managed: boolean;
-  /** True for the @everyone role, which cannot carry a tier. */
-  isDefault: boolean;
-  /** Discord's packed RGB integer. 0 means "no colour" (the default grey). */
-  color: number;
-};
+export type DiscordRole = DiscordRoleWire;
 
 /**
  * Read-only: assignable roles, used by the tier screen, the command scopes and

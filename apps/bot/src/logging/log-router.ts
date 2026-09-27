@@ -5,9 +5,10 @@ import {
   isSuppressedByRole,
   signedEvent,
   validateEvent,
-  type LogDestination
+  type LogDestination,
+  type Severity
 } from "@al-ai/core";
-import { resolveChannel } from "./channel-registry.js";
+import { resolveChannel, resolveEmbedColor } from "./channel-registry.js";
 import type { ConfigCache } from "../storage/config-cache.js";
 import type { BotDatabase } from "../storage/database.js";
 import type { GuildLoggingConfig } from "../storage/database.js";
@@ -41,7 +42,8 @@ export type LogRuntime = {
 export type LogOutcome = {
   eventId: string;
   destination: LogDestination;
-  severity: "info" | "warning" | "critical";
+  /** The schema's own verdict — never re-derived here. */
+  severity: Severity;
   delivered: boolean;
   skipped?: string;
 };
@@ -104,8 +106,13 @@ export async function logEvent(
     const resolution = resolveChannel(config, definition.category, id);
     if (resolution.channelId) {
       // The operator's embed colour is part of the configuration, so it is applied
-      // here; without this the setting was saved and silently ignored.
-      delivered = await runtime.send(resolution.channelId, envelope, config.embedColor);
+      // here; without this the setting was saved and silently ignored. A colour
+      // picked for this record wins over its section's, which wins over the global.
+      delivered = await runtime.send(
+        resolution.channelId,
+        envelope,
+        resolveEmbedColor(config, definition.category, id)
+      );
     }
     reason = resolution.reason;
   }

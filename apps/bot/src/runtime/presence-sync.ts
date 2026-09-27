@@ -74,10 +74,6 @@ export function createPresenceSync(deps: PresenceSyncDeps) {
     /** Exposed for tests and for the shutdown path. */
     applied() {
       return applied;
-    },
-
-    forget() {
-      applied = null;
     }
   };
 }

@@ -4,10 +4,20 @@ import { dom } from "./dom-env.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { act, createElement, StrictMode, type ReactElement } from "react";
+import { MotionGlobalConfig } from "framer-motion";
 import { commandFlagsFor } from "@al-ai/core/browser";
 import { App } from "../src/App";
 import { ErrorBoundary } from "../src/components/error-boundary";
 import { TooltipProvider } from "../src/components/ui/tooltip";
+import { logCategories } from "../src/types";
+import type { LoggingSettings } from "../src/types";
+import { eventHints, eventIcons } from "../src/views/settings/logs";
+
+// The accordion's fold runs on framer-motion's frame loop, which never advances
+// in this fake DOM — an exit that takes 220ms in a browser would hold its node
+// forever here. Skipping animations makes every enter and exit land in the same
+// flush, so the tests assert the state machine rather than the tween.
+MotionGlobalConfig.skipAnimations = true;
 
 /**
  * Client-side mount tests.
@@ -221,7 +231,7 @@ const payloads: [RegExp, unknown][] = [
     warning: null
   }],
   [/^\/api\/guilds\/[^/]+\/logging$/, {
-    settings: { enabled: true, mode: "single", globalChannelId: null, ignoredChannelIds: [], ignoredRoleIds: [], embedColor: "#5865f2", eventFlags: {}, categoryChannels: {} }
+    settings: { enabled: true, mode: "normal", globalChannelId: null, ignoredChannelIds: [], ignoredRoleIds: [], embedColor: "#5865f2", categoryColors: {}, eventFlags: {}, categoryChannels: {}, eventChannels: {}, eventColors: {} }
   }],
   [/^\/api\/guilds\/[^/]+\/audit$/, { counts: { total: 0, critical: 0 }, entries: [] }],
   [/^\/api\/guilds\/[^/]+\/security$/, { events: [] }],
@@ -1024,3 +1034,561 @@ test("delete-on-leave is offered only where a member can actually leave", async 
   assert.equal(result.onMemberCommand, true, "/ban acts on a member, so it offers the control");
   assert.equal(result.onChannelCommand, false, "/clear does not, so it does not");
 });
+
+/**
+ * The unsaved-changes bar, driven through the interface.
+ *
+ * `draft-form.test.tsx` proves the hook: `dirty` is derived, `reset` restores,
+ * `commit` rebases. What it cannot prove is that a *screen* wired those to the
+ * floating bar an operator actually clicks — that the bar is absent over an
+ * untouched form, that its two buttons do what their labels say, and that a save
+ * the server refused does not quietly clear the bar, leaving the operator sure
+ * an edit that was never written is safe.
+ *
+ * The logging screen is the driver because its save is one PUT whose echo *is*
+ * the contract: the route returns the settings it stored, and the screen
+ * rebases on them.
+ *
+ * Reading happens on the captured markup, not inside the interact hook, because
+ * a click's own state change (`setSaving(true)`) is an event-handler update and
+ * flushes at once, while what the awaited save produces (`setError`,
+ * `setSaving(false)`, `commit`) lands as promise continuations. Those are not
+ * painted until the surrounding `act` exits, and `mount()` reads the markup
+ * exactly then — after the tree has settled and before it is unmounted. Reading
+ * from inside the hook sees the spinner forever, which is how a working failure
+ * path reads as "the bar vanished".
+ */
+
+/** The master switch's state, read out of captured markup. */
+function loggingEnabled(html: string) {
+  const probe = document.createElement("div");
+  probe.innerHTML = html;
+  return probe.querySelector('[aria-label="تفعيل السجلات"]')?.getAttribute("aria-checked") ?? null;
+}
+
+/** Toggles the logging master switch by clicking it, the way an operator does. */
+async function toggleLogging(doc: Document) {
+  await openTrigger(doc.querySelector('[aria-label="تفعيل السجلات"]')!);
+}
+
+/**
+ * Serves the read payloads and records the logging PUT, echoing its body the
+ * way the route does — or refusing it when `refusal` is set, so the failure
+ * path is the server's own 409 answer rather than a simulated network drop.
+ */
+function stubFetchWithSave(refusal: string | null = null) {
+  const puts: LoggingSettings[] = [];
+  (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: RequestInit) => {
+    const raw = typeof input === "string" ? input : String((input as { url?: string }).url ?? input);
+    const path = raw.split("?")[0]!;
+    if (init?.method === "PUT" && path.endsWith("/logging")) {
+      const body = JSON.parse(String(init.body)) as LoggingSettings;
+      puts.push(body);
+      if (refusal) {
+        return {
+          ok: false,
+          status: 409,
+          headers: new Map(),
+          json: async () => ({ error: "VERSION_CONFLICT", message: refusal })
+        };
+      }
+      return { ok: true, status: 200, headers: new Map(), json: async () => ({ settings: body, savedAt: new Date().toISOString() }) };
+    }
+    const match = payloads.find(([pattern]) => pattern.test(path));
+    if (!match) return { ok: false, status: 404, headers: new Map(), json: async () => ({ error: "NOT_FOUND" }) };
+    return { ok: true, status: 200, headers: new Map(), json: async () => match[1] };
+  };
+  return puts;
+}
+
+test("the unsaved-changes bar is absent over an untouched form and appears on a real edit", async () => {
+  stubFetchWithSave();
+  const { html, result, errors } = await mount(`/dashboard/${GUILD_ID}/logs`, async doc => {
+    // The untouched form is read here, before the edit: this is settled state,
+    // so a synchronous read is honest. The *edited* form is read from the markup
+    // the harness captures once everything has flushed — see the note above.
+    const barBefore = doc.querySelector('[role="status"]');
+    await toggleLogging(doc);
+    return { barBefore: Boolean(barBefore) };
+  });
+
+  assert.deepEqual(fatal(errors), [], "no render error");
+
+  // Absent first: a bar over a form nobody has touched is a bar that gets
+  // ignored, which is why `dirty` is derived rather than set by hand.
+  assert.equal(result.barBefore, false, "no save bar before any change");
+  assert.equal(loggingEnabled(html), "false", "the switch moved");
+  assert.match(html, /حفظ التغييرات/, "turning the switch off shows the bar");
+});
+
+test("«إعادة ضبط» clears the bar at once and puts the control back", async () => {
+  stubFetchWithSave();
+  const { html, errors } = await mount(`/dashboard/${GUILD_ID}/logs`, async doc => {
+    await toggleLogging(doc);
+    // The bar's own button, not a keyboard shortcut or a second switch: the
+    // label is the contract, and the bar keeps no copy of the data by design.
+    const reset = [...doc.querySelectorAll("button")].find(element => /إعادة ضبط/.test(element.textContent ?? ""));
+    assert.ok(reset, "the bar is offering its reset button");
+    reset!.click();
+  });
+
+  assert.deepEqual(fatal(errors), [], "no render error");
+
+  assert.doesNotMatch(html, /حفظ التغييرات/, "reverting clears the bar");
+  // The control follows the revert rather than the two disagreeing — an operator
+  // who watches the switch return to its start must not see the bar linger.
+  assert.equal(loggingEnabled(html), "true", "the switch returned to its saved state");
+});
+
+test("a successful save clears the bar and keeps the server's answer", async () => {
+  const puts = stubFetchWithSave();
+  const { html, errors } = await mount(`/dashboard/${GUILD_ID}/logs`, async doc => {
+    await toggleLogging(doc);
+    const save = [...doc.querySelectorAll("button")].find(element => /حفظ التغييرات/.test(element.textContent ?? ""));
+    assert.ok(save, "the bar is offering its save button");
+    save!.click();
+  });
+
+  assert.deepEqual(fatal(errors), [], "no render error");
+
+  // The PUT carried the edit — the screen did not send a stale draft.
+  assert.equal(puts.length, 1, "one save request");
+  assert.equal(puts[0]!.enabled, false, "the request body carries the edit");
+  assert.doesNotMatch(html, /حفظ التغييرات/, "a clean save removes the bar");
+  // And re-editing starts from the server's value, not the pre-edit one: a later
+  // toggle is a *new* change, which is what `commit` rebasing on the echo buys.
+  assert.equal(loggingEnabled(html), "false", "the saved value is what stays on screen");
+});
+
+test("a refused save keeps the change, keeps the bar, and says why", async () => {
+  const refusal = "الإصدار الموجود أحدث من تعديلك؛ أعد المحاولة.";
+  stubFetchWithSave(refusal);
+  const { html, errors } = await mount(`/dashboard/${GUILD_ID}/logs`, async doc => {
+    await toggleLogging(doc);
+    const save = [...doc.querySelectorAll("button")].find(element => /حفظ التغييرات/.test(element.textContent ?? ""));
+    assert.ok(save, "the bar is offering its save button");
+    save!.click();
+  });
+
+  assert.deepEqual(fatal(errors), [], "no render error");
+
+  // The bar is still up and the failure is named inside it, beside the button
+  // that caused it — not only in a toast the operator may have dismissed.
+  assert.match(html, /حفظ التغييرات/, "the bar stays after a failure");
+  assert.match(html, new RegExp(refusal), "the server's reason is shown inside the bar");
+  // The edit survived: the form does not read "saved" for something the server
+  // refused, which is the lie this bar exists to avoid.
+  assert.equal(loggingEnabled(html), "false", "the change is still on screen");
+});
+
+/* ------------------------------------------------------------------ *
+ * The rebuilt logs screen: thirteen sections behind a sidebar, and the
+ * channel setup/teardown that change the guild itself.
+ *
+ * The save-bar tests above drive the same `useDraftForm` every screen shares,
+ * so what is left to prove here is specific to this screen's new shape: that
+ * the sidebar swaps panes instead of scrolling fourteen cards, that the bulk
+ * buttons move every sub-switch in a section at once, and that deleting
+ * channels — the one irreversible write the dashboard offers — cannot happen
+ * without a confirmation that names what it will destroy.
+ * ------------------------------------------------------------------ */
+
+/** The sidebar entry for one section, matched by its label. */
+function navButton(doc: Document, label: string): HTMLElement | null {
+  const nav = doc.querySelector('nav[aria-label="أقسام السجلات"]');
+  return (
+    [...(nav?.querySelectorAll("button") ?? [])].find(button =>
+      button.textContent?.trim().startsWith(label)
+    ) ?? null
+  );
+}
+
+/**
+ * The card the sidebar swaps in. Found by its description rather than its
+ * title, because the title is one short word that other copy can contain while
+ * the description is unique to the section.
+ */
+function sectionCard(doc: Document, description: string): Element | null {
+  return [...doc.querySelectorAll("div")].find(div => div.textContent?.includes(description)) ?? null;
+}
+
+/** The active sidebar entry, read out of captured markup. */
+function activeNavLabel(html: string): string | null {
+  const probe = document.createElement("div");
+  probe.innerHTML = html;
+  return probe.querySelector('nav[aria-label="أقسام السجلات"] button[aria-current="true"]')?.textContent?.trim() ?? null;
+}
+
+test("the logs sidebar lists every section and swaps one card in for another", async () => {
+  stubFetch();
+  const { html: general, errors } = await mount(`/dashboard/${GUILD_ID}/logs`);
+
+  assert.deepEqual(fatal(errors), [], "no render error");
+
+  // The general pane is the landing one — the master switch lives here, and no
+  // section card is mounted until one is chosen.
+  assert.match(general, /التسجيل المركزي/);
+  for (const label of logCategories.map(category => category.label)) {
+    assert.match(general, new RegExp(label), `the sidebar lists «${label}»`);
+  }
+
+  const roles = logCategories.find(category => category.id === "role-log")!;
+  assert.doesNotMatch(
+    general,
+    new RegExp(roles.description),
+    "a section's card is not drawn before the operator picks it"
+  );
+
+  const { html: section } = await mount(`/dashboard/${GUILD_ID}/logs`, async doc => {
+    const picked = navButton(doc, roles.label);
+    assert.ok(picked, "the section has a sidebar entry");
+    picked!.click();
+  });
+
+  assert.ok(activeNavLabel(section)?.startsWith(roles.label), "the sidebar marks the section now showing");
+  assert.match(section, new RegExp(roles.description), "the section's card carries its description");
+  // The records follow the header directly: no collapsed list to open first, so
+  // every label is on the page the moment the section is picked.
+  for (const event of roles.events) {
+    assert.match(section, new RegExp(event.label), `the record «${event.label}» is drawn without an extra click`);
+  }
+  assert.doesNotMatch(section, /التسجيل المركزي/, "the general card is unmounted, not stacked above it");
+});
+
+test("«تعطيل الكل» mutes every event in a section at once", async () => {
+  stubFetchWithSave();
+  const voice = logCategories.find(category => category.id === "voice-log")!;
+
+  const { html, errors } = await mount(`/dashboard/${GUILD_ID}/logs`, async doc => {
+    navButton(doc, voice.label)!.click();
+    await settle();
+    // The bulk buttons are mounted by the sidebar swap, so the card is only
+    // queryable after that click has flushed.
+    const button = [...(sectionCard(doc, voice.description)?.querySelectorAll("button") ?? [])].find(
+      element => element.textContent?.trim() === "تعطيل الكل"
+    );
+    assert.ok(button, "the section card offers «تعطيل الكل»");
+    button!.click();
+  });
+
+  assert.deepEqual(fatal(errors), [], "no render error");
+
+  assert.match(
+    html,
+    new RegExp(`${voice.events.length} مكتوم`),
+    "every event in the section is muted, not only the visible ones"
+  );
+  assert.match(html, /حفظ التغييرات/, "the move lights the save bar");
+});
+
+test("«تفعيل الكل» lifts the mute and saves an explicit flag per event", async () => {
+  const puts = stubFetchWithSave();
+  const voice = logCategories.find(category => category.id === "voice-log")!;
+
+  const { html, errors } = await mount(`/dashboard/${GUILD_ID}/logs`, async doc => {
+    navButton(doc, voice.label)!.click();
+    await settle();
+
+    const bulk = (text: string) => {
+      const button = [...(sectionCard(doc, voice.description)?.querySelectorAll("button") ?? [])].find(
+        element => element.textContent?.trim() === text
+      );
+      assert.ok(button, `«${text}» is offered inside the section card`);
+      button!.click();
+    };
+
+    bulk("تعطيل الكل");
+    await settle();
+    bulk("تفعيل الكل");
+    await settle();
+
+    const save = [...doc.querySelectorAll("button")].find(element => /حفظ التغييرات/.test(element.textContent ?? ""));
+    assert.ok(save, "either bulk move lights the save bar");
+    save!.click();
+  });
+
+  assert.deepEqual(fatal(errors), [], "no render error");
+
+  assert.doesNotMatch(html, new RegExp(`${voice.events.length} مكتوم`), "no event is left muted");
+  assert.doesNotMatch(html, /حفظ التغييرات/, "the save cleared the bar");
+
+  // The request carries an explicit flag per event rather than relying on the
+  // shipped default — which is what keeps the section on after a later change
+  // to that default.
+  assert.equal(puts.length, 1, "one save request");
+  for (const event of voice.events) {
+    assert.equal(puts[0]!.eventFlags[event.id], true, `${event.id} is explicitly on after «تفعيل الكل»`);
+  }
+});
+
+/**
+ * Both maps fall back — a missing icon renders the generic glyph, a missing hint
+ * renders no line — so a record added to the schema without an entry looks
+ * merely plainer than its neighbours, which nothing else in the build surfaces.
+ */
+test("every record carries an icon and a line naming when it fires", () => {
+  const missingIcons: string[] = [];
+  const missingHints: string[] = [];
+
+  for (const category of logCategories) {
+    for (const event of category.events) {
+      if (!(event.id in eventIcons)) missingIcons.push(event.id);
+      if (!(event.id in eventHints)) missingHints.push(event.id);
+    }
+  }
+
+  assert.deepEqual(
+    missingIcons,
+    [],
+    "these records would render with the generic glyph: " + missingIcons.join(", ")
+  );
+  assert.deepEqual(
+    missingHints,
+    [],
+    "these records would render with no firing line: " + missingHints.join(", ")
+  );
+});
+
+test("a record card ships compact when off and unfolds when switched on", async () => {
+  stubFetchWithSave();
+  const roles = logCategories.find(category => category.id === "role-log")!;
+  const first = roles.events[0]!;
+
+  // Ship the record disabled so the compact state is the *initial* render of
+  // its card: a card that enters with the switch off has no fold to wait for,
+  // so the pickers' absence is real and not pending behind an exit animation
+  // (which this fake DOM's frame loop never advances). The fold-back on
+  // deactivation is the same conditional render in reverse, driven by the same
+  // state — only its timing lives in the browser.
+  const loggingEntry = payloads.find(([pattern]) => pattern.test("/api/guilds/x/logging"))!;
+  const originalPayload = loggingEntry[1];
+  loggingEntry[1] = {
+    settings: {
+      ...(originalPayload as { settings: LoggingSettings }).settings,
+      eventFlags: { [first.id]: false }
+    }
+  };
+
+  /** The record's own switch, found by its aria-label inside the section card. */
+  const recordSwitch = (doc: Document): HTMLElement =>
+    [...(sectionCard(doc, roles.description)?.querySelectorAll<HTMLButtonElement>('button[role="switch"]') ?? [])].find(
+      element => element.getAttribute("aria-label") === first.label
+    )!;
+
+  /** The text of the one card the switch lives in, not of its section. */
+  const cardText = (doc: Document) => {
+    let element = recordSwitch(doc)!.parentElement;
+    while (element && !/bg-card/.test(element.className ?? "")) element = element.parentElement;
+    return element?.textContent ?? "";
+  };
+
+  let compactWhenOff = false;
+  let unfoldedWhenOn = false;
+  try {
+    const { html, errors } = await mount(`/dashboard/${GUILD_ID}/logs`, async doc => {
+      navButton(doc, roles.label)!.click();
+      await settle();
+      compactWhenOff =
+        cardText(doc).includes(first.label) && !cardText(doc).includes("قناة السجل") && !cardText(doc).includes("لون السجل");
+
+      recordSwitch(doc)!.click();
+      await settle();
+      unfoldedWhenOn = cardText(doc).includes("قناة السجل") && cardText(doc).includes("لون السجل");
+    });
+
+    assert.deepEqual(fatal(errors), [], "no render error");
+    assert.equal(compactWhenOff, true, "an off record is a compact card: name and firing line, no pickers");
+    assert.equal(unfoldedWhenOn, true, "switching on unfolds the channel and colour pickers");
+    assert.match(html, /قناة السجل/, "the unfolded card carries the channel picker in the final render");
+    assert.match(html, /لون السجل/, "…and the colour picker");
+  } finally {
+    loggingEntry[1] = originalPayload;
+  }
+});
+
+test("the logs page carries the stats banner, the X/N sidebar counts, and no premium badge", async () => {
+  stubFetch();
+  const { html, errors } = await mount(`/dashboard/${GUILD_ID}/logs`);
+
+  assert.deepEqual(fatal(errors), [], "no render error");
+
+  assert.match(html, /تتبع جميع الأحداث في السيرفر/, "the banner names what the screen does");
+  for (const label of ["إجمالي السجلات", "السجلات المفعلة", "الأقسام", "القنوات المستخدمة"]) {
+    assert.match(html, new RegExp(label), `the banner carries the «${label}» pill`);
+  }
+  // The sidebar count is enabled/total, rendered LTR so "0/18" does not read as
+  // "18/0". Unset flags read as enabled, so a fresh guild shows every count full.
+  const members = logCategories.find(category => category.id === "member-log")!;
+  assert.match(
+    html,
+    new RegExp(`\\d+/${members.events.length}`),
+    "each section row shows its enabled/total count"
+  );
+  // The premium-badge decision is standing: no record, section, or banner is
+  // ever marked as a special tier.
+  assert.doesNotMatch(html, /بوتات خاصة/, "no section or record carries a premium badge");
+  assert.doesNotMatch(html, /Premium/i, "…and none carries an English one either");
+});
+
+test("a channel action starts a visible cooldown when it finishes", async () => {
+  stubFetchWithChannelActions();
+
+  const { html, errors } = await mount(`/dashboard/${GUILD_ID}/logs`, async doc => {
+    const create = [...doc.querySelectorAll("button")].find(element =>
+      /إنشاء قنوات عادية/.test(element.textContent ?? "")
+    );
+    assert.ok(create, "the normal-setup card is offered");
+    create!.click();
+  });
+
+  assert.deepEqual(fatal(errors), [], "no render error");
+
+  // The badge counts down in mm:ss and the buttons rest while it runs — that is
+  // the whole contract, visible right on the card instead of a silent disable.
+  assert.match(html, /\d{2}:\d{2}/, "a cooldown badge with a mm:ss countdown is visible");
+  assert.match(html, /جارٍ التنفيذ…|disabled/, "the action cards are resting");
+});
+
+/**
+ * Serves the read payloads and answers the two channel endpoints, echoing the
+ * routing table the way the routes do. The stored settings bind one channel, so
+ * the teardown dialog has a count to name.
+ */
+function stubFetchWithChannelActions() {
+  const setups: string[] = [];
+  const teardowns: string[] = [];
+  const bound: LoggingSettings = {
+    enabled: true,
+    mode: "detailed",
+    globalChannelId: null,
+    ignoredChannelIds: [],
+    ignoredRoleIds: [],
+    embedColor: "#5865f2",
+    eventFlags: {},
+    categoryChannels: { "member-log": "2" },
+    categoryColors: {},
+    eventChannels: {},
+    eventColors: {}
+  };
+
+  (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: RequestInit) => {
+    const raw = typeof input === "string" ? input : String((input as { url?: string }).url ?? input);
+    const path = raw.split("?")[0]!;
+    if (path.endsWith("/logging/setup") && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as { mode: string };
+      setups.push(body.mode);
+      // Echo the routing table the way the route does: normal binds one channel
+      // per section, detailed binds one per record.
+      const normal = body.mode === "normal";
+      return {
+        ok: true,
+        status: 200,
+        headers: new Map(),
+        json: async () => ({
+          settings: {
+            ...bound,
+            mode: body.mode,
+            categoryChannels: normal ? { "member-log": "3" } : {},
+            eventChannels: normal ? {} : { "member.join": "3" }
+          },
+          savedAt: new Date().toISOString(),
+          created: [{ name: normal ? "member-log" : "member-join", channelId: "3" }],
+          deleted: [],
+          failed: []
+        })
+      };
+    }
+    if (path.endsWith("/logging/channels") && init?.method === "DELETE") {
+      teardowns.push("delete");
+      return {
+        ok: true,
+        status: 200,
+        headers: new Map(),
+        json: async () => ({
+          settings: { ...bound, enabled: false, globalChannelId: null, categoryChannels: {}, eventChannels: {} },
+          savedAt: new Date().toISOString(),
+          deleted: ["2"],
+          failed: []
+        })
+      };
+    }
+    if (path.endsWith("/logging")) {
+      if (init?.method === "PUT") {
+        const body = JSON.parse(String(init.body)) as LoggingSettings;
+        return { ok: true, status: 200, headers: new Map(), json: async () => ({ settings: body, savedAt: new Date().toISOString() }) };
+      }
+      return { ok: true, status: 200, headers: new Map(), json: async () => ({ settings: bound }) };
+    }
+    const match = payloads.find(([pattern]) => pattern.test(path));
+    if (!match) return { ok: false, status: 404, headers: new Map(), json: async () => ({ error: "NOT_FOUND" }) };
+    return { ok: true, status: 200, headers: new Map(), json: async () => match[1] };
+  };
+  return { setups, teardowns };
+}
+
+test("deleting the log channels asks first, names the count, and only then acts", async () => {
+  const { setups, teardowns } = stubFetchWithChannelActions();
+
+  const { html, errors } = await mount(`/dashboard/${GUILD_ID}/logs`, async doc => {
+    const trigger = [...doc.querySelectorAll("button")].find(element =>
+      /حذف قنوات السجلات/.test(element.textContent ?? "")
+    );
+    assert.ok(trigger, "the teardown button is offered on the general pane");
+    assert.equal(trigger!.getAttribute("disabled"), null, "it is live: one channel is currently bound");
+
+    // The dialog is portalled, so it is only visible while the tree is mounted —
+    // the assertions that name what it says happen here, against the live document.
+    trigger!.click();
+    await settle();
+    const dialog = doc.querySelector('[role="dialog"]');
+    assert.ok(dialog, "a confirmation dialog opened");
+    assert.match(dialog!.textContent ?? "", /سيتم حذف 1 قناة/, "it names the channel count, not a generic warning");
+    assert.match(dialog!.textContent ?? "", /لا يمكن التراجع/, "and says the move is irreversible");
+
+    // Cancel has to leave everything exactly as it was — no request, no state.
+    const cancel = [...dialog!.querySelectorAll("button")].find(element => /إلغاء/.test(element.textContent ?? ""));
+    cancel!.click();
+    await settle();
+    assert.equal(doc.querySelectorAll('[role="dialog"]').length, 0, "cancel closes the dialog without a request");
+
+    // Reopen and confirm this time. The dialog's own button is the bare word
+    // «حذف», which is what distinguishes it from the screen's trigger.
+    trigger!.click();
+    await settle();
+    const confirm = [...doc.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(element =>
+      /^حذف$/.test(element.textContent?.trim() ?? "")
+    );
+    assert.ok(confirm, "the dialog has its own destructive button, distinct from the screen's");
+    confirm!.click();
+    await settle();
+    assert.equal(doc.querySelectorAll('[role="dialog"]').length, 0, "confirm closes the dialog");
+  });
+
+  assert.deepEqual(fatal(errors), [], "no render error");
+
+  assert.equal(teardowns.length, 1, "exactly one DELETE was issued");
+  assert.equal(setups.length, 0, "setup was never touched");
+  assert.equal(loggingEnabled(html), "false", "logging is off in the committed settings");
+  assert.match(html, /تم حذف قنوات السجلات وتعطيل التسجيل/, "the outcome is reported, not swallowed");
+});
+
+test("creating the log channels commits through its own response, not the draft", async () => {
+  const { setups } = stubFetchWithChannelActions();
+
+  const { html, errors } = await mount(`/dashboard/${GUILD_ID}/logs`, async doc => {
+    const create = [...doc.querySelectorAll("button")].find(element =>
+      /إنشاء قنوات عادية/.test(element.textContent ?? "")
+    );
+    assert.ok(create, "the section-channel setup button is offered");
+    create!.click();
+  });
+
+  assert.deepEqual(fatal(errors), [], "no render error");
+
+  assert.equal(setups.length, 1, "one setup request");
+  assert.equal(setups[0], "normal", "the button carries its mode to the endpoint");
+  assert.doesNotMatch(html, /جارٍ الإنشاء/, "the button is enabled again once the request landed");
+  assert.doesNotMatch(html, /حفظ التغييرات/, "setup commits through its own response, so no draft is pending");
+  assert.match(html, /تم إنشاء قنوات الأقسام وربطها/, "the created channels are reported");
+});
+

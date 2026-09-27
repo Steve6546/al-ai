@@ -27,8 +27,9 @@
  * - `RequestThrottle` bounds the *unauthenticated* traffic, so a flood of
  *   sign-in attempts cannot consume the budget AL AI needs for its own reads.
  *
- * A signed-in operator is never throttled. Locking someone out of their own
- * dashboard to protect Discord would be a cure worse than the disease.
+ * A signed-in operator is never throttled in practice: the limit is sized so a
+ * dashboard session cannot reach it, and the throttle key is the TCP peer
+ * address, which a client cannot choose.
  */
 
 /* ------------------------------------------------------------------ *
@@ -168,11 +169,13 @@ export class RequestThrottle {
 }
 
 /** The client a request is attributed to, for throttling purposes. */
-export function clientKey(headers: Record<string, unknown>, remoteAddress: string | undefined): string {
-  // `trustProxy` is on, so `x-forwarded-for` is populated by the proxy in front
-  // of the dashboard. Only the first entry is the client; the rest are hops.
-  const forwarded = headers["x-forwarded-for"];
-  const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  if (typeof raw === "string" && raw.length > 0) return raw.split(",")[0]!.trim();
+export function clientKey(remoteAddress: string | undefined): string {
+  // The key must not be attacker-controlled. `trustProxy` is on, so
+  // `x-forwarded-for` is whatever the caller wrote in the header — and trusting
+  // it let a flood rotate its own throttle key per request, making the limit
+  // optional for exactly the traffic it exists to bound. The TCP peer cannot be
+  // forged, so it is the key. Behind a reverse proxy every proxied request
+  // shares the proxy's address; that is the right trade for a single-operator
+  // dashboard, since the alternative was no effective limit at all.
   return remoteAddress ?? "unknown";
 }

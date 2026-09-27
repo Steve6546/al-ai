@@ -125,11 +125,13 @@ export class EventPipeline {
   async drain() {
     if (this.draining) return;
     this.draining = true;
+    let throttled = false;
     try {
       for (const queue of this.queues) {
         while (queue.length) {
           if (this.windowUsage() >= this.ceiling) {
             this.scheduleRetry();
+            throttled = true;
             return;
           }
           const job = queue.shift()!;
@@ -143,6 +145,18 @@ export class EventPipeline {
       }
     } finally {
       this.draining = false;
+      // A job enqueued while this drain was in flight scheduled a microtask that
+      // no-oped on `draining` and cleared `drainScheduled`, so nothing was left
+      // to drain it but the next arrival — the tail of a burst could sit in a
+      // queue until an event arrives minutes later, while `stats().queued`
+      // reported a backlog nobody acted on. Re-checking here is what closes that
+      // window: the drain that consumed the burst also picks up its own tail.
+      //
+      // But not when the stop was the throttle: there `scheduleRetry` has the
+      // next drain already arranged, and the queue stays non-empty until the
+      // window moves. Re-scheduling here would spin a microtask against a clock
+      // that has not advanced, forever.
+      if (!throttled && this.queues.some(queue => queue.length > 0)) this.scheduleDrain();
     }
   }
 

@@ -1,5 +1,6 @@
 import type { DiscordPermissionBit } from "./discord-permissions.js";
-import type { Tier } from "./permissions.js";
+import { isTier, type Tier } from "./permissions.js";
+import { filterSnowflakes, normaliseSnowflake } from "./snowflake.js";
 
 /**
  * The AL AI command registry.
@@ -613,7 +614,7 @@ export function normaliseCommandConfig(definition: CommandDefinition, input: Par
   return {
     name: definition.name,
     enabled: input?.enabled === undefined ? base.enabled : Boolean(input.enabled),
-    allowedLevel: isAllowedLevel(input?.allowedLevel) ? input.allowedLevel : base.allowedLevel,
+    allowedLevel: isTier(input?.allowedLevel) ? input.allowedLevel : base.allowedLevel,
     dmOnAction: definition.supportsNotify && input?.dmOnAction ? true : false,
     deleteMessageDays: definition.supportsPurge ? Math.min(Math.max(days, 0), MAX_PURGE_DAYS) : 0,
     allowedRoleIds: normaliseIdList(input?.allowedRoleIds, MAX_CUSTOM_ROLES_PER_COMMAND),
@@ -633,25 +634,19 @@ export function normaliseCommandConfig(definition: CommandDefinition, input: Par
     // so every other command has nothing for this to delete. Same rule as the
     // purge setting: an unsupported control is dropped, not stored and ignored.
     deleteResponseOnLeave: definition.target === "member" ? Boolean(input?.deleteResponseOnLeave) : false,
-    mutedRoleId: owns("mutedRoleId") ? normaliseSingleId(input?.mutedRoleId) : null,
-    prisonRoleId: owns("prisonRoleId") ? normaliseSingleId(input?.prisonRoleId) : null,
-    prisonChannelId: owns("prisonChannelId") ? normaliseSingleId(input?.prisonChannelId) : null,
+    mutedRoleId: owns("mutedRoleId") ? normaliseSnowflake(input?.mutedRoleId) : null,
+    prisonRoleId: owns("prisonRoleId") ? normaliseSnowflake(input?.prisonRoleId) : null,
+    prisonChannelId: owns("prisonChannelId") ? normaliseSnowflake(input?.prisonChannelId) : null,
     blacklistRoleIds: owns("blacklistRoleIds") ? normaliseIdList(input?.blacklistRoleIds, MAX_CUSTOM_ROLES_PER_COMMAND) : [],
     adminRoleIdsToStrip: owns("adminRoleIdsToStrip") ? normaliseIdList(input?.adminRoleIdsToStrip, MAX_CUSTOM_ROLES_PER_COMMAND) : [],
     blockableRoleIds: owns("blockableRoleIds") ? normaliseIdList(input?.blockableRoleIds, MAX_CUSTOM_ROLES_PER_COMMAND) : []
   };
 }
 
-const SNOWFLAKE = /^\d{17,20}$/;
-const TIERS: readonly Tier[] = ["owner", "admin", "moderator"];
-
-function isAllowedLevel(value: unknown): value is Tier {
-  return typeof value === "string" && (TIERS as readonly string[]).includes(value);
-}
 
 function normaliseIdList(value: unknown, limit: number): string[] {
   if (!Array.isArray(value)) return [];
-  return [...new Set(value.filter((id): id is string => typeof id === "string" && SNOWFLAKE.test(id)))].slice(0, limit);
+  return filterSnowflakes(value, limit);
 }
 
 /**
@@ -661,11 +656,8 @@ function normaliseIdList(value: unknown, limit: number): string[] {
  * is never coerced: an id Discord would reject, kept because it was non-empty,
  * would look configured on the screen while the command that needs it refuses
  * to run — the failure would be reported a long way from the setting that
- * caused it.
+ * caused it. That is exactly what {@link normaliseSnowflake} does.
  */
-function normaliseSingleId(value: unknown): string | null {
-  return typeof value === "string" && SNOWFLAKE.test(value) ? value : null;
-}
 
 /**
  * The characters Discord accepts in a command name.

@@ -18,8 +18,6 @@ export type IntrusionDetectorOptions = {
   windowMs?: number;
   /** Distinct authorization failures from one actor inside the window. */
   authorizationBurst?: number;
-  /** Distinct signature failures from one layer inside the window. */
-  signatureBurst?: number;
   /** Requests to one endpoint inside the window before it counts as abnormal. */
   requestBurst?: number;
 };
@@ -30,7 +28,6 @@ export function createIntrusionDetector(options: IntrusionDetectorOptions = {}) 
   const now = options.now ?? (() => Date.now());
   const windowMs = options.windowMs ?? DEFAULT_WINDOW_MS;
   const authorizationBurst = options.authorizationBurst ?? 3;
-  const signatureBurst = options.signatureBurst ?? 2;
   const requestBurst = options.requestBurst ?? 30;
 
   /** key -> timestamps inside the current window */
@@ -113,15 +110,6 @@ export function createIntrusionDetector(options: IntrusionDetectorOptions = {}) 
     /** True when this actor has already tripped the authorization burst budget. */
     isAuthorizationBursting(guildId: string, actorId: string) {
       return countInWindow(`auth:${guildId}:${actorId}`) >= authorizationBurst;
-    },
-
-    /** True when this layer has already tripped the signature burst budget. */
-    isSignatureBursting(layer: string) {
-      return countInWindow(`sig:${layer}`) >= signatureBurst;
-    },
-
-    reset() {
-      hits.clear();
     }
   };
 }

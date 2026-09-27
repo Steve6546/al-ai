@@ -169,10 +169,10 @@ test("sweeping forgets clients with nothing left in the window", () => {
  * Client attribution
  * ------------------------------------------------------------------ */
 
-test("the client is the first hop in x-forwarded-for", () => {
-  // `trustProxy` is on, so the header is populated by the proxy in front of the
-  // dashboard. Counting the proxy's own address would throttle everybody at once.
-  assert.equal(clientKey({ "x-forwarded-for": "203.0.113.7, 10.0.0.1" }, "127.0.0.1"), "203.0.113.7");
-  assert.equal(clientKey({}, "127.0.0.1"), "127.0.0.1");
-  assert.equal(clientKey({}, undefined), "unknown");
+test("the client is the TCP peer, not a header the caller can choose", () => {
+  // `trustProxy` is on, so `x-forwarded-for` is whatever the caller wrote.
+  // Trusting it let a flood rotate its own throttle key per request and bypass
+  // the limit; the socket peer cannot be forged, so it is the key.
+  assert.equal(clientKey("127.0.0.1"), "127.0.0.1");
+  assert.equal(clientKey(undefined), "unknown");
 });

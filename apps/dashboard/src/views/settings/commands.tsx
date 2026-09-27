@@ -5,7 +5,6 @@ import {
   ChevronDown,
   Gavel,
   Hash,
-  Loader2,
   MessageSquare,
   Palette,
   Plus,
@@ -27,6 +26,8 @@ import {
   clampInteger,
   commandDurations,
   commandRegistry,
+  isSnowflake,
+  mentionToSnowflake,
   isUsableAlias,
   MAX_ALIASES_PER_COMMAND,
   MAX_AUTO_DELETE_SECONDS,
@@ -37,8 +38,10 @@ import {
 } from "@al-ai/core/browser";
 import { api, type CommandChange, type ScopedMember } from "@/api";
 import { EmptyState } from "@/components/empty-state";
+import { RoleSwatch } from "@/components/role-swatch";
+import { LoadError, LoadingRow } from "@/components/view-states";
 import { SaveBar } from "@/components/save-bar";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useDraftForm } from "@/lib/use-draft-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -120,19 +123,10 @@ export function CommandsView({ guild }: { guild: Guild }) {
   }, [guild.id]);
 
   if (error) {
-    return (
-      <Alert variant="destructive">
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
-    );
+    return <LoadError message={error} />;
   }
   if (!data) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" />
-        جارٍ التحميل
-      </div>
-    );
+    return <LoadingRow />;
   }
 
   if (data.commands.length === 0) {
@@ -224,8 +218,7 @@ export function CommandsBoard({
   /** Re-reads the stored configuration after a save, so the draft is rebased. */
   onSaved: () => Promise<CommandFlag[]>;
 }) {
-  const [saved, setSaved] = useState<CommandFlag[]>(commands);
-  const [draft, setDraft] = useState<CommandFlag[]>(commands);
+  const { saved, draft, dirty, setDraft, reset, commit } = useDraftForm(commands, commandsEqual);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [section, setSection] = useState<CommandCategory | "all">("all");
@@ -488,17 +481,16 @@ export function CommandsBoard({
         </p>
       </div>
 
-      {changes.length > 0 && (
+      {dirty && (
         <SaveBar
           message={`${changes.length} تغيير غير محفوظ`}
-          onCancel={() => setDraft(saved)}
+          onCancel={reset}
           onSave={async () => {
             await onSave(changes);
             // Rebased on what the server stored, not on the local draft: the
             // server normalises every change, so the two can legitimately differ.
             const fresh = await onSaved();
-            setSaved(fresh);
-            setDraft(fresh);
+            commit(fresh);
           }}
         />
       )}
@@ -571,6 +563,19 @@ const COMPARED_KEYS = [
 ] as const;
 
 /**
+ * The draft form's comparison for this screen, and the save bar's single rule.
+ *
+ * `dirty` and the `changes` list below are two readings of the same question —
+ * "does any drafted command differ from its stored copy?" — so the bar appears
+ * for exactly the edits the save will send, and reverting the last of them
+ * clears it at once.
+ */
+function commandsEqual(saved: CommandFlag[], draft: CommandFlag[]): boolean {
+  const before = new Map(saved.map(command => [command.name, command]));
+  return draft.every(command => !commandDiffers(command, before.get(command.name)));
+}
+
+/**
  * Whether the draft differs from what is stored, field by field.
  *
  * Not `JSON.stringify`. The two objects are built by different code — one by the
@@ -580,8 +585,7 @@ const COMPARED_KEYS = [
  * plus the lists and the presets in order, is what makes "unchanged" mean
  * unchanged.
  */
-function commandDiffers(a: CommandFlag, b: CommandFlag | undefined): boolean {
-  if (!b) return true;
+function commandDiffers(a: CommandFlag, b: CommandFlag | undefined): boolean {  if (!b) return true;
   for (const key of COMPARED_KEYS) {
     if (a[key] !== b[key]) return true;
   }
@@ -1345,13 +1349,7 @@ export function ScopeSelector({
                 checked={selected.includes(item.id)}
                 onCheckedChange={checked => onChange(checked ? [...selected, item.id] : selected.filter(id => id !== item.id))}
               />
-              {item.color !== undefined && (
-                <span
-                  aria-hidden
-                  className="size-2.5 shrink-0 rounded-full border border-border"
-                  style={{ background: item.color ? `#${item.color.toString(16).padStart(6, "0")}` : undefined }}
-                />
-              )}
+              <RoleSwatch color={item.color} />
               {item.type && <span className="text-[10px] text-muted-foreground">#{item.type}</span>}
               <span className="truncate">{item.name}</span>
             </label>
@@ -1398,8 +1396,8 @@ export function MemberScopeSelector({
   const trimmed = entry.trim();
   // A mention is what the operator has to hand — they copy it from Discord —
   // so both forms are accepted and reduced to the snowflake inside.
-  const candidate = trimmed.replace(/[<@!>]/g, "");
-  const valid = /^\d{17,20}$/.test(candidate);
+  const candidate = mentionToSnowflake(trimmed);
+  const valid = isSnowflake(candidate);
   const duplicate = valid && selected.includes(candidate);
 
   const add = () => {
@@ -1489,7 +1487,7 @@ export function MemberScopeSelector({
  * what it cannot honour, and a drop the operator cannot see is indistinguishable
  * from a save that did not happen.
  */
-export function AliasEditor({
+function AliasEditor({
   command,
   aliasOwner,
   onChange

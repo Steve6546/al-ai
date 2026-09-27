@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, Info, Loader2, ShieldCheck, TriangleAlert, UserCog } from "lucide-react";
+import { Check, Info, ShieldCheck, TriangleAlert, UserCog } from "lucide-react";
 import { api } from "@/api";
+import { wireEqual } from "@/lib/records";
+import { useDraftForm } from "@/lib/use-draft-form";
 import { SaveBar } from "@/components/save-bar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { RoleSwatch } from "@/components/role-swatch";
+import { LoadError, LoadingRow } from "@/components/view-states";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { tierDescriptions, tierLabels, type DiscordRole, type Guild, type TierConfig, type TierRoles } from "@/types";
+import { EMPTY_TIER_ROLES } from "@al-ai/core/browser";
 
 /**
  * Role mapping — GOVERNANCE rule 3.
@@ -25,7 +30,10 @@ import { tierDescriptions, tierLabels, type DiscordRole, type Guild, type TierCo
  */
 export function RolesView({ guild }: { guild: Guild }) {
   const [config, setConfig] = useState<TierConfig | null>(null);
-  const [draft, setDraft] = useState<TierRoles | null>(null);
+  const { draft, dirty, reset, commit, setDraft } = useDraftForm(
+    config?.configured ?? EMPTY_TIER_ROLES,
+    rolesEqual
+  );
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -33,7 +41,6 @@ export function RolesView({ guild }: { guild: Guild }) {
     try {
       const result = await api.tiers(guild.id);
       setConfig(result);
-      setDraft(result.configured ?? EMPTY_TIERS);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذّر التحميل.");
     }
@@ -41,28 +48,16 @@ export function RolesView({ guild }: { guild: Guild }) {
 
   useEffect(() => {
     setConfig(null);
-    setDraft(null);
     void load();
   }, [load]);
 
   if (error) {
-    return (
-      <Alert variant="destructive">
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
-    );
+    return <LoadError message={error} />;
   }
 
   if (!config || !draft) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" />
-        جارٍ التحميل
-      </div>
-    );
+    return <LoadingRow />;
   }
-
-  const dirty = JSON.stringify(normalise(config.configured ?? EMPTY_TIERS)) !== JSON.stringify(normalise(draft));
 
   /**
    * Assigning a role to one list removes it from the other. A role in both lists
@@ -136,11 +131,10 @@ export function RolesView({ guild }: { guild: Guild }) {
 
       {dirty && (
         <SaveBar
-          onCancel={() => setDraft(config.configured ?? EMPTY_TIERS)}
+          onCancel={reset}
           onSave={async () => {
             const result = await api.saveTiers(guild.id, draft);
-            setConfig(current => (current ? { ...current, configured: result.configured } : current));
-            setDraft(result.configured);
+            commit(result.configured);
             await load();
           }}
         />
@@ -149,14 +143,20 @@ export function RolesView({ guild }: { guild: Guild }) {
   );
 }
 
-const EMPTY_TIERS: TierRoles = { adminRoleIds: [], moderatorRoleIds: [] };
-
 /** Sorted copies, so a reordered list is not mistaken for a change. */
 function normalise(roles: TierRoles): TierRoles {
   return {
     adminRoleIds: [...roles.adminRoleIds].sort(),
     moderatorRoleIds: [...roles.moderatorRoleIds].sort()
   };
+}
+
+/**
+ * The hook's comparison for this screen: two lists that differ only in order
+ * are the same selection, so both sides are sorted before they are compared.
+ */
+function rolesEqual(a: TierRoles, b: TierRoles): boolean {
+  return wireEqual(normalise(a), normalise(b));
 }
 
 function toggle(list: readonly string[], id: string, checked: boolean): string[] {
@@ -208,11 +208,7 @@ function RolePicker({
                     checked={chosen.has(role.id)}
                     onCheckedChange={checked => onToggle(role.id, checked === true)}
                   />
-                  <span
-                    className="size-2.5 shrink-0 rounded-full border border-border"
-                    style={role.color ? { backgroundColor: `#${role.color.toString(16).padStart(6, "0")}` } : undefined}
-                    aria-hidden
-                  />
+                  <RoleSwatch color={role.color} />
                   <span className="min-w-0 flex-1 truncate">{role.name}</span>
                   {blocked && (
                     <Badge variant="destructive" className="shrink-0 text-[10px]">

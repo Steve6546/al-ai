@@ -19,10 +19,10 @@ import { cn } from "@/lib/utils";
  * transparent margin to explain.
  */
 
-export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 /** 8 MB. Generous for a 256px avatar, small enough to keep the request sane. */
-export const MAX_SOURCE_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_SOURCE_FILE_BYTES = 8 * 1024 * 1024;
 
 export type CropTarget = "avatar" | "banner" | "roleIcon";
 
@@ -35,7 +35,7 @@ export type CropTarget = "avatar" | "banner" | "roleIcon";
  * bytes is the one that would win. Only the Arabic label is local, because it is
  * a display concern the shared contract has no business knowing.
  */
-export const CROP_TARGETS: Record<CropTarget, { width: number; height: number; label: string }> = {
+const CROP_TARGETS: Record<CropTarget, { width: number; height: number; label: string }> = {
   avatar: { ...IMAGE_TARGET_SIZES.avatar, label: "الأفاتار" },
   banner: { ...IMAGE_TARGET_SIZES.banner, label: "البانر" },
   roleIcon: { ...IMAGE_TARGET_SIZES.roleIcon, label: "أيقونة الرتبة" }

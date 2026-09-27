@@ -19,11 +19,10 @@ import {
   MAX_NICKNAME_LENGTH,
   activityTypeLabels,
   activityTypes,
-  botStatusLabels,
-  botStatuses,
   describeAppearanceResult
 } from "@al-ai/core/browser";
 import { api } from "@/api";
+import { useDraftForm } from "@/lib/use-draft-form";
 import { ColorPicker } from "@/components/color-picker";
 import { ImageCropper, ImagePickerButton, readImageFile, type CropTarget, type LoadedImage } from "@/components/image-cropper";
 import { SaveBar } from "@/components/save-bar";
@@ -82,12 +81,12 @@ type CropState = { target: CropTarget; image: LoadedImage } | null;
 
 export function CustomizationView({ guild }: { guild: Guild }) {
   /* ---- per-guild scope ---- */
-  const [savedGuild, setSavedGuild] = useState<CustomizationSettings | null>(null);
-  const [guildDraft, setGuildDraft] = useState<CustomizationSettings | null>(null);
+  const [guildSettings, setGuildSettings] = useState<CustomizationSettings | null>(null);
+  const guildForm = useDraftForm(guildSettings);
 
   /* ---- global scope ---- */
-  const [savedIdentity, setSavedIdentity] = useState<BotIdentitySettings | null>(null);
-  const [identityDraft, setIdentityDraft] = useState<BotIdentitySettings | null>(null);
+  const [identitySettings, setIdentitySettings] = useState<BotIdentitySettings | null>(null);
+  const identityForm = useDraftForm(identitySettings);
   const [snapshot, setSnapshot] = useState<BotIdentitySnapshot | null>(null);
 
   /* ---- advisory reads ---- */
@@ -104,10 +103,8 @@ export function CustomizationView({ guild }: { guild: Guild }) {
 
   useEffect(() => {
     let cancelled = false;
-    setSavedGuild(null);
-    setGuildDraft(null);
-    setSavedIdentity(null);
-    setIdentityDraft(null);
+    setGuildSettings(null);
+    setIdentitySettings(null);
     setHierarchy(null);
     setRoleIcon(null);
     setError(null);
@@ -120,8 +117,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
       .customization(guild.id)
       .then(result => {
         if (cancelled) return;
-        setSavedGuild(result.settings);
-        setGuildDraft(result.settings);
+        setGuildSettings(result.settings);
         setPermissions(result.permissions);
         setHierarchy(result.hierarchy);
         setRoleIcon(result.roleIcon);
@@ -132,17 +128,15 @@ export function CustomizationView({ guild }: { guild: Guild }) {
       .botIdentity(guild.id)
       .then(result => {
         if (cancelled) return;
-        setSavedIdentity(result.settings);
-        setIdentityDraft(result.settings);
+        setIdentitySettings(result.settings);
         setSnapshot(result.snapshot);
       })
       .catch(cause => {
         if (cancelled) return;
         // The global half unreadable must not present an editable form whose
-        // save would overwrite values it never read. Fill the draft with the
-        // documented defaults *only* as a last resort, and say so.
-        setSavedIdentity(null);
-        setIdentityDraft(null);
+        // save would overwrite values it never read. Clearing the source keeps
+        // the form inert, and the toast says why.
+        setIdentitySettings(null);
         push({
           tone: "error",
           title: "تعذّر تحميل الهوية العالمية",
@@ -171,7 +165,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
    * ---------------------------------------------------------------- */
   /** Whatever the preview should draw: the draft when there is one, else stored. */
   const previewIdentity = useMemo(() => {
-    const source = identityDraft ?? savedIdentity ?? DEFAULT_BOT_IDENTITY;
+    const source = identityForm.draft ?? identityForm.saved ?? DEFAULT_BOT_IDENTITY;
     return {
       username: snapshot?.username ?? "AL AI",
       // The draft's data URL wins while cropping; otherwise fall back to the CDN
@@ -184,7 +178,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
       activityText: source.activityText,
       statusDuration: source.statusDuration
     };
-  }, [identityDraft, savedIdentity, snapshot]);
+  }, [identityForm.draft, identityForm.saved, snapshot]);
 
   if (error) {
     return (
@@ -193,7 +187,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
       </Alert>
     );
   }
-  if (!savedGuild || !guildDraft) {
+  if (!guildForm.saved || !guildForm.draft) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="size-4 animate-spin" />
@@ -202,15 +196,11 @@ export function CustomizationView({ guild }: { guild: Guild }) {
     );
   }
 
-  /* ---------------------------------------------------------------- *
-   * Dirty tracking
-   *
-   * Compared field by field rather than with `JSON.stringify` so that a key
-   * appearing in one object and not the other (which is how the two halves were
-   * merged) cannot register as "changed" with both values equal.
-   * ---------------------------------------------------------------- */
-  const guildDirty = !shallowEqual(savedGuild, guildDraft);
-  const identityDirty = savedIdentity !== null && identityDraft !== null && !shallowEqual(savedIdentity, identityDraft);
+  const { draft: guildDraft, patch: patchGuild } = guildForm;
+  const { draft: identityDraft, patch: patchIdentity } = identityForm;
+
+  const guildDirty = guildForm.dirty;
+  const identityDirty = identityForm.dirty;
 
   const nicknamePermission = permissions.find(item => item.key === "change_nickname");
   // Only a *known* absence blocks the save. `granted` is null when the permission
@@ -218,12 +208,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
   // guild whenever Discord had a hiccup.
   const canSaveGuild =
     guild.canManageIdentity && nicknamePermission?.granted !== false && guildDraft.nickname.length <= MAX_NICKNAME_LENGTH;
-  const canSaveIdentity = guild.canManageIdentity && identityDraft !== null;
   const permissionsUnreadable = permissions.length > 0 && permissions.every(permission => permission.granted === null);
-
-  const patchGuild = (next: Partial<CustomizationSettings>) => setGuildDraft({ ...guildDraft, ...next });
-  const patchIdentity = (next: Partial<BotIdentitySettings>) =>
-    setIdentityDraft(current => (current ? { ...current, ...next } : current));
 
   /* ---------------------------------------------------------------- *
    * Image picking
@@ -269,16 +254,14 @@ export function CustomizationView({ guild }: { guild: Guild }) {
     if (roleIcon?.locked) delete payload.roleIconUrl;
 
     const result = await api.saveCustomization(guild.id, payload);
-    setSavedGuild(result.settings);
-    setGuildDraft(result.settings);
+    guildForm.commit(result.settings);
     return describeAppearanceResult(result);
   };
 
   const saveIdentity = async () => {
     if (!identityDraft) return { ok: false, message: "تعذّر تحميل الهوية العالمية." };
     const result = await api.saveBotIdentity(guild.id, identityDraft);
-    setSavedIdentity(result.settings);
-    setIdentityDraft(result.settings);
+    identityForm.commit(result.settings);
     return describeAppearanceResult(result);
   };
 
@@ -300,8 +283,8 @@ export function CustomizationView({ guild }: { guild: Guild }) {
   };
 
   const resetAll = () => {
-    setGuildDraft(savedGuild);
-    if (savedIdentity) setIdentityDraft(savedIdentity);
+    guildForm.reset();
+    identityForm.reset();
     setCrop(null);
   };
 
@@ -711,22 +694,6 @@ export function CustomizationView({ guild }: { guild: Guild }) {
       ) : null}
     </div>
   );
-}
-
-/**
- * Field-by-field equality, ignoring key order and absent keys.
- *
- * `JSON.stringify` was what the previous version used and it is wrong for two
- * objects that hold the same values in a different order — a reload could show
- * the floating bar over an untouched form. Explicit comparison cannot be fooled
- * that way, and it also survives a key that exists on one side only.
- */
-function shallowEqual<T extends object>(left: T, right: T): boolean {
-  const keys = new Set([...Object.keys(left), ...Object.keys(right)]) as Set<keyof T>;
-  for (const key of keys) {
-    if (left[key] !== right[key]) return false;
-  }
-  return true;
 }
 
 /**

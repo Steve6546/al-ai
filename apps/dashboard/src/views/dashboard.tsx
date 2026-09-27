@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Activity, Ban, Clock, Loader2, ShieldAlert, TriangleAlert, UserMinus, Users, Wifi, WifiOff, Zap } from "lucide-react";
+import { Activity, Ban, Clock, ShieldAlert, TriangleAlert, UserMinus, Users, Wifi, WifiOff, Zap } from "lucide-react";
 import { BOT_HEARTBEAT_STALE_MS, PING_WARN_MS } from "@al-ai/core/browser";
 import { api } from "@/api";
+import { LoadError, LoadingRow } from "@/components/view-states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,19 +43,10 @@ export function DashboardView({ guild }: { guild: Guild }) {
   }, [guild.id]);
 
   if (error) {
-    return (
-      <Alert variant="destructive">
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
-    );
+    return <LoadError message={error} />;
   }
   if (!metrics) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" />
-        جارٍ تحميل مقاييس السيرفر
-      </div>
-    );
+    return <LoadingRow label="جارٍ تحميل مقاييس السيرفر" />;
   }
 
   const { bot, members, punishments24h, recentActivity } = metrics;

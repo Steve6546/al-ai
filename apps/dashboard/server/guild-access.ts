@@ -11,24 +11,10 @@
  * the Fastify handler is what makes them testable without a database.
  */
 
-import { DISCORD_PERMISSION_BITS, type Tier } from "@al-ai/core";
+import { DISCORD_PERMISSION_BITS, type GuildSummary, type Tier } from "@al-ai/core";
 import { guildIconUrl, hasPermission, type DiscordUserGuild } from "./discord.js";
 
-export type GuildSummary = {
-  id: string;
-  name: string;
-  iconUrl: string | null;
-  /** `null` means "not knowable", never zero. See the note in `describeGuildAccess`. */
-  memberCount: number | null;
-  tier: Tier | null;
-  botPresent: boolean;
-  canManage: boolean;
-  canManageIdentity: boolean;
-  canManageLogging: boolean;
-  canManageCommands: boolean;
-  canManageTiers: boolean;
-  canInvite: boolean;
-};
+export type { GuildSummary };
 
 /**
  * Discord's own verdict on whether the caller may administer this guild.

@@ -1,9 +1,9 @@
 /**
  * Browser-safe surface of @al-ai/core.
  *
- * The dashboard UI needs the shared rules (the five operator destinations, the
- * category default, the command registry, the tier weights) but must never pull
- * in the server crypto. `security.ts` is the only module that imports
+ * The dashboard UI needs the shared rules (the thirteen operator destinations,  
+ * the category default, the command registry, the tier weights) but must never  
+ * pull in the server crypto. `security.ts` is the only module that imports  
  * `node:crypto`, so it is deliberately excluded here.
  *
  * The server keeps importing `@al-ai/core`; the browser imports `@al-ai/core/browser`.
@@ -17,3 +17,4 @@ export * from "./session-policy.js";
 export * from "./contracts.js";
 export * from "./hierarchy.js";
 export * from "./anti-nuke.js";
+export * from "./snowflake.js";

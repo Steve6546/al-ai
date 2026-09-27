@@ -13,7 +13,7 @@ import { LAYER_SIGNATURE_TTL_MS, newNonce, layerSignature, verifyLayerRequest } 
  *    arbitrary state, and it never echoes a secret back.
  */
 
-export const DEFAULT_ADAPTER_PORT = 3400;
+const DEFAULT_ADAPTER_PORT = 3400;
 export const ADAPTER_HOST = "127.0.0.1";
 
 /** The only keys `applyConfig` will accept. Anything else is rejected. */
