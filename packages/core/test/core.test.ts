@@ -231,6 +231,19 @@ test("a warning and its removal are both registered moderation events", () => {
 
 test("duplicate channel assignment across destinations is rejected", () => {
   assert.throws(() => assertUniqueChannelAssignment({ "member-log": "c1", "voice-log": "c1" }));
+  // An event bound to a *foreign* section's channel splits one channel across
+  // two purposes, which is what the guard exists to stop.
+  assert.throws(() => assertUniqueChannelAssignment({ "voice-log": "c1" }, { "member.join": "c1" }));
+});
+
+test("an event bound to its own section's channel is accepted", () => {
+  // «تطبيق على جميع السجلات المفعلة» produces exactly this shape — the
+  // section's channel written into every enabled record — and rejecting it
+  // stranded the operator with an unsavable draft.
+  assert.equal(
+    assertUniqueChannelAssignment({ "member-log": "c1" }, { "member.join": "c1", "member.leave": "c1" }),
+    true
+  );
 });
 
 test("distinct channel assignment is accepted", () => {

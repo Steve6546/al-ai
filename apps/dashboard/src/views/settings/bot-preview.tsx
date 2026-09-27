@@ -146,7 +146,7 @@ export function BotLivePreview({ identity, guild }: { identity: PreviewIdentity;
             <Badge variant="secondary" className="mb-1 gap-1">
               {/* The same glyph the picker draws, so the preview cannot show a
                   green disc for a status the menu renders as a crescent. */}
-              <StatusDot status={status} size={9} maskColor="currentColor" />
+              <StatusDot status={status} size={9} />
               {statusLabel(status)}
               {durationLabel(identity.statusDuration) ? (
                 <span className="text-muted-foreground">· {durationLabel(identity.statusDuration)}</span>

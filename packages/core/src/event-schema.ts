@@ -437,15 +437,19 @@ export function isSuppressedByRole(
 }
 
 /**
- * Guards the "one purpose per channel" rule: a channel must not be bound twice,
- * whether the two bindings are both sections, both events, or one of each.
+ * Guards the "one purpose per channel" rule: a channel must not be bound to two
+ * sections, and an event must not be bound to a channel that belongs to a
+ * *different* section.
  *
- * A channel shared by a section and one of its own events is harmless to route —
- * the event binding would resolve to the same room — but it is still rejected,
- * because the operator's intent in binding an event on its own is separation. A
- * duplicate that achieves nothing but confusion is not a configuration worth
- * saving, and the error names both claimants so the operator can see which one
- * to clear.
+ * An event bound to its **own** section's channel is allowed, deliberately. The
+ * «تطبيق على جميع السجلات المفعلة» button writes the section's channel into
+ * every enabled record, which by definition produces exactly this shape — and
+ * rejecting it stranded the operator with an unsavable draft whose only "fix"
+ * was to un-apply the button. Routing resolves the event binding first, so the
+ * duplicate lands in the same room either way; there is no second purpose to
+ * protect. What stays rejected is everything that would genuinely split one
+ * channel across two purposes: section against section, and event against a
+ * foreign section.
  */
 export function assertUniqueChannelAssignment(
   sectionChannels: Partial<Record<LogDestination, string>>,
@@ -460,6 +464,10 @@ export function assertUniqueChannelAssignment(
   }
   for (const [eventId, channelId] of Object.entries(eventChannels)) {
     if (!channelId) continue;
+    const ownCategory = eventSchema.get(eventId)?.category;
+    // Absent-from-schema events keep the strict rule: an unknown id has no
+    // section to call its own.
+    if (ownCategory && seen.get(channelId) === ownCategory) continue;
     const previous = seen.get(channelId);
     if (previous) throw new Error(`Channel ${channelId} is assigned to both ${previous} and ${eventId}.`);
     seen.set(channelId, eventId);

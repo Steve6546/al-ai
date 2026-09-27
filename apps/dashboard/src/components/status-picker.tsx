@@ -29,6 +29,7 @@ import {
   type BotStatusDuration
 } from "@al-ai/core/browser";
 import { Check } from "lucide-react";
+import { useId } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,12 +55,13 @@ export const STATUS_COLORS: Record<BotStatus, string> = {
   invisible: "#80848e"
 };
 
-/** How a status is described in a sentence, beyond its short label. */
+/** How a status is described in the menu, the way Discord's own status menu
+ * carries a one-line explanation under each name. */
 const STATUS_DESCRIPTIONS: Record<BotStatus, string> = {
-  online: "يظهر متصلاً للجميع",
-  idle: "يظهر بجانبه هلال أصفر",
-  dnd: "يُظهر أنه مشغول ولا يريد الإزعاج",
-  invisible: "يظهر غير متصل للجميع"
+  online: "ستظهر متصلاً للجميع",
+  idle: "ستظهر خائماً، بجانب اسمك هلال أصفر",
+  dnd: "لن تصلك إشعارات سطح المكتب",
+  invisible: "ستظهر غير متصل للجميع"
 };
 
 /**
@@ -67,26 +69,18 @@ const STATUS_DESCRIPTIONS: Record<BotStatus, string> = {
  *
  * `online` and `invisible` are circles that differ only in fill, and `dnd` is a
  * circle with a bar — but `idle` is a *crescent*, which no icon library draws
- * the way Discord does. It is built here from two overlapping shapes so the
- * silhouette matches: a solid disc, with a second disc in the surrounding
- * colour punched out of its top-right.
- *
- * `maskColor` is passed in rather than hardcoded because the crescent's cut-out
- * has to match whatever surface it sits on; a fixed value would show as a pale
- * notch on the menu background and a dark one on the button.
+ * the way Discord does. It is cut with an SVG mask instead of an overlapping
+ * CSS disc: a mask is self-contained, so the crescent reads correctly on every
+ * surface — the card the trigger sits on, the menu, and the live preview — with
+ * no caller having to name the background colour. (The previous maskColor
+ * approach is also what painted the bite black once the theme's tokens became
+ * oklch: `hsl(var(--background))` stopped being a colour at all.)
  */
-export function StatusDot({
-  status,
-  size = 10,
-  maskColor = "currentColor",
-  className
-}: {
-  status: BotStatus;
-  size?: number;
-  maskColor?: string;
-  className?: string;
-}) {
+export function StatusDot({ status, size = 10, className }: { status: BotStatus; size?: number; className?: string }) {
   const color = STATUS_COLORS[status];
+  // useId keeps the mask id unique per rendered glyph; an id collision across
+  // two dots on one page would make both crescents read the first mask.
+  const maskId = `status-crescent-${useId().replace(/[^a-zA-Z0-9-]/g, "")}`;
 
   if (status === "invisible") {
     return (
@@ -100,24 +94,16 @@ export function StatusDot({
 
   if (status === "idle") {
     return (
-      <span
-        aria-hidden
-        className={cn("relative inline-block shrink-0", className)}
-        style={{ width: size, height: size }}
-      >
-        <span className="absolute inset-0 rounded-full" style={{ backgroundColor: color }} />
-        {/* The bite that turns the disc into a crescent. */}
-        <span
-          className="absolute rounded-full"
-          style={{
-            backgroundColor: maskColor,
-            width: size * 0.72,
-            height: size * 0.72,
-            top: -size * 0.22,
-            right: -size * 0.24
-          }}
-        />
-      </span>
+      <svg aria-hidden viewBox="0 0 16 16" width={size} height={size} className={cn("shrink-0", className)}>
+        <defs>
+          <mask id={maskId}>
+            <rect width="16" height="16" fill="#fff" />
+            {/* The bite, top-right — Discord's crescent opens that way. */}
+            <circle cx="14" cy="2" r="6.5" fill="#000" />
+          </mask>
+        </defs>
+        <circle cx="8" cy="8" r="8" fill={color} mask={`url(#${maskId})`} />
+      </svg>
     );
   }
 
@@ -194,7 +180,7 @@ export function StatusPicker({
             as a hole rather than a pale dot. The theme tokens are plain oklch
             values since Tailwind 4 — wrapping them in hsl() produced an invalid
             colour and a black bite. */}
-        <StatusDot status={status} maskColor="var(--background)" />
+        <StatusDot status={status} />
         <span>{botStatusLabels[status]}</span>
         {activeDuration ? (
           <span className="text-xs text-muted-foreground">
@@ -203,13 +189,21 @@ export function StatusPicker({
         ) : null}
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="start" className="w-56">
+      <DropdownMenuContent align="start" className="w-64">
         {botStatuses.map(candidate => {
           const description = STATUS_DESCRIPTIONS[candidate];
+          // Two-line rows, the way Discord's own status menu draws them: the
+          // name, and the explanation underneath rather than hidden in a
+          // tooltip the operator has to hover to discover.
           const body = (
             <>
-              <StatusDot status={candidate} size={11} maskColor="var(--popover)" />
-              <span className="flex-1">{botStatusLabels[candidate]}</span>
+              <span className="mt-1">
+                <StatusDot status={candidate} size={12} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium leading-tight">{botStatusLabels[candidate]}</span>
+                <span className="block text-xs leading-snug text-muted-foreground">{description}</span>
+              </span>
             </>
           );
 
@@ -218,21 +212,20 @@ export function StatusPicker({
             return (
               <DropdownMenuItem
                 key={candidate}
-                title={description}
-                className="justify-start gap-2"
+                className="items-start justify-start gap-2.5 py-2"
                 onSelect={() => pick(candidate)}
               >
                 {body}
-                {status === candidate ? <Check className="size-3.5 text-primary" /> : null}
+                {status === candidate ? <Check className="mt-1 size-3.5 shrink-0 text-primary" /> : null}
               </DropdownMenuItem>
             );
           }
 
           return (
             <DropdownMenuSub key={candidate}>
-              <DropdownMenuSubTrigger className="justify-start gap-2" title={description}>
+              <DropdownMenuSubTrigger className="items-start justify-start gap-2.5 py-2">
                 {body}
-                {status === candidate ? <Check className="size-3.5 text-primary" /> : null}
+                {status === candidate ? <Check className="mt-1 size-3.5 shrink-0 text-primary" /> : null}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-48">
                 {botStatusDurations.map(entry => (
