@@ -195,6 +195,25 @@ function resolveCloudflaredPath(): string | null {
   return null;
 }
 
+/**
+ * Production tunnel configuration, from the environment.
+ *
+ * A quick tunnel (trycloudflare.com) is a *testing* facility: the URL is
+ * random per run and Cloudflare gives it no SLA. A production deployment
+ * should create a remotely-managed tunnel in the Cloudflare dashboard and set:
+ *
+ * - `CLOUDFLARED_TUNNEL_TOKEN` — the tunnel's run token, so the manager starts
+ *   `cloudflared tunnel run --token …` instead of a quick tunnel.
+ * - `CLOUDFLARED_HOSTNAME` — the fixed hostname routed to that tunnel, which
+ *   is what the OAuth callback and the reach gate use. The Developer Portal
+ *   redirect is then registered once and never changes.
+ */
+function productionTunnel(): { token: string; hostname: string | null } | null {
+  const token = process.env.CLOUDFLARED_TUNNEL_TOKEN?.trim();
+  if (!token) return null;
+  return { token, hostname: process.env.CLOUDFLARED_HOSTNAME?.trim() || null };
+}
+
 /* ------------------------------------------------------------------ *
  * The manager
  * ------------------------------------------------------------------ */
@@ -315,13 +334,21 @@ export function createNetworkManager(input: {
 
   function startTunnel() {
     if (child) return;
-    if (!cloudflaredPath) {
+    const managed = productionTunnel();
+    if (!cloudflaredPath && !managed) {
       tunnelStatus = "error";
       tunnelError = "cloudflared غير مثبّت على هذا الجهاز — ثبّته أو اضبط CLOUDFLARED_PATH.";
       return;
     }
     tunnelStatus = "starting";
     tunnelError = null;
+    // A managed tunnel's hostname is configuration, not discovery: it is known
+    // before the process answers, so the gate and the OAuth origin can use it
+    // immediately.
+    if (managed?.hostname) {
+      tunnelUrl = `https://${managed.hostname}`;
+      tunnelStatus = "running";
+    }
     // Detached, with the log file as stdout/stderr: the child outlives this
     // process (a restart keeps the URL) and no pipe can fill up and stall it —
     // cloudflared is chatty, and a blocked pipe would freeze the tunnel.
@@ -335,8 +362,10 @@ export function createNetworkManager(input: {
     }
     try {
       child = spawn(
-        cloudflaredPath,
-        ["tunnel", "--url", `http://127.0.0.1:${input.port}`, "--no-autoupdate"],
+        cloudflaredPath!,
+        managed
+          ? ["tunnel", "run", "--token", managed.token]
+          : ["tunnel", "--url", `http://127.0.0.1:${input.port}`, "--no-autoupdate"],
         { stdio: ["ignore", logFd, logFd], detached: true, windowsHide: true }
       );
       child.unref();
@@ -344,7 +373,7 @@ export function createNetworkManager(input: {
     } catch (error) {
       child = null;
       tunnelPid = null;
-      tunnelStatus = "error";
+      tunnelStatus = managed?.hostname ? "running" : "error";
       tunnelError = error instanceof Error ? error.message : "تعذّر تشغيل النفق.";
       return;
     } finally {

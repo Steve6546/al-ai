@@ -3,14 +3,28 @@
  * issue a cookie that outlives SESSION_MAX_AGE_SECONDS, and it must never
  * relax the httpOnly / sameSite settings below.
  */
-export const SESSION_COOKIE_NAME = "al_ai_session";
+/**
+ * The `__Host-` prefix is browser-enforced: a cookie so named is refused
+ * unless it is Secure, Path=/, and carries no Domain attribute — exactly the
+ * shape production sets below. That makes session fixation by a
+ * sibling-origin cookie structurally impossible rather than policy. Production
+ * carries the prefixed name; development (plain HTTP, where the prefix would
+ * be refused for lacking Secure) keeps the unprefixed one, so a dev server
+ * stays usable without weakening the hardened deployment. Renaming logs every
+ * operator out exactly once; the value is a fresh UUID per sign-in.
+ */
+export const SESSION_COOKIE_NAME =
+  process.env.NODE_ENV === "production" ? "__Host-al_ai_session" : "al_ai_session";
 export const SESSION_MAX_AGE_SECONDS = 24 * 60 * 60;
 /**
  * `Secure` follows the environment rather than a flag that has to be remembered:
  * a session id must never cross cleartext HTTP, and the only deployment with any
- * business sending one is production, which sits behind TLS termination. Local
- * dev stays plain HTTP on localhost, where the flag would stop the cookie from
- * being sent at all — so it is off unless `NODE_ENV` says otherwise.
+ * business sending one is production, which sits behind TLS termination (the
+ * Cloudflare tunnel) or talks from localhost, where browsers honor Secure
+ * cookies on plain HTTP. `NODE_ENV=production` is therefore a hard requirement
+ * for any deployment the network screen exposes beyond loopback — development
+ * stays plain HTTP on localhost, where the flag would otherwise stop the
+ * cookie from being sent at all.
  */
 export const SESSION_COOKIE_SECURE = process.env.NODE_ENV === "production";
 export const SESSION_COOKIE_OPTIONS = {
