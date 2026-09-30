@@ -14,7 +14,8 @@
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "check:schema": "node scripts/parse-schema.mjs infra/schema.sql",
-    "verify": "npm run lint && npm run check:schema && npm test && npm run build"
+    "verify": "npm run lint && npm run check:schema && npm test && npm run build",
+    "backup": "node --env-file=.env scripts/backup-db.mjs"
   },
   "devDependencies": {
     "pgsql-ast-parser": "^12.0.2",

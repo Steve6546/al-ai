@@ -6,6 +6,11 @@
     ".": "./src/index.ts",
     "./browser": "./src/browser.ts"
   },
-  "scripts": { "test": "tsx --test test/*.test.ts" },
-  "dependencies": { "tsx": "^4.23.13" }
+  "scripts": {
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "tsx": "^4.23.13"
+  }
 }
