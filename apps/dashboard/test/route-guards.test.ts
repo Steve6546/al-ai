@@ -172,9 +172,14 @@ test("the global identity write resolves the caller's tier in a guild from the b
   assert.doesNotMatch(body, /const\s+\w+\s*=\s*await requireSession\(/, "a bare session check is not enough");
 });
 
-test("the global identity read requires a session", () => {
+test("the global identity read requires guild standing, not just a session", () => {
   assert.ok(identityRead, "GET /api/bot/identity is declared");
-  assert.match(identityRead!.body, /readSession\(/, "the read is not public");
+  // The read once stopped at a bare session, which let any signed-in Discord
+  // account — reachable through the tunnel — read the bot's stored profile. It
+  // now resolves the caller's tier in the guildId the client already sends,
+  // the same shape the write uses, floored at the screen's own visibility rule.
+  assert.match(identityRead!.body, /requireTierForGuild\(/, "the read re-resolves standing per guild");
+  assert.doesNotMatch(identityRead!.body, /const\s+\w+\s*=\s*await readSession\(/, "a bare session check is not enough");
 });
 
 test("the global identity write refuses a body with no guild to authorise against", () => {

@@ -63,8 +63,22 @@ export async function readSession(db: Database, request: { headers: Record<strin
   return session;
 }
 
-export function sessionAccessToken(session: SessionRecord, env: BffEnv) {
-  return decryptSecret(session.accessTokenCiphertext, env.encryptionKey);
+/**
+ * The session's Discord access token, or null when its ciphertext can no
+ * longer be decrypted.
+ *
+ * A rotation of ENCRYPTION_KEY (or a corrupted row) must look like "please
+ * sign in again", not a 500 on every authenticated route: the audit flagged
+ * that an undecryptable session used to throw here and take its caller down.
+ * Callers treat null exactly like an auth failure — the session is destroyed
+ * and the browser is sent back to the login screen.
+ */
+export function sessionAccessToken(session: SessionRecord, env: BffEnv): string | null {
+  try {
+    return decryptSecret(session.accessTokenCiphertext, env.encryptionKey);
+  } catch {
+    return null;
+  }
 }
 
 export async function issueSession(

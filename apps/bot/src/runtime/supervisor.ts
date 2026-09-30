@@ -73,8 +73,12 @@ function isAlive(pid: number) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    // EPERM means the process exists but belongs to another account — that is
+    // very much alive, and treating it as dead let a second instance start
+    // with the same token (duplicated logs, doubled commands, doubled
+    // anti-nuke counting). Only "no such process" may read as dead.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }
 

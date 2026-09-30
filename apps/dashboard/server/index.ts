@@ -131,18 +131,41 @@ const env = loadEnv();
 const pool = createPool(env.databaseUrl);
 const db = createDatabase(pool);
 
-const app = Fastify({ logger: true, trustProxy: true });
+/**
+ * Trust forwarded headers only from the peer that actually proxies to us —
+ * the `cloudflared` process on loopback. `trustProxy: true` let any *direct*
+ * client flip its own protocol via `x-forwarded-proto`, which fed the OAuth
+ * origin logic; loopback-gating keeps the tunnel's https signal while making
+ * the header dead weight everywhere else.
+ */
+function trustProxyOnlyLoopback(addr: string): boolean {
+  return addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1";
+}
+
+/**
+ * The 1 MiB default is uncomfortably tight: the identity save legitimately
+ * carries an avatar AND a banner data URL (~1,000,200 bytes at the core's
+ * caps) before any other field. Stating the bound explicitly keeps a future
+ * field from silently breaking that save, while still capping bodies.
+ */
+const REQUEST_BODY_LIMIT = 1_200_000;
+
+const app = Fastify({
+  logger: true,
+  bodyLimit: REQUEST_BODY_LIMIT,
+  trustProxy: trustProxyOnlyLoopback
+});
 
 /**
  * The deployment's network reach. Loaded from `instance_settings` at boot, so
- * the mode the operator chose survives a restart and a tunnel mode resumes its
- * `cloudflared` process on its own. The gate hook below consults this on every
- * request.
+ * the mode the operator chose survives a restart and a tunnel mode adopts (or
+ * resumes) its `cloudflared` process on its own. The gate hook below consults
+ * this on every request.
  */
 const network = createNetworkManager({
   port: env.port,
-  getMode: () => db.getSetting("remote_access_mode"),
-  setMode: value => db.setSetting("remote_access_mode", value),
+  getSetting: key => db.getSetting(key),
+  setSetting: (key, value) => db.setSetting(key, value),
   log: app.log
 });
 await network.boot();
@@ -221,7 +244,7 @@ app.addHook("onRequest", async (_request, reply) => {
  * visitor should learn why in one response, not be metered first.
  */
 app.addHook("onRequest", async (request, reply) => {
-  if (network.isHostAllowed(request.headers.host)) return;
+  if (network.isHostAllowed(request.headers.host, request.socket.remoteAddress)) return;
   return reply.code(403).send({
     error: "REMOTE_ACCESS_DISABLED",
     message: "الوصول إلى هذه اللوحة من خارج الجهاز المضيف معطّل. شغّل «الوصول للشبكة» من شاشة النظام داخل اللوحة."
@@ -235,9 +258,20 @@ app.addHook("onRequest", async (request, reply) => {
   if (!url.startsWith("/api/") && !url.startsWith("/auth/")) return;
   if (url.startsWith("/internal/")) return;
 
-  // The socket peer, not `request.ip`: `trustProxy` makes `request.ip` whatever
-  // the caller put in `x-forwarded-for`, which would hand the flood its own key.
-  const verdict = throttle.check(clientKey(request.socket.remoteAddress), Date.now());
+  // A request carrying a well-formed session id gets its OWN bucket keyed by
+  // that id rather than the shared per-IP one. Behind the tunnel every visitor
+  // arrives from cloudflared's loopback socket, so one flooding stranger could
+  // otherwise 429-lock the signed-in operator out of their own dashboard. The
+  // id is validated by shape only — a forged one just buys its own empty
+  // bucket, which is exactly the isolation we want; the session it claims is
+  // still verified per-route.
+  const cookies = parseCookies(request.headers.cookie);
+  const sessionKey = cookies[SESSION_COOKIE_NAME];
+  const key =
+    sessionKey && /^[0-9a-f-]{36}$/i.test(sessionKey)
+      ? `sess:${sessionKey}`
+      : clientKey(request.socket.remoteAddress);
+  const verdict = throttle.check(key, Date.now());
   if (verdict.allowed) return;
 
   return reply
@@ -320,8 +354,20 @@ async function loadUserGuilds(
   reply: FastifyReply,
   session: NonNullable<Awaited<ReturnType<typeof readSession>>>
 ) {
+  // An undecryptable token (ENCRYPTION_KEY rotated under a live session, or a
+  // corrupted row) is an auth failure, not a crash: end the session so the
+  // browser falls back to the sign-in screen.
+  const accessToken = sessionAccessToken(session, env);
+  if (!accessToken) {
+    await destroySession(db, request as unknown as { headers: Record<string, unknown> }).catch(() => undefined);
+    reply
+      .code(401)
+      .header("set-cookie", clearedCookieHeader())
+      .send({ error: "SESSION_EXPIRED", message: "انتهت صلاحية الدخول عبر Discord. سجّل الدخول من جديد." });
+    return null;
+  }
   try {
-    return await fetchUserGuildsCached(sessionAccessToken(session, env));
+    return await fetchUserGuildsCached(accessToken);
   } catch (error) {
     if (isAuthFailure(error)) {
       await destroySession(db, request as unknown as { headers: Record<string, unknown> }).catch(() => undefined);
@@ -477,7 +523,7 @@ async function verifyLayerCall(request: FastifyRequest, reply: FastifyReply) {
 /* ------------------------------------------------------------------ *
  * Health
  * ------------------------------------------------------------------ */
-app.get("/api/health", async (): Promise<HealthSnapshot> => {
+app.get("/api/health", async (request): Promise<HealthSnapshot | Omit<HealthSnapshot, "verification">> => {
   let database: "reachable" | "unreachable" = "reachable";
   let guildCount = 0;
   let uniqueUsers = 0;
@@ -507,12 +553,22 @@ app.get("/api/health", async (): Promise<HealthSnapshot> => {
       ? "connected"
       : "configured";
 
-  return {
-    status: database === "reachable" ? "healthy" : "degraded",
-    dashboard: "online",
+  // The service booleans answer "is the stack up" for supervisor checks; the
+  // verification counts (guilds, unique users) are deployment statistics no
+  // anonymous caller has business reading, so they are attached only for a
+  // signed-in session.
+  const base = {
+    status: (database === "reachable" ? "healthy" : "degraded") as "healthy" | "degraded",
+    dashboard: "online" as const,
     bot,
     database,
-    gateway: { eventsLastMinute: 0, ceiling: 120 },
+    gateway: { eventsLastMinute: 0, ceiling: 120 }
+  };
+  const session = await readSession(db, request as unknown as { headers: Record<string, unknown> });
+  if (!session) return base;
+
+  return {
+    ...base,
     // Discord's review threshold counts guilds, while its warning threshold counts
     // unique users. describeVerification owns both so the two units cannot be
     // compared against each other again.
@@ -699,11 +755,20 @@ app.get("/auth/discord/login", async (request, reply) => {
 });
 
 app.get("/auth/discord/callback", async (request, reply) => {
+  // The state cookie has done its job the moment this route answers, whatever
+  // the answer is — a consumed or rejected state must not sit in the jar for
+  // its full 10-minute Max-Age. Every exit path goes through `done`, which
+  // clears it alongside the redirect.
+  const clearStateCookie = policyCookieHeader(`${SESSION_COOKIE_NAME}_state`, "", 0);
+  const done = (path: string) => {
+    reply.header("Set-Cookie", clearStateCookie);
+    return reply.redirect(path);
+  };
   const query = request.query as { code?: string; state?: string; error?: string; guild_id?: string };
-  if (query.error) return reply.redirect("/?auth=denied");
+  if (query.error) return done("/?auth=denied");
   const cookies = parseCookies(request.headers.cookie);
   if (!query.code || !query.state || cookies[`${SESSION_COOKIE_NAME}_state`] !== query.state) {
-    return reply.redirect("/?auth=state_mismatch");
+    return done("/?auth=state_mismatch");
   }
 
   // Discord returns `guild_id` only when this leg was a bot authorization — the
@@ -718,7 +783,7 @@ app.get("/auth/discord/callback", async (request, reply) => {
   // what guards the redirect.
   if (query.guild_id) {
     invalidateBotGuildCache();
-    return reply.redirect("/?auth=bot_added");
+    return done("/?auth=bot_added");
   }
 
   try {
@@ -735,7 +800,7 @@ app.get("/auth/discord/callback", async (request, reply) => {
     const granted = tokens.scope.split(/\s+/).filter(Boolean);
     if (!LOGIN_SCOPES.every(scope => granted.includes(scope))) {
       app.log.warn({ scope: tokens.scope }, "Discord token does not cover the dashboard login scopes");
-      return reply.redirect("/?auth=denied");
+      return done("/?auth=denied");
     }
 
     const identity = await fetchIdentity(tokens.access_token);
@@ -744,7 +809,7 @@ app.get("/auth/discord/callback", async (request, reply) => {
     // the signed-in operator.
     if (env.botToken && identity.id === (await resolveBotUserId(env.botToken))) {
       app.log.warn({ userId: identity.id }, "OAuth callback resolved the bot's own application id");
-      return reply.redirect("/?auth=denied");
+      return done("/?auth=denied");
     }
 
     // A sign-in always begins a new session. Any session the browser was still
@@ -770,11 +835,12 @@ app.get("/auth/discord/callback", async (request, reply) => {
       accessToken: tokens.access_token,
       scopes: tokens.scope
     });
-    reply.header("Set-Cookie", sessionCookieHeader(id));
+    // Two cookies on the way out: the new session and the state clearance.
+    reply.header("Set-Cookie", [sessionCookieHeader(id), clearStateCookie]);
     return reply.redirect("/?auth=ok");
   } catch (error) {
     app.log.error(error, "Discord OAuth callback failed");
-    return reply.redirect("/?auth=failed");
+    return done("/?auth=failed");
   }
 });
 
@@ -1385,10 +1451,15 @@ function appearanceResponse(
 const GLOBAL_APPEARANCE_FIELDS = new Set<AppearanceField>(["avatarDataUrl", "bannerDataUrl", "bio"]);
 
 app.get("/api/bot/identity", async (request, reply) => {
-  const session = await readSession(db, request as unknown as { headers: Record<string, unknown> });
-  if (!session) {
-    return reply.code(401).send({ error: "UNAUTHENTICATED", message: "الجلسة منتهية أو غير موجودة. سجّل الدخول عبر Discord." });
-  }
+  // The identity is global (one bot, every guild), so the read needs guild
+  // standing, not just a session — the audit flagged it as the one read any
+  // signed-in stranger could reach. The floor matches the screen's own
+  // visibility rule (`canManageIdentity` = a resolvable tier in a bot guild);
+  // the write keeps its stricter admin gate. The client already sends the
+  // guildId this route was ignoring.
+  const query = request.query as { guildId?: string };
+  const context = await requireTierForGuild(request, reply, query.guildId ?? "", "moderator");
+  if (!context) return;
 
   const identity = await db.getBotIdentity();
 

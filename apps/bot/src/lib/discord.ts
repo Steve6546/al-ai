@@ -1313,8 +1313,13 @@ function createActorResolver() {
     let actorId = "unknown";
     let reason = "";
     try {
-      const logs = await guild.fetchAuditLogs({ type, limit: 5 });
-      const entry = logs.entries.find(item => item.targetId === targetId) ?? logs.entries.first();
+      const logs = await guild.fetchAuditLogs({ type, limit: 10 });
+      // Strict match only — no fallback to the newest entry. Under a burst of
+      // punishments the fallback pinned an unrelated admin's concurrent action
+      // onto an event they did not perform, which both misattributes the
+      // written log and spikes the wrong person's anti-nuke counter. A missing
+      // match leaves the actor unknown, which every consumer already handles.
+      const entry = logs.entries.find(item => item.targetId === targetId);
       if (entry?.executorId) actorId = entry.executorId;
       if (entry?.reason) reason = entry.reason;
     } catch {

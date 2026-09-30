@@ -27,6 +27,8 @@ export type IntegrationAdapterDeps = {
   hmacSecret: string;
   sourceLayer: string;
   consumeNonce: (nonce: string, expiresAt: Date) => Promise<boolean>;
+  /** Called with a fixed reason whenever a request signature fails to verify. */
+  onSignatureFailure?: (reason: string) => void;
   handlers: {
     getStatus: AdapterHandler;
     diagnose: AdapterHandler;
@@ -101,7 +103,11 @@ export function startIntegrationAdapter(deps: IntegrationAdapterDeps) {
     const endpoint = url.pathname.replace(/^\//, "");
 
     if (endpoint === "ping") {
-      await send(response, 200, { ok: true, sourceLayer: deps.sourceLayer });
+      // A liveness boolean only. The instance's sourceLayer string is
+      // configuration disclosure any local process (or any web page, since
+      // browsers can still SEND cross-origin) could read without ever holding
+      // the HMAC secret — the real endpoints below stay signature-gated.
+      await send(response, 200, { ok: true });
       return;
     }
     if (!isEndpoint(endpoint)) {
@@ -133,7 +139,17 @@ export function startIntegrationAdapter(deps: IntegrationAdapterDeps) {
         now()
       );
     } catch (error) {
-      await send(response, 401, { error: error instanceof Error ? error.message : "LAYER_SIGNATURE_INVALID" });
+      // The attempt is surfaced to the intrusion detector, which owns the
+      // critical `security.hmac-invalid` signal; without this the HMAC surface
+      // could be probed endlessly with zero security telemetry. The reply maps
+      // the error onto the known LAYER_* code family — those codes ARE the
+      // fixed vocabulary verifyLayerRequest throws — so the trusted caller can
+      // still tell a replay from a stale timestamp, while any message outside
+      // the family collapses to the generic code and no driver text escapes.
+      const reason = error instanceof Error ? error.message : "LAYER_SIGNATURE_INVALID";
+      const code = /^LAYER_[A-Z_]+$/.test(reason) ? reason : "LAYER_SIGNATURE_INVALID";
+      void deps.onSignatureFailure?.(code);
+      await send(response, 401, { error: code });
       return;
     }
 
@@ -150,8 +166,11 @@ export function startIntegrationAdapter(deps: IntegrationAdapterDeps) {
     try {
       const result = await deps.handlers[endpoint]({ endpoint, body: parsed });
       await send(response, 200, { ok: true, endpoint, result });
-    } catch (error) {
-      await send(response, 500, { ok: false, error: error instanceof Error ? error.message : "ADAPTER_FAILED" });
+    } catch {
+      // A fixed reason, never error.message: handler failures can carry driver
+      // or SQL text, and the adapter's caller is any local process with the
+      // HMAC secret — the error detail belongs in the bot's log, not here.
+      await send(response, 500, { ok: false, error: "ADAPTER_FAILED" });
     }
   }
 

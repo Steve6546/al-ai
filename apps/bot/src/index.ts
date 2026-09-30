@@ -491,7 +491,15 @@ bindEvents(client, guardedDispatch, {
 
     const reject = async (message: string, detail: string) => {
       const signal = detector.authorizationFailure({ guildId, actorId: userId, action: commandName, reason: detail });
-      await raiseSecurityEvent(signal.id, signal.data, guildId);
+      // Past the burst budget the critical audit write stops: the command path
+      // does not cross the gateway's rate ceiling, so a member hammering an
+      // unauthorized command used to grow the append-only audit trail without
+      // bound. The first attempts in the window still land — the budget is
+      // checked BEFORE recording this one, so the story is written once and
+      // the flood behind it is not.
+      if (!detector.isAuthorizationBursting(guildId, userId)) {
+        await raiseSecurityEvent(signal.id, signal.data, guildId);
+      }
       await logEvent("bot.command-failure", { guildId, actorId: userId, data: { command: commandName, ...aliasNote(), reason: detail } }, runtime).catch(() => undefined);
       await reply(message, { autoDeleteSeconds });
     };
@@ -789,19 +797,25 @@ bindEvents(client, guardedDispatch, {
       readBotHighestPosition(client, guildId)
     ]);
 
-    if (!actorPositions || !targetPositions || botPosition === null) {
+    if (!actorPositions || botPosition === null) {
       await reject("تعذّر التحقق من الرتب.", "HIERARCHY_UNAVAILABLE");
       return;
     }
 
+    // A banned target is by definition no longer a member — `/unban` could
+    // never pass the old "target must be readable" gate — and the record
+    // commands may name someone who already left. Discord still refuses the
+    // mutations it should refuse, so a missing target reads as position-less
+    // instead of failing the whole command. The actor and bot reads stay
+    // mandatory: without them there is no hierarchy to reason about.
     const hierarchy = checkHierarchy({
       actorId: userId,
       targetId,
       actorHighestPosition: actorPositions.highestPosition,
-      targetHighestPosition: targetPositions.highestPosition,
+      targetHighestPosition: targetPositions?.highestPosition ?? -1,
       botHighestPosition: botPosition,
       actorIsGuildOwner: actorPositions.isGuildOwner,
-      targetIsGuildOwner: targetPositions.isGuildOwner
+      targetIsGuildOwner: targetPositions?.isGuildOwner ?? false
     });
     if (!hierarchy.allowed) {
       await reject(hierarchyMessages[hierarchy.reason], hierarchy.reason);
@@ -1447,6 +1461,10 @@ const adapter =
         hmacSecret,
         sourceLayer: controlPlane.instance.sourceLayer,
         consumeNonce: (nonce, expiresAt) => database.consumeNonce(nonce, "integration-adapter", expiresAt),
+        onSignatureFailure: reason => {
+          const signal = detector.signatureFailure({ layer: "integration-adapter", reason });
+          void raiseSecurityEvent(signal.id, signal.data);
+        },
         handlers: {
           getStatus: async () => ({ ...pipeline.stats(), intents: intentUsage.stats(), watchdog: watchdog.snapshot() }),
           diagnose: async () => ({

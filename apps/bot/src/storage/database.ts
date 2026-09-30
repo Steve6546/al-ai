@@ -95,7 +95,15 @@ const MEMBER_STATE_COLUMNS = `
 export type BotDatabase = ReturnType<typeof createBotDatabase>;
 
 export function createBotDatabase(databaseUrl: string) {
-  const pool = new Pool({ connectionString: databaseUrl, max: 5, idleTimeoutMillis: 30_000 });
+  const pool = new Pool({
+    connectionString: databaseUrl,
+    max: 5,
+    idleTimeoutMillis: 30_000,
+    // Same caps as the dashboard's pool: a hung query must not pin a slot
+    // forever, and a forgotten BEGIN must not hold its connection idle.
+    connectionTimeoutMillis: 5_000,
+    options: "-c statement_timeout=15000 -c idle_in_transaction_session_timeout=10000"
+  });
   pool.on("error", error => console.error("AL AI bot database pool error", error));
 
   return {

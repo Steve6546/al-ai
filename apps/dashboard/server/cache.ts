@@ -170,12 +170,17 @@ export class RequestThrottle {
 
 /** The client a request is attributed to, for throttling purposes. */
 export function clientKey(remoteAddress: string | undefined): string {
-  // The key must not be attacker-controlled. `trustProxy` is on, so
-  // `x-forwarded-for` is whatever the caller wrote in the header — and trusting
-  // it let a flood rotate its own throttle key per request, making the limit
-  // optional for exactly the traffic it exists to bound. The TCP peer cannot be
-  // forged, so it is the key. Behind a reverse proxy every proxied request
-  // shares the proxy's address; that is the right trade for a single-operator
-  // dashboard, since the alternative was no effective limit at all.
-  return remoteAddress ?? "unknown";
+  // The key must not be attacker-controlled. `trustProxy` is gated to loopback
+  // peers, so `x-forwarded-for` from a direct client is ignored — the TCP peer
+  // cannot be forged, so it is the key. Behind a reverse proxy every proxied
+  // request shares the proxy's address; that is the right trade for a
+  // single-operator dashboard, since the alternative was no effective limit.
+  if (!remoteAddress) return "unknown";
+  // IPv6 privacy extensions rotate the interface identifier inside a /64 at
+  // zero cost to the caller, so a raw address made the limit optional for
+  // anyone with a /64. Aggregate the key to the prefix instead.
+  if (remoteAddress.startsWith("::ffff:") || !remoteAddress.includes(":")) return remoteAddress;
+  const head = remoteAddress.split("::")[0]!;
+  const groups = head.split(":").filter(Boolean).slice(0, 4);
+  return `${groups.join(":")}::/64`;
 }

@@ -16,7 +16,17 @@ export type SessionRecord = {
 };
 
 export function createPool(databaseUrl: string) {
-  const pool = new Pool({ connectionString: databaseUrl, max: 10, idleTimeoutMillis: 30_000 });
+  const pool = new Pool({
+    connectionString: databaseUrl,
+    max: 10,
+    idleTimeoutMillis: 30_000,
+    // A hung query used to pin a slot forever — ten wedged queries exhausted
+    // the pool and every request then queued on checkout. The statement cap
+    // bounds any single query, and the transaction-idle cap catches a BEGIN
+    // that never reached COMMIT.
+    connectionTimeoutMillis: 5_000,
+    options: "-c statement_timeout=15000 -c idle_in_transaction_session_timeout=10000"
+  });
   pool.on("error", error => console.error("AL AI database pool error", error));
   return pool;
 }

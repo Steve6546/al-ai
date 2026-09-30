@@ -23,6 +23,8 @@ import {
  */
 
 const base = { port: 3000, machineHosts: ["192.0.2.10", "10.234.0.35"], tunnelHost: null as string | null };
+const local = { ...base, remoteAddress: "127.0.0.1" };
+const remote = { ...base, remoteAddress: "192.168.1.50" };
 
 test("lanHostsFrom keeps only real, non-loopback addresses", () => {
   const interfaces = {
@@ -44,7 +46,7 @@ test("splitHostPort handles bare hosts, ports, and bracketed IPv6", () => {
 });
 
 test("off answers loopback only, and refuses every other origin", () => {
-  const options = { ...base, mode: "off" as const };
+  const options = { ...local, mode: "off" as const };
   assert.equal(isHostAllowed("localhost:3000", options), true);
   assert.equal(isHostAllowed("127.0.0.1:3000", options), true);
   assert.equal(isHostAllowed("[::1]:3000", options), true);
@@ -53,7 +55,7 @@ test("off answers loopback only, and refuses every other origin", () => {
 });
 
 test("lan adds the machine's own addresses, still refusing strangers", () => {
-  const options = { ...base, mode: "lan" as const };
+  const options = { ...local, mode: "lan" as const };
   assert.equal(isHostAllowed("192.0.2.10:3000", options), true);
   assert.equal(isHostAllowed("10.234.0.35:3000", options), true);
   // A different private-range machine is not this machine.
@@ -61,15 +63,31 @@ test("lan adds the machine's own addresses, still refusing strangers", () => {
   assert.equal(isHostAllowed("203.0.113.7:3000", options), false);
 });
 
+test("the loopback and tunnel hostname branches need a loopback peer", () => {
+  // A LAN peer presenting Host: localhost is impersonating the trusted origin —
+  // the header is attacker-controlled on any socket.
+  assert.equal(isHostAllowed("localhost:3000", { ...remote, mode: "off" as const }), false);
+  assert.equal(isHostAllowed("127.0.0.1:3000", { ...remote, mode: "lan" as const }), false);
+  // The tunnel hostname from a direct-origin connection: same impersonation.
+  const tunnel = { ...remote, mode: "tunnel" as const, tunnelHost: "quiet-river-1234.trycloudflare.com" };
+  assert.equal(isHostAllowed("quiet-river-1234.trycloudflare.com", tunnel), false);
+  // ...while cloudflared genuinely connects from loopback, so the real path
+  // keeps working, and the machine's own addresses stay reachable from the LAN.
+  assert.equal(isHostAllowed("quiet-river-1234.trycloudflare.com", { ...local, mode: "tunnel" as const, tunnelHost: "quiet-river-1234.trycloudflare.com" }), true);
+  assert.equal(isHostAllowed("192.0.2.10:3000", { ...remote, mode: "lan" as const }), true);
+  // IPv4-mapped loopback peers are still loopback.
+  assert.equal(isHostAllowed("localhost:3000", { ...base, remoteAddress: "::ffff:127.0.0.1", mode: "off" as const }), true);
+});
+
 test("tunnel adds exactly the one tunnel host", () => {
-  const options = { ...base, mode: "tunnel" as const, tunnelHost: "quiet-river-1234.trycloudflare.com" };
+  const options = { ...local, mode: "tunnel" as const, tunnelHost: "quiet-river-1234.trycloudflare.com" };
   assert.equal(isHostAllowed("quiet-river-1234.trycloudflare.com", options), true);
   assert.equal(isHostAllowed("other-tunnel-9999.trycloudflare.com", options), false);
   assert.equal(isHostAllowed("evil.example.com", options), false);
 });
 
 test("an explicit wrong port is refused even on an allowed hostname", () => {
-  const options = { ...base, mode: "lan" as const };
+  const options = { ...local, mode: "lan" as const };
   assert.equal(isHostAllowed("192.0.2.10:9999", options), false);
   assert.equal(isHostAllowed("localhost:9999", options), false);
   // A bare host (no port) stays allowed; some proxies forward it that way.
