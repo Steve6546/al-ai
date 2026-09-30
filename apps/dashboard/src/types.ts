@@ -17,6 +17,7 @@ import {
   type GuildSummary,
   type LogDestination,
   type NukeAction,
+  type RemoteAccessMode,
   type Tier,
   type TierRoles
 } from "@al-ai/core/browser";
@@ -55,6 +56,7 @@ export type {
   PermissionStatus,
   PresetReason,
   PunishmentCounts,
+  RemoteAccessMode,
   RoleHierarchyVerdict,
   RoleIconGate,
   TierRoles
@@ -145,6 +147,17 @@ export type SessionInfo = {
   user: { id: string; username: string; avatarUrl: string | null; expiresAt: string } | null;
 };
 
+/** What `GET /api/network` answers with — the deployment's current reach. */
+export type NetworkSnapshot = {
+  mode: RemoteAccessMode;
+  tunnelUrl: string | null;
+  tunnelStatus: "off" | "starting" | "running" | "error";
+  tunnelError: string | null;
+  /** The machine's own non-loopback addresses, as bare hostnames. */
+  machineHosts: string[];
+  port: number;
+};
+
 /* ------------------------------------------------------------------ *
  * Display copy
  * ------------------------------------------------------------------ */
@@ -159,6 +172,18 @@ export const tierLabels: Record<Tier, string> = {
   owner: "المالك",
   admin: "مدير",
   moderator: "مشرف"
+};
+
+export const remoteAccessLabels: Record<RemoteAccessMode, string> = {
+  off: "هذا الجهاز فقط",
+  lan: "الشبكة المحلية",
+  tunnel: "عبر الإنترنت"
+};
+
+export const remoteAccessDescriptions: Record<RemoteAccessMode, string> = {
+  off: "الوضع الافتراضي: اللوحة تُفتح من هذا الجهاز فقط (localhost).",
+  lan: "أي جهاز موصول بنفس شبكة الراوتر يفتح اللوحة عبر عنوان هذا الجهاز.",
+  tunnel: "أي جهاز على الإنترنت يفتح اللوحة عبر نفق مشفّر (Cloudflare) — بدون فتح أي منفذ في الراوتر."
 };
 
 /**

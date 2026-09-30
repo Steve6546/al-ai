@@ -35,6 +35,7 @@ import {
   SESSION_COOKIE_OPTIONS,
   SESSION_MAX_AGE_SECONDS,
   signActor,
+  normaliseRemoteAccessMode,
   normaliseWelcomeSettings,
   validateEvent,
   verifyHmac,
@@ -512,4 +513,15 @@ test("welcome settings normalise rather than trust", () => {
   assert.deepEqual(normaliseWelcomeSettings(written), written);
   assert.equal(normaliseWelcomeSettings({ memberRoleId: "not-a-snowflake" }).memberRoleId, null);
   assert.equal(normaliseWelcomeSettings({ memberRoleId: 123 }).memberRoleId, null);
+});
+
+test("remote access mode normalises to the safe default", () => {
+  // A garbled or missing row must narrow reach, never widen it.
+  assert.equal(normaliseRemoteAccessMode(undefined), "off");
+  assert.equal(normaliseRemoteAccessMode(""), "off");
+  assert.equal(normaliseRemoteAccessMode("internet"), "off");
+  assert.equal(normaliseRemoteAccessMode(3), "off");
+  // The three real values survive verbatim, including "tunnel" — the widest.
+  assert.equal(normaliseRemoteAccessMode("lan"), "lan");
+  assert.equal(normaliseRemoteAccessMode("tunnel"), "tunnel");
 });

@@ -8,7 +8,7 @@ import { InviteBotPanel } from "@/components/invite-bot";
 import { LoginScreen } from "@/components/login-screen";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { guildPath, guildsPath, navigate, useRoute } from "@/lib/router";
-import { AuditView, CommandsView, CustomizationView, DashboardView, LogsView, RolesView, SecurityView, WelcomeView } from "@/views";
+import { AuditView, CommandsView, CustomizationView, DashboardView, LogsView, NetworkView, RolesView, SecurityView, WelcomeView } from "@/views";
 import type { Guild, HealthSnapshot, SessionInfo } from "@/types";
 
 /**
@@ -223,14 +223,27 @@ export function App() {
            leave a black page. The boundary keeps it to the screen that failed,
            and `resetKey` releases the latch when the operator navigates. */
         <ErrorBoundary resetKey={`${guild.id}:${view}`} scope={viewTitle(view)}>
-          {view === "dashboard" && <DashboardView guild={guild} />}
-          {view === "commands" && <CommandsView guild={guild} />}
-          {view === "roles" && <RolesView guild={guild} />}
-          {view === "customization" && <CustomizationView guild={guild} />}
-          {view === "logs" && <LogsView guild={guild} />}
-          {view === "welcome" && <WelcomeView guild={guild} />}
-          {view === "audit" && <AuditView guild={guild} />}
-          {view === "security" && <SecurityView guild={guild} />}
+          {/*
+            «الوصول للشبكة» is an instance-wide screen, so it renders whether or
+            not AL AI is in this guild — connectivity is exactly what an
+            operator may want to look at while the bot is missing.
+          */}
+          {view === "network" ? (
+            <NetworkView />
+          ) : !guild.botPresent ? (
+            <InviteBotPanel guild={guild} refreshing={refreshing} onRefresh={() => void refresh()} />
+          ) : (
+            <>
+              {view === "dashboard" && <DashboardView guild={guild} />}
+              {view === "commands" && <CommandsView guild={guild} />}
+              {view === "roles" && <RolesView guild={guild} />}
+              {view === "customization" && <CustomizationView guild={guild} />}
+              {view === "logs" && <LogsView guild={guild} />}
+              {view === "welcome" && <WelcomeView guild={guild} />}
+              {view === "audit" && <AuditView guild={guild} />}
+              {view === "security" && <SecurityView guild={guild} />}
+            </>
+          )}
         </ErrorBoundary>
       )}
     </AppShell>

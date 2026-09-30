@@ -15,8 +15,10 @@ import type {
   GuildMetrics,
   HealthSnapshot,
   LoggingSettings,
+  NetworkSnapshot,
   WelcomeSettings,
   PermissionStatus,
+  RemoteAccessMode,
   RoleHierarchyVerdict,
   RoleIconGate,
   SecurityEvent,
@@ -300,3 +302,10 @@ export const saveWelcome = (guildId: string, settings: WelcomeSettings) =>
     method: "PUT",
     body: JSON.stringify(settings)
   });
+
+/* ------------------------------------------------------------------ *
+ * System: network reach (instance-wide, not per guild)
+ * ------------------------------------------------------------------ */
+export const network = () => call<NetworkSnapshot>("/api/network");
+export const saveNetwork = (mode: RemoteAccessMode) =>
+  call<NetworkSnapshot>("/api/network", { method: "PUT", body: JSON.stringify({ mode }) });

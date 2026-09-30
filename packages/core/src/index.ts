@@ -11,3 +11,4 @@ export * from "./anti-nuke.js";
 export * from "./command-registry.js";
 export * from "./embed-plan.js";
 export * from "./snowflake.js";
+export * from "./remote-access.js";

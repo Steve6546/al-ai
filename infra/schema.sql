@@ -566,6 +566,17 @@ CREATE TABLE IF NOT EXISTS guild_welcome (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Instance-wide deployment settings — switches that belong to this copy of the
+-- dashboard rather than to any guild in it (the remote-access reach is the
+-- first). A key/value shape keeps future deployment settings from needing one
+-- table each, and the value stays a plain string: the reader normalises it, so
+-- a garbled row degrades to the safe default instead of failing a boot.
+CREATE TABLE IF NOT EXISTS instance_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Bot tokens are retired (GOVERNANCE rule 19). AL AI runs on exactly one master
 -- token held in the server environment; the dashboard never accepts a credential
 -- from the browser. The tables are dropped rather than left dormant, because an

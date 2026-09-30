@@ -321,6 +321,26 @@ export function createDatabase(pool: pg.Pool) {
       );
     },
 
+    /** One instance-wide deployment setting, or null when it was never saved. */
+    async getSetting(key: string): Promise<string | null> {
+      const { rows } = await pool.query<{ value: string }>(
+        `SELECT value FROM instance_settings WHERE key = $1`,
+        [key]
+      );
+      return rows[0]?.value ?? null;
+    },
+
+    async setSetting(key: string, value: string) {
+      await pool.query(
+        `INSERT INTO instance_settings (key, value, updated_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (key) DO UPDATE
+           SET value = EXCLUDED.value,
+               updated_at = now()`,
+        [key, value]
+      );
+    },
+
     async saveLogging(guildId: string, settings: LoggingSettings) {
       const client = await pool.connect();
       try {

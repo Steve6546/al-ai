@@ -110,6 +110,7 @@ import {
 } from "./discord.js";
 import { clientKey, RequestThrottle } from "./cache.js";
 import { describeGuildAccess, isAdministrable } from "./guild-access.js";
+import { createNetworkManager, packOAuthState, unpackOAuthState } from "./network.js";
 import {
   applyAppearance,
   invalidateAppearanceSnapshot,
@@ -125,6 +126,20 @@ const pool = createPool(env.databaseUrl);
 const db = createDatabase(pool);
 
 const app = Fastify({ logger: true, trustProxy: true });
+
+/**
+ * The deployment's network reach. Loaded from `instance_settings` at boot, so
+ * the mode the operator chose survives a restart and a tunnel mode resumes its
+ * `cloudflared` process on its own. The gate hook below consults this on every
+ * request.
+ */
+const network = createNetworkManager({
+  port: env.port,
+  getMode: () => db.getSetting("remote_access_mode"),
+  setMode: value => db.setSetting("remote_access_mode", value),
+  log: app.log
+});
+await network.boot();
 
 /* ------------------------------------------------------------------ *
  * Request throttle
@@ -153,6 +168,26 @@ const app = Fastify({ logger: true, trustProxy: true });
 const API_THROTTLE_WINDOW_MS = 60_000;
 const API_THROTTLE_MAX = 120;
 const throttle = new RequestThrottle(API_THROTTLE_WINDOW_MS, API_THROTTLE_MAX);
+
+/**
+ * The reach gate: which origins this dashboard answers at all.
+ *
+ * The mode is an instance-wide setting («الوصول للشبكة»), and "off" is the
+ * deployment default — the dashboard then answers loopback only, so a LAN
+ * address typed into another device gets a plain refusal rather than a login
+ * screen. The Host header is the origin the browser actually believes it is
+ * talking to, and the allowlist is exact (loopback, the machine's own
+ * addresses, and the one tunnel host) rather than "any private address", so a
+ * crafted Host cannot slip past. Runs before the throttle: an unreachable
+ * visitor should learn why in one response, not be metered first.
+ */
+app.addHook("onRequest", async (request, reply) => {
+  if (network.isHostAllowed(request.headers.host)) return;
+  return reply.code(403).send({
+    error: "REMOTE_ACCESS_DISABLED",
+    message: "الوصول إلى هذه اللوحة من خارج الجهاز المضيف معطّل. شغّل «الوصول للشبكة» من شاشة النظام داخل اللوحة."
+  });
+});
 
 app.addHook("onRequest", async (request, reply) => {
   const url = request.url;
@@ -485,6 +520,28 @@ function newOAuthState() {
   return randomBytes(16).toString("base64url");
 }
 
+/**
+ * The origin this request's browser believes it is on, e.g.
+ * `http://192.168.1.195:3000`. `trustProxy` is on, so behind the tunnel
+ * `request.protocol` reads the `x-forwarded-proto` Cloudflare sets rather than
+ * the tunnel's own cleartext hop.
+ */
+function requestOrigin(request: FastifyRequest): string {
+  return `${request.protocol}://${request.headers.host ?? ""}`;
+}
+
+/**
+ * The redirect URI for an OAuth leg that starts at `origin`, or the configured
+ * default when that origin is not one this deployment serves. The default is
+ * the safe fallback, not a hole: Discord compares the token-exchange redirect
+ * URI against the authorize leg's, so an origin that was never allowed fails
+ * at Discord instead of minting a session.
+ */
+function redirectUriForOrigin(origin: string): string {
+  if (network.isOriginAllowed(origin)) return `${origin}/auth/discord/callback`;
+  return env.redirectUri;
+}
+
 app.get("/api/session", async request => {
   const session = await readSession(db, request as unknown as { headers: Record<string, unknown> });
   if (!session) return { authenticated: false, user: null };
@@ -500,10 +557,69 @@ app.get("/api/session", async request => {
   };
 });
 
-app.get("/auth/discord/login", async (_request, reply) => {
-  const state = newOAuthState();
+/**
+ * Write guard for instance-wide deployment settings.
+ *
+ * Remote access does not belong to a guild, so the usual per-guild tier check
+ * does not apply. The honest equivalent: the caller must administer at least
+ * one guild *this deployment's bot actually serves*. Owning an unrelated server
+ * elsewhere on Discord must not buy the keys to somebody else's deployment.
+ */
+async function requireInstanceAdmin(request: FastifyRequest, reply: FastifyReply) {
+  const session = await requireSession(request, reply);
+  if (!session) return null;
+  const userGuilds = await loadUserGuilds(request, reply, session);
+  if (!userGuilds) return null;
+  const botGuildIds = env.botToken
+    ? await fetchBotGuildIds(env.botToken).catch(() => new Set<string>())
+    : new Set<string>();
+  const administrates = userGuilds.some(
+    guild => botGuildIds.has(guild.id) && isAdministrable(guild.permissions)
+  );
+  if (!administrates) {
+    reply.code(403).send({ error: "FORBIDDEN", message: "إعدادات النظام لمشرفي سيرفرات يعمل فيها هذا البوت." });
+    return null;
+  }
+  return session;
+}
+
+/** Read: the current reach, for the «الوصول للشبكة» screen. */
+app.get("/api/network", async (request, reply) => {
+  if (!(await requireSession(request, reply))) return;
+  return network.snapshot();
+});
+
+app.put("/api/network", async (request, reply) => {
+  const session = await requireInstanceAdmin(request, reply);
+  if (!session) return;
+
+  const body = request.body as { mode?: unknown } | undefined;
+  const snapshot = await network.setMode(body?.mode);
+
+  await appendAudit(db, env, {
+    guildId: null,
+    eventId: "bot.command-success",
+    actorId: session.discordUserId,
+    payload: { action: "network.mode", mode: snapshot.mode, tunnelUrl: snapshot.tunnelUrl }
+  });
+
+  return snapshot;
+});
+
+app.get("/auth/discord/login", async (request, reply) => {
+  // The state cookie stores the packed value — random plus origin — so the
+  // byte-for-byte comparison at the callback covers the origin too.
+  const origin = requestOrigin(request);
+  const state = packOAuthState(origin, newOAuthState());
   reply.header("Set-Cookie", stateCookieHeader(state));
-  return reply.redirect(buildAuthorizeUrl({ clientId: env.clientId, redirectUri: env.redirectUri, state, scopes: LOGIN_SCOPES }));
+  return reply.redirect(
+    buildAuthorizeUrl({
+      clientId: env.clientId,
+      redirectUri: redirectUriForOrigin(origin),
+      state,
+      scopes: LOGIN_SCOPES
+    })
+  );
 });
 
 app.get("/auth/discord/callback", async (request, reply) => {
@@ -530,7 +646,12 @@ app.get("/auth/discord/callback", async (request, reply) => {
   }
 
   try {
-    const tokens = await exchangeCode({ clientId: env.clientId, clientSecret: env.clientSecret, redirectUri: env.redirectUri, code: query.code });
+    // Unpack the origin the login leg started from and repeat its redirect URI.
+    // A state that does not carry one (a leg from a previous deployment) falls
+    // back to the configured default, matching what that leg would have sent.
+    const origin = unpackOAuthState(query.state);
+    const redirectUri = origin ? redirectUriForOrigin(origin) : env.redirectUri;
+    const tokens = await exchangeCode({ clientId: env.clientId, clientSecret: env.clientSecret, redirectUri, code: query.code });
 
     // The token must actually grant the login scopes. A code issued for any
     // other authorization does not carry them, and trusting it would let a
@@ -694,9 +815,15 @@ app.get("/api/guilds/:guildId/invite", async (request, reply) => {
   const target = normaliseSnowflake(guildId);
   if (!target) return reply.code(400).send({ error: "INVALID_GUILD_ID", message: "معرّف السيرفر غير صالح." });
 
-  const state = newOAuthState();
+  const origin = requestOrigin(request);
+  const state = packOAuthState(origin, newOAuthState());
   reply.header("Set-Cookie", stateCookieHeader(state));
-  return reply.redirect(buildBotInviteUrl(env.clientId, target, { redirectUri: env.redirectUri, state }));
+  return reply.redirect(
+    buildBotInviteUrl(env.clientId, target, {
+      redirectUri: redirectUriForOrigin(origin),
+      state
+    })
+  );
 });
 
 app.get("/api/guilds/:guildId/channels", async (request, reply) => {
@@ -2060,6 +2187,7 @@ await app.listen({ port: env.port, host: "0.0.0.0" });
 async function shutdown(signal: NodeJS.Signals) {
   app.log.info({ signal }, "AL AI dashboard is shutting down");
   try {
+    network.stop();
     await app.close();
     await db.close();
   } catch (error) {

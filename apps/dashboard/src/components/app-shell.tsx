@@ -9,6 +9,7 @@ import {
   Copy,
   ExternalLink,
   FileClock,
+  Globe,
   LayoutDashboard,
   LayoutGrid,
   LogOut,
@@ -47,7 +48,7 @@ import { tierLabels, type Guild, type HealthSnapshot, type SessionInfo } from "@
  * into. It owns navigation and identity only — no view-specific state lives here.
  */
 
-export type ViewKey = "dashboard" | "commands" | "customization" | "welcome" | "roles" | "logs" | "audit" | "security";
+export type ViewKey = "dashboard" | "commands" | "customization" | "welcome" | "roles" | "logs" | "audit" | "security" | "network";
 
 /**
  * Every view key, in one place.
@@ -65,7 +66,8 @@ const viewKeys: readonly ViewKey[] = [
   "roles",
   "logs",
   "audit",
-  "security"
+  "security",
+  "network"
 ] as const;
 
 export function isViewKey(value: unknown): value is ViewKey {
@@ -119,6 +121,15 @@ const navSections: { id: string; title: string | null; items: NavItem[] }[] = [
     items: [
       { key: "logs", label: "السجلات", icon: ScrollText, needs: "canManageLogging", requiresBot: true },
       { key: "audit", label: "سجل تدقيق اللوحة", icon: FileClock }
+    ]
+  },
+  {
+    id: "system",
+    title: "النظام",
+    items: [
+      // Instance-wide, not per guild: the reach of this deployment itself. The
+      // screen is readable by any signed-in operator; the server gates writes.
+      { key: "network", label: "الوصول للشبكة", icon: Globe }
     ]
   }
 ];

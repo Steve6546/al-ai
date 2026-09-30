@@ -1,0 +1,102 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import type { NetworkInterfaceInfo } from "node:os";
+import {
+  isHostAllowed,
+  lanHostsFrom,
+  packOAuthState,
+  parseTunnelUrl,
+  splitHostPort,
+  unpackOAuthState
+} from "../server/network.js";
+
+/**
+ * Unit tests for the network-reach pure functions.
+ *
+ * These functions are the whole security boundary of the remote-access switch:
+ * the manager only decides which process to spawn, while these decide which
+ * Host headers get a response at all. So every rule is exercised directly —
+ * loopback, the machine's own addresses, the one tunnel host, and the ways a
+ * crafted header tries to borrow one of them.
+ */
+
+const base = { port: 3000, machineHosts: ["192.0.2.10", "10.234.0.35"], tunnelHost: null as string | null };
+
+test("lanHostsFrom keeps only real, non-loopback addresses", () => {
+  const interfaces = {
+    lo: [{ address: "127.0.0.1", internal: true } as NetworkInterfaceInfo],
+    ethernet: [
+      { address: "192.168.1.195", internal: false } as NetworkInterfaceInfo,
+      { address: "fe80::1%12", internal: false } as NetworkInterfaceInfo
+    ],
+    virtual: [{ address: "192.168.56.1", internal: false } as NetworkInterfaceInfo]
+  };
+  assert.deepEqual(lanHostsFrom(interfaces), ["192.168.1.195", "fe80::1%12", "192.168.56.1"]);
+});
+
+test("splitHostPort handles bare hosts, ports, and bracketed IPv6", () => {
+  assert.deepEqual(splitHostPort("example.com"), { hostname: "example.com", port: null });
+  assert.deepEqual(splitHostPort("example.com:3000"), { hostname: "example.com", port: "3000" });
+  assert.deepEqual(splitHostPort("[::1]:3000"), { hostname: "[::1]", port: "3000" });
+  assert.deepEqual(splitHostPort("[::1]"), { hostname: "[::1]", port: null });
+});
+
+test("off answers loopback only, and refuses every other origin", () => {
+  const options = { ...base, mode: "off" as const };
+  assert.equal(isHostAllowed("localhost:3000", options), true);
+  assert.equal(isHostAllowed("127.0.0.1:3000", options), true);
+  assert.equal(isHostAllowed("[::1]:3000", options), true);
+  assert.equal(isHostAllowed("192.0.2.10:3000", options), false);
+  assert.equal(isHostAllowed(undefined, options), false);
+});
+
+test("lan adds the machine's own addresses, still refusing strangers", () => {
+  const options = { ...base, mode: "lan" as const };
+  assert.equal(isHostAllowed("192.0.2.10:3000", options), true);
+  assert.equal(isHostAllowed("10.234.0.35:3000", options), true);
+  // A different private-range machine is not this machine.
+  assert.equal(isHostAllowed("192.168.1.200:3000", options), false);
+  assert.equal(isHostAllowed("203.0.113.7:3000", options), false);
+});
+
+test("tunnel adds exactly the one tunnel host", () => {
+  const options = { ...base, mode: "tunnel" as const, tunnelHost: "quiet-river-1234.trycloudflare.com" };
+  assert.equal(isHostAllowed("quiet-river-1234.trycloudflare.com", options), true);
+  assert.equal(isHostAllowed("other-tunnel-9999.trycloudflare.com", options), false);
+  assert.equal(isHostAllowed("evil.example.com", options), false);
+});
+
+test("an explicit wrong port is refused even on an allowed hostname", () => {
+  const options = { ...base, mode: "lan" as const };
+  assert.equal(isHostAllowed("192.0.2.10:9999", options), false);
+  assert.equal(isHostAllowed("localhost:9999", options), false);
+  // A bare host (no port) stays allowed; some proxies forward it that way.
+  assert.equal(isHostAllowed("192.0.2.10", options), true);
+});
+
+test("OAuth state packs the origin in and unpacks it back out", () => {
+  const state = packOAuthState("http://192.0.2.10:3000", "abcDEF-_123456");
+  assert.match(state, /^abcDEF-_123456\./);
+  assert.equal(unpackOAuthState(state), "http://192.0.2.10:3000");
+});
+
+test("unpackOAuthState rejects payloads that are not origins", () => {
+  const forged = packOAuthState("https://evil.example.com", "abcDEF-_123456");
+  // The random part is validated first; a forged random never unpacks.
+  assert.equal(unpackOAuthState(`nope.${Buffer.from("http://x", "utf8").toString("base64url")}`), null);
+  assert.equal(unpackOAuthState("no-dot-at-all"), null);
+  assert.equal(unpackOAuthState(undefined), null);
+  assert.equal(unpackOAuthState("."), null);
+  // An origin-looking payload with a valid random unpacks; the allowlist check
+  // at the call site is what keeps a forged origin from being *used*.
+  assert.equal(unpackOAuthState(forged), "https://evil.example.com");
+});
+
+test("parseTunnelUrl finds the quick-tunnel URL in real cloudflared output", () => {
+  const line = "2026-09-30T10:00:00Z INF +-----------------------------------------------------------+\n" +
+    "|  Your quick Tunnel has been created! Visit it at (it may take some time to be reachable):  |\n" +
+    "|  https://quiet-river-1234.trycloudflare.com                                            |";
+  assert.equal(parseTunnelUrl(line), "https://quiet-river-1234.trycloudflare.com");
+  assert.equal(parseTunnelUrl("no url in here"), null);
+  assert.equal(parseTunnelUrl("https://example.com"), null);
+});

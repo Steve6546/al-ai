@@ -90,6 +90,14 @@ const payloads: [RegExp, unknown][] = [
   [/^\/api\/session$/, { authenticated: true, user: { id: "1", username: "owner", avatarUrl: null, expiresAt: new Date().toISOString() } }],
   [/^\/api\/health$/, { status: "healthy", dashboard: "online", bot: "connected", database: "reachable", gateway: { eventsLastMinute: 0, ceiling: 120 }, verification: { guildCount: 1, uniqueUsers: 1, reviewRequired: false, warning: null } }],
   [/^\/api\/guilds$/, { guilds: [guild] }],
+  [/^\/api\/network$/, {
+    mode: "lan",
+    tunnelUrl: null,
+    tunnelStatus: "off",
+    tunnelError: null,
+    machineHosts: ["192.0.2.10"],
+    port: 3000
+  }],
   [/^\/api\/guilds\/[^/]+\/customization$/, customizationPayload],
   [/^\/api\/bot\/identity$/, {
     settings: {
@@ -345,7 +353,7 @@ function fatal(errors: string[]): string[] {
   );
 }
 
-const views = ["dashboard", "commands", "customization", "welcome", "roles", "logs", "audit", "security"];
+const views = ["dashboard", "commands", "customization", "welcome", "roles", "logs", "audit", "security", "network"];
 
 /**
  * A marker that only the *loaded* screen can render, per view.
@@ -372,7 +380,10 @@ const loadedMarkers: Record<string, RegExp> = {
   roles: /المالك/,
   logs: /التسجيل المركزي/,
   audit: /آخر الأحداث/,
-  security: /محرّك مضاد التخريب/
+  security: /محرّك مضاد التخريب/,
+  // The machine address renders as a row only once the snapshot arrived — the
+  // address itself comes from the payload, so no static copy can match it.
+  network: /192\.0\.2\.10:3000/
 };
 
 /** Every "still loading" phrase in the app, so no screen can hide behind one. */

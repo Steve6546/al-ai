@@ -11,5 +11,6 @@ export { SecurityView } from "./security";
 export { CommandsView } from "./settings/commands";
 export { CustomizationView } from "./settings/customization";
 export { LogsView } from "./settings/logs";
+export { NetworkView } from "./settings/network";
 export { RolesView } from "./settings/roles";
 export { WelcomeView } from "./settings/welcome";
