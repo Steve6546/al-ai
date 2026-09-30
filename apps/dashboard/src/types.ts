@@ -182,8 +182,8 @@ export const remoteAccessLabels: Record<RemoteAccessMode, string> = {
 
 export const remoteAccessDescriptions: Record<RemoteAccessMode, string> = {
   off: "الوضع الافتراضي: اللوحة تُفتح من هذا الجهاز فقط (localhost).",
-  lan: "أي جهاز موصول بنفس شبكة الراوتر يفتح اللوحة عبر عنوان هذا الجهاز.",
-  tunnel: "أي جهاز على الإنترنت يفتح اللوحة عبر نفق مشفّر (Cloudflare) — بدون فتح أي منفذ في الراوتر."
+  lan: "أي جهاز موصول بنفس شبكة الراوتر يفتح اللوحة، ويتحوّل تسجيل دخوله تلقائياً إلى النفق عند تشغيله.",
+  tunnel: "أي جهاز على الإنترنت يفتح اللوحة عبر نفق مشفّر (Cloudflare) — يشمل الشبكة المحلية، بدون فتح أي منفذ في الراوتر."
 };
 
 /**

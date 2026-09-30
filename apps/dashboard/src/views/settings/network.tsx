@@ -79,13 +79,12 @@ export function NetworkView() {
   const tunnelUrl = snapshot.tunnelUrl;
   const status = tunnelStatusCopy[snapshot.tunnelStatus];
 
-  // Discord hands the browser back to exactly the origin the sign-in started
-  // from, and only origins registered in the Developer Portal are accepted —
-  // so each extra origin needs its callback URL added there once.
-  const callbackUrls = [
-    ...lanUrls.map(url => `${url}/auth/discord/callback`),
-    ...(tunnelUrl ? [`${tunnelUrl}/auth/discord/callback`] : [])
-  ];
+  // Discord registers HTTPS redirect URIs and loopback only — a plain-HTTP LAN
+  // address cannot be saved in the Developer Portal at all, so advertising its
+  // callback would be an instruction that can never work. Sign-in from a LAN
+  // device hands off to the tunnel automatically instead; the tunnel callback
+  // is the one URL an operator needs to add, once per tunnel address.
+  const callbackUrls = tunnelUrl ? [`${tunnelUrl}/auth/discord/callback`] : [];
 
   const copyRow = (label: string, value: string) => (
     <div className="flex h-9 items-center gap-2 rounded-md border border-input bg-background/50 px-3">
@@ -170,6 +169,10 @@ export function NetworkView() {
             <div key={url}>{copyRow("الشبكة المحلية", url)}</div>
           ))}
           {tunnelUrl && <div>{copyRow("النفق", tunnelUrl)}</div>}
+          <p className="text-xs text-muted-foreground">
+            من جهاز على الشبكة المحلية إن لم يفتح الرابط: سمّح بالمنفذ {snapshot.port} في جدار حماية ويندوز (أمر لمسؤول
+            الجهاز)، أو افتح رابط النفق مباشرة — يعمل من أي مكان.
+          </p>
           {snapshot.tunnelStatus === "starting" && (
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" /> يجري إنشاء النفق ويظهر رابطه خلال ثوانٍ…
@@ -191,8 +194,9 @@ export function NetworkView() {
               <div>
                 <p className="text-base font-bold">خطوة واحدة في Discord</p>
                 <p className="text-xs text-muted-foreground">
-                  لكي يعمل تسجيل الدخول من الأجهزة الأخرى، أضِف روابط الرجوع التالية في
-                  Developer Portal ← OAuth2 ← Redirects، مرة واحدة لكل رابط.
+                  ديسكورد يقبل روابط الرجوع المشفّرة (HTTPS) فقط خارج هذا الجهاز — لذلك يُسجَّل رابط النفق أدناه في
+                  Developer Portal ← OAuth2 ← Redirects، ويصبح الدخول يعمل من أي جهاز على الإنترنت. من جهاز على الشبكة
+                  المحلية، اضغط «تسجيل الدخول» وسيُحوَّل تلقائياً إلى النفق.
                 </p>
               </div>
             </div>

@@ -134,6 +134,34 @@ export function parseTunnelUrl(text: string): string | null {
   return match ? match[0].toLowerCase() : null;
 }
 
+/**
+ * Origins Discord lets an application register as redirect URIs.
+ *
+ * Discord's rule: redirect URIs must be HTTPS, with loopback (`localhost`,
+ * `127.0.0.1`) as the single development exception. A plain-HTTP LAN address
+ * like `http://192.168.1.195:3000` cannot be saved in the Developer Portal at
+ * all — which is what produced the «Invalid OAuth2 redirect_uri» screen: the
+ * sign-in leg built a redirect URI Discord would never accept. The login and
+ * invite legs therefore hand such browsers to an origin that *can* hold a
+ * registered callback (the tunnel), instead of walking them into a wall.
+ */
+export function isOAuthCapableOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    return url.protocol === "https:" || LOOPBACK_HOSTNAMES.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function isLoopbackOrigin(origin: string): boolean {
+  try {
+    return LOOPBACK_HOSTNAMES.has(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** Known install locations, checked in order; null when cloudflared is absent. */
 function resolveCloudflaredPath(): string | null {
   const candidates = [
@@ -285,7 +313,16 @@ export function createNetworkManager(input: {
     stopTunnel();
   }
 
-  return { boot, setMode, snapshot, isHostAllowed: isHostAllowedNow, isOriginAllowed, stop };
+  /**
+   * The one HTTPS origin that can hold a registered OAuth callback while a
+   * tunnel is up, or null. This is where sign-in legs from plain-HTTP LAN
+   * origins hand off to.
+   */
+  function tunnelOrigin(): string | null {
+    return mode === "tunnel" && tunnelUrl ? tunnelUrl : null;
+  }
+
+  return { boot, setMode, snapshot, isHostAllowed: isHostAllowedNow, isOriginAllowed, tunnelOrigin, stop };
 }
 
 export type NetworkManager = ReturnType<typeof createNetworkManager>;

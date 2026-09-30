@@ -110,7 +110,13 @@ import {
 } from "./discord.js";
 import { clientKey, RequestThrottle } from "./cache.js";
 import { describeGuildAccess, isAdministrable } from "./guild-access.js";
-import { createNetworkManager, packOAuthState, unpackOAuthState } from "./network.js";
+import {
+  createNetworkManager,
+  isLoopbackOrigin,
+  isOAuthCapableOrigin,
+  packOAuthState,
+  unpackOAuthState
+} from "./network.js";
 import {
   applyAppearance,
   invalidateAppearanceSnapshot,
@@ -168,6 +174,39 @@ await network.boot();
 const API_THROTTLE_WINDOW_MS = 60_000;
 const API_THROTTLE_MAX = 120;
 const throttle = new RequestThrottle(API_THROTTLE_WINDOW_MS, API_THROTTLE_MAX);
+
+/**
+ * Security headers on every response, refusals included.
+ *
+ * Now that the deployment reaches beyond loopback, these are the baseline the
+ * browser enforces for us: the page must not be framed (clickjacking), MIME-
+ * sniffed, or leaked through referrers, and the CSP pins what the SPA may
+ * load — its own bundle and styles, Discord's CDN for avatars, Google Fonts —
+ * so an injected script has nowhere to phone home to. Kept as headers rather
+ * than a helmet dependency: five lines the whole surface depends on, with the
+ * font and image exceptions stated where they can be read.
+ */
+app.addHook("onRequest", async (_request, reply) => {
+  reply.header("X-Content-Type-Options", "nosniff");
+  reply.header("X-Frame-Options", "DENY");
+  reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  reply.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  reply.header(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "script-src 'self'",
+      // Style attributes are how React and framer-motion write inline styles.
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' https://fonts.gstatic.com",
+      "img-src 'self' data: https://cdn.discordapp.com",
+      "connect-src 'self'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'"
+    ].join("; ")
+  );
+});
 
 /**
  * The reach gate: which origins this dashboard answers at all.
@@ -542,6 +581,38 @@ function redirectUriForOrigin(origin: string): string {
   return env.redirectUri;
 }
 
+/**
+ * Where an OAuth leg may begin, given the origin the browser is on.
+ *
+ * Discord registers HTTPS redirect URIs and loopback only — a plain-HTTP LAN
+ * address cannot be saved in the Developer Portal, so a sign-in that built its
+ * callback from such an origin always ended at «Invalid OAuth2 redirect_uri».
+ * The handoff sends the browser to an origin that can hold the callback:
+ *
+ * - loopback variants (`127.0.0.1`) hand to the configured default, which is
+ *   the one callback guaranteed registered — it *is* the deployment's URI, and
+ *   the browser is on this machine anyway.
+ * - HTTPS origins (the tunnel) proceed where they are.
+ * - anything else (a LAN IP) hands to the tunnel while one is up, or returns
+ *   null — the caller then explains instead of walking into Discord's error.
+ */
+function oauthOriginFor(origin: string): string | null {
+  if (isLoopbackOrigin(origin)) return new URL(env.redirectUri).origin;
+  if (isOAuthCapableOrigin(origin)) return origin;
+  return network.tunnelOrigin();
+}
+
+/**
+ * The page a LAN browser lands on when no tunnel exists to hand sign-in to.
+ * Discord's own rule makes direct login from such a device impossible, so the
+ * honest answer says so and names the working path.
+ */
+const OAUTH_ORIGIN_PAGE = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>AL AI — تسجيل الدخول</title>
+<style>body{font-family:system-ui,sans-serif;background:#0b1020;color:#e5e7eb;display:grid;place-items:center;height:100vh;margin:0}div{max-width:34rem;text-align:center;line-height:1.9;padding:1.5rem}</style>
+</head><body><div><h1>تسجيل الدخول من هذا الجهاز</h1>
+<p>ديسكورد يقبل روابط الرجوع المشفّرة (HTTPS) فقط خارج الجهاز المضيف، لذلك لا يمكن تسجيل الدخول مباشرة من عنوان الشبكة المحلية.</p>
+<p>شغّل «عبر الإنترنت» من شاشة «الوصول للشبكة»، ثم افتح اللوحة من رابط النفق الظاهر هناك — الدخول من أي جهاز يعمل منه مباشرة.</p></div></body></html>`;
+
 app.get("/api/session", async request => {
   const session = await readSession(db, request as unknown as { headers: Record<string, unknown> });
   if (!session) return { authenticated: false, user: null };
@@ -607,9 +678,14 @@ app.put("/api/network", async (request, reply) => {
 });
 
 app.get("/auth/discord/login", async (request, reply) => {
+  const origin = requestOrigin(request);
+  const oauthOrigin = oauthOriginFor(origin);
+  if (oauthOrigin !== origin) {
+    if (oauthOrigin) return reply.redirect(`${oauthOrigin}/auth/discord/login`);
+    return reply.code(403).type("text/html; charset=utf-8").send(OAUTH_ORIGIN_PAGE);
+  }
   // The state cookie stores the packed value — random plus origin — so the
   // byte-for-byte comparison at the callback covers the origin too.
-  const origin = requestOrigin(request);
   const state = packOAuthState(origin, newOAuthState());
   reply.header("Set-Cookie", stateCookieHeader(state));
   return reply.redirect(
@@ -810,18 +886,25 @@ app.get("/api/guilds", async (request, reply) => {
  */
 app.get("/api/guilds/:guildId/invite", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
+  // Same handoff as the login leg: a plain-HTTP LAN origin cannot hold the
+  // registered callback, so the browser continues from an origin that can.
+  const origin = requestOrigin(request);
+  const oauthOrigin = oauthOriginFor(origin);
+  if (oauthOrigin !== origin) {
+    if (oauthOrigin) return reply.redirect(`${oauthOrigin}/api/guilds/${guildId}/invite`);
+    return reply.code(403).type("text/html; charset=utf-8").send(OAUTH_ORIGIN_PAGE);
+  }
   const context = await requireGuildAccess(request, reply, guildId);
   if (!context) return;
   const target = normaliseSnowflake(guildId);
   if (!target) return reply.code(400).send({ error: "INVALID_GUILD_ID", message: "معرّف السيرفر غير صالح." });
 
-  const origin = requestOrigin(request);
-  const state = packOAuthState(origin, newOAuthState());
-  reply.header("Set-Cookie", stateCookieHeader(state));
+  const oauthState = packOAuthState(origin, newOAuthState());
+  reply.header("Set-Cookie", stateCookieHeader(oauthState));
   return reply.redirect(
     buildBotInviteUrl(env.clientId, target, {
       redirectUri: redirectUriForOrigin(origin),
-      state
+      state: oauthState
     })
   );
 });

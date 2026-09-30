@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import type { NetworkInterfaceInfo } from "node:os";
 import {
   isHostAllowed,
+  isLoopbackOrigin,
+  isOAuthCapableOrigin,
   lanHostsFrom,
   packOAuthState,
   parseTunnelUrl,
@@ -99,4 +101,22 @@ test("parseTunnelUrl finds the quick-tunnel URL in real cloudflared output", () 
   assert.equal(parseTunnelUrl(line), "https://quiet-river-1234.trycloudflare.com");
   assert.equal(parseTunnelUrl("no url in here"), null);
   assert.equal(parseTunnelUrl("https://example.com"), null);
+});
+
+test("only https and loopback origins can hold a registered OAuth callback", () => {
+  // Discord's rule: HTTPS, with loopback as the single development exception.
+  assert.equal(isOAuthCapableOrigin("https://quiet-river-1234.trycloudflare.com"), true);
+  assert.equal(isOAuthCapableOrigin("http://localhost:3000"), true);
+  assert.equal(isOAuthCapableOrigin("http://127.0.0.1:3000"), true);
+  // The LAN address that produced «Invalid OAuth2 redirect_uri».
+  assert.equal(isOAuthCapableOrigin("http://192.168.1.195:3000"), false);
+  assert.equal(isOAuthCapableOrigin("not a url"), false);
+});
+
+test("loopback variants are recognised for the same-machine handoff", () => {
+  assert.equal(isLoopbackOrigin("http://127.0.0.1:3000"), true);
+  assert.equal(isLoopbackOrigin("http://localhost:3000"), true);
+  assert.equal(isLoopbackOrigin("http://[::1]:3000"), true);
+  assert.equal(isLoopbackOrigin("http://192.168.1.195:3000"), false);
+  assert.equal(isLoopbackOrigin("https://quiet-river-1234.trycloudflare.com"), false);
 });
