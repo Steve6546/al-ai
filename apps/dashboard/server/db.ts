@@ -1,13 +1,17 @@
 import pg from "pg";
-import type { AntiNukeConfig, LoggingSettings, CustomizationSettings, CommandConfig, TierRoles } from "@al-ai/core";
-import { DEFAULT_ANTI_NUKE_CONFIG, DEFAULT_BOT_IDENTITY, DEFAULT_CUSTOMIZATION, DEFAULT_EMBED_COLOR, DEFAULT_LOGGING_MODE, DEFAULT_WELCOME_SETTINGS, isLoggingMode, isTier, normaliseAntiNukeConfig, normaliseBotIdentity, normaliseTierRoles, normaliseWelcomeSettings, PUNISHMENT_EVENT_IDS, SESSION_MAX_AGE_SECONDS, type BotIdentitySettings, type WelcomeSettings } from "@al-ai/core";
+import { randomUUID } from "node:crypto";
+import type { AntiNukeConfig, LoggingSettings, CustomizationSettings, CommandConfig, InviteSettings, LevelRoleReward, LevelRewardKind, LevelSettings, TierRoles } from "@al-ai/core";
+import { DEFAULT_ANTI_NUKE_CONFIG, DEFAULT_BOT_PRESENCE, DEFAULT_CUSTOMIZATION, DEFAULT_EMBED_COLOR, DEFAULT_INVITE_SETTINGS, DEFAULT_LEVEL_SETTINGS, DEFAULT_LOGGING_MODE, DEFAULT_WELCOME_MESSAGE_SETTINGS, DEFAULT_WELCOME_SETTINGS, MAX_LEVEL_CAP, isLoggingMode, isTier, levelFromXp, normaliseAntiNukeConfig, normaliseBotPresence, normaliseInviteSettings, normaliseLevelSettings, normaliseLevelReward, normaliseTierRoles, normaliseWelcomeMessageSettings, normaliseWelcomeSettings, PUNISHMENT_EVENT_IDS, SESSION_MAX_AGE_SECONDS, type BotPresenceSettings, type WelcomeMessageSettings, type WelcomeSettings } from "@al-ai/core";
 
 const { Pool } = pg;
 
 export type SessionRecord = {
   id: string;
   discordUserId: string;
+  /** The display name Discord shows (the global name when there is one). */
   discordUsername: string;
+  /** The @handle, which is a different name and is asked for as often. */
+  discordHandle: string | null;
   /** Discord avatar hash; null means the account uses a default avatar. */
   discordAvatar: string | null;
   accessTokenCiphertext: string;
@@ -32,6 +36,60 @@ export function createPool(databaseUrl: string) {
 }
 
 export type Database = ReturnType<typeof createDatabase>;
+
+/** One persistent sync job, mapped from the snake_case row. */
+export type LevelSyncJob = {
+  id: string;
+  guildId: string;
+  status: "pending" | "running" | "completed" | "failed";
+  cursor: string | null;
+  total: number | null;
+  processed: number;
+  granted: number;
+  removed: number;
+  skipped: number;
+  failed: number;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+};
+
+type LevelSyncJobRow = {
+  id: string;
+  guild_id: string;
+  status: string;
+  cursor: string | null;
+  total: number | null;
+  processed: number;
+  granted: number;
+  removed: number;
+  skipped: number;
+  failed: number;
+  error: string | null;
+  created_at: Date;
+  started_at: Date | null;
+  completed_at: Date | null;
+};
+
+function mapSyncJob(row: LevelSyncJobRow): LevelSyncJob {
+  return {
+    id: row.id,
+    guildId: row.guild_id,
+    status: row.status as LevelSyncJob["status"],
+    cursor: row.cursor,
+    total: row.total,
+    processed: row.processed,
+    granted: row.granted,
+    removed: row.removed,
+    skipped: row.skipped,
+    failed: row.failed,
+    error: row.error,
+    createdAt: new Date(row.created_at).toISOString(),
+    startedAt: row.started_at ? new Date(row.started_at).toISOString() : null,
+    completedAt: row.completed_at ? new Date(row.completed_at).toISOString() : null
+  };
+}
 
 export function createDatabase(pool: pg.Pool) {
   return {
@@ -102,107 +160,116 @@ export function createDatabase(pool: pg.Pool) {
      * apply to Discord are stored — see `CustomizationSettings` in @al-ai/core.
      */
     async getCustomization(guildId: string): Promise<CustomizationSettings> {
-      const { rows } = await pool.query<{ nickname: string | null; role_color: string | null; role_icon_url: string | null }>(
-        `SELECT nickname, role_color, role_icon_url FROM guild_customization WHERE guild_id = $1`,
+      const { rows } = await pool.query<{
+        enabled: boolean;
+        nickname: string | null;
+        role_color: string | null;
+        role_icon_url: string | null;
+        avatar_data_url: string | null;
+        banner_data_url: string | null;
+        bio: string | null;
+      }>(
+        `SELECT enabled, nickname, role_color, role_icon_url, avatar_data_url, banner_data_url, bio FROM guild_customization WHERE guild_id = $1`,
         [guildId]
       );
       const row = rows[0];
       // No row means the guild is still on the shipped defaults, not "blank".
       return {
+        enabled: row?.enabled ?? DEFAULT_CUSTOMIZATION.enabled,
         nickname: row?.nickname ?? DEFAULT_CUSTOMIZATION.nickname,
         roleColor: row?.role_color ?? DEFAULT_CUSTOMIZATION.roleColor,
-        roleIconUrl: row?.role_icon_url ?? DEFAULT_CUSTOMIZATION.roleIconUrl
+        roleIconUrl: row?.role_icon_url ?? DEFAULT_CUSTOMIZATION.roleIconUrl,
+        avatarDataUrl: row?.avatar_data_url ?? DEFAULT_CUSTOMIZATION.avatarDataUrl,
+        bannerDataUrl: row?.banner_data_url ?? DEFAULT_CUSTOMIZATION.bannerDataUrl,
+        bio: row?.bio ?? DEFAULT_CUSTOMIZATION.bio
       };
     },
 
     async saveCustomization(guildId: string, settings: CustomizationSettings) {
       await pool.query(
-        `INSERT INTO guild_customization (guild_id, nickname, role_color, role_icon_url, updated_at)
-         VALUES ($1, $2, $3, $4, now())
+        `INSERT INTO guild_customization (guild_id, enabled, nickname, role_color, role_icon_url, avatar_data_url, banner_data_url, bio, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
          ON CONFLICT (guild_id) DO UPDATE
-           SET nickname = EXCLUDED.nickname,
+           SET enabled = EXCLUDED.enabled,
+               nickname = EXCLUDED.nickname,
                role_color = EXCLUDED.role_color,
                role_icon_url = EXCLUDED.role_icon_url,
+               avatar_data_url = EXCLUDED.avatar_data_url,
+               banner_data_url = EXCLUDED.banner_data_url,
+               bio = EXCLUDED.bio,
                updated_at = now()`,
-        [guildId, settings.nickname, settings.roleColor, settings.roleIconUrl]
+        [
+          guildId,
+          settings.enabled,
+          settings.nickname,
+          settings.roleColor,
+          settings.roleIconUrl,
+          settings.avatarDataUrl,
+          settings.bannerDataUrl,
+          settings.bio
+        ]
       );
     },
 
     /**
-     * The global half of the bot's identity — one row, shared by every guild.
+     * The bot's presence — one row, shared by every guild.
      *
-     * Read through the same `normaliseBotIdentity` the bot uses, so a row written
+     * Read through the same `normaliseBotPresence` the bot uses, so a row written
      * by an older build cannot mean two different things on the two sides of the
      * database. There is no guild argument because there is no per-guild value:
-     * Discord gives an application one avatar, one banner and one presence.
+     * Discord sends a status on the gateway connection, so it is one presence for
+     * the whole bot. Everything a single server can override lives on
+     * `guild_customization` instead.
      *
      * The seed row is created by `schema.sql`, but a read must still survive its
      * absence — a database restored from a partial dump would otherwise throw on
      * the first page load instead of showing the defaults.
      */
-    async getBotIdentity(): Promise<BotIdentitySettings> {
+    async getBotPresence(): Promise<BotPresenceSettings> {
       const { rows } = await pool.query<{
-        avatar_data_url: string | null;
-        banner_data_url: string | null;
-        bio: string | null;
         status: string | null;
         activity_type: string | null;
         activity_text: string | null;
         status_duration: string | null;
         status_expires_at: Date | string | null;
-      }>(`SELECT avatar_data_url, banner_data_url, bio, status, activity_type, activity_text, status_duration, status_expires_at FROM bot_identity WHERE id = true`);
+      }>(`SELECT status, activity_type, activity_text, status_duration, status_expires_at FROM bot_identity WHERE id = true`);
       const row = rows[0];
-      return normaliseBotIdentity({
-        avatarDataUrl: row?.avatar_data_url ?? DEFAULT_BOT_IDENTITY.avatarDataUrl,
-        bannerDataUrl: row?.banner_data_url ?? DEFAULT_BOT_IDENTITY.bannerDataUrl,
-        bio: row?.bio ?? DEFAULT_BOT_IDENTITY.bio,
-        status: row?.status ?? DEFAULT_BOT_IDENTITY.status,
-        activityType: row?.activity_type ?? DEFAULT_BOT_IDENTITY.activityType,
-        activityText: row?.activity_text ?? DEFAULT_BOT_IDENTITY.activityText,
-        statusDuration: row?.status_duration ?? DEFAULT_BOT_IDENTITY.statusDuration,
+      return normaliseBotPresence({
+        status: row?.status ?? DEFAULT_BOT_PRESENCE.status,
+        activityType: row?.activity_type ?? DEFAULT_BOT_PRESENCE.activityType,
+        activityText: row?.activity_text ?? DEFAULT_BOT_PRESENCE.activityText,
+        statusDuration: row?.status_duration ?? DEFAULT_BOT_PRESENCE.statusDuration,
         // `pg` hands a TIMESTAMPTZ back as a Date, not a string, and
-        // `normaliseBotIdentity` parses only strings. Converting here keeps the
+        // `normaliseBotPresence` parses only strings. Converting here keeps the
         // contract's "ISO-8601 instant" promise true for every reader instead of
         // letting the driver's choice leak into the shape.
         statusExpiresAt:
           row?.status_expires_at === null || row?.status_expires_at === undefined
-            ? DEFAULT_BOT_IDENTITY.statusExpiresAt
+            ? DEFAULT_BOT_PRESENCE.statusExpiresAt
             : new Date(row.status_expires_at).toISOString()
       });
     },
 
     /**
-     * Writes the single identity row.
+     * Writes the single presence row.
      *
      * Upserted rather than updated, so a database whose seed row was removed
      * heals on the next save instead of silently discarding the operator's work.
      * The `id` column is forced to `true` and its CHECK refuses anything else,
-     * which is what keeps "the current identity" unambiguous.
+     * which is what keeps "the current presence" unambiguous.
      */
-    async saveBotIdentity(settings: BotIdentitySettings) {
+    async saveBotPresence(settings: BotPresenceSettings) {
       await pool.query(
-        `INSERT INTO bot_identity (id, avatar_data_url, banner_data_url, bio, status, activity_type, activity_text, status_duration, status_expires_at, updated_at)
-         VALUES (true, $1, $2, $3, $4, $5, $6, $7, $8, now())
+        `INSERT INTO bot_identity (id, status, activity_type, activity_text, status_duration, status_expires_at, updated_at)
+         VALUES (true, $1, $2, $3, $4, $5, now())
          ON CONFLICT (id) DO UPDATE
-           SET avatar_data_url = EXCLUDED.avatar_data_url,
-               banner_data_url = EXCLUDED.banner_data_url,
-               bio = EXCLUDED.bio,
-               status = EXCLUDED.status,
+           SET status = EXCLUDED.status,
                activity_type = EXCLUDED.activity_type,
                activity_text = EXCLUDED.activity_text,
                status_duration = EXCLUDED.status_duration,
                status_expires_at = EXCLUDED.status_expires_at,
                updated_at = now()`,
-        [
-          settings.avatarDataUrl,
-          settings.bannerDataUrl,
-          settings.bio,
-          settings.status,
-          settings.activityType,
-          settings.activityText,
-          settings.statusDuration,
-          settings.statusExpiresAt
-        ]
+        [settings.status, settings.activityType, settings.activityText, settings.statusDuration, settings.statusExpiresAt]
       );
     },
 
@@ -308,27 +375,530 @@ export function createDatabase(pool: pg.Pool) {
         enabled: boolean;
         member_role_id: string | null;
         bot_role_id: string | null;
-      }>(`SELECT enabled, member_role_id, bot_role_id FROM guild_welcome WHERE guild_id = $1`, [guildId]);
+        delay_seconds: number;
+      }>(`SELECT enabled, member_role_id, bot_role_id, delay_seconds FROM guild_welcome WHERE guild_id = $1`, [guildId]);
       const row = rows[0];
       if (!row) return DEFAULT_WELCOME_SETTINGS;
       return normaliseWelcomeSettings({
         enabled: row.enabled,
         memberRoleId: row.member_role_id,
-        botRoleId: row.bot_role_id
+        botRoleId: row.bot_role_id,
+        delaySeconds: row.delay_seconds
       });
     },
 
     async saveWelcome(guildId: string, settings: WelcomeSettings) {
       await pool.query(
-        `INSERT INTO guild_welcome (guild_id, enabled, member_role_id, bot_role_id, updated_at)
-         VALUES ($1, $2, $3, $4, now())
+        `INSERT INTO guild_welcome (guild_id, enabled, member_role_id, bot_role_id, delay_seconds, updated_at)
+         VALUES ($1, $2, $3, $4, $5, now())
          ON CONFLICT (guild_id) DO UPDATE
            SET enabled = EXCLUDED.enabled,
                member_role_id = EXCLUDED.member_role_id,
                bot_role_id = EXCLUDED.bot_role_id,
+               delay_seconds = EXCLUDED.delay_seconds,
                updated_at = now()`,
-        [guildId, settings.enabled, settings.memberRoleId, settings.botRoleId]
+        [guildId, settings.enabled, settings.memberRoleId, settings.botRoleId, settings.delaySeconds]
       );
+    },
+
+    /* ---------------------------------------------------------------- *
+     * Levels system. The dashboard owns the settings' and rewards' write
+     * path; the bot writes the XP rows. Both sides read through the same
+     * core normalisers, so a stored value cannot mean one thing here and
+     * another in the engine.
+     * ---------------------------------------------------------------- */
+
+    async getLevelSettings(guildId: string): Promise<LevelSettings> {
+      const { rows } = await pool.query<Record<string, unknown>>(
+        `SELECT enabled, text_xp_enabled, voice_xp_enabled, text_xp_min, text_xp_max, voice_xp_min, voice_xp_max,
+                max_level_cap, reset_on_leave, text_cooldown_seconds, voice_min_members, ignore_muted, ignore_deafened,
+                ignore_afk, notify_level_up, notify_mode, notify_channel_id, rank_card, text_level_up_message,
+                voice_level_up_message, role_stacking, role_multipliers, channel_multipliers,
+                ignored_text_channel_ids, ignored_voice_channel_ids, ignored_role_ids
+         FROM guild_levels WHERE guild_id = $1`,
+        [guildId]
+      );
+      const row = rows[0];
+      if (!row) return { ...DEFAULT_LEVEL_SETTINGS };
+      return normaliseLevelSettings({
+        enabled: row.enabled,
+        textXpEnabled: row.text_xp_enabled,
+        voiceXpEnabled: row.voice_xp_enabled,
+        textXpMin: row.text_xp_min,
+        textXpMax: row.text_xp_max,
+        voiceXpMin: row.voice_xp_min,
+        voiceXpMax: row.voice_xp_max,
+        maxLevelCap: row.max_level_cap,
+        resetOnLeave: row.reset_on_leave,
+        textCooldownSeconds: row.text_cooldown_seconds,
+        voiceMinMembers: row.voice_min_members,
+        ignoreMuted: row.ignore_muted,
+        ignoreDeafened: row.ignore_deafened,
+        ignoreAfk: row.ignore_afk,
+        notifyLevelUp: row.notify_level_up,
+        notifyMode: row.notify_mode,
+        notifyChannelId: row.notify_channel_id,
+        rankCardEnabled: row.rank_card,
+        textLevelUpMessage: row.text_level_up_message,
+        voiceLevelUpMessage: row.voice_level_up_message,
+        roleStacking: row.role_stacking,
+        roleMultipliers: row.role_multipliers,
+        channelMultipliers: row.channel_multipliers,
+        ignoredTextChannelIds: row.ignored_text_channel_ids,
+        ignoredVoiceChannelIds: row.ignored_voice_channel_ids,
+        ignoredRoleIds: row.ignored_role_ids
+      });
+    },
+
+    async saveLevelSettings(guildId: string, settings: LevelSettings) {
+      await pool.query(
+        `INSERT INTO guild_levels (guild_id, enabled, text_xp_enabled, voice_xp_enabled, text_xp_min, text_xp_max,
+                                   voice_xp_min, voice_xp_max, max_level_cap, reset_on_leave, text_cooldown_seconds,
+                                   voice_min_members, ignore_muted, ignore_deafened, ignore_afk,
+                                   notify_level_up, notify_mode, notify_channel_id, rank_card, text_level_up_message,
+                                   voice_level_up_message, role_stacking, role_multipliers, channel_multipliers,
+                                   ignored_text_channel_ids, ignored_voice_channel_ids, ignored_role_ids, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb,$24::jsonb,$25::jsonb,$26::jsonb,$27::jsonb, now())
+         ON CONFLICT (guild_id) DO UPDATE SET
+           enabled = EXCLUDED.enabled,
+           text_xp_enabled = EXCLUDED.text_xp_enabled,
+           voice_xp_enabled = EXCLUDED.voice_xp_enabled,
+           text_xp_min = EXCLUDED.text_xp_min,
+           text_xp_max = EXCLUDED.text_xp_max,
+           voice_xp_min = EXCLUDED.voice_xp_min,
+           voice_xp_max = EXCLUDED.voice_xp_max,
+           max_level_cap = EXCLUDED.max_level_cap,
+           reset_on_leave = EXCLUDED.reset_on_leave,
+           text_cooldown_seconds = EXCLUDED.text_cooldown_seconds,
+           voice_min_members = EXCLUDED.voice_min_members,
+           ignore_muted = EXCLUDED.ignore_muted,
+           ignore_deafened = EXCLUDED.ignore_deafened,
+           ignore_afk = EXCLUDED.ignore_afk,
+           notify_level_up = EXCLUDED.notify_level_up,
+           notify_mode = EXCLUDED.notify_mode,
+           notify_channel_id = EXCLUDED.notify_channel_id,
+           rank_card = EXCLUDED.rank_card,
+           text_level_up_message = EXCLUDED.text_level_up_message,
+           voice_level_up_message = EXCLUDED.voice_level_up_message,
+           role_stacking = EXCLUDED.role_stacking,
+           role_multipliers = EXCLUDED.role_multipliers,
+           channel_multipliers = EXCLUDED.channel_multipliers,
+           ignored_text_channel_ids = EXCLUDED.ignored_text_channel_ids,
+           ignored_voice_channel_ids = EXCLUDED.ignored_voice_channel_ids,
+           ignored_role_ids = EXCLUDED.ignored_role_ids,
+           updated_at = now()`,
+        [
+          guildId,
+          settings.enabled,
+          settings.textXpEnabled,
+          settings.voiceXpEnabled,
+          settings.textXpMin,
+          settings.textXpMax,
+          settings.voiceXpMin,
+          settings.voiceXpMax,
+          settings.maxLevelCap,
+          settings.resetOnLeave,
+          settings.textCooldownSeconds,
+          settings.voiceMinMembers,
+          settings.ignoreMuted,
+          settings.ignoreDeafened,
+          settings.ignoreAfk,
+          settings.notifyLevelUp,
+          settings.notifyMode,
+          settings.notifyChannelId,
+          settings.rankCardEnabled,
+          settings.textLevelUpMessage,
+          settings.voiceLevelUpMessage,
+          settings.roleStacking,
+          JSON.stringify(settings.roleMultipliers),
+          JSON.stringify(settings.channelMultipliers),
+          JSON.stringify(settings.ignoredTextChannelIds),
+          JSON.stringify(settings.ignoredVoiceChannelIds),
+          JSON.stringify(settings.ignoredRoleIds)
+        ]
+      );
+    },
+
+    async getWelcomeMessages(guildId: string): Promise<WelcomeMessageSettings> {
+      const { rows } = await pool.query<Record<string, unknown>>(
+        `SELECT enabled, image_enabled, image_mode, image_channel_id, channel_id, mode, text, embed, image_config
+         FROM guild_welcome_messages WHERE guild_id = $1`,
+        [guildId]
+      );
+      const row = rows[0];
+      if (!row) return { ...DEFAULT_WELCOME_MESSAGE_SETTINGS };
+      return normaliseWelcomeMessageSettings({
+        enabled: row.enabled,
+        imageEnabled: row.image_enabled,
+        imageMode: row.image_mode,
+        imageChannelId: row.image_channel_id,
+        channelId: row.channel_id,
+        mode: row.mode,
+        text: row.text,
+        embed: row.embed,
+        image: row.image_config
+      });
+    },
+
+    async saveWelcomeMessages(guildId: string, settings: WelcomeMessageSettings) {
+      await pool.query(
+        `INSERT INTO guild_welcome_messages (guild_id, enabled, image_enabled, image_mode, image_channel_id,
+                                            channel_id, mode, text, embed, image_config, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb, now())
+         ON CONFLICT (guild_id) DO UPDATE SET
+           enabled = EXCLUDED.enabled,
+           image_enabled = EXCLUDED.image_enabled,
+           image_mode = EXCLUDED.image_mode,
+           image_channel_id = EXCLUDED.image_channel_id,
+           channel_id = EXCLUDED.channel_id,
+           mode = EXCLUDED.mode,
+           text = EXCLUDED.text,
+           embed = EXCLUDED.embed,
+           image_config = EXCLUDED.image_config,
+           updated_at = now()`,
+        [
+          guildId,
+          settings.enabled,
+          settings.imageEnabled,
+          settings.imageMode,
+          settings.imageChannelId,
+          settings.channelId,
+          settings.mode,
+          settings.text,
+          JSON.stringify(settings.embed),
+          JSON.stringify(settings.image)
+        ]
+      );
+    },
+
+    async getInviteSettings(guildId: string): Promise<InviteSettings> {
+      const { rows } = await pool.query<Record<string, unknown>>(
+        `SELECT enabled, fake_account_days, keep_roles_on_leave, log_self_invites, log_joins,
+                log_leaves, log_milestones, join_message, leave_message, milestone_message, milestone_roles
+         FROM guild_invites WHERE guild_id = $1`,
+        [guildId]
+      );
+      const row = rows[0];
+      if (!row) return { ...DEFAULT_INVITE_SETTINGS };
+      return normaliseInviteSettings({
+        enabled: row.enabled,
+        fakeAccountDays: row.fake_account_days,
+        keepRolesOnLeave: row.keep_roles_on_leave,
+        logSelfInvites: row.log_self_invites,
+        logJoins: row.log_joins,
+        logLeaves: row.log_leaves,
+        logMilestones: row.log_milestones,
+        joinMessage: row.join_message,
+        leaveMessage: row.leave_message,
+        milestoneMessage: row.milestone_message,
+        milestoneRoles: row.milestone_roles
+      });
+    },
+
+    async saveInviteSettings(guildId: string, settings: InviteSettings) {
+      await pool.query(
+        `INSERT INTO guild_invites (guild_id, enabled, fake_account_days, keep_roles_on_leave, log_self_invites,
+                                   log_joins, log_leaves, log_milestones, join_message, leave_message,
+                                   milestone_message, milestone_roles, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb, now())
+         ON CONFLICT (guild_id) DO UPDATE SET
+           enabled = EXCLUDED.enabled,
+           fake_account_days = EXCLUDED.fake_account_days,
+           keep_roles_on_leave = EXCLUDED.keep_roles_on_leave,
+           log_self_invites = EXCLUDED.log_self_invites,
+           log_joins = EXCLUDED.log_joins,
+           log_leaves = EXCLUDED.log_leaves,
+           log_milestones = EXCLUDED.log_milestones,
+           join_message = EXCLUDED.join_message,
+           leave_message = EXCLUDED.leave_message,
+           milestone_message = EXCLUDED.milestone_message,
+           milestone_roles = EXCLUDED.milestone_roles,
+           updated_at = now()`,
+        [
+          guildId,
+          settings.enabled,
+          settings.fakeAccountDays,
+          settings.keepRolesOnLeave,
+          settings.logSelfInvites,
+          settings.logJoins,
+          settings.logLeaves,
+          settings.logMilestones,
+          settings.joinMessage,
+          settings.leaveMessage,
+          settings.milestoneMessage,
+          JSON.stringify(settings.milestoneRoles)
+        ]
+      );
+    },
+
+    async listLevelRewards(guildId: string): Promise<LevelRoleReward[]> {
+      const { rows } = await pool.query<Record<string, unknown>>(
+        `SELECT id, kind, level, required_voice_level, role_id, always_keep
+         FROM level_role_rewards WHERE guild_id = $1
+         ORDER BY kind, level, required_voice_level NULLS LAST`,
+        [guildId]
+      );
+      return rows
+        .map(row =>
+          normaliseLevelReward({
+            id: row.id,
+            kind: row.kind,
+            level: row.level,
+            voiceLevel: row.required_voice_level,
+            roleId: row.role_id,
+            alwaysKeep: row.always_keep
+          })
+        )
+        .filter((reward): reward is LevelRoleReward => reward !== null && reward.id !== "");
+    },
+
+    /**
+     * Inserts one reward rule. A duplicate is refused with `null` — the
+     * conflict is a real business answer the route maps to 409, not a
+     * silent no-op pretending to be a create.
+     */
+    async createLevelReward(guildId: string, reward: Omit<LevelRoleReward, "id">): Promise<LevelRoleReward | null> {
+      const { rows } = await pool.query<{ id: string; kind: LevelRewardKind; level: number; required_voice_level: number | null; role_id: string }>(
+        `INSERT INTO level_role_rewards (id, guild_id, kind, level, required_voice_level, role_id, always_keep)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (guild_id, kind, level, required_voice_level, role_id) DO NOTHING
+         RETURNING id, kind, level, required_voice_level, role_id`,
+        [randomUUID(), guildId, reward.kind, reward.level, reward.voiceLevel, reward.roleId, reward.alwaysKeep]
+      );
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        id: row.id,
+        kind: row.kind,
+        level: row.level,
+        voiceLevel: row.required_voice_level,
+        roleId: row.role_id,
+        alwaysKeep: reward.alwaysKeep
+      };
+    },
+
+    /**
+     * Updates one reward rule. `not_found` and `conflict` are distinct
+     * answers — editing a rule into a shape another rule already holds is a
+     * business rejection (409), not a missing row (404) and not a 500.
+     */
+    async updateLevelReward(
+      guildId: string,
+      rewardId: string,
+      reward: Omit<LevelRoleReward, "id">
+    ): Promise<{ ok: true } | { ok: false; reason: "not_found" | "conflict" }> {
+      try {
+        const { rowCount } = await pool.query(
+          `UPDATE level_role_rewards SET kind = $3, level = $4, required_voice_level = $5, role_id = $6, always_keep = $7
+           WHERE guild_id = $1 AND id = $2`,
+          [guildId, rewardId, reward.kind, reward.level, reward.voiceLevel, reward.roleId, reward.alwaysKeep]
+        );
+        return rowCount === 1 ? { ok: true } : { ok: false, reason: "not_found" };
+      } catch (error) {
+        if (error instanceof pg.DatabaseError && error.code === "23505") return { ok: false, reason: "conflict" };
+        throw error;
+      }
+    },
+
+    async deleteLevelReward(guildId: string, rewardId: string): Promise<boolean> {
+      const { rowCount } = await pool.query(`DELETE FROM level_role_rewards WHERE guild_id = $1 AND id = $2`, [
+        guildId,
+        rewardId
+      ]);
+      return rowCount === 1;
+    },
+
+    /**
+     * Ensures one open sync job for the guild. Idempotent: a pending or
+     * running job is returned as-is, a failed job is resumed from its cursor,
+     * and only a fresh request after a completed pass starts a new one. The
+     * bot's minute clock claims and runs it; nothing here needs the bot to be
+     * reachable — the job row is the durable transport.
+     */
+    async createOrResumeSyncJob(guildId: string): Promise<LevelSyncJob> {
+      const existing = await pool.query<LevelSyncJobRow>(
+        `SELECT * FROM level_sync_jobs
+         WHERE guild_id = $1 AND status IN ('pending','running')
+         ORDER BY created_at DESC LIMIT 1`,
+        [guildId]
+      );
+      if (existing.rows[0]) return mapSyncJob(existing.rows[0]);
+      const failed = await pool.query<{ id: string }>(
+        `SELECT id FROM level_sync_jobs
+         WHERE guild_id = $1 AND status = 'failed'
+         ORDER BY created_at DESC LIMIT 1`,
+        [guildId]
+      );
+      if (failed.rows[0]) {
+        const resumed = await pool.query<LevelSyncJobRow>(
+          `UPDATE level_sync_jobs SET status = 'pending', error = NULL, updated_at = now()
+           WHERE id = $1 RETURNING *`,
+          [failed.rows[0].id]
+        );
+        return mapSyncJob(resumed.rows[0]);
+      }
+      const inserted = await pool.query<LevelSyncJobRow>(
+        `INSERT INTO level_sync_jobs (id, guild_id) VALUES ($1, $2) RETURNING *`,
+        [randomUUID(), guildId]
+      );
+      return mapSyncJob(inserted.rows[0]);
+    },
+
+    /** The guild's most recent sync job, for the progress surface. */
+    async latestSyncJob(guildId: string): Promise<LevelSyncJob | null> {
+      const { rows } = await pool.query<LevelSyncJobRow>(
+        `SELECT * FROM level_sync_jobs WHERE guild_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [guildId]
+      );
+      return rows[0] ? mapSyncJob(rows[0]) : null;
+    },
+
+    /** The signed-in member's own XP totals, for the dual-rule state surface. */
+    async memberLevels(guildId: string, userId: string): Promise<{ textXp: number; voiceXp: number } | null> {
+      const { rows } = await pool.query<{ text_xp: number; voice_xp: number }>(
+        `SELECT text_xp, voice_xp FROM user_guild_levels WHERE guild_id = $1 AND user_id = $2`,
+        [guildId, userId]
+      );
+      return rows[0] ? { textXp: rows[0].text_xp, voiceXp: rows[0].voice_xp } : null;
+    },
+
+    /**
+     * The levels system status: engine switch, the last time XP actually
+     * moved, and the bot's last minute-clock heartbeat written through
+     * instance_settings. Every value is read from real state — the card on
+     * the screen repeats what the data says, never what it hopes.
+     */
+    async levelsStatus(guildId: string): Promise<{
+      enabled: boolean;
+      lastXpWriteAt: string | null;
+      lastVoiceTickAt: string | null;
+      voiceSessions: number | null;
+      sync: LevelSyncJob | null;
+    }> {
+      const settings = await pool.query<{ enabled: boolean }>(
+        `SELECT enabled FROM guild_levels WHERE guild_id = $1`,
+        [guildId]
+      );
+      const activity = await pool.query<{ last_write: Date | null }>(
+        `SELECT GREATEST(MAX(last_text_xp_at), MAX(last_voice_xp_at)) AS last_write FROM user_guild_levels WHERE guild_id = $1`,
+        [guildId]
+      );
+      const markers = await pool.query<{ key: string; value: string }>(
+        `SELECT key, value FROM instance_settings WHERE key IN ('levels.last_voice_tick_at','levels.voice_sessions')`
+      );
+      const marker = (key: string) => markers.rows.find(row => row.key === key)?.value ?? null;
+      const tickAt = marker("levels.last_voice_tick_at");
+      const sessions = marker("levels.voice_sessions");
+      const latestJob = await pool.query<LevelSyncJobRow>(
+        `SELECT * FROM level_sync_jobs WHERE guild_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [guildId]
+      );
+      return {
+        enabled: settings.rows[0]?.enabled ?? false,
+        lastXpWriteAt: activity.rows[0].last_write ? new Date(activity.rows[0].last_write).toISOString() : null,
+        lastVoiceTickAt: tickAt ? new Date(tickAt).toISOString() : null,
+        voiceSessions: sessions === null ? null : Number(sessions),
+        sync: latestJob.rows[0] ? mapSyncJob(latestJob.rows[0]) : null
+      };
+    },
+
+    /**
+     * One leaderboard page plus the stats cards. Levels are derived from XP
+     * here through the shared formula, never stored — a stored level would be
+     * a second copy of the truth the screen's formula card advertises.
+     */
+    async levelLeaderboard(
+      guildId: string,
+      track: "text" | "voice",
+      limit: number,
+      offset: number
+    ): Promise<{
+      entries: { userId: string; displayName: string | null; avatarHash: string | null; xp: number }[];
+      total: number;
+      stats: { highestLevel: number; totalXp: number; rankedMembers: number };
+    }> {
+      const xpColumn = track === "voice" ? "voice_xp" : "text_xp";
+      // A hidden member keeps earning XP. They stay listed with their flag so
+      // the operator can un-hide them, but the board's stats stop counting
+      // them, and the UI renders their row dimmed.
+      const entries = await pool.query<{ user_id: string; display_name: string | null; avatar_hash: string | null; xp: number; leaderboard_hidden: boolean }>(
+        `SELECT user_id, display_name, avatar_hash, ${xpColumn} AS xp, leaderboard_hidden FROM user_guild_levels
+         WHERE guild_id = $1 AND ${xpColumn} > 0
+         ORDER BY ${xpColumn} DESC, user_id ASC
+         LIMIT $2 OFFSET $3`,
+        [guildId, limit, offset]
+      );
+      const stats = await pool.query<{
+        highest_xp: number | null;
+        total_xp: string | number | null;
+        ranked_members: string | number;
+      }>(
+        `SELECT MAX(${xpColumn}) AS highest_xp, SUM(${xpColumn}) AS total_xp, COUNT(*) AS ranked_members
+         FROM user_guild_levels WHERE guild_id = $1 AND ${xpColumn} > 0 AND NOT leaderboard_hidden`,
+        [guildId]
+      );
+      const row = stats.rows[0];
+      const highestXp = row?.highest_xp ?? 0;
+      // Levels on the board derive through the guild's own cap, the same one
+      // the bot and the screens use — never through a private default.
+      const capRow = await pool.query<{ max_level_cap: number }>(
+        `SELECT max_level_cap FROM guild_levels WHERE guild_id = $1`,
+        [guildId]
+      );
+      const capSetting = capRow.rows[0]?.max_level_cap;
+      const cap = capSetting === undefined || capSetting === 0 ? MAX_LEVEL_CAP : capSetting;
+      return {
+        entries: entries.rows.map(entry => ({
+          userId: entry.user_id,
+          displayName: entry.display_name,
+          avatarHash: entry.avatar_hash,
+          xp: entry.xp,
+          hidden: entry.leaderboard_hidden
+        })),
+        total: Number(row?.ranked_members ?? 0),
+        stats: {
+          highestLevel: levelFromXp(highestXp, cap),
+          totalXp: Number(row?.total_xp ?? 0),
+          rankedMembers: Number(row?.ranked_members ?? 0)
+        }
+      };
+    },
+
+    /**
+     * Operator writes on one member, from the leaderboard's admin menu.
+     *
+     * Setting XP overwrites the totals outright — levels are derived, so the
+     * next read speaks the truth. Both writes reconcile reward roles through
+     * a sync request, because a raise can earn roles and a reset can strand
+     * them; the request lives in the sync job machine, so the bot picks it up
+     * within a minute and the operator never has to remember.
+     */
+
+    /** Overwrites a member's XP totals. `null` leaves that track untouched. */
+    async setMemberXp(
+      guildId: string,
+      userId: string,
+      values: { textXp: number | null; voiceXp: number | null }
+    ): Promise<boolean> {
+      const { rowCount } = await pool.query(
+        `UPDATE user_guild_levels SET
+           text_xp = COALESCE($3, text_xp),
+           voice_xp = COALESCE($4, voice_xp),
+           updated_at = now()
+         WHERE guild_id = $1 AND user_id = $2`,
+        [guildId, userId, values.textXp, values.voiceXp]
+      );
+      return rowCount === 1;
+    },
+
+    /** Sets (or clears) a member's leaderboard exclusion. */
+    async setMemberLeaderboardHidden(guildId: string, userId: string, hidden: boolean): Promise<boolean> {
+      const { rowCount } = await pool.query(
+        `UPDATE user_guild_levels SET leaderboard_hidden = $3, updated_at = now()
+         WHERE guild_id = $1 AND user_id = $2`,
+        [guildId, userId, hidden]
+      );
+      return rowCount === 1;
     },
 
     /** One instance-wide deployment setting, or null when it was never saved. */
@@ -410,18 +980,21 @@ export function createDatabase(pool: pg.Pool) {
       id: string;
       discordUserId: string;
       discordUsername: string;
+      /** The @handle, beside the display name. */
+      discordHandle?: string | null;
       discordAvatar?: string | null;
       accessTokenCiphertext: string;
       scopes: string;
     }) {
       const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000);
       await pool.query(
-        `INSERT INTO oauth_sessions (id, discord_user_id, discord_username, discord_avatar, access_token_ciphertext, scopes, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        `INSERT INTO oauth_sessions (id, discord_user_id, discord_username, discord_handle, discord_avatar, access_token_ciphertext, scopes, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
           input.id,
           input.discordUserId,
           input.discordUsername,
+          input.discordHandle ?? null,
           input.discordAvatar ?? null,
           input.accessTokenCiphertext,
           input.scopes,
@@ -433,7 +1006,7 @@ export function createDatabase(pool: pg.Pool) {
 
     async getSession(id: string): Promise<SessionRecord | null> {
       const { rows } = await pool.query(
-        `SELECT id, discord_user_id, discord_username, discord_avatar, access_token_ciphertext, scopes, expires_at
+        `SELECT id, discord_user_id, discord_username, discord_handle, discord_avatar, access_token_ciphertext, scopes, expires_at
          FROM oauth_sessions WHERE id = $1 AND expires_at > now()`,
         [id]
       );
@@ -443,6 +1016,7 @@ export function createDatabase(pool: pg.Pool) {
         id: row.id,
         discordUserId: row.discord_user_id,
         discordUsername: row.discord_username,
+        discordHandle: row.discord_handle ?? null,
         discordAvatar: row.discord_avatar ?? null,
         accessTokenCiphertext: row.access_token_ciphertext,
         scopes: row.scopes,

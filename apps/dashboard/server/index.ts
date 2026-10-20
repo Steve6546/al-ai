@@ -27,6 +27,7 @@ import {
   LAYER_SIGNATURE_TTL_MS,
   logDestinations,
   LOG_CATEGORY_NAME,
+  DEFAULT_ACTIVITY_TEXT,
   MAX_ACTIVITY_TEXT_LENGTH,
   MAX_BIO_LENGTH,
   MAX_IMAGE_DATA_URL_LENGTH,
@@ -34,10 +35,11 @@ import {
   durationToMs,
   isBotStatusDuration,
   isTimedBotStatus,
-  normaliseBotIdentity,
+  normaliseBotPresence,
   normaliseCommandConfig,
   eventSchema,
   normaliseHexColor,
+  normaliseBio,
   normaliseImageDataUrl,
   normaliseImageValue,
   normaliseNickname,
@@ -45,6 +47,11 @@ import {
   normaliseSnowflake,
   normaliseTierRoles,
   normaliseAntiNukeConfig,
+  normaliseInviteSettings,
+  normaliseWelcomeMessageSettings,
+  detectLevelConfigProblems,
+  normaliseLevelSettings,
+  normaliseLevelReward,
   normaliseWelcomeSettings,
   requireCommand,
   SESSION_COOKIE_NAME,
@@ -54,11 +61,16 @@ import {
   type ActivityEntry,
   type AntiNukeConfig,
   type WelcomeSettings,
-  type BotIdentitySettings,
+  type BotPresenceSettings,
   type ChannelOption,
   type CommandConfig,
   type CustomizationSettings,
   type GuildMetrics,
+  type InviteSettings,
+  type LevelRewardKind,
+  type WelcomeMessageSettings,
+  type LevelRoleReward,
+  type LevelSettings,
   type LogDestination,
   type LoggingMode,
   type LoggingSettings,
@@ -66,9 +78,11 @@ import {
   type PermissionStatus,
   type Tier,
   DISCORD_PERMISSION_BITS,
-  LOGIN_SCOPES
+  LOGIN_SCOPES,
+  normaliseRemoteAccessMode
 } from "@al-ai/core";
 import { loadEnv } from "./env.js";
+import { isPlatformOwner } from "./authorization.js";
 import { createDatabase, createPool } from "./db.js";
 import { clearedCookieHeader, destroySession, issueSession, parseCookies, policyCookieHeader, readSession, sessionAccessToken, sessionCookieHeader } from "./session.js";
 import { assertTier, AuthorizationError, botIdentityPermissionStatus, resolveActorTier } from "./authorization.js";
@@ -95,6 +109,8 @@ import {
   resolveBotUserId,
   userAvatarUrl,
   userBannerUrl,
+  guildMemberAvatarUrl,
+  guildMemberBannerUrl,
   hasPermission,
   createGuildChannel,
   deleteGuildChannel,
@@ -119,11 +135,12 @@ import {
 } from "./network.js";
 import {
   applyAppearance,
-  invalidateAppearanceSnapshot,
-  readAppearanceSnapshot,
+  changedAppearanceFields,
+  fetchImageAsDataUrl,
+  invalidateGuildMemberProfile,
+  readGuildMemberProfile,
   resolveRoleIconWrite,
   type AppearanceField,
-  type AppearanceSnapshot,
   type FieldOutcome
 } from "./appearance.js";
 
@@ -149,6 +166,17 @@ function trustProxyOnlyLoopback(addr: string): boolean {
  * field from silently breaking that save, while still capping bodies.
  */
 const REQUEST_BODY_LIMIT = 1_200_000;
+
+/**
+ * How long the browser is told to wait after an upstream Discord failure.
+ *
+ * The dashboard cannot make Discord answer, so the only thing it can do is
+ * refuse to invite a stampede: a 503 that carries `Retry-After` tells the
+ * client to wait instead of retrying into a struggling API. The value is a
+ * few seconds - long enough for a transient 5xx to clear, short enough that
+ * the operator is not left staring at a dead screen.
+ */
+const UPSTREAM_RETRY_AFTER_SECONDS = 3;
 
 const app = Fastify({
   logger: true,
@@ -222,7 +250,12 @@ app.addHook("onRequest", async (_request, reply) => {
       // Style attributes are how React and framer-motion write inline styles.
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
-      "img-src 'self' data: https://cdn.discordapp.com",
+      // `blob:` is required by the image cropper: a picked file becomes an
+      // object URL and is previewed in an <img> before any bytes reach the
+      // server. A blob URL can only be minted by this same origin, so the
+      // allowance widens the surface by nothing — it names what the page
+      // already owns.
+      "img-src 'self' data: blob: https://cdn.discordapp.com",
       "connect-src 'self'",
       "base-uri 'self'",
       "form-action 'self'",
@@ -251,13 +284,82 @@ app.addHook("onRequest", async (request, reply) => {
   });
 });
 
+/**
+ * The cross-site request guard for everything that changes state.
+ *
+ * `SameSite=Lax` already stops a browser from sending the session cookie on a
+ * cross-site POST, and the absence of CORS stops the answer from being read.
+ * That is a real defence, but it is a single one, and it is a browser-side
+ * promise rather than a check this server makes - a client that is not a
+ * browser (or a browser that treats the cookie differently) is not covered by
+ * it at all.
+ *
+ * So the server checks the request's own origin. Two rules, in order:
+ *
+ * 1. A request that *names* a site must name **this** one. A browser always
+ *    sends `Origin` on a cross-site write, and a same-origin request from the
+ *    dashboard itself sends its own origin - so the check is precise rather
+ *    than heuristic.
+ * 2. A request that carries the **session cookie** and names no site at all is
+ *    refused. The cookie is the only credential a browser sends, and a write
+ *    that arrives with it and without saying where it came from is exactly the
+ *    shape of a forged request. A request *without* the cookie is left to the
+ *    route's own authentication, which will answer 401 anyway - refusing it
+ *    here would only change the message.
+ *
+ * A request with no `Origin` at all is *not* refused: that is a non-browser
+ * client (the operator's own scripts, curl, a health probe), and refusing it
+ * would break the tools without closing a hole a browser can reach.
+ */
+app.addHook("onRequest", async (request, reply) => {
+  const method = request.method.toUpperCase();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return;
+
+  const origin = typeof request.headers.origin === "string" ? request.headers.origin : null;
+  const referer = typeof request.headers.referer === "string" ? request.headers.referer : null;
+  const requestHost = String(request.headers.host ?? "").toLowerCase();
+
+  const namesThisSite = (value: string | null) => {
+    if (!value) return false;
+    try {
+      return new URL(value).host.toLowerCase() === requestHost;
+    } catch {
+      return false;
+    }
+  };
+
+  const refusal = {
+    error: "CROSS_SITE_REQUEST",
+    message: "طلب من موقع آخر. هذه اللوحة تقبل الطلبات من موقعها فقط."
+  };
+
+  // Rule 1: a named site must be this one.
+  if (origin !== null && !namesThisSite(origin)) {
+    return reply.code(403).send(refusal);
+  }
+  if (origin === null && referer !== null && !namesThisSite(referer)) {
+    return reply.code(403).send(refusal);
+  }
+
+  // Rule 2: a write that carries the session cookie has to say where it came
+  // from. Without the cookie there is nothing to forge - the route's own
+  // authentication answers - so the request is left alone.
+  if (origin === null && referer === null) {
+    const cookies = parseCookies(request.headers.cookie);
+    if (cookies[SESSION_COOKIE_NAME]) {
+      return reply.code(403).send(refusal);
+    }
+  }
+
+  return undefined;
+});
+
 app.addHook("onRequest", async (request, reply) => {
   const url = request.url;
   // Static assets are not throttled: a single page load legitimately fetches a
   // handful of them, and none of them touch Discord.
   if (!url.startsWith("/api/") && !url.startsWith("/auth/")) return;
   if (url.startsWith("/internal/")) return;
-
   // A request carrying a well-formed session id gets its OWN bucket keyed by
   // that id rather than the shared per-IP one. Behind the tunnel every visitor
   // arrives from cloudflared's loopback socket, so one flooding stranger could
@@ -387,8 +489,16 @@ async function loadUserGuilds(
       return null;
     }
 
+    // Everything that is not "your token died" and not "you are too fast" is
+    // Discord's own transient fault: a 5xx from the API, a connection that
+    // dropped, or our timeout waiting for it. 503 says exactly that, and
+    // `Retry-After` tells the browser to wait instead of hammering a struggling
+    // upstream - the 429 above carries the same header for the same reason.
     app.log.error(error, "Discord guild list read failed");
-    reply.code(503).send({ error: "DISCORD_UNAVAILABLE", message: "تعذّر الوصول إلى Discord. أعد المحاولة." });
+    reply
+      .code(503)
+      .header("retry-after", String(UPSTREAM_RETRY_AFTER_SECONDS))
+      .send({ error: "DISCORD_UNAVAILABLE", message: "تعذّر الوصول إلى Discord. أعد المحاولة." });
     return null;
   }
 }
@@ -677,34 +787,58 @@ app.get("/api/session", async request => {
     user: {
       id: session.discordUserId,
       username: session.discordUsername,
+      // The @handle, when the session carries one (a session issued before the
+      // column existed simply has none).
+      handle: session.discordHandle ?? null,
       // Resolved server-side so the browser never builds a CDN URL itself.
       avatarUrl: userAvatarUrl(session.discordUserId, session.discordAvatar),
-      expiresAt: session.expiresAt
+      expiresAt: session.expiresAt,
+      // The verdict only, never the OWNER_ID itself: the browser needs to know
+      // whether to *show* the platform-owner surfaces, and the server re-checks
+      // every gated request against the session anyway.
+      isPlatformOwner: isPlatformOwner(env.ownerId, session.discordUserId)
     }
   };
 });
 
 /**
- * Write guard for instance-wide deployment settings.
+ * The platform-owner gate: the one identity allowed to touch the deployment's
+ * own surfaces — the network reach and the bot's global profile.
  *
- * Remote access does not belong to a guild, so the usual per-guild tier check
- * does not apply. The honest equivalent: the caller must administer at least
- * one guild *this deployment's bot actually serves*. Owning an unrelated server
- * elsewhere on Discord must not buy the keys to somebody else's deployment.
+ * The comparison happens here, on the server, against the Discord id the
+ * session actually authenticated: a `guildId` in the request body, a claimed
+ * user id, or the page the browser happens to be on prove nothing. OWNER_ID is
+ * never sent to the client — the session route publishes only the *verdict*
+ * (`isPlatformOwner`), so the sidebar can hide what its caller cannot reach.
+ *
+ * An unset OWNER_ID denies everyone, by design: a deployment that cannot name
+ * its owner must not guess one from whoever signed in first. The warning is
+ * logged once per process, and it names the setting without echoing any value.
  */
-async function requireInstanceAdmin(request: FastifyRequest, reply: FastifyReply) {
+let warnedNoOwner = false;
+async function requirePlatformOwner(request: FastifyRequest, reply: FastifyReply) {
   const session = await requireSession(request, reply);
   if (!session) return null;
-  const userGuilds = await loadUserGuilds(request, reply, session);
-  if (!userGuilds) return null;
-  const botGuildIds = env.botToken
-    ? await fetchBotGuildIds(env.botToken).catch(() => new Set<string>())
-    : new Set<string>();
-  const administrates = userGuilds.some(
-    guild => botGuildIds.has(guild.id) && isAdministrable(guild.permissions)
-  );
-  if (!administrates) {
-    reply.code(403).send({ error: "FORBIDDEN", message: "إعدادات النظام لمشرفي سيرفرات يعمل فيها هذا البوت." });
+
+  if (!env.ownerId) {
+    if (!warnedNoOwner) {
+      console.warn(
+        "AL AI dashboard: OWNER_ID is not configured — platform-owner features (network access, the bot's global identity) are denied for every account until it is set. The value is a Discord user id; nothing is logged except this warning."
+      );
+      warnedNoOwner = true;
+    }
+    reply.code(403).send({
+      error: "FORBIDDEN",
+      message: "ميزات مالك المنصة معطّلة: لم يُضبط OWNER_ID على الخادم. أعد تشغيل اللوحة بعد ضبطه."
+    });
+    return null;
+  }
+
+  if (!isPlatformOwner(env.ownerId, session.discordUserId)) {
+    reply.code(403).send({
+      error: "FORBIDDEN",
+      message: "هذه الإعدادات من حصرية لمالك المنصة."
+    });
     return null;
   }
   return session;
@@ -712,13 +846,42 @@ async function requireInstanceAdmin(request: FastifyRequest, reply: FastifyReply
 
 /** Read: the current reach, for the «الوصول للشبكة» screen. */
 app.get("/api/network", async (request, reply) => {
-  if (!(await requireSession(request, reply))) return;
+  if (!(await requirePlatformOwner(request, reply))) return;
+  network.probe();
   return network.snapshot();
 });
 
+/**
+ * A floor on how often the reach switch may move.
+ *
+ * Each switch spawns or kills a `cloudflared` process; a second switch while
+ * the first is still settling races it — two tunnels could be started before
+ * either registered its URL, and the manager's "already starting" guard would
+ * then trust a status that no longer matched the process tree. The browser
+ * holds its own lock, but two operators share one server, and a scripted
+ * caller does not honour a disabled button at all. The server's clock is the
+ * rule; the client's is courtesy.
+ */
+const MODE_SWITCH_COOLDOWN_MS = 3_000;
+let lastModeSwitchAt = 0;
+
 app.put("/api/network", async (request, reply) => {
-  const session = await requireInstanceAdmin(request, reply);
+  const session = await requirePlatformOwner(request, reply);
   if (!session) return;
+
+  // A switch to the mode already active is a no-op and costs nothing, so it is
+  // allowed through: a double-clicked confirmation should not read as a flood.
+  const next = normaliseRemoteAccessMode((request.body as { mode?: unknown } | undefined)?.mode);
+  if (next !== network.snapshot().mode) {
+    const elapsed = Date.now() - lastModeSwitchAt;
+    if (elapsed < MODE_SWITCH_COOLDOWN_MS) {
+      return reply.code(429).header("retry-after", String(Math.ceil((MODE_SWITCH_COOLDOWN_MS - elapsed) / 1000))).send({
+        error: "TOO_MANY_REQUESTS",
+        message: `انتظر ثانية قبل تبديل وضع الوصول مرة أخرى — النفق السابق لا يزال قيد التشغيل.`
+      });
+    }
+    lastModeSwitchAt = Date.now();
+  }
 
   const body = request.body as { mode?: unknown } | undefined;
   const snapshot = await network.setMode(body?.mode);
@@ -804,12 +967,28 @@ app.get("/auth/discord/callback", async (request, reply) => {
     }
 
     const identity = await fetchIdentity(tokens.access_token);
+
     // The resolved identity must be a user, never this application. A code that
     // somehow reaches here on application credentials would make the bot itself
     // the signed-in operator.
-    if (env.botToken && identity.id === (await resolveBotUserId(env.botToken))) {
-      app.log.warn({ userId: identity.id }, "OAuth callback resolved the bot's own application id");
-      return done("/?auth=denied");
+    //
+    // This guard is a safety net, not a gate. The identity above was fetched
+    // with the operator's own access token and is already trustworthy; the
+    // bot-id read only cross-checks it. When that read fails — a rotated token
+    // the process has not reloaded, a Discord outage — the operator has still
+    // authenticated successfully, and turning a dead bot token into
+    // «فشل تسجيل الدخول» locks every operator out of the dashboard for a reason
+    // a fresh sign-in cannot fix. The failure is logged and the check skipped;
+    // a broken bot token already surfaces on every guild screen that needs it.
+    if (env.botToken) {
+      const botUserId = await resolveBotUserId(env.botToken).catch(error => {
+        app.log.warn({ err: error }, "Could not resolve the bot's own user id; skipping the self-sign-in guard");
+        return null;
+      });
+      if (botUserId !== null && identity.id === botUserId) {
+        app.log.warn({ userId: identity.id }, "OAuth callback resolved the bot's own application id");
+        return done("/?auth=denied");
+      }
     }
 
     // A sign-in always begins a new session. Any session the browser was still
@@ -831,10 +1010,21 @@ app.get("/auth/discord/callback", async (request, reply) => {
     const { id } = await issueSession(db, env, {
       discordUserId: identity.id,
       discordUsername: identity.globalName ?? identity.username,
+      // The @handle beside the display name: the account menu shows both, and
+      // they are genuinely different names on Discord.
+      discordHandle: identity.username,
       discordAvatar: identity.avatar,
       accessToken: tokens.access_token,
       scopes: tokens.scope
     });
+
+    // A code exchanged through this origin is proof its redirect URI is
+    // registered in the Developer Portal — Discord rejects an unregistered one
+    // before a token is ever issued. Record it so the «خطوة واحدة في Discord»
+    // card stops asking for a step the operator has already taken. See
+    // `markOriginVerified` for why the login is the check rather than an API.
+    if (origin) network.markOriginVerified(origin);
+
     // Two cookies on the way out: the new session and the state clearance.
     reply.header("Set-Cookie", [sessionCookieHeader(id), clearStateCookie]);
     return reply.redirect("/?auth=ok");
@@ -892,7 +1082,10 @@ app.get("/api/guilds", async (request, reply) => {
   // read it instead of inventing an answer.
   if (botGuilds.status === "rejected") {
     app.log.error(botGuilds.reason, "Discord bot guild list read failed");
-    return reply.code(503).send({ error: "DISCORD_UNAVAILABLE", message: "تعذّر الوصول إلى Discord. أعد المحاولة." });
+    return reply
+      .code(503)
+      .header("retry-after", String(UPSTREAM_RETRY_AFTER_SECONDS))
+      .send({ error: "DISCORD_UNAVAILABLE", message: "تعذّر الوصول إلى Discord. أعد المحاولة." });
   }
 
   const botGuildIds = botGuilds.value;
@@ -1351,6 +1544,443 @@ app.put("/api/guilds/:guildId/welcome", async (request, reply) => {
 });
 
 /* ------------------------------------------------------------------ *
+ * Levels system — settings, role rewards, sync and leaderboard
+ * ------------------------------------------------------------------ */
+
+/**
+ * The grantable-role check the welcome routes run inline, shared by every
+ * levels route that accepts a role id. A reward pointing at a managed,
+ * deleted or above-the-bot role could never be applied by the bot, so the
+ * write must refuse it rather than store a rule that silently does nothing.
+ */
+async function grantableRoleCheck(guildId: string, roleId: string): Promise<boolean> {
+  if (!env.botToken) return false;
+  const [roles, botHighestRolePosition] = await Promise.all([
+    fetchGuildRoles(env.botToken, guildId).catch(() => [] as DiscordRole[]),
+    fetchBotHighestRolePosition(env.botToken, guildId).catch(() => null)
+  ]);
+  return (
+    botHighestRolePosition !== null &&
+    roles.some(role => role.id === roleId && !role.managed && !role.isDefault && role.position < botHighestRolePosition)
+  );
+}
+
+app.get("/api/guilds/:guildId/levels/settings", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
+
+  const settings = await db.getLevelSettings(guildId);
+  const [roles, botHighestRolePosition, channels, rewards] = await Promise.all([
+    env.botToken ? fetchGuildRoles(env.botToken, guildId).catch(() => [] as DiscordRole[]) : Promise.resolve([] as DiscordRole[]),
+    env.botToken ? fetchBotHighestRolePosition(env.botToken, guildId).catch(() => null) : Promise.resolve(null),
+    env.botToken ? fetchGuildChannels(env.botToken, guildId).catch(() => [] as ChannelOption[]) : Promise.resolve([] as ChannelOption[]),
+    db.listLevelRewards(guildId)
+  ]);
+  const grantableRoleIds = new Set(
+    roles
+      .filter(role => !role.managed && !role.isDefault && botHighestRolePosition !== null && role.position < botHighestRolePosition)
+      .map(role => role.id)
+  );
+  // Warnings come from data: which rules point at roles the bot can no longer
+  // grant, and whether the notification channel still exists.
+  const problems = detectLevelConfigProblems(settings, rewards, grantableRoleIds, new Set(channels.map(channel => channel.id)));
+  return {
+    settings,
+    roles: [...grantableRoleIds].map(id => roles.find(role => role.id === id)!).filter(Boolean),
+    channels,
+    problems
+  };
+});
+
+app.put("/api/guilds/:guildId/levels/settings", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
+
+  const body = request.body as Partial<LevelSettings> | undefined;
+  if (!body || typeof body !== "object") {
+    return reply.code(400).send({ error: "INVALID_BODY", message: "يلزم جسم الطلب يحتوي إعدادات المستويات." });
+  }
+  const settings = normaliseLevelSettings(body);
+
+  // The custom notify channel must be a real channel the bot can see. A
+  // deleted channel stored here would turn every level-up into a silent no-op.
+  if (settings.notifyMode === "custom_channel" && settings.notifyChannelId) {
+    const channels = await fetchGuildChannels(env.botToken ?? "", guildId).catch(() => [] as ChannelOption[]);
+    if (!channels.some(channel => channel.id === settings.notifyChannelId)) {
+      return reply.code(409).send({
+        error: "CHANNEL_NOT_FOUND",
+        message: "قناة إشعارات الترقية محذوفة أو غير ظاهرة للبوت — اختر قناة أخرى."
+      });
+    }
+  }
+
+  await db.saveLevelSettings(guildId, settings);
+  await appendAudit(db, env, {
+    guildId,
+    eventId: "bot.command-success",
+    actorId: context.session!.discordUserId,
+    payload: { action: "levels.settings.save", enabled: settings.enabled, roleStacking: settings.roleStacking }
+  });
+  return { settings, savedAt: new Date().toISOString() };
+});
+
+app.get("/api/guilds/:guildId/welcome-messages", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
+
+  const settings = await db.getWelcomeMessages(guildId);
+  const channels = env.botToken
+    ? await fetchGuildChannels(env.botToken, guildId).catch(() => [] as ChannelOption[])
+    : ([] as ChannelOption[]);
+  return { settings, channels };
+});
+
+app.put("/api/guilds/:guildId/welcome-messages", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
+
+  const body = request.body as Partial<WelcomeMessageSettings> | undefined;
+  if (!body || typeof body !== "object") {
+    return reply.code(400).send({ error: "INVALID_BODY", message: "يلزم جسم الطلب يحتوي إعدادات رسائل الترحيب." });
+  }
+  const settings = normaliseWelcomeMessageSettings(body);
+
+  // Every named channel must be a real channel the bot can see — a deleted
+  // welcome channel would silently swallow every greeting.
+  const channels = env.botToken
+    ? await fetchGuildChannels(env.botToken, guildId).catch(() => [] as ChannelOption[])
+    : ([] as ChannelOption[]);
+  const channelIds = new Set(channels.map(channel => channel.id));
+  const requiresChannel = (id: string | null, label: string) => {
+    if (!id) return `${label}: اختر قناة أولاً.`;
+    if (!channelIds.has(id)) return `${label}: القناة محذوفة أو غير ظاهرة للبوت — اختر قناة أخرى.`;
+    return null;
+  };
+  if (settings.enabled) {
+    const channelError = requiresChannel(settings.channelId, "قناة الترحيب");
+    if (channelError) return reply.code(409).send({ error: "CHANNEL_NOT_FOUND", message: channelError });
+    if (settings.imageEnabled && settings.imageMode === "separate_channel") {
+      const imageError = requiresChannel(settings.imageChannelId, "قناة الصورة");
+      if (imageError) return reply.code(409).send({ error: "CHANNEL_NOT_FOUND", message: imageError });
+    }
+  }
+
+  await db.saveWelcomeMessages(guildId, settings);
+  await appendAudit(db, env, {
+    guildId,
+    eventId: "bot.command-success",
+    actorId: context.session!.discordUserId,
+    payload: { action: "welcome-messages.save", enabled: settings.enabled, imageEnabled: settings.imageEnabled, mode: settings.mode }
+  });
+  return { settings, savedAt: new Date().toISOString() };
+});
+
+app.get("/api/guilds/:guildId/invites/settings", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
+
+  const settings = await db.getInviteSettings(guildId);
+  const [roles, botHighestRolePosition] = await Promise.all([
+    env.botToken ? fetchGuildRoles(env.botToken, guildId).catch(() => [] as DiscordRole[]) : Promise.resolve([] as DiscordRole[]),
+    env.botToken ? fetchBotHighestRolePosition(env.botToken, guildId).catch(() => null) : Promise.resolve(null)
+  ]);
+  const grantableRoleIds = new Set(
+    roles
+      .filter(role => !role.managed && !role.isDefault && botHighestRolePosition !== null && role.position < botHighestRolePosition)
+      .map(role => role.id)
+  );
+  // Warnings come from data: a milestone pointing at a role the bot can no
+  // longer grant is a reward that will never land, and the screen should say
+  // so before the operator wonders why nothing was handed out.
+  const problems = settings.milestoneRoles
+    .filter(milestone => !grantableRoleIds.has(milestone.roleId))
+    .map(milestone => ({
+      code: "milestone-role-missing",
+      message: `قاعدة الإنجاز عند ${milestone.net} إحالة تشير إلى رتبة محذوفة، أو مُدارة، أو فوق أعلى رتبة البوت — لن تُطبَّق حتى تُعدَّل.`
+    }));
+  return {
+    settings,
+    roles: [...grantableRoleIds].map(id => roles.find(role => role.id === id)!).filter(Boolean),
+    problems
+  };
+});
+
+app.put("/api/guilds/:guildId/invites/settings", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
+
+  const body = request.body as Partial<InviteSettings> | undefined;
+  if (!body || typeof body !== "object") {
+    return reply.code(400).send({ error: "INVALID_BODY", message: "يلزم جسم الطلب يحتوي إعدادات الإحالات." });
+  }
+  const settings = normaliseInviteSettings(body);
+
+  // Every milestone role must be one the bot can actually grant today. A
+  // deleted or managed role stored here would make the milestone silent.
+  for (const milestone of settings.milestoneRoles) {
+    if (!(await grantableRoleCheck(guildId, milestone.roleId))) {
+      return reply.code(409).send({
+        error: "ROLE_NOT_GRANTABLE",
+        message: `رتبة قاعدة الإنجاز عند ${milestone.net} إحالة محذوفة، أو مُدارة بواسطة تكامل، أو فوق أعلى رتبة البوت — اختر رتبة أخرى.`
+      });
+    }
+  }
+
+  await db.saveInviteSettings(guildId, settings);
+  await appendAudit(db, env, {
+    guildId,
+    eventId: "bot.command-success",
+    actorId: context.session!.discordUserId,
+    payload: { action: "invites.settings.save", enabled: settings.enabled, milestones: settings.milestoneRoles.length }
+  });
+  return { settings, savedAt: new Date().toISOString() };
+});
+
+app.get("/api/guilds/:guildId/levels/rewards", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
+  return { rewards: await db.listLevelRewards(guildId) };
+});
+
+/** The body shape both reward-write routes normalise from. */
+async function rewardFromBody(
+  guildId: string,
+  body: Partial<LevelRoleReward> | undefined,
+  reply: FastifyReply
+): Promise<Omit<LevelRoleReward, "id"> | null> {
+  const reward = normaliseLevelReward(body);
+  if (!reward || !reward.roleId) {
+    reply.code(400).send({ error: "INVALID_BODY", message: "يلزم اختيار رتبة ديسكورد للمكافأة." });
+    return null;
+  }
+  if (!(await grantableRoleCheck(guildId, reward.roleId))) {
+    reply.code(409).send({
+      error: "ROLE_NOT_GRANTABLE",
+      message: "الرتبة المختارة محذوفة، أو مُدارة بواسطة تكامل، أو فوق أعلى رتبة البوت — ولا يمكن منحها."
+    });
+    return null;
+  }
+  return { kind: reward.kind, level: reward.level, voiceLevel: reward.voiceLevel, roleId: reward.roleId, alwaysKeep: reward.alwaysKeep };
+}
+
+app.post("/api/guilds/:guildId/levels/rewards", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
+
+  const reward = await rewardFromBody(guildId, request.body as Partial<LevelRoleReward> | undefined, reply);
+  if (!reward) return;
+  const created = await db.createLevelReward(guildId, reward);
+  // A duplicate rule is a genuine conflict, answered as one — never a fake
+  // create, and never a 500 from an unconstrained unique violation.
+  if (!created) {
+    return reply.code(409).send({ error: "REWARD_CONFLICT", message: "هذه القاعدة مسجّلة مسبقاً بنفس المستوى والرتبة." });
+  }
+  await appendAudit(db, env, {
+    guildId,
+    eventId: "bot.command-success",
+    actorId: context.session!.discordUserId,
+    payload: { action: "levels.reward.create", kind: created.kind, level: created.level, roleId: created.roleId }
+  });
+  return { reward: created, savedAt: new Date().toISOString() };
+});
+
+app.patch("/api/guilds/:guildId/levels/rewards/:rewardId", async (request, reply) => {
+  const { guildId, rewardId } = request.params as { guildId: string; rewardId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
+
+  const reward = await rewardFromBody(guildId, request.body as Partial<LevelRoleReward> | undefined, reply);
+  if (!reward) return;
+  const updated = await db.updateLevelReward(guildId, rewardId, reward);
+  if (!updated.ok) {
+    return reply.code(updated.reason === "conflict" ? 409 : 404).send({
+      error: updated.reason === "conflict" ? "REWARD_CONFLICT" : "NOT_FOUND",
+      message:
+        updated.reason === "conflict"
+          ? "لا يمكن تعديل القاعدة إلى هذه التركيبة — قاعدة أخرى تحملها مسبقاً."
+          : "القاعدة غير موجودة."
+    });
+  }
+  await appendAudit(db, env, {
+    guildId,
+    eventId: "bot.command-success",
+    actorId: context.session!.discordUserId,
+    payload: { action: "levels.reward.update", rewardId, level: reward.level, roleId: reward.roleId }
+  });
+  // The edited rule may have stranded roles on members who no longer qualify —
+  // reconciliation is requested here, not left to an operator's memory.
+  await db.createOrResumeSyncJob(guildId);
+  return { savedAt: new Date().toISOString() };
+});
+
+app.delete("/api/guilds/:guildId/levels/rewards/:rewardId", async (request, reply) => {
+  const { guildId, rewardId } = request.params as { guildId: string; rewardId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
+  const deleted = await db.deleteLevelReward(guildId, rewardId);
+  if (!deleted) return reply.code(404).send({ error: "NOT_FOUND", message: "القاعدة غير موجودة." });
+  await appendAudit(db, env, {
+    guildId,
+    eventId: "bot.command-success",
+    actorId: context.session!.discordUserId,
+    payload: { action: "levels.reward.delete", rewardId }
+  });
+  // Same as the edit above: the deleted rule's roles must be reconciled away.
+  await db.createOrResumeSyncJob(guildId);
+  return { savedAt: new Date().toISOString() };
+});
+
+/**
+ * The sync lifecycle from the operator's side.
+ *
+ * POST ensures one open job (idempotent: double-click returns the same job,
+ * a failed job is resumed from its cursor) and answers with the real state —
+ * the request lives in the database, so a restart cannot lose it and the
+ * response never promises more than the row says.
+ */
+app.post("/api/guilds/:guildId/levels/sync", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
+  const job = await db.createOrResumeSyncJob(guildId);
+  if (job.status === "pending" || job.status === "running") {
+    await appendAudit(db, env, {
+      guildId,
+      eventId: "bot.command-success",
+      actorId: context.session!.discordUserId,
+      payload: { action: "levels.sync.requested", jobId: job.id, resumed: job.status === "pending" && job.processed > 0 }
+    });
+  }
+  return { job };
+});
+
+/** Live progress for the sync button and the status card. */
+app.get("/api/guilds/:guildId/levels/sync", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
+  return { job: await db.latestSyncJob(guildId) };
+});
+
+/** The signed-in member's own XP, for the dual-rule eligibility chips. */
+app.get("/api/guilds/:guildId/levels/me", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
+  return { levels: await db.memberLevels(guildId, context.session.discordUserId) };
+});
+
+/* ------------------------------------------------------------------ *
+ * Levels — per-member admin (leaderboard row menu)
+ * ------------------------------------------------------------------ */
+
+const MEMBER_XP_CEILING = 999_999_999;
+
+/** Clamps one operator-supplied XP total; `null` means "leave this track". */
+function clampMemberXp(value: unknown): number | null {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return Math.min(MEMBER_XP_CEILING, Math.max(0, Math.round(numeric)));
+}
+
+/** Sets a member's XP outright. Levels are derived, so the board reads true. */
+app.patch("/api/guilds/:guildId/levels/members/:userId", async (request, reply) => {
+  const { guildId, userId } = request.params as { guildId: string; userId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
+  const body = request.body as { textXp?: unknown; voiceXp?: unknown } | undefined;
+  const textXp = clampMemberXp(body?.textXp);
+  const voiceXp = clampMemberXp(body?.voiceXp);
+  if (textXp === null && voiceXp === null) {
+    return reply.code(400).send({ error: "INVALID_BODY", message: "أدخل قيمة XP كتابية أو صوتية صحيحة (0 أو أعلى)." });
+  }
+  const updated = await db.setMemberXp(guildId, userId, { textXp, voiceXp });
+  if (!updated) return reply.code(404).send({ error: "NOT_FOUND", message: "لا توجد بيانات مستويات لهذا العضو." });
+  await appendAudit(db, env, {
+    guildId,
+    eventId: "bot.command-success",
+    actorId: context.session!.discordUserId,
+    payload: { action: "levels.member.xp.set", userId, textXp, voiceXp }
+  });
+  await db.createOrResumeSyncJob(guildId);
+  return { savedAt: new Date().toISOString() };
+});
+
+/** Resets a member's XP on both tracks and reconciles their reward roles. */
+app.post("/api/guilds/:guildId/levels/members/:userId/reset", async (request, reply) => {
+  const { guildId, userId } = request.params as { guildId: string; userId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
+  const updated = await db.setMemberXp(guildId, userId, { textXp: 0, voiceXp: 0 });
+  if (!updated) return reply.code(404).send({ error: "NOT_FOUND", message: "لا توجد بيانات مستويات لهذا العضو." });
+  await appendAudit(db, env, {
+    guildId,
+    eventId: "bot.command-success",
+    actorId: context.session!.discordUserId,
+    payload: { action: "levels.member.xp.reset", userId }
+  });
+  await db.createOrResumeSyncJob(guildId);
+  return { savedAt: new Date().toISOString() };
+});
+
+/** Shows or hides a member on the leaderboard. They keep earning either way. */
+app.patch("/api/guilds/:guildId/levels/members/:userId/visibility", async (request, reply) => {
+  const { guildId, userId } = request.params as { guildId: string; userId: string };
+  const context = await requireTierForGuild(request, reply, guildId);
+  if (!context) return;
+  const hidden = (request.body as { hidden?: unknown } | undefined)?.hidden === true;
+  const updated = await db.setMemberLeaderboardHidden(guildId, userId, hidden);
+  if (!updated) return reply.code(404).send({ error: "NOT_FOUND", message: "لا توجد بيانات مستويات لهذا العضو." });
+  await appendAudit(db, env, {
+    guildId,
+    eventId: "bot.command-success",
+    actorId: context.session!.discordUserId,
+    payload: { action: "levels.member.visibility", userId, hidden }
+  });
+  return { savedAt: new Date().toISOString() };
+});
+
+/**
+ * Real system status, from real state: the engine switch, the last XP write,
+ * the bot's last minute-clock heartbeat and the latest sync job. No fake
+ * heartbeat and no progress invented in the browser.
+ */
+app.get("/api/guilds/:guildId/levels/status", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
+  return db.levelsStatus(guildId);
+});
+
+app.get("/api/guilds/:guildId/levels/leaderboard", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
+  const query = request.query as { track?: string; limit?: string; offset?: string };
+  const track = query.track === "voice" ? "voice" : "text";
+  const limit = Math.min(100, Math.max(1, Number(query.limit ?? 25) || 25));
+  const offset = Math.max(0, Number(query.offset ?? 0) || 0);
+  const page = await db.levelLeaderboard(guildId, track, limit, offset);
+  // Avatar URLs are built here, like every other Discord CDN URL: the browser
+  // never assembles one itself.
+  return {
+    ...page,
+    entries: page.entries.map(entry => ({
+      ...entry,
+      avatarUrl: userAvatarUrl(entry.userId, entry.avatarHash)
+    }))
+  };
+});
+
+/* ------------------------------------------------------------------ *
  * Bot tokens — retired
  *
  * The dashboard used to accept additional bot tokens from the operator and
@@ -1432,122 +2062,58 @@ function appearanceResponse(
 }
 
 /* ------------------------------------------------------------------ *
- * Global bot identity — avatar, banner, bio, presence
+ * The bot's presence — status and activity
  *
- * The half of the appearance that is the same in every guild. Reading and
- * writing need no guild at all, which is why this route lives under
- * `/api/bot/identity` rather than nested inside a guild: an avatar that only
- * changed for one server would be the fake setting this project removed.
+ * The one appearance setting with no REST route at all. A status lives on the
+ * gateway connection, so it is the same in every guild the bot is in, and the
+ * *bot* is what applies it: this route stores the choice and the bot's presence
+ * sync picks it up on its next tick.
  *
- * The tier check still needs a guild — "may this account edit AL AI's own
- * profile?" is a question about standing somewhere — so the write takes an
- * optional `guildId` and resolves the caller's tier inside it. It asks for the
- * admin tier rather than owner because an Administrator already reaches this
- * screen, and the write is reversible from the same form: the worst an admin
- * can do here is change a picture and a status back.
+ * That is exactly why it is no longer part of «هوية البوت». Everything on that
+ * screen is now scoped to one server, and a control that reaches every server
+ * cannot sit on a form whose whole promise is "this is how the bot appears
+ * *here*". It keeps its own route and its own screen, and both say plainly that
+ * it applies everywhere — the feature is preserved without leaving a global
+ * concept behind on the identity screen.
+ *
+ * The tier check still needs a guild — "may this account change the bot's
+ * status?" is a question about standing somewhere — so the write takes a
+ * `guildId` and resolves the caller's tier inside it. The guard is the platform
+ * owner, and that is not a leftover: changing this really does change the bot's
+ * status in every other server, which is the cross-server reach this round took
+ * *out* of the identity screen. Handing it to a guild admin would put it
+ * straight back, one screen over.
  * ------------------------------------------------------------------ */
 
-/** The fields the global form owns. Presence is excluded: see the PUT route. */
-const GLOBAL_APPEARANCE_FIELDS = new Set<AppearanceField>(["avatarDataUrl", "bannerDataUrl", "bio"]);
-
-app.get("/api/bot/identity", async (request, reply) => {
-  // The identity is global (one bot, every guild), so the read needs guild
-  // standing, not just a session — the audit flagged it as the one read any
-  // signed-in stranger could reach. The floor matches the screen's own
-  // visibility rule (`canManageIdentity` = a resolvable tier in a bot guild);
-  // the write keeps its stricter admin gate. The client already sends the
-  // guildId this route was ignoring.
-  const query = request.query as { guildId?: string };
-  const context = await requireTierForGuild(request, reply, query.guildId ?? "", "moderator");
-  if (!context) return;
-
-  const identity = await db.getBotIdentity();
-
-  // The bot's own snowflake, needed to build its CDN avatar address — Discord
-  // serves avatars from `/avatars/{user_id}/{hash}`, so a hash alone is not
-  // enough to address one. Memoised for the life of the process by
-  // `resolveBotUserId`, so this costs nothing after the first call.
-  const botUserId = env.botToken ? await resolveBotUserId(env.botToken).catch(() => null) : null;
-
-  // Advisory, exactly like the per-guild screen's reads. A Discord outage must
-  // not stop the operator from seeing and editing the stored identity, so every
-  // read degrades to "unknown" and an unknown never becomes a warning.
-  const live: AppearanceSnapshot | null = env.botToken
-    ? await readAppearanceSnapshot(env.botToken).catch(() => null)
-    : null;
-
-  // Discord returns hashes, never URLs. Resolved here so the browser never
-  // assembles a CDN address and can never get the animated-asset extension or
-  // the size parameter wrong. Without the bot's ID there is no address to
-  // build, so the fields are null rather than a URL pointing at nothing.
-  const snapshot =
-    live && botUserId
-      ? {
-          username: live.username,
-          bio: live.bio,
-          avatarUrl: userAvatarUrl(botUserId, live.avatar),
-          bannerUrl: userBannerUrl(botUserId, live.banner)
-        }
-      : null;
+app.get("/api/bot/presence", async (request, reply) => {
+  if (!(await requirePlatformOwner(request, reply))) return;
 
   // `settings` rather than `identity`, matching every other settings route in
   // this file. The dashboard's client reads `result.settings`, so the earlier
   // name was a silent contract break: the screen crashed on a null draft
   // (`Object.keys(null)`) rather than showing an error, because the response
   // was a perfectly valid 200 carrying a key nobody looked at.
-  return { settings: identity, snapshot };
+  return { settings: await db.getBotPresence() };
 });
 
-app.put("/api/bot/identity", async (request, reply) => {
-  const body = request.body as (Partial<BotIdentitySettings> & { guildId?: unknown }) | undefined;
+app.put("/api/bot/presence", async (request, reply) => {
+  const body = request.body as (Partial<BotPresenceSettings> & { guildId?: unknown }) | undefined;
 
-  // The tier is resolved in the guild the caller is looking at. It cannot come
-  // from the body as a claim — only as a *location* to check.
+  // The guildId is mandatory as the *location* the audit trail names and the
+  // place the caller's tier is resolved — not as the scope of the write, which
+  // is the whole account. See `RULES-CONTRACTS.md`: this 400 is deliberate and
+  // must not be "fixed" into an optional field.
   const guildId = normaliseSnowflake(body?.guildId);
   if (!guildId) {
     return reply.code(400).send({
       error: "GUILD_ID_REQUIRED",
-      message: "أرسل معرّف السيرفر الذي تُعدّ منه الهوية العالمية، ليُتحقق من صلاحيتك فيه."
+      message: "أرسل معرّف السيرفر الذي تُعدّ منه حالة البوت، ليُتحقق من صلاحيتك فيه."
     });
   }
 
-  const context = await requireTierForGuild(request, reply, guildId, "admin");
+  const context = await requirePlatformOwner(request, reply);
   if (!context) return;
 
-  const previous = await db.getBotIdentity();
-
-  // Rejected rather than silently dropped. An image that failed validation and
-  // became `null` would *wipe* the avatar the operator meant to replace — the
-  // database would agree, the form would look saved, and the picture would be
-  // gone. So a value that was sent and did not survive is a 400.
-  if (body?.avatarDataUrl) {
-    if (!normaliseImageDataUrl(body.avatarDataUrl)) {
-      return reply.code(400).send({
-        error: "INVALID_AVATAR",
-        message:
-          imageRejectionReason(body.avatarDataUrl) === "TOO_LARGE"
-            ? `حجم الصورة يتجاوز الحد المسموح (${Math.round(MAX_IMAGE_DATA_URL_LENGTH / 1000)} كيلوبايت تقريباً). قصّها أو صغّرها ثم أعد المحاولة.`
-            : "صيغة الصورة غير مدعومة. استخدم PNG أو JPEG أو WEBP أو GIF."
-      });
-    }
-  }
-  if (body?.bannerDataUrl) {
-    if (!normaliseImageDataUrl(body.bannerDataUrl)) {
-      return reply.code(400).send({
-        error: "INVALID_BANNER",
-        message:
-          imageRejectionReason(body.bannerDataUrl) === "TOO_LARGE"
-            ? `حجم البانر يتجاوز الحد المسموح (${Math.round(MAX_IMAGE_DATA_URL_LENGTH / 1000)} كيلوبايت تقريباً). قصّه أو صغّره ثم أعد المحاولة.`
-            : "صيغة صورة البانر غير مدعومة. استخدم PNG أو JPEG أو WEBP أو GIF."
-      });
-    }
-  }
-  // A bio that is too long is truncated by `normaliseBio`, so the raw length is
-  // checked first — truncating here would hide the mistake instead of reporting it.
-  const rawBio = typeof body?.bio === "string" ? body.bio.trim() : "";
-  if (rawBio.length > MAX_BIO_LENGTH) {
-    return reply.code(400).send({ error: "INVALID_BIO", message: `النبذة يجب ألا تتجاوز ${MAX_BIO_LENGTH} حرفاً.` });
-  }
   const rawActivity = typeof body?.activityText === "string" ? body.activityText.trim() : "";
   if (rawActivity.length > MAX_ACTIVITY_TEXT_LENGTH) {
     return reply.code(400).send({
@@ -1555,14 +2121,17 @@ app.put("/api/bot/identity", async (request, reply) => {
       message: `نص النشاط يجب ألا يتجاوز ${MAX_ACTIVITY_TEXT_LENGTH} حرفاً.`
     });
   }
+  // Product rule: an activity kind without a text is a silent no-op — Discord
+  // renders nothing, and the «نوع النشاط» picker reads as broken. A save with
+  // an empty text therefore lands the project's real default presence instead,
+  // so the picker always produces something members can actually see.
+  const activityText = rawActivity.length > 0 ? rawActivity : DEFAULT_ACTIVITY_TEXT;
 
-  const next = normaliseBotIdentity({
-    // Fields absent from the body keep their stored value: a PUT that only
-    // carries the presence must not clear the avatar as a side effect of
-    // `undefined` normalising to null.
-    avatarDataUrl: body?.avatarDataUrl === undefined ? previous.avatarDataUrl : body.avatarDataUrl,
-    bannerDataUrl: body?.bannerDataUrl === undefined ? previous.bannerDataUrl : body.bannerDataUrl,
-    bio: body?.bio === undefined ? previous.bio : body.bio,
+  const previous = await db.getBotPresence();
+  const next = normaliseBotPresence({
+    // Fields absent from the body keep their stored value, so a PUT that
+    // carries only the status cannot blank the activity as a side effect of
+    // `undefined` normalising to the default.
     status: body?.status === undefined ? previous.status : body.status,
     // The client sends the *choice*; the expiry is derived here. A client clock
     // can be wrong by hours, and letting it set the instant would mean a window
@@ -1576,77 +2145,45 @@ app.put("/api/bot/identity", async (request, reply) => {
       Date.now()
     ),
     activityType: body?.activityType === undefined ? previous.activityType : body.activityType,
-    activityText: body?.activityText === undefined ? previous.activityText : body.activityText
+    activityText: body?.activityText === undefined ? previous.activityText : activityText
   });
 
-  if (!env.botToken) {
-    return reply.code(503).send({ error: "BOT_NOT_CONFIGURED", message: "البوت غير مهيأ لتعديل هويته." });
-  }
-
-  const outcomes: FieldOutcome[] = [];
-  try {
-    // Only the three fields this route can reach Discord with. The presence is
-    // still stored below, but `applyAppearance` deliberately does not write it:
-    // a status lives on the gateway, so this is the one value whose writer is
-    // the bot. Claiming it here would be the fourth column of a promise nobody
-    // keeps.
-    // Read once: nothing between the two slots can change it, and a second
-    // round trip per save is a query this route does not need.
-    const customization = await db.getCustomization(guildId);
-    outcomes.push(
-      ...(await applyAppearance({
-        token: env.botToken,
-        guildId,
-        previous: { customization, identity: previous },
-        next: { customization, identity: next }
-      }))
-    );
-  } catch (error) {
-    if (isAuthFailure(error)) return answerBotTokenRefused(reply, error);
-    app.log.error(error, "Appearance write failed before any field was attempted");
-    return reply.code(503).send({ error: "DISCORD_UNAVAILABLE", message: "تعذّر الوصول إلى Discord. أعد المحاولة." });
-  }
-
-  const attempted = outcomes.map(outcome => outcome.field).filter(field => GLOBAL_APPEARANCE_FIELDS.has(field));
-
-  // Storage happens even when Discord refused: the stored row is what the bot
-  // reads on its next tick, and a rate limit is momentary. Refusing to store
-  // would make the operator retype an image that `applyAppearance` may well
-  // accept a second later. The response says plainly what did not land, so
-  // "stored" and "applied" never get conflated.
-  await db.saveBotIdentity(next);
-
-  // The snapshot cache would otherwise keep showing the previous avatar and
-  // bio for up to a minute after a save that already succeeded — the "saved
-  // but nothing changed" reading this project treats as a defect.
-  invalidateAppearanceSnapshot();
-
-  const response = appearanceResponse(reply, outcomes, attempted, "Global bot identity saved");
-  if (!response) return;
+  /*
+   * Stored, not applied — and the response says exactly that instead of
+   * reporting a write that never happened.
+   *
+   * There is no Discord call this route could make: the presence is set on the
+   * gateway connection by the bot, which re-reads this row every 15 seconds.
+   * `applyAppearance` is therefore not called and no field outcome is invented.
+   * The response carries `{ settings, savedAt }` and no `applied`/`failed` pair,
+   * because an empty `applied` would read to the toast as "nothing was saved"
+   * — the "محفوظ ≠ منفّذ" confusion arriving from the other direction.
+   */
+  await db.saveBotPresence(next);
 
   await appendAudit(db, env, {
     guildId,
     eventId: "bot.command-success",
-    actorId: context.session!.discordUserId,
-    payload: {
-      action: "bot.identity.save",
-      applied: response.applied,
-      failed: response.failed.map(entry => entry.code)
-    }
+    actorId: context.discordUserId,
+    payload: { action: "bot.presence.save", status: next.status, activityType: next.activityType }
   });
 
-  // `settings` for the reason given on the GET route above: one key, everywhere.
-  return { settings: next, ...response };
+  return { settings: next, savedAt: new Date().toISOString() };
 });
 
 /* ------------------------------------------------------------------ *
- * Customization — the bot's per-guild identity
+ * Customization — the bot's identity in ONE guild
  *
- * Discord gives an application one global avatar, so this screen only ever
- * writes what the bot can actually apply per guild: the nickname and the colour
- * and icon of its own role. Everything is normalised with the shared helpers in
- * @al-ai/core, which the bot also uses on read, so a value can never mean two
- * different things on the two sides of the database.
+ * Everything the bot can present differently per server: the nickname, the
+ * guild avatar, the guild banner, the guild bio, and the colour and icon of its
+ * own role. Discord's Modify Current Member endpoint
+ * (`PATCH /guilds/{id}/members/@me`) accepts the first four together, and the
+ * role endpoint carries the other two — so a bot can hold a complete profile
+ * per guild, and nothing on this screen reaches another server.
+ *
+ * Everything is normalised with the shared helpers in @al-ai/core, which the
+ * bot also uses on read, so a value can never mean two different things on the
+ * two sides of the database.
  * ------------------------------------------------------------------ */
 app.get("/api/guilds/:guildId/customization", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
@@ -1655,17 +2192,61 @@ app.get("/api/guilds/:guildId/customization", async (request, reply) => {
   const settings = await db.getCustomization(guildId);
   const token = env.botToken;
 
+  /*
+   * The live preview needs what Discord currently serves for the bot *in this
+   * guild* — the member's nickname, avatar and banner — and it is read here,
+   * beside the stored row, because the two answer different halves of the same
+   * question: the row is what the operator last chose, this is what members
+   * actually see right now, including a nickname set from Discord itself.
+   *
+   * It is a guild-scoped read on a guild route, so every viewer of this screen
+   * gets it; there is no owner-gated half to route around any more, which is
+   * what the previous version of this comment was about.
+   *
+   * The preview prefers the draft, then the stored value, then this — so a
+   * just-picked file wins immediately while a fresh install still shows the
+   * bot's real face rather than a set of empty defaults.
+   *
+   * The bio is absent on purpose: Discord validates a member bio on write and
+   * never returns it on read, so the stored row is the only source for it.
+   */
+  const botUserId = token ? await resolveBotUserId(token).catch(() => null) : null;
+
   // Each of these is advisory. A Discord outage must not stop the operator from
   // seeing their saved settings, so every read degrades to "unknown" instead of
   // failing the request — and an unknown never becomes a warning about a problem
   // that may not exist.
-  const [permissions, premiumTier, hierarchy] = token
+  const [permissions, premiumTier, hierarchy, member] = token
     ? await Promise.all([
         botIdentityPermissionStatus(token, guildId).catch((): PermissionStatus[] => []),
         fetchGuildPremiumTier(token, guildId).catch(() => null),
-        fetchGuildHierarchy(token, guildId).catch(() => null)
+        fetchGuildHierarchy(token, guildId).catch(() => null),
+        botUserId ? readGuildMemberProfile(token, guildId, botUserId).catch(() => null) : Promise.resolve(null)
       ])
-    : [[] as PermissionStatus[], null, null];
+    : [[] as PermissionStatus[], null, null, null];
+
+  // Discord answers with hashes, never URLs, and an avatar hash starting with
+  // `a_` is animated and needs `.gif` — both rules live in the URL builders, so
+  // the browser never assembles a CDN address itself.
+  //
+  // The guild-scoped builders, not the account ones: a per-server avatar lives
+  // at a path that names both the guild and the user, and building it with
+  // `userAvatarUrl` would draw the account's picture and look perfectly correct
+  // — the operator would conclude their per-server upload had been ignored.
+  const profile =
+    member && botUserId
+      ? {
+          username: member.username,
+          nickname: member.nickname,
+          avatarUrl: guildMemberAvatarUrl(guildId, botUserId, member.avatar),
+          bannerUrl: guildMemberBannerUrl(guildId, botUserId, member.banner),
+          // What members see when this server has no override: the account's own
+          // picture. Sent so the preview can draw it instead of the initials —
+          // a bot with a perfectly good face must not render as a blank circle.
+          accountAvatarUrl: userAvatarUrl(botUserId, member.accountAvatar),
+          accountBannerUrl: userBannerUrl(botUserId, member.accountBanner)
+        }
+      : null;
 
   const tierRoles = await db.getTierRoles(guildId).catch(() => null);
   const managedRoleIds = [...(tierRoles?.adminRoleIds ?? []), ...(tierRoles?.moderatorRoleIds ?? [])];
@@ -1681,7 +2262,11 @@ app.get("/api/guilds/:guildId/customization", async (request, reply) => {
     settings,
     permissions,
     hierarchy: hierarchy ? assessRoleHierarchy(hierarchy.botPosition, managedPositions) : null,
-    roleIcon: assessRoleIconGate(premiumTier)
+    roleIcon: assessRoleIconGate(premiumTier),
+    // What Discord currently serves for the bot in THIS guild, or null when the
+    // read failed. Sent to every viewer, because it is this server's own data —
+    // there is no owner-gated half of it left to withhold.
+    profile
   };
 });
 
@@ -1690,7 +2275,38 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
   const context = await requireTierForGuild(request, reply, guildId);
   if (!context) return;
 
-  const body = request.body as Partial<CustomizationSettings> | undefined;
+  const body = request.body as (Partial<CustomizationSettings> & { avatarUrl?: unknown; bannerUrl?: unknown }) | undefined;
+
+  // "أو رابط مباشر": a pasted URL is fetched here and converted to the data URI
+  // Discord requires — its profile endpoints take image *data*, never a link. A
+  // failure is a 400 naming the reason, never a silently-dropped field.
+  //
+  // The fetched value lands in the same slot an upload would, so the two paths
+  // converge here and everything below sees one shape. This moved with the two
+  // images when they became this server's: the fields are the same fields, only
+  // the scope changed.
+  const avatarUrlText = typeof body?.avatarUrl === "string" ? body.avatarUrl.trim() : "";
+  if (body && avatarUrlText) {
+    try {
+      body.avatarDataUrl = await fetchImageAsDataUrl(avatarUrlText);
+    } catch (cause) {
+      return reply.code(400).send({
+        error: "INVALID_AVATAR_URL",
+        message: `صورة السيرفر: ${cause instanceof Error ? cause.message : "تعذّر جلب الصورة من الرابط."}`
+      });
+    }
+  }
+  const bannerUrlText = typeof body?.bannerUrl === "string" ? body.bannerUrl.trim() : "";
+  if (body && bannerUrlText) {
+    try {
+      body.bannerDataUrl = await fetchImageAsDataUrl(bannerUrlText);
+    } catch (cause) {
+      return reply.code(400).send({
+        error: "INVALID_BANNER_URL",
+        message: `غلاف السيرفر: ${cause instanceof Error ? cause.message : "تعذّر جلب الصورة من الرابط."}`
+      });
+    }
+  }
 
   // A nickname is optional (empty means "use the application name"), but when one
   // is supplied it must be one Discord will accept. The raw length is checked
@@ -1713,8 +2329,47 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
   // icon entirely below boost level 2, and reading an absent field as null would
   // wipe a stored icon the moment it did.
   const iconSent = body?.roleIconUrl !== undefined;
+  // The member's own fields follow the same absent/None contract: absent leaves
+  // the stored value alone, null clears it, and a value that was sent but does
+  // not survive validation is refused — a silently-dropped image would read as
+  // saved while keeping the old one.
+  const avatarSent = body?.avatarDataUrl !== undefined;
+  const bannerSent = body?.bannerDataUrl !== undefined;
   const current = await db.getCustomization(guildId);
   const normalisedIcon = iconSent ? normaliseImageValue(body?.roleIconUrl) : null;
+  const guildAvatar = avatarSent ? normaliseImageDataUrl(body?.avatarDataUrl ?? null) : null;
+  const guildBanner = bannerSent ? normaliseImageDataUrl(body?.bannerDataUrl ?? null) : null;
+
+  // A bio that is too long is truncated by `normaliseBio`, so the raw length is
+  // checked first — truncating here would hide the mistake instead of reporting
+  // it. 300 is Discord's own measured ceiling for a *member* bio, answered to a
+  // longer value with `400 BASE_TYPE_MAX_LENGTH`; it is not the 190 that applies
+  // to the account's About me, and using that here would refuse characters
+  // Discord would have accepted.
+  const rawBio = typeof body?.bio === "string" ? body.bio.trim() : "";
+  if (rawBio.length > MAX_BIO_LENGTH) {
+    return reply.code(400).send({ error: "INVALID_BIO", message: `النبذة يجب ألا تتجاوز ${MAX_BIO_LENGTH} حرفاً.` });
+  }
+  const bio = normaliseBio(rawBio);
+
+  if (avatarSent && body?.avatarDataUrl && !guildAvatar) {
+    return reply.code(400).send({
+      error: "INVALID_AVATAR",
+      message:
+        imageRejectionReason(body.avatarDataUrl) === "TOO_LARGE"
+          ? `حجم صورة السيرفر يتجاوز الحد المسموح (${Math.round(MAX_IMAGE_DATA_URL_LENGTH / 1000)} كيلوبايت تقريباً). قصّها أو صغّرها ثم أعد المحاولة.`
+          : "صيغة صورة السيرفر غير مدعومة. استخدم PNG أو JPEG أو WEBP أو GIF."
+    });
+  }
+  if (bannerSent && body?.bannerDataUrl && !guildBanner) {
+    return reply.code(400).send({
+      error: "INVALID_BANNER",
+      message:
+        imageRejectionReason(body.bannerDataUrl) === "TOO_LARGE"
+          ? `حجم غلاف السيرفر يتجاوز الحد المسموح (${Math.round(MAX_IMAGE_DATA_URL_LENGTH / 1000)} كيلوبايت تقريباً). قصّه أو صغّره ثم أعد المحاولة.`
+          : "صيغة غلاف السيرفر غير مدعومة. استخدم PNG أو JPEG أو WEBP أو GIF."
+    });
+  }
 
   // A data URL (uploaded through the cropper) or an https link (a value stored
   // by an older build). Anything else is refused rather than quietly dropped,
@@ -1752,27 +2407,50 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
   const roleIconUrl = icon.value;
   const roleIconDeferred = icon.deferred;
 
+  const settings: CustomizationSettings = {
+    enabled: body?.enabled !== false,
+    nickname,
+    roleColor,
+    roleIconUrl,
+    avatarDataUrl: avatarSent ? guildAvatar : current.avatarDataUrl,
+    bannerDataUrl: bannerSent ? guildBanner : current.bannerDataUrl,
+    // Absent leaves the stored text alone; an explicit null or "" clears it.
+    bio: body?.bio === undefined ? current.bio : bio
+  };
+  const previous = current;
+
   // Refuse instead of performing an operation that is guaranteed to fail — but
-  // only on a *known* absence, and only when the nickname is actually being
-  // changed. `null` means the permission read failed, and blocking on that would
-  // make an unreadable permission indistinguishable from a missing one,
-  // refusing saves the bot can perform. The bot re-checks before it writes and
-  // reports Discord's own error if the permission really is absent.
+  // only on a *known* absence, and only when a field that needs the permission
+  // is actually changing. `null` means the permission read failed, and blocking
+  // on that would make an unreadable permission indistinguishable from a missing
+  // one, refusing saves the bot can perform. The bot re-checks before it writes
+  // and reports Discord's own error if the permission really is absent.
+  //
+  // The nickname, the avatar, the banner and the bio travel in ONE Modify
+  // Current Member call and all four need Change Nickname, so the gate covers
+  // the four together rather than the nickname alone. The check is
+  // `changedAppearanceFields` — the same function the writer uses to decide what
+  // to send — so the gate cannot disagree with the write about what changed,
+  // and it inherits the master-switch rule for free: turning the profile off
+  // clears all four, so it needs the permission too.
   //
   // The "only when it changes" half matters for the same reason the icon gate
-  // does: a colour-only save was refused because the bot happened to lack Manage
-  // Nicknames, which is one field's problem failing a form that would otherwise
-  // have saved. It also spends two Discord calls less on the common case.
-  if (env.botToken && nickname !== current.nickname) {
+  // does: a colour-only save was refused because the bot happened to lack the
+  // permission, which is one field's problem failing a form that would otherwise
+  // have saved. It also spends a Discord call less on the common case.
+  const memberFields: AppearanceField[] = ["nickname", "guildAvatarDataUrl", "bannerDataUrl", "bio"];
+  const memberChanged = changedAppearanceFields({ previous, next: settings }).some(field => memberFields.includes(field));
+  if (env.botToken && memberChanged) {
     const statuses = await botIdentityPermissionStatus(env.botToken, guildId);
     const nicknamePermission = statuses.find(status => status.key === "change_nickname");
     if (nicknamePermission?.granted === false) {
-      return reply.code(409).send({ error: "MISSING_PERMISSION", message: "البوت لا يملك صلاحية «تغيير الاسم المستعار» في هذا السيرفر." });
+      return reply.code(409).send({
+        error: "MISSING_PERMISSION",
+        message:
+          "البوت لا يملك صلاحية «تغيير الاسم المستعار» (Change Nickname) في هذا السيرفر، وهي اللازمة للقب والصورة والغلاف والنبذة."
+      });
     }
   }
-
-  const settings: CustomizationSettings = { nickname, roleColor, roleIconUrl };
-  const previous = current;
 
   // Save first, then apply. The row is the source of truth the bot reads on its
   // sync tick, and a Discord outage must not lose an edit the operator has
@@ -1788,15 +2466,17 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
   let outcomes: FieldOutcome[] = [];
   if (env.botToken) {
     try {
-      // Read once: nothing between the two slots can change it, and a second
-      // round trip per save is a query this route does not need.
-      const identity = await db.getBotIdentity();
-      outcomes = await applyAppearance({ token: env.botToken, guildId, previous: { customization: previous, identity }, next: { customization: settings, identity } });
+      outcomes = await applyAppearance({ token: env.botToken, guildId, previous, next: settings });
     } catch (error) {
       if (isAuthFailure(error)) return answerBotTokenRefused(reply, error);
       app.log.error(error, "Per-guild appearance write failed before any field was attempted");
       return reply.code(503).send({ error: "DISCORD_UNAVAILABLE", message: "تعذّر الوصول إلى Discord. أعد المحاولة." });
     }
+    // The preview's read of what Discord serves is now stale by exactly this
+    // save. Dropping it per guild — not wholesale — is what makes the card show
+    // the new picture immediately without turning one save into a burst of
+    // Discord calls for every other server's next screen load.
+    invalidateGuildMemberProfile(env.botToken, guildId);
   } else {
     // Nothing was attempted, so nothing is claimed. The settings are stored and
     // the screen says so; the bot will apply them on its next tick.
@@ -1807,7 +2487,18 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
     guildId,
     eventId: "bot.command-success",
     actorId: context.session!.discordUserId,
-    payload: { action: "customization.save", nickname, roleColor, roleIconUrl }
+    payload: {
+      action: "customization.save",
+      nickname,
+      roleColor,
+      roleIconUrl,
+      // Whether an image or a bio was stored, never the values themselves: the
+      // audit trail is append-only and shipped to a webhook, and a data URL is
+      // megabytes of somebody's picture.
+      avatar: settings.avatarDataUrl !== null,
+      banner: settings.bannerDataUrl !== null,
+      bioLength: settings.bio.length
+    }
   });
 
   // The deferred icon is a policy refusal, not a Discord outage, so it must not
@@ -1844,8 +2535,29 @@ app.get("/api/guilds/:guildId/metrics", async (request, reply) => {
 
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-  const [health, counts, rows, widget, record] = await Promise.all([
-    db.getGuildHealth(guildId).catch(() => null),
+  // The heartbeat read is *not* best-effort like the four below. A missing row
+  // and a failed read are different facts, but `deriveBotStatus` cannot tell
+  // them apart: both arrive as `null`, and `null` renders «لم يُشغّل بعد» —
+  // "start the bot and reload". When the read itself is what failed, that
+  // sentence misdiagnoses a dashboard-side database blip as a bot outage and
+  // points the operator at the wrong machine. So the read is allowed to fail
+  // the request instead, and the screen's own 30s retry picks it back up.
+  const healthResult = await db
+    .getGuildHealth(guildId)
+    .then(value => ({ value }))
+    .catch(cause => {
+      request.log.error(cause, "guild_health read failed");
+      return { failed: true as const };
+    });
+  if ("failed" in healthResult) {
+    return reply.code(503).send({
+      error: "METRICS_UNAVAILABLE",
+      message: "تعذّرت قراءة حالة البوت من قاعدة البيانات. أعد المحاولة."
+    });
+  }
+  const health = healthResult.value;
+
+  const [counts, rows, widget, record] = await Promise.all([
     db.countPunishmentsSince(guildId, since).catch(() => []),
     db.listRecentModeration(guildId, 8).catch(() => []),
     // The widget is unauthenticated and independent of our bot token.

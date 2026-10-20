@@ -3,8 +3,8 @@ import type {
   AntiNukeSettings,
   AppearanceSaveResult,
   AuditEntry,
-  BotIdentitySettings,
-  BotIdentitySnapshot,
+  BotPresenceSettings,
+  GuildProfileSnapshot,
   ChannelOption,
   CommandCategory,
   CommandConfig,
@@ -14,6 +14,15 @@ import type {
   Guild,
   GuildMetrics,
   HealthSnapshot,
+  InviteSettings,
+  WelcomeMessageSettings,
+  LeaderboardPage,
+  LevelConfigProblem,
+  LevelRewardInput,
+  LevelRoleReward,
+  LevelSettings,
+  LevelsStatus,
+  LevelSyncJob,
   LoggingSettings,
   NetworkSnapshot,
   WelcomeSettings,
@@ -64,10 +73,17 @@ const MAX_RETRY_WAIT_MS = 5_000;
  * a second 429 is real information and belongs in front of the operator.
  */
 async function request<T>(path: string, init: RequestInit | undefined, mayRetry: boolean): Promise<T> {
+  // Content-Type only rides on requests that actually carry a body — Fastify
+  // refuses an empty body that claims to be JSON, which is how a bare POST
+  // (the sync button) used to die with 'Body cannot be empty'.
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
+  if (init?.body !== undefined && init.body !== null) {
+    headers["Content-Type"] = headers["Content-Type"] ?? "application/json";
+  }
   const response = await fetch(path, {
     credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
-    ...init
+    ...init,
+    headers
   });
 
   if (!response.ok) {
@@ -193,14 +209,50 @@ export const saveCommands = (guildId: string, changes: CommandChange[]) =>
 /* ------------------------------------------------------------------ *
  * Settings: customization
  * ------------------------------------------------------------------ */
-export const customization = (guildId: string) =>
-  call<{
+export const customization = async (guildId: string) => {
+  const payload = await call<{
     settings: CustomizationSettings;
     permissions: PermissionStatus[];
     /** Null when the guild's roles could not be read, so no verdict is claimed. */
     hierarchy: RoleHierarchyVerdict | null;
     roleIcon: RoleIconGate;
+    /**
+     * What Discord currently serves for the bot *in this guild*, or null when
+     * the read failed.
+     *
+     * The preview needs it for the same reason it needs `settings`: the stored
+     * row is what the operator last chose, and this is what members actually
+     * see right now — including a nickname someone set outside the dashboard.
+     * It is guild-scoped, so every viewer of this screen gets it; there is no
+     * owner-gated half left to read.
+     */
+    profile: GuildProfileSnapshot | null;
   }>(`/api/guilds/${guildId}/customization`);
+
+  /*
+   * `settings` is what the form edits, so a dashboard server that predates the
+   * current shape is worth naming rather than rendering around. A server built
+   * before the per-guild bio and banner existed answers 200 without them, the
+   * form binds `undefined`, and the screen reads as a form with two fields
+   * missing rather than as a version mismatch. That is the ordinary
+   * tsx-without-hot-reload situation the command board already guards.
+   *
+   * `profile` is deliberately not required: it is a live Discord read, and
+   * "Discord did not answer" is a legitimate null rather than a stale server.
+   */
+  const settings = payload.settings as Partial<CustomizationSettings> | undefined;
+  for (const field of ["bannerDataUrl", "bio"] as const) {
+    if (!settings || !(field in settings)) {
+      throw new ApiError(
+        "STALE_SERVER",
+        `الخادم لم يُرسل الحقل «${field}» مع إعدادات السيرفر، فالنموذج لن يعرضه. الأرجح أن اللوحة تعمل بكود أقدم من الحزمة المعروضة — أعد تشغيل خادم اللوحة.`,
+        200
+      );
+    }
+  }
+
+  return payload;
+};
 /**
  * Partial on purpose: a field the operator cannot edit must be omitted rather
  * than echoed back. The server reads an absent field as "leave it alone" and a
@@ -214,23 +266,26 @@ export const saveCustomization = (guildId: string, settings: Partial<Customizati
   );
 
 /* ------------------------------------------------------------------ *
- * Settings: global bot identity
+ * Settings: the bot's presence
  *
- * Avatar, banner, bio, status and activity. Discord gives an application one of
- * each, so these follow the bot into every server — which is why they live on
- * their own route rather than on the per-guild customization one.
+ * Status and activity — and nothing else. Discord has no REST route for either:
+ * a status lives on the gateway connection, so it is identical in every server
+ * the bot is in, and the *bot* is what applies it. This route stores the choice
+ * and the bot's presence sync picks it up within seconds.
+ *
+ * It has its own route rather than a corner of the identity screen because that
+ * screen is now entirely server-scoped: a control that reaches every server
+ * cannot sit on a form whose whole promise is «هذا ما يظهر به البوت هنا».
  *
  * `guildId` travels in the body even though the route is not guild-scoped:
  * access is still checked per guild, and a guild ID is not a secret (it is in
  * every invite link), so the guard has to be told which guild to check.
  * ------------------------------------------------------------------ */
-export const botIdentity = (guildId: string) =>
-  call<{ settings: BotIdentitySettings; snapshot: BotIdentitySnapshot }>(
-    `/api/bot/identity?guildId=${encodeURIComponent(guildId)}`
-  );
+export const botPresence = (guildId: string) =>
+  call<{ settings: BotPresenceSettings }>(`/api/bot/presence?guildId=${encodeURIComponent(guildId)}`);
 
-export const saveBotIdentity = (guildId: string, settings: BotIdentitySettings) =>
-  call<{ settings: BotIdentitySettings; savedAt: string } & AppearanceSaveResult>(`/api/bot/identity`, {
+export const saveBotPresence = (guildId: string, settings: BotPresenceSettings) =>
+  call<{ settings: BotPresenceSettings; savedAt: string } & AppearanceSaveResult>(`/api/bot/presence`, {
     method: "PUT",
     body: JSON.stringify({ guildId, ...settings })
   });
@@ -302,6 +357,81 @@ export const saveWelcome = (guildId: string, settings: WelcomeSettings) =>
     method: "PUT",
     body: JSON.stringify(settings)
   });
+
+/* ------------------------------------------------------------------ *
+ * Levels system
+ * ------------------------------------------------------------------ */
+export const levelsSettings = (guildId: string) =>
+  call<{ settings: LevelSettings; roles: DiscordRole[]; channels: ChannelOption[]; problems: LevelConfigProblem[] }>(
+    `/api/guilds/${guildId}/levels/settings`
+  );
+export const saveLevelsSettings = (guildId: string, settings: LevelSettings) =>
+  call<{ settings: LevelSettings; savedAt: string }>(`/api/guilds/${guildId}/levels/settings`, {
+    method: "PUT",
+    body: JSON.stringify(settings)
+  });
+export const levelsRewards = (guildId: string) =>
+  call<{ rewards: LevelRoleReward[] }>(`/api/guilds/${guildId}/levels/rewards`);
+
+/* ------------------------------------------------------------------ *
+ * Invites (referrals) module
+ * ------------------------------------------------------------------ */
+export const invitesSettings = (guildId: string) =>
+  call<{ settings: InviteSettings; roles: DiscordRole[]; problems: { code: string; message: string }[] }>(
+    `/api/guilds/${guildId}/invites/settings`
+  );
+export const saveInvitesSettings = (guildId: string, settings: InviteSettings) =>
+  call<{ settings: InviteSettings; savedAt: string }>(`/api/guilds/${guildId}/invites/settings`, {
+    method: "PUT",
+    body: JSON.stringify(settings)
+  });
+/* ------------------------------------------------------------------ *
+ * Welcome messages (رسائل الترحيب)
+ * ------------------------------------------------------------------ */
+export const welcomeMessages = (guildId: string) =>
+  call<{ settings: WelcomeMessageSettings; channels: ChannelOption[] }>(`/api/guilds/${guildId}/welcome-messages`);
+export const saveWelcomeMessages = (guildId: string, settings: WelcomeMessageSettings) =>
+  call<{ settings: WelcomeMessageSettings; savedAt: string }>(`/api/guilds/${guildId}/welcome-messages`, {
+    method: "PUT",
+    body: JSON.stringify(settings)
+  });
+export const createLevelReward = (guildId: string, reward: LevelRewardInput) =>
+  call<{ reward: LevelRoleReward; savedAt: string }>(`/api/guilds/${guildId}/levels/rewards`, {
+    method: "POST",
+    body: JSON.stringify(reward)
+  });
+export const updateLevelReward = (guildId: string, rewardId: string, reward: LevelRewardInput) =>
+  call<{ savedAt: string }>(`/api/guilds/${guildId}/levels/rewards/${rewardId}`, {
+    method: "PATCH",
+    body: JSON.stringify(reward)
+  });
+export const deleteLevelReward = (guildId: string, rewardId: string) =>
+  call<{ savedAt: string }>(`/api/guilds/${guildId}/levels/rewards/${rewardId}`, { method: "DELETE" });
+export const startLevelsSync = (guildId: string) =>
+  call<{ job: LevelSyncJob }>(`/api/guilds/${guildId}/levels/sync`, { method: "POST" });
+export const levelsMe = (guildId: string) =>
+  call<{ levels: { textXp: number; voiceXp: number } | null }>(`/api/guilds/${guildId}/levels/me`);
+export const levelsStatus = (guildId: string) => call<LevelsStatus>(`/api/guilds/${guildId}/levels/status`);
+export const setMemberXp = (
+  guildId: string,
+  userId: string,
+  values: { textXp: number | null; voiceXp: number | null }
+) =>
+  call<{ savedAt: string }>(`/api/guilds/${guildId}/levels/members/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(values)
+  });
+export const resetMemberXp = (guildId: string, userId: string) =>
+  call<{ savedAt: string }>(`/api/guilds/${guildId}/levels/members/${userId}/reset`, { method: "POST" });
+export const setMemberLeaderboardHidden = (guildId: string, userId: string, hidden: boolean) =>
+  call<{ savedAt: string }>(`/api/guilds/${guildId}/levels/members/${userId}/visibility`, {
+    method: "PATCH",
+    body: JSON.stringify({ hidden })
+  });
+export const levelsLeaderboard = (guildId: string, track: "text" | "voice", page: number, pageSize = 25) =>
+  call<LeaderboardPage>(
+    `/api/guilds/${guildId}/levels/leaderboard?track=${track}&limit=${pageSize}&offset=${(page - 1) * pageSize}`
+  );
 
 /* ------------------------------------------------------------------ *
  * System: network reach (instance-wide, not per guild)

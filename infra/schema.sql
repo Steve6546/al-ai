@@ -52,9 +52,7 @@ CREATE TABLE IF NOT EXISTS guild_customization (
   guild_id TEXT PRIMARY KEY REFERENCES guilds(id) ON DELETE CASCADE,
   -- Per-guild bot nickname, applied by the dashboard over REST.
   nickname TEXT,
-  -- Per-guild appearance of the AL AI role: colour plus optional icon. Discord
-  -- gives a bot one global avatar, so a per-guild image is expressed through its
-  -- role rather than the account.
+  -- Per-guild appearance of the AL AI role: colour plus optional icon.
   role_color TEXT,
   role_icon_url TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -62,44 +60,79 @@ CREATE TABLE IF NOT EXISTS guild_customization (
 -- Idempotent upgrade for databases created before the role appearance existed.
 ALTER TABLE guild_customization ADD COLUMN IF NOT EXISTS role_color TEXT;
 ALTER TABLE guild_customization ADD COLUMN IF NOT EXISTS role_icon_url TEXT;
--- The retired design stored a per-guild avatar and banner. Neither is possible:
--- Discord gives an application one global avatar, so the columns held values no
--- code could ever apply. Dropped rather than left dormant, because a column that
--- looks like a feature is worse than no column at all.
+-- The retired design stored a per-guild avatar and banner as *URLs* with no
+-- apply path, so they were dropped rather than left dormant.
+--
+-- Every one of those fields is real now, and so is a per-guild bio. Discord's
+-- Modify Current Member (PATCH /guilds/{id}/members/@me) accepts `avatar`,
+-- `banner` and `bio` beside `nick`, and that was measured against the live API
+-- rather than read off a changelog: a banner data URI came back as a stored
+-- `banner` hash on the member object, and a 4000-character bio came back as
+-- 400 BASE_TYPE_MAX_LENGTH — a rejection, which is what proves the field is
+-- parsed rather than accepted-and-discarded. (An earlier comment here claimed a
+-- banner had no member equivalent and would stay retired. That was wrong, and
+-- it is why this now says the opposite.)
 ALTER TABLE guild_customization DROP COLUMN IF EXISTS avatar_url;
 ALTER TABLE guild_customization DROP COLUMN IF EXISTS banner_url;
+ALTER TABLE guild_customization ADD COLUMN IF NOT EXISTS avatar_data_url TEXT;
+ALTER TABLE guild_customization ADD COLUMN IF NOT EXISTS banner_data_url TEXT;
+-- The per-guild bio Discord shows on this member's profile. Unlike the account's
+-- "About me" — the application description, which is capped at 190 — this field
+-- is capped at 300, which is the number Discord itself returned when the live
+-- API refused a longer one.
+ALTER TABLE guild_customization ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT '';
+-- The per-guild custom profile's master switch: off walks the nickname, the
+-- guild avatar, the banner and the bio back to Discord's defaults on the next
+-- save.
+ALTER TABLE guild_customization ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT true;
+-- The ceilings the images used to carry on `bot_identity`. The cropper keeps
+-- them small, so these only stop a hand-crafted request from writing megabytes
+-- into a text column. Dropped-then-added rather than guarded, which is how every
+-- other constraint in this file is made idempotent.
+ALTER TABLE guild_customization DROP CONSTRAINT IF EXISTS guild_customization_avatar_size_check;
+ALTER TABLE guild_customization ADD CONSTRAINT guild_customization_avatar_size_check
+  CHECK (avatar_data_url IS NULL OR length(avatar_data_url) <= 500000);
+ALTER TABLE guild_customization DROP CONSTRAINT IF EXISTS guild_customization_banner_size_check;
+ALTER TABLE guild_customization ADD CONSTRAINT guild_customization_banner_size_check
+  CHECK (banner_data_url IS NULL OR length(banner_data_url) <= 500000);
+ALTER TABLE guild_customization DROP CONSTRAINT IF EXISTS guild_customization_bio_check;
+ALTER TABLE guild_customization ADD CONSTRAINT guild_customization_bio_check CHECK (length(bio) <= 300);
 
--- The global half of the bot's identity: one row, shared by every guild.
+-- The bot's own row: presence, and nothing else.
 --
--- Kept out of `guild_customization` on purpose. An avatar, a banner and a
--- presence are the same everywhere, so storing them per guild would mean N rows
--- holding one setting — the last writer wins and the rest silently disagree with
--- what Discord actually shows. The `id` column plus its CHECK is what makes the
--- single row structural rather than a convention: a second row cannot be
--- inserted, so "the current identity" is never ambiguous.
+-- It held the account's avatar, banner and "About me" too, back when those were
+-- the only place a bot could show them. They all live on `guild_customization`
+-- now, so the columns here are dropped rather than left dormant: a stored
+-- setting with no reader is decoration, and two places holding "the bot's
+-- picture" is how a screen ends up drawing one of them while the operator edits
+-- the other.
 --
--- The images are base64 data URLs because that is the form Discord accepts. They
--- are cropped in the browser before they get here, so the ceiling below is a
--- guard against a hand-crafted request, not against normal use.
+-- Presence stays, and stays here, because it is the one appearance field with no
+-- REST route at all. A status is sent on the gateway connection, so it is the
+-- same in every guild the bot is in — the bot reads this row and applies it, and
+-- the dashboard only ever writes it.
+--
+-- The `id` column plus its CHECK is what makes the single row structural rather
+-- than a convention: a second row cannot be inserted, so "the current presence"
+-- is never ambiguous.
 CREATE TABLE IF NOT EXISTS bot_identity (
   id BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),
-  avatar_data_url TEXT,
-  banner_data_url TEXT,
-  bio TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'online',
   activity_type TEXT NOT NULL DEFAULT 'playing',
   activity_text TEXT NOT NULL DEFAULT '',
   status_duration TEXT,
   status_expires_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT bot_identity_avatar_size_check CHECK (avatar_data_url IS NULL OR length(avatar_data_url) <= 500000),
-  CONSTRAINT bot_identity_banner_size_check CHECK (banner_data_url IS NULL OR length(banner_data_url) <= 500000),
-  CONSTRAINT bot_identity_bio_check CHECK (length(bio) <= 400),
   CONSTRAINT bot_identity_status_check CHECK (status IN ('online','idle','dnd','invisible')),
   CONSTRAINT bot_identity_activity_type_check CHECK (activity_type IN ('playing','listening','watching','competing')),
   CONSTRAINT bot_identity_activity_text_check CHECK (length(activity_text) <= 128),
   CONSTRAINT bot_identity_status_duration_check CHECK (status_duration IS NULL OR status_duration IN ('15m','1h','8h','24h','3d','forever'))
 );
+-- The account-appearance columns, retired. Dropping a column takes its CHECK
+-- with it, so the three size/length constraints above need no separate DROP.
+ALTER TABLE bot_identity DROP COLUMN IF EXISTS avatar_data_url;
+ALTER TABLE bot_identity DROP COLUMN IF EXISTS banner_data_url;
+ALTER TABLE bot_identity DROP COLUMN IF EXISTS bio;
 -- Seed the single row so a read never has to special-case "no identity yet".
 INSERT INTO bot_identity (id) VALUES (true) ON CONFLICT (id) DO NOTHING;
 
@@ -177,6 +210,10 @@ CREATE TABLE IF NOT EXISTS oauth_sessions (
   id UUID PRIMARY KEY,
   discord_user_id TEXT NOT NULL,
   discord_username TEXT NOT NULL,
+  -- The @handle, kept beside the display name: Discord's two names are both
+  -- real, the account menu shows both, and a moderator is asked for the handle
+  -- more often than for the display name.
+  discord_handle TEXT,
   -- Avatar hash only; the CDN URL is built by the BFF, never stored.
   discord_avatar TEXT,
   access_token_ciphertext TEXT NOT NULL,
@@ -188,6 +225,8 @@ CREATE TABLE IF NOT EXISTS oauth_sessions (
 );
 -- Idempotent upgrade for databases created before discord_avatar existed.
 ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS discord_avatar TEXT;
+-- Idempotent upgrade for databases created before the @handle was stored.
+ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS discord_handle TEXT;
 CREATE INDEX IF NOT EXISTS oauth_sessions_expires_idx ON oauth_sessions (expires_at);
 
 -- Append-only. Payloads are AES-256-GCM encrypted before they land here.
@@ -558,13 +597,27 @@ ALTER TABLE guild_security ALTER COLUMN enabled SET DEFAULT true;
 -- managed, sits below the bot's highest position) at write time; the bot
 -- re-checks the hierarchy at assign time, because ranks move after a setting
 -- was written and Discord refuses, rather than errors, the out-of-range grant.
+-- (CREATE TABLE IF NOT EXISTS leaves an existing table's columns alone.)
 CREATE TABLE IF NOT EXISTS guild_welcome (
   guild_id TEXT PRIMARY KEY REFERENCES guilds(id) ON DELETE CASCADE,
   enabled BOOLEAN NOT NULL DEFAULT false,
   member_role_id TEXT,
   bot_role_id TEXT,
+  -- Join-to-grant delay in seconds (0 = immediate), so the operator can let a
+  -- member settle — or survive a raid's first wave — before the role lands.
+  delay_seconds SMALLINT NOT NULL DEFAULT 0 CONSTRAINT guild_welcome_delay_check CHECK (delay_seconds BETWEEN 0 AND 3600),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- The upgrade for databases that predate `delay_seconds` — and it has to sit
+-- *after* the CREATE TABLE above. It used to sit before it, which is invisible
+-- on an existing database (the table is already there) and fatal on a fresh one:
+-- `ALTER TABLE guild_welcome` answered "relation does not exist", the file
+-- aborted on that line, and the table it was about to create was never created
+-- at all. This is the ordering trap the project has a rule about, and the
+-- from-scratch database is the only check that sees it.
+ALTER TABLE guild_welcome ADD COLUMN IF NOT EXISTS delay_seconds SMALLINT NOT NULL DEFAULT 0;
+ALTER TABLE guild_welcome DROP CONSTRAINT IF EXISTS guild_welcome_delay_check;
+ALTER TABLE guild_welcome ADD CONSTRAINT guild_welcome_delay_check CHECK (delay_seconds BETWEEN 0 AND 3600);
 
 -- Instance-wide deployment settings — switches that belong to this copy of the
 -- dashboard rather than to any guild in it (the remote-access reach is the
@@ -576,6 +629,276 @@ CREATE TABLE IF NOT EXISTS instance_settings (
   value TEXT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Levels system. One settings row per guild; a missing row means the feature
+-- ships off, so a guild that never opened the screen earns no XP. The numeric
+-- bounds mirror the clamps in normaliseLevelSettings (packages/core/src/levels.ts)
+-- so the two sides cannot disagree about what a stored value means.
+CREATE TABLE IF NOT EXISTS guild_levels (
+  guild_id TEXT PRIMARY KEY REFERENCES guilds(id) ON DELETE CASCADE,
+  enabled BOOLEAN NOT NULL DEFAULT false,
+  text_xp_enabled BOOLEAN NOT NULL DEFAULT true,
+  voice_xp_enabled BOOLEAN NOT NULL DEFAULT true,
+  -- XP per qualifying event is a random draw inside [*_xp_min, *_xp_max].
+  text_xp_min SMALLINT NOT NULL DEFAULT 15 CONSTRAINT guild_levels_text_xp_min_check CHECK (text_xp_min BETWEEN 1 AND 100),
+  text_xp_max SMALLINT NOT NULL DEFAULT 25 CONSTRAINT guild_levels_text_xp_max_check CHECK (text_xp_max BETWEEN 1 AND 100),
+  voice_xp_min SMALLINT NOT NULL DEFAULT 3 CONSTRAINT guild_levels_voice_xp_min_check CHECK (voice_xp_min BETWEEN 0 AND 100),
+  voice_xp_max SMALLINT NOT NULL DEFAULT 3 CONSTRAINT guild_levels_voice_xp_max_check CHECK (voice_xp_max BETWEEN 0 AND 100),
+  -- 0 = unlimited up to the hard ceiling (MAX_LEVEL_CAP in core).
+  max_level_cap INTEGER NOT NULL DEFAULT 100 CONSTRAINT guild_levels_cap_check CHECK (max_level_cap = 0 OR max_level_cap BETWEEN 10 AND 1000),
+  -- Zero a member's XP totals when they leave the guild.
+  reset_on_leave BOOLEAN NOT NULL DEFAULT false,
+  text_cooldown_seconds INTEGER NOT NULL DEFAULT 120 CONSTRAINT guild_levels_cooldown_check CHECK (text_cooldown_seconds BETWEEN 10 AND 3600),
+  voice_min_members INTEGER NOT NULL DEFAULT 2 CONSTRAINT guild_levels_min_members_check CHECK (voice_min_members BETWEEN 1 AND 10),
+  ignore_muted BOOLEAN NOT NULL DEFAULT true,
+  ignore_deafened BOOLEAN NOT NULL DEFAULT true,
+  ignore_afk BOOLEAN NOT NULL DEFAULT true,
+  notify_level_up BOOLEAN NOT NULL DEFAULT false,
+  -- 'same_channel' answers where the XP was earned; 'custom_channel' uses
+  -- notify_channel_id; 'send_dm' mails the member. Mirrors LevelNotifyMode.
+  notify_mode TEXT NOT NULL DEFAULT 'same_channel' CONSTRAINT guild_levels_notify_mode_check CHECK (notify_mode IN ('same_channel','custom_channel','send_dm')),
+  notify_channel_id TEXT,
+  -- Rich embed rank card (avatar + progress) attached to level-up notices.
+  rank_card BOOLEAN NOT NULL DEFAULT false,
+  text_level_up_message TEXT NOT NULL DEFAULT '🎉 مبروك {user}! وصلت للمستوى **{level}**!',
+  voice_level_up_message TEXT NOT NULL DEFAULT '🎤 مبروك {user}! وصلت للمستوى الصوتي **{level}**!',
+  role_stacking BOOLEAN NOT NULL DEFAULT false,
+  -- XP multiplier rules as [{ id, multiplier }]: roles members carry, and
+  -- channels XP is earned inside. Both clamped in the core normaliser.
+  role_multipliers JSONB NOT NULL DEFAULT '[]',
+  channel_multipliers JSONB NOT NULL DEFAULT '[]',
+  ignored_text_channel_ids JSONB NOT NULL DEFAULT '[]',
+  ignored_voice_channel_ids JSONB NOT NULL DEFAULT '[]',
+  ignored_role_ids JSONB NOT NULL DEFAULT '[]',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- The per-minute fixed rate was replaced by the [min, max] draw above.
+ALTER TABLE guild_levels DROP COLUMN IF EXISTS voice_xp_per_minute;
+-- CREATE TABLE IF NOT EXISTS leaves an existing table's columns alone, so the
+-- new XP fields are added by hand — the same idempotent pattern every upgrade
+-- in this file uses.
+ALTER TABLE guild_levels ADD COLUMN IF NOT EXISTS text_xp_min SMALLINT;
+ALTER TABLE guild_levels ADD COLUMN IF NOT EXISTS text_xp_max SMALLINT;
+ALTER TABLE guild_levels ADD COLUMN IF NOT EXISTS voice_xp_min SMALLINT;
+ALTER TABLE guild_levels ADD COLUMN IF NOT EXISTS voice_xp_max SMALLINT;
+ALTER TABLE guild_levels ADD COLUMN IF NOT EXISTS max_level_cap INTEGER;
+ALTER TABLE guild_levels ADD COLUMN IF NOT EXISTS reset_on_leave BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE guild_levels ADD COLUMN IF NOT EXISTS rank_card BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE guild_levels ADD COLUMN IF NOT EXISTS role_multipliers JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE guild_levels ADD COLUMN IF NOT EXISTS channel_multipliers JSONB NOT NULL DEFAULT '[]';
+-- Backfill the draw ranges, then apply defaults and CHECK guards to every row.
+UPDATE guild_levels SET
+  text_xp_min = COALESCE(text_xp_min, 15),
+  text_xp_max = COALESCE(text_xp_max, 25),
+  voice_xp_min = COALESCE(voice_xp_min, 3),
+  voice_xp_max = COALESCE(voice_xp_max, 3),
+  max_level_cap = COALESCE(max_level_cap, 100);
+ALTER TABLE guild_levels ALTER COLUMN text_xp_min SET DEFAULT 15;
+ALTER TABLE guild_levels ALTER COLUMN text_xp_max SET DEFAULT 25;
+ALTER TABLE guild_levels ALTER COLUMN voice_xp_min SET DEFAULT 3;
+ALTER TABLE guild_levels ALTER COLUMN voice_xp_max SET DEFAULT 3;
+ALTER TABLE guild_levels ALTER COLUMN max_level_cap SET DEFAULT 100;
+ALTER TABLE guild_levels DROP CONSTRAINT IF EXISTS guild_levels_text_xp_min_check;
+ALTER TABLE guild_levels ADD CONSTRAINT guild_levels_text_xp_min_check CHECK (text_xp_min BETWEEN 1 AND 100);
+ALTER TABLE guild_levels DROP CONSTRAINT IF EXISTS guild_levels_text_xp_max_check;
+ALTER TABLE guild_levels ADD CONSTRAINT guild_levels_text_xp_max_check CHECK (text_xp_max BETWEEN 1 AND 100);
+ALTER TABLE guild_levels DROP CONSTRAINT IF EXISTS guild_levels_voice_xp_min_check;
+ALTER TABLE guild_levels ADD CONSTRAINT guild_levels_voice_xp_min_check CHECK (voice_xp_min BETWEEN 0 AND 100);
+ALTER TABLE guild_levels DROP CONSTRAINT IF EXISTS guild_levels_voice_xp_max_check;
+ALTER TABLE guild_levels ADD CONSTRAINT guild_levels_voice_xp_max_check CHECK (voice_xp_max BETWEEN 0 AND 100);
+ALTER TABLE guild_levels DROP CONSTRAINT IF EXISTS guild_levels_cap_check;
+ALTER TABLE guild_levels ADD CONSTRAINT guild_levels_cap_check CHECK (max_level_cap = 0 OR max_level_cap BETWEEN 10 AND 1000);
+-- The retired sync flag: requests now live in `level_sync_jobs`, which carry
+-- the whole lifecycle (pending → running → completed | failed) rather than a
+-- timestamp that was cleared before the work it promised was verified.
+ALTER TABLE guild_levels DROP COLUMN IF EXISTS sync_requested_at;
+
+-- Role reward sync, as a persistent job rather than a flag.
+--
+-- `cursor` is the last member id processed, so the pass is resumable across
+-- restarts and batch boundaries without skipping or repeating members: the
+-- member read is keyset-paginated on the primary key, which stays stable even
+-- while XP totals move mid-pass. Counters are cumulative and updated per
+-- batch, so the dashboard's progress reads live state, not a local guess.
+CREATE TABLE IF NOT EXISTS level_sync_jobs (
+  id UUID PRIMARY KEY,
+  guild_id TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending' CONSTRAINT level_sync_jobs_status_check CHECK (status IN ('pending','running','completed','failed')),
+  cursor TEXT,
+  total INTEGER,
+  processed INTEGER NOT NULL DEFAULT 0,
+  granted INTEGER NOT NULL DEFAULT 0,
+  removed INTEGER NOT NULL DEFAULT 0,
+  skipped INTEGER NOT NULL DEFAULT 0,
+  failed INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS level_sync_jobs_guild_idx ON level_sync_jobs (guild_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS level_sync_jobs_open_idx ON level_sync_jobs (created_at) WHERE status = 'pending';
+
+-- One row per member per guild. Levels are always derived from XP through
+-- levelFromXp, never stored — a stored level could drift from the formula the
+-- screen advertises. `text_xp`/`voice_xp` are the totals; the display names and
+-- avatar hashes are the bot's last observation, so the leaderboard renders
+-- without a member fetch per row (a member may have left, and a left member
+-- keeps their rank — they earned it).
+CREATE TABLE IF NOT EXISTS user_guild_levels (
+  guild_id TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  text_xp INTEGER NOT NULL DEFAULT 0 CONSTRAINT user_guild_levels_text_xp_check CHECK (text_xp >= 0),
+  voice_xp INTEGER NOT NULL DEFAULT 0 CONSTRAINT user_guild_levels_voice_xp_check CHECK (voice_xp >= 0),
+  display_name TEXT,
+  avatar_hash TEXT,
+  last_text_xp_at TIMESTAMPTZ,
+  last_voice_xp_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (guild_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS user_guild_levels_text_rank_idx ON user_guild_levels (guild_id, text_xp DESC);
+CREATE INDEX IF NOT EXISTS user_guild_levels_voice_rank_idx ON user_guild_levels (guild_id, voice_xp DESC);
+-- Leaderboard exclusion is per member: a hidden member keeps earning XP —
+-- only the board hides them, at the operator's request.
+ALTER TABLE user_guild_levels ADD COLUMN IF NOT EXISTS leaderboard_hidden BOOLEAN NOT NULL DEFAULT false;
+
+-- Reward levels are bounded by the hard ceiling (MAX_REWARD_LEVEL = 500);
+-- a rule above a guild's own cap stays storable but is flagged as a problem
+-- in the config detection, since the cap can move at any time.
+CREATE TABLE IF NOT EXISTS level_role_rewards (
+  id UUID PRIMARY KEY,
+  guild_id TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CONSTRAINT level_role_rewards_kind_check CHECK (kind IN ('text','voice','dual')),
+  level INTEGER NOT NULL CONSTRAINT level_role_rewards_level_check CHECK (level BETWEEN 1 AND 100),
+  -- Only meaningful for 'dual'; NULL otherwise.
+  required_voice_level INTEGER CONSTRAINT level_role_rewards_voice_level_check CHECK (required_voice_level IS NULL OR required_voice_level BETWEEN 1 AND 100),
+  role_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- NULLS NOT DISTINCT, not the plain form: a 'text' row's required_voice_level
+  -- is NULL, and the default UNIQUE treats NULLs as pairwise distinct — two
+  -- identical text rules would both slip through. PostgreSQL 15+.
+  UNIQUE NULLS NOT DISTINCT (guild_id, kind, level, required_voice_level, role_id),
+  CONSTRAINT level_role_rewards_dual_shape_check CHECK (
+    (kind = 'dual' AND required_voice_level IS NOT NULL)
+    OR (kind <> 'dual' AND required_voice_level IS NULL)
+  )
+);
+-- The sync pass and every XP grant ask "which rewards does this member's level
+-- reach?" across all kinds at once, so one index serves the whole read.
+CREATE INDEX IF NOT EXISTS level_role_rewards_guild_idx ON level_role_rewards (guild_id);
+-- Per-rule stacking: a rule marked `always_keep` keeps its role on the member
+-- for as long as the rule is satisfied, even without the guild-wide stacking
+-- switch — the modal's "alone or keep previous" choice, stored per rule.
+ALTER TABLE level_role_rewards ADD COLUMN IF NOT EXISTS always_keep BOOLEAN NOT NULL DEFAULT false;
+-- The ceiling moved from 500 to MAX_LEVEL (= 100): an existing database's
+-- CHECK still carries the old range, so it is replaced by hand — CREATE TABLE
+-- IF NOT EXISTS leaves an existing table's constraints alone.
+ALTER TABLE level_role_rewards DROP CONSTRAINT IF EXISTS level_role_rewards_level_check;
+ALTER TABLE level_role_rewards ADD CONSTRAINT level_role_rewards_level_check CHECK (level BETWEEN 1 AND 500);
+ALTER TABLE level_role_rewards DROP CONSTRAINT IF EXISTS level_role_rewards_voice_level_check;
+ALTER TABLE level_role_rewards ADD CONSTRAINT level_role_rewards_voice_level_check CHECK (required_voice_level IS NULL OR required_voice_level BETWEEN 1 AND 500);
+
+-- Invites (referrals) module. One settings row per guild; a missing row means
+-- the feature ships off. The bounds mirror the clamps in normaliseInviteSettings
+-- (packages/core/src/invites.ts) so the two sides cannot disagree.
+CREATE TABLE IF NOT EXISTS guild_invites (
+  guild_id TEXT PRIMARY KEY REFERENCES guilds(id) ON DELETE CASCADE,
+  enabled BOOLEAN NOT NULL DEFAULT false,
+  -- An account younger than this is logged as fake and kept off the net.
+  -- 0 keeps every account; the ceiling matches MAX_FAKE_ACCOUNT_DAYS in core.
+  fake_account_days SMALLINT NOT NULL DEFAULT 3 CONSTRAINT guild_invites_fake_days_check CHECK (fake_account_days BETWEEN 0 AND 30),
+  -- Keep a milestone role once earned, even when the net drops below it.
+  keep_roles_on_leave BOOLEAN NOT NULL DEFAULT false,
+  log_self_invites BOOLEAN NOT NULL DEFAULT true,
+  log_joins BOOLEAN NOT NULL DEFAULT true,
+  log_leaves BOOLEAN NOT NULL DEFAULT true,
+  log_milestones BOOLEAN NOT NULL DEFAULT true,
+  join_message TEXT NOT NULL DEFAULT '👋 انضم {user} إلى السيرفر.
+عمر الحساب: {user.age}
+صاحب الدعوة: {inviter} — الكود: {invite.code}
+دعوات الداعي: {inviter.net} صافي ({inviter.total} كلي، {inviter.leaves} مغادرون، {inviter.fakes} وهميون)',
+  leave_message TEXT NOT NULL DEFAULT '🚪 غادر {user} السيرفر.
+كان قد دعاه {inviter}.
+تم خصم نقطة من الداعي، مجموع دعواته الحالي: {inviter.net}',
+  milestone_message TEXT NOT NULL DEFAULT '🎉 وصل {inviter} إلى {inviter.net} إحالة صافية وحصل على رتبة جديدة!',
+  -- Milestone rules as [{ id, net, roleId }], clamped in the core normaliser.
+  milestone_roles JSONB NOT NULL DEFAULT '[]',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One row per member per guild: who brought them in, through which code, and
+-- how the join was classified. The row survives a leave (left_at fills in,
+-- counted flips off) so the re-join rule — a returning member never counts
+-- twice — can see the history without a second table.
+CREATE TABLE IF NOT EXISTS invite_members (
+  guild_id TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  inviter_id TEXT,
+  invite_code TEXT,
+  -- Mirrors InviteJoinKind in core: regular | fake | rejoin | self | vanity | unknown.
+  kind TEXT NOT NULL DEFAULT 'unknown' CONSTRAINT invite_members_kind_check CHECK (kind IN ('regular','fake','rejoin','self','vanity','unknown')),
+  -- Whether this row's join was counted in the inviter's regular/net. Flips
+  -- off when the member leaves so the deduction happens exactly once.
+  counted BOOLEAN NOT NULL DEFAULT false,
+  account_age_ms BIGINT,
+  joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  left_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (guild_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS invite_members_inviter_idx ON invite_members (guild_id, inviter_id);
+
+-- The inviter's running counters. regular grows only on counted joins and
+-- leaves only on counted departures, so net = regular - leaves + bonus is a
+-- pure function of the row. bonus carries the moderators' manual edits
+-- (/admin-invites add/remove), which may push the net in either direction.
+CREATE TABLE IF NOT EXISTS invite_stats (
+  guild_id TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  regular INTEGER NOT NULL DEFAULT 0 CONSTRAINT invite_stats_regular_check CHECK (regular >= 0),
+  fakes INTEGER NOT NULL DEFAULT 0 CONSTRAINT invite_stats_fakes_check CHECK (fakes >= 0),
+  rejoins INTEGER NOT NULL DEFAULT 0 CONSTRAINT invite_stats_rejoins_check CHECK (rejoins >= 0),
+  leaves INTEGER NOT NULL DEFAULT 0 CONSTRAINT invite_stats_leaves_check CHECK (leaves >= 0),
+  bonus INTEGER NOT NULL DEFAULT 0 CONSTRAINT invite_stats_bonus_check CHECK (bonus BETWEEN -100000 AND 100000),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (guild_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS invite_stats_guild_idx ON invite_stats (guild_id, regular DESC);
+
+-- Welcome messages (رسائل الترحيب). One settings row per guild; a missing row
+-- means the feature ships off. Distinct from `guild_welcome` (the auto-role):
+-- that table grants a role on join, this one speaks. The embed and the canvas
+-- config are JSONB blobs normalised through normaliseWelcomeMessageSettings
+-- (packages/core/src/welcome-messages.ts) on every read and write, so the BFF
+-- and the bot cannot disagree about what a stored value means.
+CREATE TABLE IF NOT EXISTS guild_welcome_messages (
+  guild_id TEXT PRIMARY KEY REFERENCES guilds(id) ON DELETE CASCADE,
+  enabled BOOLEAN NOT NULL DEFAULT false,
+  image_enabled BOOLEAN NOT NULL DEFAULT false,
+  -- with_message | before_message | separate_channel. Mirrors WelcomeImageMode.
+  image_mode TEXT NOT NULL DEFAULT 'with_message' CONSTRAINT guild_welcome_messages_image_mode_check CHECK (image_mode IN ('with_message','before_message','separate_channel')),
+  -- Only meaningful when image_mode = 'separate_channel'.
+  image_channel_id TEXT,
+  -- Where the message itself goes; NULL means unset and the module stays quiet.
+  channel_id TEXT,
+  -- text | embed. Mirrors WelcomeMessageMode.
+  mode TEXT NOT NULL DEFAULT 'embed' CONSTRAINT guild_welcome_messages_mode_check CHECK (mode IN ('text','embed')),
+  text TEXT NOT NULL DEFAULT 'أهلاً وسهلاً {user} في {server}! 🎉',
+  embed JSONB NOT NULL DEFAULT '{}',
+  image_config JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS guild_welcome_messages_channel_idx ON guild_welcome_messages (channel_id);
+
+-- The bot's presence is type + text together: Discord renders nothing for an
+-- activity with a blank name, so an empty text makes the whole «نوع النشاط»
+-- picker look broken. Fresh deployments start with a real presence; existing
+-- rows get the real text only while theirs is empty — an operator's chosen
+-- text is never overwritten.
+ALTER TABLE bot_identity ALTER COLUMN activity_text SET DEFAULT 'سيرفرات ديسكورد';
+UPDATE bot_identity SET activity_text = 'سيرفرات ديسكورد' WHERE id = true AND (activity_text IS NULL OR activity_text = '');
 
 -- Bot tokens are retired (GOVERNANCE rule 19). AL AI runs on exactly one master
 -- token held in the server environment; the dashboard never accepts a credential
@@ -608,4 +931,15 @@ CREATE TRIGGER audit_trail_no_truncate
 -- Belt and braces: the application role has no business truncating history.
 -- (Ignored when the role is the table owner or a superuser.)
 REVOKE TRUNCATE ON audit_trail FROM PUBLIC;
+
+-- The application role (`al_ai_app` in this deployment) reads and writes every
+-- feature table but owns none of them, so a table created under the owner role
+-- needs its grants stated here. Wrapped rather than bare: a database initialised
+-- under a different role name must not fail its whole schema pass over a grant.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'al_ai_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO al_ai_app;
+  END IF;
+END $$;
 

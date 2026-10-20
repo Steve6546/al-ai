@@ -5,7 +5,14 @@
  * failing later on the first request. KEY_ROTATION_DAYS and
  * AUDIT_RETENTION_DAYS are mandatory in production only: they are operational
  * settings that must never be guessed, but local development stays usable.
+ *
+ * The reading rules and the "which are missing" and "are we in production"
+ * answers come from `@al-ai/core`, shared with the bot. Only the *policy* — the
+ * list of required names, and the shape the values are returned in — belongs to
+ * the dashboard.
  */
+
+import { isProduction, missingEnv, readEnv } from "@al-ai/core";
 
 const alwaysRequired = [
   "DISCORD_CLIENT_ID",
@@ -33,19 +40,24 @@ export type BffEnv = {
   botToken: string | null;
   keyRotationDays: number | null;
   auditRetentionDays: number | null;
+  /**
+   * The platform owner's Discord user id, when configured. Gates the
+   * instance-wide surfaces (network reach, the bot's global identity) that do
+   * not belong to any single guild. Absent means every owner-gated surface is
+   * denied — the deployment runs without a known owner and must not guess one.
+   */
+  ownerId: string | null;
 };
 
 function read(key: string) {
-  const value = process.env[key];
-  return value && value.trim().length > 0 ? value.trim() : null;
+  return readEnv(process.env, key);
 }
 
 export function loadEnv(): BffEnv {
-  const missing: string[] = alwaysRequired.filter(key => !read(key));
-  const nodeEnv = read("NODE_ENV") ?? "development";
-  const isProduction = nodeEnv === "production";
-  if (isProduction) {
-    missing.push(...productionRequired.filter(key => !read(key)));
+  const missing = missingEnv(process.env, alwaysRequired);
+  const production = isProduction(process.env);
+  if (production) {
+    missing.push(...missingEnv(process.env, productionRequired));
   }
   if (missing.length) {
     throw new Error(`AL AI dashboard cannot start. Missing required environment values: ${missing.join(", ")}`);
@@ -61,8 +73,8 @@ export function loadEnv(): BffEnv {
   }
 
   return {
-    nodeEnv,
-    isProduction,
+    nodeEnv: read("NODE_ENV") ?? "development",
+    isProduction: production,
     port: Number(read("PORT") ?? 3000),
     clientId: read("DISCORD_CLIENT_ID")!,
     clientSecret: read("DISCORD_CLIENT_SECRET")!,
@@ -73,6 +85,7 @@ export function loadEnv(): BffEnv {
     encryptionKey,
     botToken: read("BOT_TOKEN"),
     keyRotationDays: read("KEY_ROTATION_DAYS") ? Number(read("KEY_ROTATION_DAYS")) : null,
-    auditRetentionDays: read("AUDIT_RETENTION_DAYS") ? Number(read("AUDIT_RETENTION_DAYS")) : null
+    auditRetentionDays: read("AUDIT_RETENTION_DAYS") ? Number(read("AUDIT_RETENTION_DAYS")) : null,
+    ownerId: read("OWNER_ID")
   };
 }

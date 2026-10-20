@@ -67,6 +67,10 @@ export function describeGuildAccess(input: {
     // tier or above — a moderator must not be able to widen their own access by
     // editing the list.
     canManageTiers: tier === "owner" || tier === "admin",
-    canInvite: hasPermission(guild.permissions, DISCORD_PERMISSION_BITS.MANAGE_GUILD)
+    canInvite: hasPermission(guild.permissions, DISCORD_PERMISSION_BITS.MANAGE_GUILD),
+    // Mirrors `requireInstanceAdmin` in the route: administer a guild the bot
+    // actually serves. Kept here so the selector and the gate cannot drift, and
+    // so a moderator of one server never sees the deployment's network reach.
+    canAdminInstance: botPresent && isAdministrable(guild.permissions)
   };
 }

@@ -81,3 +81,17 @@ export async function botIdentityPermissionStatus(botToken: string, guildId: str
     }
   ];
 }
+
+/**
+ * The platform-owner verdict, pure so it can be tested without a request.
+ *
+ * `ownerId` is the deployment's configured OWNER_ID (null when unset) and
+ * `discordUserId` is the id the session actually authenticated — never a value
+ * the request carried. Unset means no owner: a deployment that cannot name its
+ * owner denies the owner-gated surfaces rather than guessing one from whoever
+ * signed in first.
+ */
+export function isPlatformOwner(ownerId: string | null, discordUserId: string): boolean {
+  if (!ownerId) return false;
+  return ownerId === discordUserId;
+}

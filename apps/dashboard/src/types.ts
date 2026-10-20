@@ -15,6 +15,8 @@ import {
   type AntiNukeConfig,
   type DiscordRoleWire,
   type GuildSummary,
+  type LevelConfigProblem,
+  type LevelRewardKind,
   type LogDestination,
   type NukeAction,
   type RemoteAccessMode,
@@ -29,14 +31,10 @@ export { tierOrder } from "@al-ai/core/browser";
  * Shared with the BFF and the bot — declared in core, re-exported here
  * ------------------------------------------------------------------ */
 export type {
-  ActivityEntry,
   ActivityType,
   AntiNukeConfig,
-  AntiNukeLimits,
-  AppearanceFailure,
-  AppearanceFieldName,
   AppearanceSaveResult,
-  BotIdentitySettings,
+  BotPresenceSettings,
   BotStatus,
   BotStatusDuration,
   ChannelOption,
@@ -44,18 +42,24 @@ export type {
   CommandConfig,
   CommandDuration,
   CommandFlag,
-  CommandTarget,
   CustomizationSettings,
-  DurationOption,
   GuildMetrics,
   HealthSnapshot,
+  InviteMilestone,
+  InviteSettings,
+  WelcomeEmbedField,
+  WelcomeMessageSettings,
+  WelcomeTextLayer,
+  LevelNotifyMode,
+  LevelRewardKind,
+  LevelRoleReward,
+  LevelSettings,
   LogDestination,
   LoggingSettings,
   WelcomeSettings,
   NukeAction,
   PermissionStatus,
   PresetReason,
-  PunishmentCounts,
   RemoteAccessMode,
   RoleHierarchyVerdict,
   RoleIconGate,
@@ -63,23 +67,100 @@ export type {
 } from "@al-ai/core/browser";
 
 /* ------------------------------------------------------------------ *
+ * Levels system — UI-only shapes
+ * ------------------------------------------------------------------ */
+
+export type { LevelConfigProblem } from "@al-ai/core/browser";
+
+/** One persistent sync job, mirroring the BFF's `LevelSyncJob`. */
+export type LevelSyncJob = {
+  id: string;
+  guildId: string;
+  status: "pending" | "running" | "completed" | "failed";
+  cursor: string | null;
+  total: number | null;
+  processed: number;
+  granted: number;
+  removed: number;
+  skipped: number;
+  failed: number;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+};
+
+/** Real engine status: every value read from server state, nothing invented. */
+export type LevelsStatus = {
+  enabled: boolean;
+  lastXpWriteAt: string | null;
+  lastVoiceTickAt: string | null;
+  voiceSessions: number | null;
+  sync: LevelSyncJob | null;
+};
+
+/** What an operator types into a reward modal, before it has a row id. */
+export type LevelRewardInput = {
+  kind: LevelRewardKind;
+  level: number;
+  /** Required voice level; only meaningful for "dual" rules. */
+  voiceLevel: number | null;
+  roleId: string;
+  /** Keep this role even without the guild-wide stacking switch. */
+  alwaysKeep?: boolean;
+};
+
+/** One leaderboard row, with the avatar URL the BFF already resolved. */
+export type LeaderboardEntry = {
+  userId: string;
+  displayName: string | null;
+  avatarHash: string | null;
+  avatarUrl: string | null;
+  xp: number;
+  /** Hidden members keep earning; the board only dims and un-ranks them. */
+  hidden: boolean;
+};
+
+export type LeaderboardPage = {
+  entries: LeaderboardEntry[];
+  total: number;
+  stats: { highestLevel: number; totalXp: number; rankedMembers: number };
+};
+
+/* ------------------------------------------------------------------ *
  * Dashboard-only shapes
  * ------------------------------------------------------------------ */
 
 /**
- * The bot's *resolved* global profile, for the live preview.
+ * What Discord currently serves for the bot *inside one guild*, for the preview.
  *
  * Declared here rather than in core because it is a view, not a stored shape:
- * `BotIdentitySettings` holds what the operator chose (which may be a data URL
- * they just cropped), while this holds what Discord currently serves — the CDN
- * URL, the account name. The preview needs both so it can show the last applied
+ * `CustomizationSettings` holds what the operator chose (which may be a data URL
+ * they just cropped), while this holds what Discord actually returns — the CDN
+ * URLs, the account name. The preview needs both so it can show the last applied
  * value before the operator touches anything.
+ *
+ * Guild-scoped, and every field is the *member's* value rather than the
+ * account's: `avatarUrl` is built from the guild-avatar hash and `bannerUrl`
+ * from the guild-banner hash, so the preview draws the face members of THIS
+ * server see. There is no `bio`: Discord validates a member bio on write and
+ * never returns it on read, so the stored row is the only source for it.
  */
-export type BotIdentitySnapshot = {
+export type GuildProfileSnapshot = {
   username: string;
+  /** The member's nickname in this guild, or null when they have none. */
+  nickname: string | null;
+  /** This guild's avatar and banner, or null when there is no override. */
   avatarUrl: string | null;
   bannerUrl: string | null;
-  bio: string;
+  /**
+   * What the bot falls back to where this guild has no override — the account's
+   * own picture. Present so the preview draws the face members really see
+   * instead of the initials, and never as a control: nothing on this screen can
+   * write it.
+   */
+  accountAvatarUrl: string | null;
+  accountBannerUrl: string | null;
 };
 
 /**
@@ -144,7 +225,17 @@ export type AntiNukeSettings = {
 
 export type SessionInfo = {
   authenticated: boolean;
-  user: { id: string; username: string; avatarUrl: string | null; expiresAt: string } | null;
+  /** `isPlatformOwner` is the server's verdict on OWNER_ID, never the value itself. */
+  user: {
+    id: string;
+    /** The display name Discord shows. */
+    username: string;
+    /** The @handle, when the session carries one. */
+    handle?: string | null;
+    avatarUrl: string | null;
+    expiresAt: string;
+    isPlatformOwner?: boolean;
+  } | null;
 };
 
 /** What `GET /api/network` answers with — the deployment's current reach. */
@@ -153,9 +244,12 @@ export type NetworkSnapshot = {
   tunnelUrl: string | null;
   tunnelStatus: "off" | "starting" | "running" | "error";
   tunnelError: string | null;
-  /** The machine's own non-loopback addresses, as bare hostnames. */
-  machineHosts: string[];
+  /** The machine's own non-loopback addresses, each with the interface it belongs to. */
+  machineHosts: { host: string; label: string }[];
   port: number;
+  /** Whether a sign-in has completed through the tunnel address, proving its
+   * redirect URI is registered in Discord — see `markOriginVerified` server-side. */
+  tunnelCallbackVerified: boolean;
 };
 
 /* ------------------------------------------------------------------ *
@@ -315,7 +409,10 @@ const eventCopy: Record<string, string> = {
   "server.invite-create": "إنشاء دعوة",
   "invite.delete": "حذف دعوة",
   "invite.use": "استخدام دعوة",
-
+  "invites.member-join": "انضمام عبر دعوة (إحالة)",
+  "invites.member-leave": "مغادرة مُحال وخصم",
+  "invites.milestone": "رتبة إنجاز إحالات",
+  "invites.admin-adjust": "تعديل يدوي للإحالات",
   /* expression-log */
   "server.expression-create": "إضافة إيموجي",
   "server.expression-delete": "حذف إيموجي",

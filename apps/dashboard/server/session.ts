@@ -84,13 +84,22 @@ export function sessionAccessToken(session: SessionRecord, env: BffEnv): string 
 export async function issueSession(
   db: Database,
   env: BffEnv,
-  input: { discordUserId: string; discordUsername: string; discordAvatar?: string | null; accessToken: string; scopes: string }
+  input: {
+    discordUserId: string;
+    discordUsername: string;
+    /** The @handle, beside the display name. */
+    discordHandle?: string | null;
+    discordAvatar?: string | null;
+    accessToken: string;
+    scopes: string;
+  }
 ) {
   const id = randomUUID();
   const expiresAt = await db.createSession({
     id,
     discordUserId: input.discordUserId,
     discordUsername: input.discordUsername,
+    discordHandle: input.discordHandle ?? null,
     discordAvatar: input.discordAvatar ?? null,
     accessTokenCiphertext: encryptSecret(input.accessToken, env.encryptionKey),
     scopes: input.scopes

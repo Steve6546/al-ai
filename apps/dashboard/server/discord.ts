@@ -91,23 +91,77 @@ function readRetryAfter(body: string, headers: Headers): number | null {
   return Number.isFinite(header) && header >= 0 ? header : null;
 }
 
+/**
+ * How long one Discord call may take.
+ *
+ * `fetch` has no timeout of its own: a connection Discord never finishes leaves
+ * the request open, the socket open, and the operator watching a spinner that
+ * never resolves. A timeout turns that hang into an ordinary transient failure
+ * the route can answer - and a bounded one, so a stuck upstream cannot hold
+ * the event loop's sockets forever.
+ */
+const DISCORD_CALL_TIMEOUT_MS = 10_000;
+
+/** The pause before the single retry of a transient read. */
+const DISCORD_RETRY_DELAY_MS = 500;
+
+/**
+ * Whether a failure is worth one more attempt.
+ *
+ * Only a *read* is retried, and only when the fault is upstream and
+ * temporary: a 5xx from Discord, a dropped connection, or our own timeout. A
+ * 4xx is an answer rather than a fault, and a write is never repeated - the
+ * first attempt may already have taken effect even if its answer was lost.
+ *
+ * This is not hypothetical: the dashboard's own log recorded
+ * `Discord /users/@me/guilds failed with 500` twice in a row, and the request
+ * after them answered 200. A single retry would have absorbed it.
+ */
+function isTransientUpstreamFailure(error: unknown): boolean {
+  if (error instanceof DiscordApiError) return error.status >= 500;
+  // `AbortSignal.timeout` rejects with a TimeoutError, `fetch` with a TypeError
+  // when the connection could not be made or was cut mid-flight.
+  if (error instanceof DOMException && error.name === "TimeoutError") return true;
+  return error instanceof TypeError;
+}
+
+/**
+ * One attempt, with a bounded retry for a transient read.
+ *
+ * `canRetry` is the caller's own statement about idempotence: the reads pass
+ * true, the writes pass false and see their failure immediately.
+ */
+async function withTimeoutAndRetry<T>(run: () => Promise<T>, canRetry: boolean): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (!canRetry || !isTransientUpstreamFailure(error)) throw error;
+    await sleep(DISCORD_RETRY_DELAY_MS);
+    return await run();
+  }
+}
+
 async function request<T>(path: string, init: RequestInit & { token: string; scheme?: "Bot" | "Bearer" }): Promise<T> {
   const { token, scheme = "Bot", ...rest } = init;
-  const response = await fetch(`${API}${path}`, {
-    ...rest,
-    headers: {
-      Authorization: `${scheme} ${token}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-      ...(rest.headers ?? {})
+  const method = String(rest.method ?? "GET").toUpperCase();
+  return withTimeoutAndRetry(async () => {
+    const response = await fetch(`${API}${path}`, {
+      ...rest,
+      signal: AbortSignal.timeout(DISCORD_CALL_TIMEOUT_MS),
+      headers: {
+        Authorization: `${scheme} ${token}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        ...(rest.headers ?? {})
+      }
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      const retryAfter = response.status === 429 ? readRetryAfter(body, response.headers) : null;
+      throw new DiscordApiError(response.status, path, body, retryAfter);
     }
-  });
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    const retryAfter = response.status === 429 ? readRetryAfter(body, response.headers) : null;
-    throw new DiscordApiError(response.status, path, body, retryAfter);
-  }
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+    if (response.status === 204) return undefined as T;
+    return (await response.json()) as T;
+  }, method === "GET");
 }
 
 /**
@@ -126,18 +180,21 @@ export async function requestJson<T>(
   path: string,
   init: { token: string; method: "GET" | "PATCH" | "POST" | "DELETE"; body?: unknown }
 ): Promise<T> {
-  const response = await fetch(`${API}${path}`, {
-    method: init.method,
-    headers: { Authorization: `Bot ${init.token}`, "Content-Type": "application/json" },
-    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) })
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    const retryAfter = response.status === 429 ? readRetryAfter(text, response.headers) : null;
-    throw new DiscordApiError(response.status, path, text, retryAfter);
-  }
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  return withTimeoutAndRetry(async () => {
+    const response = await fetch(`${API}${path}`, {
+      method: init.method,
+      signal: AbortSignal.timeout(DISCORD_CALL_TIMEOUT_MS),
+      headers: { Authorization: `Bot ${init.token}`, "Content-Type": "application/json" },
+      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) })
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      const retryAfter = response.status === 429 ? readRetryAfter(text, response.headers) : null;
+      throw new DiscordApiError(response.status, path, text, retryAfter);
+    }
+    if (response.status === 204) return undefined as T;
+    return (await response.json()) as T;
+  }, init.method === "GET");
 }
 
 export function buildAuthorizeUrl(input: { clientId: string; redirectUri: string; state: string; scopes: readonly string[] }) {
@@ -1012,4 +1069,32 @@ export function guildIconUrl(guildId: string, iconHash: string | null, size = 12
 export function userBannerUrl(userId: string, bannerHash: string | null, size = 600): string | null {
   if (!bannerHash) return null;
   return `https://cdn.discordapp.com/banners/${userId}/${bannerHash}.${assetExtension(bannerHash)}?size=${size}`;
+}
+
+/**
+ * A member's *guild* avatar — the picture that wins in one server.
+ *
+ * A different route from `userAvatarUrl`, and the difference is the whole point
+ * of the field: Discord serves the per-guild override from a path that names
+ * both the guild and the user. Building it with `userAvatarUrl` would draw the
+ * account's picture and look perfectly correct, which is the worst kind of
+ * wrong — the operator would conclude their per-server upload had been ignored.
+ *
+ * Null when the member has no override, so the caller falls back to the
+ * account's avatar exactly as Discord does.
+ */
+export function guildMemberAvatarUrl(guildId: string, userId: string, avatarHash: string | null, size = 128): string | null {
+  if (!avatarHash) return null;
+  return `https://cdn.discordapp.com/guilds/${guildId}/users/${userId}/avatars/${avatarHash}.${assetExtension(avatarHash)}?size=${size}`;
+}
+
+/**
+ * A member's *guild* banner, or null when they have none.
+ *
+ * Same separate route as the guild avatar, and same animated-hash rule — an
+ * `a_` hash needs `.gif` or Discord answers with the first frame and no error.
+ */
+export function guildMemberBannerUrl(guildId: string, userId: string, bannerHash: string | null, size = 600): string | null {
+  if (!bannerHash) return null;
+  return `https://cdn.discordapp.com/guilds/${guildId}/users/${userId}/banners/${bannerHash}.${assetExtension(bannerHash)}?size=${size}`;
 }
