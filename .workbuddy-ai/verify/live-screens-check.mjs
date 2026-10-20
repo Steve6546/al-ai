@@ -38,6 +38,15 @@ const SCREENS = [
   { view: "dashboard", label: "لوحة التحكم" },
   { view: "roles", label: "رتب الإدارة والمشرفين" },
   { view: "customization", label: "هوية البوت" },
+  /*
+   * The account-wide half, on its own route since the identity screen was made
+   * server-scoped. It is owner-gated, so this row only exercises the screen
+   * itself when the session handed to this script belongs to the platform
+   * owner — with any other session the shell answers with its own not-allowed
+   * card, which is still worth walking (it must not throw) but says nothing
+   * about the presence form. The label is the nav entry's own.
+   */
+  { view: "presence", label: "حالة البوت" },
   { view: "commands", label: "الأوامر" },
   { view: "security", label: "الحماية والأمان" },
   { view: "logs", label: "سجلات السيرفر" },
@@ -131,14 +140,50 @@ try {
   await send("Network.enable");
   await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 
-  // The session the operator is actually using, so the routes resolve for real.
-  await send("Network.setCookie", {
-    name: "al_ai_session",
-    value: sessionId,
-    domain: "localhost",
-    path: "/",
-    httpOnly: true
-  });
+  /*
+   * The session the operator is actually using, so the routes resolve for real.
+   *
+   * Which *name* that cookie has is a property of the server's environment, not
+   * of this script: the BFF uses `__Host-al_ai_session` under
+   * `NODE_ENV=production` and plain `al_ai_session` otherwise. Hardcoding one
+   * made this whole run worthless in the one deployment it is meant for — a
+   * wrong name does not error, the request simply arrives unauthenticated, every
+   * screen renders its signed-out state, and the summary still said "clean"
+   * because nothing threw. So the name is *verified* against the server rather
+   * than assumed, and a session the server will not accept stops the run.
+   */
+  const cookieNames = ["__Host-al_ai_session", "al_ai_session"];
+  let cookieName = null;
+  for (const candidate of cookieNames) {
+    await send("Network.setCookie", {
+      name: candidate,
+      value: sessionId,
+      url: BASE,
+      path: "/",
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax"
+    });
+    /* The page has to be *on* the origin before a relative fetch means anything —
+       `about:blank` has no base URL, so probing before navigating answers `false`
+       for every cookie name and looks exactly like a rejected session. */
+    await send("Page.navigate", { url: `${BASE}/` });
+    await sleep(400);
+    const probe = await evaluate(
+      `fetch('/api/session', { credentials: 'same-origin' }).then(r => r.json()).then(v => v.authenticated === true).catch(() => false)`
+    );
+    if (probe) {
+      cookieName = candidate;
+      break;
+    }
+  }
+  if (!cookieName) {
+    throw new Error(
+      `the server rejected session ${sessionId} under every known cookie name (${cookieNames.join(", ")}). ` +
+        "Re-issue the session — rendering signed-out screens would report a clean run that verified nothing."
+    );
+  }
+  console.log(`session accepted as \`${cookieName}\``);
 
   for (const screen of SCREENS) {
     consoleErrors = [];

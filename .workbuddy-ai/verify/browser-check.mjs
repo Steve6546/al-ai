@@ -99,18 +99,32 @@ const commandsPayload = {
 const STUB = `
 (() => {
   const payloads = [
-    [/^\\/api\\/session$/, { authenticated: true, user: { id: "1", username: "owner", avatarUrl: null, expiresAt: new Date(Date.now() + 3.6e6).toISOString() } }],
+    [/^\\/api\\/session$/, { authenticated: true, user: { id: "1", username: "owner", avatarUrl: null, expiresAt: new Date(Date.now() + 3.6e6).toISOString(), isPlatformOwner: true } }],
     [/^\\/api\\/health$/, { status: "healthy", dashboard: "online", bot: "connected", database: "reachable", gateway: { eventsLastMinute: 0, ceiling: 120 }, verification: { guildCount: 1, uniqueUsers: 1, reviewRequired: false, warning: null } }],
     [/^\\/api\\/guilds$/, { guilds: ${JSON.stringify([guild])} }],
     [/^\\/api\\/guilds\\/[^/]+\\/customization$/, {
-      settings: { nickname: "AL uwu", roleColor: "#050572", roleIconUrl: "" },
+      settings: { enabled: true, nickname: "AL uwu", roleColor: "#050572", roleIconUrl: "", avatarDataUrl: "", bannerDataUrl: "", bio: "نبذة هذا السيرفر" },
       permissions: [{ key: "change_nickname", label: "تغيير الاسم المستعار", granted: true }],
       hierarchy: { botPosition: 5, highestManagedPosition: 3, blocked: false, message: null },
-      roleIcon: { locked: false, unknown: false, reason: null }
+      roleIcon: { locked: false, unknown: false, reason: null },
+      // What Discord answers for the bot's membership in this guild. This is
+      // the only read-only part of the payload now — there is no second scope
+      // for the client to be handed — and it is what the preview falls through
+      // to when the guild has no picture of its own.
+      //
+      // A real, decodable image rather than a made-up CDN address: a URL that
+      // cannot load falls back to the initials, and the screenshot would then
+      // show the very defect this fixture exists to prove is fixed. The stored
+      // guild values are deliberately the empty strings the columns really
+      // hold, so the profile is what the preview has to reach.
+      profile: { username: "AL uwu", nickname: "AL uwu", avatarUrl: null, bannerUrl: null, accountAvatarUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAABLElEQVR4nO3PCy7CAQDA4e5iZsbMzMyYmZkZMzMzY2ZmZszMzIwlqaRUUklJHnm/qn/vlJSUlJTUjRzBBX7fDT5RVchZHXTVBFy1fnedT6j3Cg0eT6PgaRK8zW5fi8vX6vS3PQXaHwMdD8HO+2DXXaj7NtxzE+69fu67ivRfRgYuooOO6JDjZfg8NnIWGz19HTuJj9vjE8eJSVti6uht2pqcsSRnD9/nzKn5g9SCKb1oTC8ZP5YNmZX9zKr+c20vu67LirU5iSYn3f2SqfMKVV65861SFtTbBY2iqJMX9fIfg6xk2iqZpb+WzbJVUrZtVOziiogAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAg8F/gD02fJ5Y8kr+FAAAAAElFTkSuQmCC", accountBannerUrl: null }
     }],
-    [/^\\/api\\/bot\\/identity$/, {
-      settings: { avatarDataUrl: "", bannerDataUrl: "", bio: "استُعيد", status: "idle", activityType: "listening", activityText: "السجلات", statusDuration: "", statusExpiresAt: "" },
-      snapshot: null
+    // The account-wide half, on its own route and its own screen. It used to
+    // ride along on the customization payload; it does not any more, and a
+    // fixture that still carried it here would let the identity screen draw a
+    // status it is no longer allowed to draw.
+    [/^\\/api\\/bot\\/presence$/, {
+      settings: { status: "idle", activityType: "listening", activityText: "السجلات", statusDuration: "", statusExpiresAt: "" }
     }],
     [/^\\/api\\/guilds\\/[^/]+\\/security\\/config$/, {
       config: { enabled: true, limits: { channelDeletesPerMinute: 3, bansPerMinute: 5, roleChangesPerMinute: 3 }, quarantineRoleId: null },
@@ -271,18 +285,63 @@ try {
   /* ---- 1. the frame ---- */
   await visit(
     `/dashboard/${GUILD_ID}/customization`,
-    `document.querySelector('main') && document.body.textContent.includes('الهوية العالمية')`
+    /*
+     * The bio field's own label, which lives on CARD 1 — the card that is only
+     * reached once the stored row has arrived.
+     *
+     * This gate used to be «حالة البوت», the presence field that shared the
+     * screen. The status moved to its own route and its own screen, so that
+     * string is no longer a marker for anything here; and it is worse than
+     * useless as one, because the note that tells the operator where the status
+     * went still contains it. A gate on a phrase that a static paragraph also
+     * prints would pass on a screen whose data never loaded at all.
+     */
+    `document.querySelector('main') && document.body.textContent.includes('نبذة عني')`
   );
 
   check("window does not scroll", await evaluate(`document.scrollingElement.scrollHeight - document.scrollingElement.clientHeight`), 0);
   check("main does scroll", await evaluate(`document.querySelector('main').scrollHeight > document.querySelector('main').clientHeight + 100`), true);
+
+/**
+ * The rect of the preview column, or null when the column is not there.
+ *
+ * The previous version fell back to `main` when the selector missed, which made
+ * every measurement of it *pass*: `main` is the scroll container, so its own
+ * top never changes, and a screen whose preview column had lost its `sticky`
+ * class looked perfectly stable. Null is the honest answer, and the existence
+ * check below turns it into a failure.
+ */
+const PREVIEW_RECT = `(el => el ? { top: Math.round(el.getBoundingClientRect().top), left: Math.round(el.getBoundingClientRect().left) } : null)(document.querySelector('main .lg\\\\:sticky'))`;
 
   const before = await evaluate(`(() => {
     const rect = el => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top), left: Math.round(r.left) }; };
     return {
       header: rect(document.querySelector('header')),
       sidebar: rect(document.querySelector('aside')),
-      preview: rect(document.querySelector('main .lg\\\\:sticky') ?? document.querySelector('main'))
+      preview: ${PREVIEW_RECT}
+    };
+  })()`);
+
+  /*
+   * The preview is measured at two scroll positions that are *both* past the
+   * point where it would have left the viewport.
+   *
+   * Comparing against scroll 0 measured the wrong thing. The preview starts
+   * below the page header, so it is supposed to travel up with the form until
+   * it reaches its sticky offset and come to rest there — that travel is the
+   * feature, not a defect. What must not change is where it rests once it has
+   * arrived, and that is what the two measurements below establish. Removing
+   * `lg:sticky` still fails both of them, because the preview would then keep
+   * moving with the form.
+   */
+  await evaluate(`document.querySelector('main').scrollTop = 300`);
+  await sleep(150);
+  const pinned = await evaluate(`(() => {
+    const rect = el => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top), left: Math.round(r.left) }; };
+    return {
+      header: rect(document.querySelector('header')),
+      sidebar: rect(document.querySelector('aside')),
+      preview: ${PREVIEW_RECT}
     };
   })()`);
 
@@ -294,7 +353,7 @@ try {
     return {
       header: rect(document.querySelector('header')),
       sidebar: rect(document.querySelector('aside')),
-      preview: rect(document.querySelector('main .lg\\\\:sticky') ?? document.querySelector('main')),
+      preview: ${PREVIEW_RECT},
       scrolled: document.querySelector('main').scrollTop
     };
   })()`);
@@ -302,14 +361,28 @@ try {
   check("the header did not move", after.header.top, before.header.top);
   check("the sidebar did not move", after.sidebar.top, before.sidebar.top);
   check("the page really scrolled", after.scrolled, value => value > 100);
-  check(
-    "the live preview stayed put",
-    after.preview.top,
-    value => Math.abs(value - before.preview.top) <= 4
-  );
+  check("the preview column is on the screen at all", after.preview !== null, true);
+  check("the live preview stayed put", after.preview?.top ?? null, value => value !== null && Math.abs(value - pinned.preview.top) <= 4);
+  check("…and is still on screen at the bottom of the form", after.preview?.top ?? null, value => value !== null && value > 0);
   await shoot("customization");
 
   /* ---- 2. the activity picker ---- */
+  /*
+   * It moved. The picker used to sit on «هوية البوت», beside the nickname and
+   * the images; it is on «حالة البوت» now, because the status it belongs to is
+   * account-wide and that screen is the one that says so. The section follows
+   * the control — measuring the customization screen here would find no
+   * `[aria-label="نوع النشاط"]` and fail on a null trigger, which reads like a
+   * broken menu rather than a relocated one.
+   *
+   * The gate is the summary line, which only exists once the stored presence
+   * has been read: it is built from the row, not from a default.
+   */
+  await visit(
+    `/dashboard/${GUILD_ID}/presence`,
+    `document.querySelector('[aria-label="نوع النشاط"]') && document.body.textContent.includes('ما سيطبّقه البوت')`
+  );
+
   await evaluate(`(() => {
     const trigger = document.querySelector('[aria-label="نوع النشاط"]');
     trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }));
@@ -497,8 +570,17 @@ try {
   })()`);
   check("the penalties row reads 23/23", penaltiesRow, value => typeof value === "string" && value.includes("23/23"));
 
-  const sectionNames = await evaluate(`[...document.querySelectorAll('nav[aria-label="أقسام الأوامر"] button')].map(b => b.textContent.trim())`);  // Fourteen sections plus the "all commands" row.
-  check("the sidebar offers every section and the all-commands row", sectionNames.length, 15);
+  const sectionNames = await evaluate(`[...document.querySelectorAll('nav[aria-label="أقسام الأوامر"] button')].map(b => b.textContent.trim())`);
+  /*
+   * Derived from the registry, not written down.
+   *
+   * This was the literal 15 ("fourteen sections plus the all-commands row") and
+   * it went stale the moment a section was added — the count is a property of
+   * `commandCategories`, which this file already imports, so restating it here
+   * was one more copy to keep in step. `+ 1` is the «كل الأوامر» row the screen
+   * prepends.
+   */
+  check("the sidebar offers every section and the all-commands row", sectionNames.length, commandCategories.length + 1);
   check(
     "…including the ones with no commands yet",
     sectionNames.some(name => name.includes("سجلات العقوبات")) && sectionNames.some(name => name.includes("إدارة الصوت")),

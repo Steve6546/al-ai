@@ -38,3 +38,15 @@
 hook بعد `if (error) return` ⇒ `Rendered more hooks than during the previous render` — **يُزيل الشجرة كلها**.
 **كل hook فوق كل early return.** `renderToString` **لا ينفّذ التأثيرات** ⇒ الحارس `test/mount.test.tsx` يركّب
 الشاشات السبع **مُحمَّلة**، و`error-boundary.tsx` يلفّ **محتوى الشاشة لا الـshell**.
+
+## 🔴 `cn` = `twMerge(clsx(…))` — الأصناف المتعارضة **تُحذَف** بصمت
+- **⚠️ `tailwind-merge` يُسقط الصنف الخاسر ويُبقي الأخير.** `CardTitle` تُعلن `font-semibold leading-none
+  tracking-tight`، والمالي يمرّر `text-base` — وفي Tailwind 4 يحمل `text-base` **line-height** أيضاً ⇒
+  **`leading-none` لا يصل إلى الـDOM**. فمُحدِّد يطالب بالثلاثة **لا يطابق شيئاً**: مسبار حيّ طبع
+  `cardTitles: []` لشاشة ملأى بالبطاقات، وأنا كنت أقرأ «لا بطاقات» بدل «مُحدِّد خاطئ».
+- **القاعدة:** لا تُعلّق قياساً (مسبار/اختبار) على **قائمة أصناف كاملة**. اطالب بالأصناف الباقية، أو بالنصّ،
+  أو بـ`data-slot`. **وقبل أن تبني على صنف، تحقّق به في node:**
+  `twMerge(clsx('font-semibold leading-none tracking-tight','text-base'))`.
+- **⚠️ ولا تكتب backtick داخل قالب نصّي في `verify/*.mjs`** — يقطع القالب ويُنتج `SyntaxError` عند التحميل،
+  لا عند التعديل. (حدث فعلاً أثناء إضافة تعليق يشرح هذه القاعدة.)
+
