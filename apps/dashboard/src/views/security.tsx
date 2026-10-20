@@ -6,6 +6,7 @@ import { SaveBar } from "@/components/save-bar";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { StateBadge } from "@/components/state-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -181,11 +182,15 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
           </CardDescription>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant={draft.enabled ? "secondary" : "outline"}>{draft.enabled ? "مفعّل" : "غير مفعّل"}</Badge>
+          {/*
+            The switch *is* the state. A badge beside it said the same thing in
+            a different colour, and the panel below repeats it in words - three
+            statements of one fact, of which the switch is the one that acts.
+          */}
           <Switch
             checked={draft.enabled}
             disabled={!canEdit}
-            aria-label="تفعيل محرّك مضاد التخريب"
+            aria-label="تفعيل نظام حماية الإشراف التلقائي"
             onCheckedChange={enabled => setDraft({ ...draft, enabled })}
           />
         </div>
@@ -202,26 +207,33 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
           </Alert>
         )}
 
+        {draft.enabled && (
+          <>
         <div className="space-y-3">
           <p className="text-sm font-medium">حدود الإجراءات (خلال دقيقة واحدة)</p>
-          {loaded.actions.map(({ action, label }) => (
-            <div key={action} className="flex items-center justify-between gap-4">
-              <Label htmlFor={`limit-${action}`} className="text-sm font-normal text-muted-foreground">
-                {label}
-              </Label>
-              <Input
-                id={`limit-${action}`}
-                type="number"
-                min={1}
-                max={100}
-                dir="ltr"
-                className="w-24 tabular"
-                disabled={!canEdit}
-                value={draft.limits[ANTI_NUKE_LIMIT_KEYS[action]]}
-                onChange={event => setLimit(action, Number(event.target.value))}
-              />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {loaded.actions.map(({ action, label }) => (
+              <div
+                key={action}
+                className="flex items-center justify-between gap-3 rounded-xl border border-border/80 bg-background/40 px-3 py-2.5"
+              >
+                <Label htmlFor={`limit-${action}`} className="text-xs font-normal text-muted-foreground">
+                  {label}
+                </Label>
+                <Input
+                  id={`limit-${action}`}
+                  type="number"
+                  min={1}
+                  max={100}
+                  dir="ltr"
+                  className="w-20 tabular text-center"
+                  disabled={!canEdit}
+                  value={draft.limits[ANTI_NUKE_LIMIT_KEYS[action]]}
+                  onChange={event => setLimit(action, Number(event.target.value))}
+                />
             </div>
           ))}
+          </div>
           <p className="text-xs text-muted-foreground">
             الحد يشمل القيمة نفسها: حد «3» يسمح بثلاث عمليات ويحتوي الرابعة.
           </p>
@@ -254,6 +266,8 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
               : "بدون رتبة حجر: سيُبلَّغ المالك ويُسجَّل الحدث، لكن لن تُسحب أي رتبة."}
           </p>
         </div>
+          </>
+        )}
       </CardContent>
 
       {dirty && (

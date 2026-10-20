@@ -8,7 +8,7 @@ import { InviteBotPanel } from "@/components/invite-bot";
 import { LoginScreen } from "@/components/login-screen";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { guildPath, guildsPath, navigate, useRoute } from "@/lib/router";
-import { AuditView, CommandsView, CustomizationView, DashboardView, LogsView, NetworkView, RolesView, SecurityView, WelcomeView } from "@/views";
+import { AuditView, BotPresenceView, CommandsView, CustomizationView, DashboardView, InvitesView, LevelsView, LogsView, NetworkView, RolesView, SecurityView, WelcomeMessagesView, WelcomeView } from "@/views";
 import type { Guild, HealthSnapshot, SessionInfo } from "@/types";
 
 /**
@@ -144,6 +144,22 @@ export function App() {
 
   const view: ViewKey = route.kind === "guild" && route.view && isViewKey(route.view) ? route.view : "dashboard";
 
+  /**
+   * Instance-wide screens, reached through a guild URL but not guild settings.
+   *
+   * «الوصول للشبكة» and «حالة البوت» both answer questions about the deployment
+   * and the bot as a whole, so a non-administrator who types the path in must
+   * land on the overview rather than on a screen the nav never offered — the same
+   * treatment a forbidden guild gets. The server gates both writes too, so this
+   * is the UI half of a rule that already exists on the other side.
+   */
+  useEffect(() => {
+    if (booting || !guild || (view !== "network" && view !== "presence")) return;
+    // The server decides ownership; the session only carries the verdict.
+    if (session?.user?.isPlatformOwner) return;
+    navigate(guildPath(routeGuildId!, "dashboard"), { replace: true });
+  }, [booting, guild, view, routeGuildId, session]);
+
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -224,12 +240,17 @@ export function App() {
            and `resetKey` releases the latch when the operator navigates. */
         <ErrorBoundary resetKey={`${guild.id}:${view}`} scope={viewTitle(view)}>
           {/*
-            «الوصول للشبكة» is an instance-wide screen, so it renders whether or
-            not AL AI is in this guild — connectivity is exactly what an
-            operator may want to look at while the bot is missing.
+            «الوصول للشبكة» and «حالة البوت» are instance-wide screens, so they
+            render whether or not AL AI is in this guild — connectivity, and the
+            status the bot holds across every server, are exactly what an
+            operator may want to look at while the bot is missing. They are still
+            owner-only: the guard above redirects a non-administrator away, and
+            `guild` is guaranteed non-null at this point in the tree.
           */}
-          {view === "network" ? (
+          {view === "network" && session?.user?.isPlatformOwner ? (
             <NetworkView />
+          ) : view === "presence" && session?.user?.isPlatformOwner ? (
+            <BotPresenceView guild={guild} />
           ) : !guild.botPresent ? (
             <InviteBotPanel guild={guild} refreshing={refreshing} onRefresh={() => void refresh()} />
           ) : (
@@ -240,6 +261,9 @@ export function App() {
               {view === "customization" && <CustomizationView guild={guild} />}
               {view === "logs" && <LogsView guild={guild} />}
               {view === "welcome" && <WelcomeView guild={guild} />}
+              {view === "welcome-messages" && <WelcomeMessagesView guild={guild} />}
+              {view === "levels" && <LevelsView guild={guild} />}
+              {view === "invites" && <InvitesView guild={guild} />}
               {view === "audit" && <AuditView guild={guild} />}
               {view === "security" && <SecurityView guild={guild} />}
             </>

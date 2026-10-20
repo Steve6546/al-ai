@@ -4,7 +4,6 @@ import {
   Bot,
   Crown,
   Loader2,
-  LogOut,
   RefreshCw,
   Search,
   ServerOff,
@@ -14,6 +13,7 @@ import {
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { SignOutButton } from "@/components/account-menu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -119,10 +119,7 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
           <span className="hidden sm:inline">تحديث</span>
         </Button>
 
-        <Button variant="ghost" size="sm" onClick={onLogout}>
-          <LogOut />
-          <span className="hidden sm:inline">خروج</span>
-        </Button>
+        <SignOutButton onLogout={onLogout} />
       </header>
 
       {/* The scrollbar belongs to the window edge, not to the centred column,

@@ -16,8 +16,8 @@ import { AuditView } from "../src/views/audit";
 import { DashboardView } from "../src/views/dashboard";
 import { SecurityView } from "../src/views/security";
 import { CommandsBoard, CommandsView, MemberScopeSelector, PresetReasons, ScopeSelector } from "../src/views/settings/commands";
-import { CustomizationView, HierarchyWarning } from "../src/views/settings/customization";
-import { BotLivePreview } from "../src/views/settings/bot-preview";
+import { CustomizationView } from "../src/views/settings/customization";
+import { BotLivePreview, type PreviewProfile } from "../src/views/settings/bot-preview";
 import { LogsView } from "../src/views/settings/logs";
 import { RolesView } from "../src/views/settings/roles";
 import type { Guild, HealthSnapshot, SessionInfo } from "../src/types";
@@ -47,10 +47,13 @@ const guild: Guild = {
   canManageLogging: true,
   canManageCommands: true,
   canManageTiers: true,
-  canInvite: true
+  canInvite: true,
+  canAdminInstance: true
 };
 
-const absentGuild: Guild = { ...guild, botPresent: false, tier: null, memberCount: null };
+// The bot is absent, so this caller administers no guild the deployment serves —
+// the instance-wide network screen must stay hidden from them.
+const absentGuild: Guild = { ...guild, botPresent: false, tier: null, memberCount: null, canAdminInstance: false };
 
 const health: HealthSnapshot = {
   status: "healthy",
@@ -179,34 +182,6 @@ test("a guild without the bot explains what to do instead of showing settings", 
  * difference between "the bot is fine" and "we could not read the roles" is
  * exactly the difference between saying nothing and inventing a warning.
  * ------------------------------------------------------------------ */
-
-const blockedVerdict = {
-  botPosition: 3,
-  highestManagedPosition: 9,
-  blocked: true,
-  message: "رتبة AL AI في المرتبة 3، وأعلى رتبة إدارية في المرتبة 9."
-};
-
-test("a blocked hierarchy shows the advisory and the bot's standing", () => {
-  const html = renderToString(createElement(HierarchyWarning, { verdict: blockedVerdict }));
-  assert.match(html, /ترتيب الرتب يمنع البوت من العمل/);
-  assert.match(html, /المرتبة 3/, "the bot's own position is shown");
-  assert.match(html, /المرتبة 9/, "the role it cannot outrank is shown");
-  assert.match(html, /الرتب/, "the fix is described");
-});
-
-test("a healthy hierarchy renders nothing", () => {
-  const html = renderToString(
-    createElement(HierarchyWarning, { verdict: { ...blockedVerdict, blocked: false, message: null } })
-  );
-  assert.equal(html, "", "no warning when there is nothing to warn about");
-});
-
-test("an unreadable hierarchy renders nothing rather than guessing", () => {
-  // Null means Discord could not be reached. Showing the advisory here would
-  // tell the operator to fix a problem that may not exist.
-  assert.equal(renderToString(createElement(HierarchyWarning, { verdict: null })), "");
-});
 
 /* ------------------------------------------------------------------ *
  * The Commands screen
@@ -485,103 +460,120 @@ test("an unresolvable member degrades to the raw id rather than vanishing", () =
  * decide what the operator sees are rendered directly, with real values.
  * ------------------------------------------------------------------ */
 
-test("the live preview shows the nickname, the role colour and the activity", () => {
-  const html = renderToString(
+/** A profile where nothing is set, to be overridden one field at a time. */
+function previewProfile(overrides: Partial<PreviewProfile> = {}): PreviewProfile {
+  return {
+    username: "AL AI",
+    nickname: "",
+    serverAvatarDataUrl: null,
+    serverBannerDataUrl: null,
+    accountAvatarUrl: null,
+    accountBannerUrl: null,
+    bio: "",
+    roleColor: null,
+    roleIconUrl: null,
+    ...overrides
+  };
+}
+
+function renderPreview(
+  profile: PreviewProfile,
+  overrides: { guildName?: string; memberCount?: number | null; enabled?: boolean } = {}
+) {
+  return renderToString(
     createElement(BotLivePreview, {
-      identity: {
-        username: "AL AI",
-        avatarDataUrl: null,
-        bannerDataUrl: null,
-        bio: "يحرس هذا السيرفر",
-        status: "online",
-        activityType: "watching",
-        activityText: "السجلات"
-      },
-      guild: {
-        nickname: "الحارس",
-        roleColor: "#e91e63",
-        roleIconUrl: null,
-        guildName: "سيرفر الاختبار",
-        memberCount: 42
-      }
+      profile,
+      guildName: overrides.guildName ?? "سيرفر الاختبار",
+      memberCount: overrides.memberCount === undefined ? 42 : overrides.memberCount,
+      enabled: overrides.enabled ?? true
     })
   ).replace(/<!-- -->/g, "");
+}
 
-  assert.match(html, /الحارس/, "the per-guild nickname is previewed");
+test("the live preview shows the nickname, the role colour and the bio", () => {
+  const html = renderPreview(previewProfile({ nickname: "الحارس", roleColor: "#e91e63", bio: "يحرس هذا السيرفر" }));
+
+  assert.match(html, /الحارس/, "this server's nickname is previewed");
   assert.match(html, /#e91e63/i, "the chosen role colour reaches the preview");
-  assert.match(html, /السجلات/, "the activity text is previewed");
-  assert.match(html, /يشاهد/, "the activity kind is spelled out, not left as an icon");
-  assert.match(html, /يحرس هذا السيرفر/, "the bio is previewed");
+  assert.match(html, /يحرس هذا السيرفر/, "this server's bio is previewed");
 });
 
 test("the preview falls back to the account name when no nickname is set", () => {
-  const html = renderToString(
-    createElement(BotLivePreview, {
-      identity: {
-        username: "AL AI",
-        avatarDataUrl: null,
-        bannerDataUrl: null,
-        bio: "",
-        status: "online",
-        activityType: "playing",
-        activityText: ""
-      },
-      guild: { nickname: "   ", roleColor: null, roleIconUrl: null, guildName: "س", memberCount: null }
-    })
-  ).replace(/<!-- -->/g, "");
+  const html = renderPreview(previewProfile({ nickname: "   " }), { memberCount: null });
 
   assert.match(html, /AL AI/, "a blank nickname shows the account name instead of an empty row");
-  // An empty activity must not render Discord's bare "Playing" with nothing
-  // after it, which is what sending a blank activity name would produce.
-  assert.doesNotMatch(html, /يلعب/, "no activity line is rendered when there is no activity");
-  assert.match(html, /لا يوجد نشاط ظاهر/, "the absence is stated rather than left blank");
 });
 
-test("the preview states which fields are global and which are per-guild", () => {
-  // This is the part operators get wrong, so it is asserted rather than left to
-  // a comment: the scope split has to be visible on the screen.
-  const html = renderToString(
-    createElement(BotLivePreview, {
-      identity: {
-        username: "AL AI",
-        avatarDataUrl: null,
-        bannerDataUrl: null,
-        bio: "",
-        status: "online",
-        activityType: "playing",
-        activityText: ""
-      },
-      guild: { nickname: "", roleColor: null, roleIconUrl: null, guildName: "س", memberCount: null }
-    })
-  ).replace(/<!-- -->/g, "");
+test("the preview says nothing about a scope beyond this server", () => {
+  // The identity screen is one scope now, and this is the pin on it: the words
+  // that used to tell the operator which fields reached every server must not
+  // come back. They were removed because they were untrue, and a future edit
+  // that reintroduces them would be reintroducing the lie.
+  const html = renderPreview(previewProfile({ nickname: "الحارس" }));
 
-  assert.match(html, /عالمي \(كل السيرفرات\)/, "the global scope is named");
-  assert.match(html, /هذا السيرفر فقط/, "the per-guild scope is named");
-  assert.match(html, /الصورة الرمزية، البانر، النبذة، الحالة والنشاط/, "the global fields are listed");
-  assert.match(html, /الاسم المستعار، ولون وأيقونة رتبة AL AI/, "the per-guild fields are listed");
+  assert.doesNotMatch(html, /كل السيرفرات/, "no «all servers» concept is left in the preview");
+  assert.doesNotMatch(html, /عالمي/, "and nothing is described as global");
+  assert.match(html, /سيرفر الاختبار/, "the server it describes is named instead");
+});
+
+test("the preview never draws a presence, because nothing here can change one", () => {
+  // A status lives on the bot's gateway connection and is the same in every
+  // server, so it is edited on its own screen. Drawing a status disc here would
+  // advertise a control this form does not have.
+  const html = renderPreview(previewProfile({ nickname: "الحارس" }));
+
+  assert.doesNotMatch(html, /لا يوجد نشاط ظاهر/, "no activity line is drawn");
+  assert.doesNotMatch(html, /مشغول|غير ظاهر|غير مرئي/, "no status is named");
+});
+
+test("the preview states the resolved values, including the ones that are missing", () => {
+  // The card above shows what members see; this block spells it out. It exists
+  // because "no avatar" and "an avatar that failed to draw" look identical on a
+  // dark card, and the operator is here to check their work.
+  const html = renderPreview(previewProfile(), { memberCount: null });
+
+  assert.match(html, /الاسم الظاهر/, "the resolved name is stated in words");
+  assert.match(html, /النبذة/, "so is the bio");
+  assert.match(html, /لا توجد/, "a missing bio says so rather than leaving a blank row");
+  assert.match(html, /الافتراضية/, "an unset avatar says so rather than showing an empty box");
+  assert.match(html, /لا يوجد غلاف/, "and so does an unset banner");
+});
+
+test("this server's own picture wins over the account's, and the account's shows where there is none", () => {
+  // The same resolution Discord walks, and the reason the two are separate
+  // inputs: a preview that always drew the account's picture would show the
+  // operator a face their own members never see.
+  const both = renderPreview(
+    previewProfile({ serverAvatarDataUrl: "data:image/png;base64,SERVER", accountAvatarUrl: "https://cdn.discordapp.com/avatars/1/account.png" })
+  );
+  assert.match(both, /data:image\/png;base64,SERVER/, "the server's picture is drawn");
+  assert.doesNotMatch(both, /account\.png/, "and the account's is not drawn over it");
+  assert.match(both, /صورة هذا السيرفر/, "the summary says which one won");
+
+  const fallback = renderPreview(
+    previewProfile({ accountAvatarUrl: "https://cdn.discordapp.com/avatars/1/account.png" })
+  );
+  assert.match(fallback, /account\.png/, "with no override, the account's picture is drawn");
+  assert.match(fallback, /الصورة الأساسية للبوت/, "and the summary says where it came from");
+});
+
+test("the preview draws the avatar the moment it has one", () => {
+  // Not through Radix's `Avatar.Image`, which holds the picture back until it
+  // has loaded — in a preview that reads as "my new picture did not apply".
+  const dataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
+  const html = renderPreview(previewProfile({ serverAvatarDataUrl: dataUrl }), { memberCount: null });
+
+  assert.match(html, new RegExp(`<img[^>]+src="${dataUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`), "the avatar is an <img> with the value it was given");
 });
 
 test("an animated-looking avatar value is rendered as a plain image, not a URL string", () => {
   // The avatar is a data URL the operator just cropped, so the preview must use
   // it directly rather than trying to resolve it as a Discord hash.
   const dataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
-  const html = renderToString(
-    createElement(BotLivePreview, {
-      identity: {
-        username: "AL AI",
-        avatarDataUrl: dataUrl,
-        bannerDataUrl: dataUrl,
-        bio: "",
-        status: "dnd",
-        activityType: "playing",
-        activityText: ""
-      },
-      guild: { nickname: "", roleColor: null, roleIconUrl: null, guildName: "س", memberCount: null }
-    })
-  );
+  const html = renderPreview(previewProfile({ serverAvatarDataUrl: dataUrl, serverBannerDataUrl: dataUrl }));
 
   assert.match(html, /data:image\/png;base64/, "the cropped image is drawn");
-  assert.doesNotMatch(html, /لا يوجد بانر/, "a banner that exists is not reported as missing");
+  assert.doesNotMatch(html, /لا يوجد غلاف/, "a banner that exists is not reported as missing");
 });
 
 /* ------------------------------------------------------------------ *
@@ -687,7 +679,7 @@ test("a partial save is described as partial, never as a clean success", () => {
   // operator walks away believing the whole form took effect.
   const partial = describeAppearanceResult({
     savedAt: new Date().toISOString(),
-    applied: ["avatarDataUrl", "bio"],
+    applied: ["guildAvatarDataUrl", "bio"],
     failed: [{ field: "nickname", code: "MISSING_PERMISSION", message: "الاسم المستعار: البوت يحتاج صلاحية إدارة الأسماء المستعارة." }]
   });
   assert.equal(partial.ok, false, "a partial save is not reported as ok");

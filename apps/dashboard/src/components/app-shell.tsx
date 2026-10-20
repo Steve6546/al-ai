@@ -1,24 +1,28 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Activity,
-  Bot,
   Check,
   ChevronsUpDown,
   CirclePlus,
-  Copy,
-  ExternalLink,
+  Database,
   FileClock,
   Globe,
   LayoutDashboard,
   LayoutGrid,
+  Link2,
   LogOut,
   Menu,
+  MessageSquareHeart,
+  PanelRightClose,
+  PanelRightOpen,
   Palette,
+  Radio,
   RefreshCw,
   ScrollText,
   ShieldAlert,
   SquareTerminal,
+  Trophy,
   UserCog,
   UserPlus
 } from "lucide-react";
@@ -38,8 +42,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { AccountMenu } from "@/components/account-menu";
+import { AppearanceMenu } from "@/components/appearance-menu";
+import { PageHeader } from "@/components/page-header";
+import { BrandMark } from "@/components/brand-mark";
 import { initials } from "@/lib/format";
-import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { tierLabels, type Guild, type HealthSnapshot, type SessionInfo } from "@/types";
 
@@ -48,7 +55,20 @@ import { tierLabels, type Guild, type HealthSnapshot, type SessionInfo } from "@
  * into. It owns navigation and identity only — no view-specific state lives here.
  */
 
-export type ViewKey = "dashboard" | "commands" | "customization" | "welcome" | "roles" | "logs" | "audit" | "security" | "network";
+export type ViewKey =
+  | "dashboard"
+  | "commands"
+  | "customization"
+  | "presence"
+  | "welcome"
+  | "welcome-messages"
+  | "roles"
+  | "levels"
+  | "invites"
+  | "logs"
+  | "audit"
+  | "security"
+  | "network";
 
 /**
  * Every view key, in one place.
@@ -62,8 +82,12 @@ const viewKeys: readonly ViewKey[] = [
   "dashboard",
   "commands",
   "customization",
+  "presence",
   "welcome",
+  "welcome-messages",
   "roles",
+  "levels",
+  "invites",
   "logs",
   "audit",
   "security",
@@ -77,59 +101,169 @@ export function isViewKey(value: unknown): value is ViewKey {
 type NavItem = {
   key: ViewKey;
   label: string;
+  /** One line of context: what the screen is *for*, in the operator's words. */
+  hint: string;
   icon: typeof LayoutDashboard;
   /** A boolean flag on the selected guild that must be true for access. */
   needs?: keyof Guild;
   /** Hidden entirely while the bot is not a member of the selected guild. */
   requiresBot?: boolean;
+  /**
+   * A platform-owner surface: hidden unless the session says the signed-in
+   * account is the deployment's OWNER_ID. The server re-checks every gated
+   * route, so this only decides what the sidebar advertises.
+   */
+  ownerOnly?: boolean;
 };
 
 /**
  * Navigation is data, not markup, so adding a screen means adding one entry.
  *
- * The four sections mirror the operator's mental model rather than the code
- * layout: what the server is doing now (Overview), what you configure once
- * (General Settings), what protects the server day to day (Moderation &
- * Protection), and what happened in the past (Logs & Monitoring).
+ * The groups follow the operator's mental model rather than the code layout:
+ * what the server is doing now (الرئيسية), what you configure once (إدارة
+ * السيرفر), what protects the server day to day (الإشراف والأوامر), what
+ * happened in the past (السجلات), and the two instance-wide surfaces that
+ * belong to the deployment's owner (النظام).
+ *
+ * Every screen the project actually has is here, once. A screen that exists
+ * but is unreachable is a bug to fix, not a reason to hide it — and a screen
+ * that does not exist must not be advertised.
  */
 const navSections: { id: string; title: string | null; items: NavItem[] }[] = [
   {
-    id: "overview",
+    id: "home",
     title: null,
-    items: [{ key: "dashboard", label: "لوحة التحكم", icon: LayoutDashboard }]
+    items: [
+      {
+        key: "dashboard",
+        label: "لوحة التحكم",
+        hint: "نظرة عامة على حالة السيرفر",
+        icon: LayoutDashboard
+      }
+    ]
   },
   {
-    id: "general",
-    title: "الإعدادات العامة",
+    id: "server",
+    title: "إدارة السيرفر",
     items: [
-      { key: "roles", label: "رتب الإدارة والمشرفين", icon: UserCog, needs: "canManageTiers", requiresBot: true },
-      { key: "welcome", label: "الترحيب والمغادرة", icon: UserPlus, needs: "canManage", requiresBot: true },
-      { key: "customization", label: "هوية البوت", icon: Palette, needs: "canManageIdentity", requiresBot: true }
+      {
+        key: "roles",
+        label: "رتب الإدارة والمشرفين",
+        hint: "من يدير ومن يشرف",
+        icon: UserCog,
+        needs: "canManageTiers",
+        requiresBot: true
+      },
+      {
+        key: "welcome",
+        label: "الرتبة التلقائية",
+        hint: "رتبة الأعضاء والبوتات",
+        icon: UserPlus,
+        needs: "canManage",
+        requiresBot: true
+      },
+      {
+        key: "welcome-messages",
+        label: "رسائل الترحيب",
+        hint: "نص الترحيب والصورة والإيمبد",
+        icon: MessageSquareHeart,
+        needs: "canManage",
+        requiresBot: true
+      },
+      {
+        key: "customization",
+        label: "هوية البوت",
+        hint: "الاسم والصورة والبايو",
+        icon: Palette,
+        needs: "canManageIdentity",
+        requiresBot: true
+      },
+      {
+        key: "levels",
+        label: "المستويات والخبرة",
+        hint: "النقاط والمكافآت والرتب",
+        icon: Trophy,
+        needs: "canManage",
+        requiresBot: true
+      },
+      {
+        key: "invites",
+        label: "الإحالات والدعوات",
+        hint: "حالة الدعوات ولوحة النتائج",
+        icon: Link2,
+        needs: "canManage",
+        requiresBot: true
+      }
     ]
   },
   {
     id: "moderation",
-    title: "الإشراف والحماية",
+    title: "الإشراف والأوامر",
     items: [
-      { key: "commands", label: "الأوامر", icon: SquareTerminal, needs: "canManageCommands", requiresBot: true },
-      { key: "security", label: "الحماية والأمان", icon: ShieldAlert }
+      {
+        key: "commands",
+        label: "الأوامر",
+        hint: "أوامر الإشراف وإعداداتها",
+        icon: SquareTerminal,
+        needs: "canManageCommands",
+        requiresBot: true
+      },
+      {
+        key: "security",
+        label: "الحماية والأمان",
+        hint: "حدود الإشراف والحماية التلقائية",
+        icon: ShieldAlert
+      }
     ]
   },
   {
-    id: "monitoring",
-    title: "السجلات والمراقبة",
+    id: "logs",
+    title: "السجلات",
     items: [
-      { key: "logs", label: "السجلات", icon: ScrollText, needs: "canManageLogging", requiresBot: true },
-      { key: "audit", label: "سجل تدقيق اللوحة", icon: FileClock }
+      {
+        key: "logs",
+        label: "سجلات البوت",
+        hint: "ما الذي فعّله البوت",
+        icon: ScrollText,
+        needs: "canManageLogging",
+        requiresBot: true
+      },
+      {
+        key: "audit",
+        label: "سجل تدقيق اللوحة",
+        hint: "ما الذي غيّره المشغّل",
+        icon: FileClock
+      }
     ]
   },
   {
     id: "system",
     title: "النظام",
     items: [
-      // Instance-wide, not per guild: the reach of this deployment itself. The
-      // screen is readable by any signed-in operator; the server gates writes.
-      { key: "network", label: "الوصول للشبكة", icon: Globe }
+      // Both of these are instance-wide rather than per guild, and both are the
+      // platform owner's. The server enforces OWNER_ID on every gated route, and
+      // the sidebar hides what its caller cannot reach.
+      //
+      // «حالة البوت» belongs here and not under «إدارة السيرفر» for a reason
+      // that is Discord's, not a preference: a status lives on the bot's gateway
+      // connection, so it is one value for every server the bot is in. It was on
+      // the identity screen, where everything else is scoped to one server — the
+      // one control that reached everywhere on a form that promised it did not.
+      {
+        key: "presence",
+        label: "حالة البوت",
+        hint: "نشاط البوت على ديسكورد",
+        icon: Radio,
+        ownerOnly: true
+      },
+      // Instance-wide, not per guild: the reach of this deployment itself.
+      {
+        key: "network",
+        label: "الوصول للشبكة",
+        hint: "من يستطيع فتح اللوحة",
+        icon: Globe,
+        ownerOnly: true
+      }
     ]
   }
 ];
@@ -154,6 +288,8 @@ type ShellProps = {
   children: ReactNode;
 };
 
+const RAIL_STORAGE_KEY = "al-ai.sidebar.collapsed";
+
 export function AppShell({
   guilds,
   guild,
@@ -170,33 +306,70 @@ export function AppShell({
   children
 }: ShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem(RAIL_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  // The rail's state is a layout preference of this machine, so it is stored
+  // the same way the appearance is: locally, and never on the server.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(RAIL_STORAGE_KEY, collapsed ? "1" : "0");
+    } catch {
+      /* a blocked store must not break the layout */
+    }
+  }, [collapsed]);
 
   const inviteUrl = `/api/guilds/${guild.id}/invite`;
 
+  const isOwner = user?.isPlatformOwner === true;
   const allowed = (item: NavItem) => {
+    if (item.ownerOnly && !isOwner) return false;
     if (item.requiresBot && !guild.botPresent) return false;
     if (!item.needs) return true;
     return Boolean(guild[item.needs]);
   };
 
   const denyReason = (item: NavItem) => {
+    if (item.ownerOnly && !isOwner) return "ميزات مالك المنصة فقط.";
     if (item.requiresBot && !guild.botPresent) return "أضف AL AI إلى هذا السيرفر أولاً.";
     if (!allowed(item)) return "رتبتك لا تسمح بهذا القسم.";
     return null;
   };
 
-  const nav = (
+  const nav = (collapsed: boolean) => (
     <SidebarNav
       guild={guild}
       view={view}
+      collapsed={collapsed}
       allowed={allowed}
       denyReason={denyReason}
+      hide={item => Boolean(item.ownerOnly && !isOwner)}
       onView={key => {
         onView(key);
         setMobileOpen(false);
       }}
     />
   );
+
+  /**
+   * Where «إعدادات هذا السيرفر» goes.
+   *
+   * The server's settings are the group of screens in the sidebar, not one
+   * page - so the account menu opens the first of them the caller may reach.
+   * Anything else would either promise a page that does not exist or land the
+   * operator on a screen they cannot use.
+   */
+  const openGuildSettings = () => {
+    const first = navSections
+      .find(section => section.id === "server")
+      ?.items.find(item => allowed(item));
+    if (first) onView(first.key);
+  };
 
   return (
     /*
@@ -206,16 +379,34 @@ export function AppShell({
      * than its content, which is what lets the scroll areas inside it scroll
      * instead of pushing the frame taller.
      */
-    <div className="grid h-full grid-cols-1 grid-rows-[minmax(0,1fr)] lg:grid-cols-[17rem_1fr]">
+    <div
+      className={cn(
+        "grid h-full grid-cols-1 grid-rows-[minmax(0,1fr)] transition-ui",
+        collapsed ? "lg:grid-cols-[4.75rem_1fr]" : "lg:grid-cols-[16.5rem_1fr]"
+      )}
+    >
       {/* ---------------------------------------------------------------- *
        * Sidebar (desktop)
        *
        * `overflow-hidden` + `min-h-0` keep it exactly as tall as the frame: the
        * nav scrolls inside the ScrollArea, and a long guild list can never
-       * stretch the column and take the profile menu off the bottom.
+       * stretch the column and take the account menu off the bottom.
        * ---------------------------------------------------------------- */}
-      <aside className="hidden min-h-0 overflow-hidden border-e border-sidebar-border bg-sidebar lg:flex lg:flex-col">
-        <Brand />
+      <aside
+        className={cn(
+          "hidden min-h-0 overflow-hidden border-e border-sidebar-border bg-sidebar lg:flex lg:flex-col",
+          collapsed && "lg:items-center"
+        )}
+      >
+        <div className={cn("flex items-center gap-2.5 px-4 py-4", collapsed && "lg:justify-center lg:px-0")}>
+          <BrandMark className="size-9 shrink-0 text-primary" />
+          {!collapsed ? (
+            <div className="min-w-0 leading-tight">
+              <p className="truncate text-sm font-semibold">AL AI</p>
+              <p className="truncate text-[11px] text-muted-foreground">إدارة ديسكورد</p>
+            </div>
+          ) : null}
+        </div>
         <Separator />
         <GuildSwitcher
           guilds={guilds}
@@ -224,10 +415,35 @@ export function AppShell({
           onSelectGuild={onSelectGuild}
           onBrowseAll={onBrowseAll}
           inviteUrl={inviteUrl}
+          collapsed={collapsed}
         />
-        <ScrollArea className="min-h-0 flex-1">{nav}</ScrollArea>
+        <ScrollArea className="min-h-0 flex-1">{nav(collapsed)}</ScrollArea>
         <Separator />
-        <ProfileMenu user={user} guild={guild} onLogout={onLogout} />
+        <div className={cn("flex items-center gap-1 p-2", collapsed && "lg:flex-col lg:justify-center")}>
+          <AppearanceMenu iconOnly />
+          {collapsed ? (
+            <AccountMenu user={user} guild={guild} onLogout={onLogout} variant="compact" />
+          ) : (
+            <AccountMenu
+              user={user}
+              guild={guild}
+              onLogout={onLogout}
+              onOpenGuildSettings={openGuildSettings}
+              className="flex-1"
+            />
+          )}
+        </div>
+        <div className={cn("px-2 pb-2", collapsed && "lg:flex lg:justify-center")}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setCollapsed(value => !value)}
+            aria-label={collapsed ? "توسيع القائمة" : "طيّ القائمة"}
+            className="size-9 text-muted-foreground"
+          >
+            {collapsed ? <PanelRightOpen className="size-4" /> : <PanelRightClose className="size-4" />}
+          </Button>
+        </div>
       </aside>
 
       {/* ---------------------------------------------------------------- *
@@ -240,7 +456,7 @@ export function AppShell({
        * scroll container, where it scrolls with the content.
        * ---------------------------------------------------------------- */}
       <div className="flex min-h-0 min-w-0 flex-col">
-        <header className="z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-background/85 px-3 backdrop-blur lg:px-4">
+        <header className="z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-background/85 px-3 backdrop-blur lg:px-5">
           {/* Mobile navigation: the sidebar is desktop-only. */}
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
@@ -250,34 +466,59 @@ export function AppShell({
             </SheetTrigger>
             <SheetContent side="right" className="w-72 p-0">
               <SheetHeader className="border-b border-border p-4">
-                <SheetTitle className="text-sm">AL AI</SheetTitle>
+                <SheetTitle className="flex items-center gap-2 text-sm">
+                  <BrandMark className="size-6 text-primary" />
+                  AL AI
+                </SheetTitle>
               </SheetHeader>
-              <ScrollArea className="h-[calc(100dvh-4rem)]">{nav}</ScrollArea>
+              <ScrollArea className="h-[calc(100dvh-4rem)]">{nav(false)}</ScrollArea>
+              <Separator />
+              <div className="p-2">
+                <AccountMenu
+                  user={user}
+                  guild={guild}
+                  onLogout={onLogout}
+                  onOpenGuildSettings={() => {
+                    openGuildSettings();
+                    setMobileOpen(false);
+                  }}
+                />
+              </div>
             </SheetContent>
           </Sheet>
 
+          {/* The path, so the reader always knows where they are: the server
+              they are in, and the screen inside it. The screen's own title
+              lives in the content area, not here - two titles for one page is
+              one too many. */}
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <div className="min-w-0">
-              <h1 className="truncate text-sm font-semibold">{viewTitle(view)}</h1>
-              <p className="truncate text-[10px] text-muted-foreground">
-                إعدادات البوت لسيرفر <span className="font-medium">{guild.name}</span>
-              </p>
-            </div>
-            <Badge variant="outline" className="hidden shrink-0 gap-1 text-[10px] sm:inline-flex">
-              <Avatar className="size-3.5 rounded-sm">
-                {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
-                <AvatarFallback className="rounded-sm text-[6px]">{initials(guild.name)}</AvatarFallback>
-              </Avatar>
-              <span className="max-w-32 truncate">{guild.name}</span>
-            </Badge>
+            <nav aria-label="مسار التنقل" className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="truncate">{guild.name}</span>
+              <span aria-hidden="true">/</span>
+              <span className="truncate text-foreground">{navIndex.get(view)?.label ?? "لوحة التحكم"}</span>
+            </nav>
           </div>
 
-          <StatusBadge health={health} />
+          <StatusChips health={health} />
 
-          <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRefresh}
+            disabled={refreshing}
+            loading={refreshing}
+            aria-label="تحديث البيانات"
+            className="gap-2"
+          >
             <RefreshCw className={cn(refreshing && "animate-spin")} />
             <span className="hidden sm:inline">تحديث</span>
           </Button>
+
+          {/* The account menu lives in the sidebar on the desktop; on a phone
+              the sidebar is a drawer, so the header carries the account. */}
+          <div className="lg:hidden">
+            <AccountMenu user={user} guild={guild} onLogout={onLogout} variant="compact" />
+          </div>
         </header>
 
         {/*
@@ -285,9 +526,22 @@ export function AppShell({
          * makes `flex-1` mean "take the remaining height" rather than "grow to
          * fit the content"; `overscroll-contain` stops a trackpad flick at the
          * end of the list from rubber-banding the whole frame behind it.
+         *
+         * Content is capped to a centered max-width container: a settings
+         * panel stretched across a 4K monitor reads as scattered stripes, not
+         * as a dashboard.
          */}
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-24 lg:p-6">
-          {children}
+          <div className="mx-auto w-full max-w-6xl px-1 py-2 lg:px-4 lg:py-3">
+            {/* The screen's own title and one line of context, taken from the
+                navigation so the menu and the page can never describe the same
+                screen differently. */}
+            <PageHeader
+              title={navIndex.get(view)?.label ?? "لوحة التحكم"}
+              description={navIndex.get(view)?.hint}
+            />
+            {children}
+          </div>
         </main>
       </div>
     </div>
@@ -297,20 +551,6 @@ export function AppShell({
 /* -------------------------------------------------------------------- *
  * Sidebar pieces
  * -------------------------------------------------------------------- */
-
-function Brand() {
-  return (
-    <div className="flex items-center gap-2.5 px-4 py-4">
-      <div className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground">
-        <Bot className="size-5" />
-      </div>
-      <div className="leading-tight">
-        <p className="text-sm font-semibold">AL AI</p>
-        <p className="text-xs text-muted-foreground">Discord Management</p>
-      </div>
-    </div>
-  );
-}
 
 /**
  * Server picker. Every row shows the guild's real Discord icon and name, and the
@@ -323,7 +563,8 @@ function GuildSwitcher({
   selectedGuildId,
   onSelectGuild,
   onBrowseAll,
-  inviteUrl
+  inviteUrl,
+  collapsed
 }: {
   guilds: Guild[];
   guild: Guild;
@@ -331,20 +572,47 @@ function GuildSwitcher({
   onSelectGuild: (guildId: string) => void;
   onBrowseAll: () => void;
   inviteUrl: string;
+  collapsed: boolean;
 }) {
+  if (collapsed) {
+    return (
+      <div className="flex justify-center p-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onBrowseAll}
+              className="rounded-md p-1 transition-ui hover:bg-sidebar-accent"
+              aria-label={guild.name}
+            >
+              <Avatar className="size-8 rounded-lg">
+                {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
+                <AvatarFallback className="rounded-lg text-[10px]">{initials(guild.name)}</AvatarFallback>
+              </Avatar>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">{guild.name}</TooltipContent>
+        </Tooltip>
+      </div>
+    );
+  }
+
   return (
     <div className="p-3">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" className="w-full justify-between px-2.5" disabled={guilds.length === 0}>
+          <Button variant="outline" className="h-auto w-full justify-between gap-2 px-2.5 py-2" disabled={guilds.length === 0}>
             <span className="flex min-w-0 items-center gap-2">
-              <Avatar className="size-6 rounded-md">
+              <Avatar className="size-7 rounded-lg">
                 {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
-                <AvatarFallback className="rounded-md text-[10px]">{initials(guild.name)}</AvatarFallback>
+                <AvatarFallback className="rounded-lg text-[10px]">{initials(guild.name)}</AvatarFallback>
               </Avatar>
-              <span className="truncate text-sm">{guild.name}</span>
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium">{guild.name}</span>
+                <span className="block truncate text-[11px] text-muted-foreground">السيرفر المحدد</span>
+              </span>
             </span>
-            <ChevronsUpDown className="size-4 opacity-60" />
+            <ChevronsUpDown className="size-4 shrink-0 opacity-60" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-64">
@@ -381,35 +649,96 @@ function GuildSwitcher({
 function SidebarNav({
   guild,
   view,
+  collapsed,
   allowed,
   denyReason,
+  hide,
   onView
 }: {
   guild: Guild;
   view: ViewKey;
+  collapsed: boolean;
   allowed: (item: NavItem) => boolean;
   denyReason: (item: NavItem) => string | null;
+  /** Owner-only entries vanish from the list; guild gates stay disabled with a reason. */
+  hide: (item: NavItem) => boolean;
   onView: (key: ViewKey) => void;
 }) {
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({ general: true, moderation: true, monitoring: true });
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    server: true,
+    moderation: true,
+    logs: true,
+    system: true
+  });
+
+  if (collapsed) {
+    // The rail shows the same screens as icons, in the same order, so the
+    // collapsed layout is the same product rather than a different one.
+    return (
+      <nav className="flex flex-col items-center gap-1 px-2 py-3">
+        {navSections.flatMap(section => section.items).filter(item => !hide(item)).map(item => {
+          const disabled = !allowed(item);
+          const reason = denyReason(item);
+          const button = (
+            <button
+              type="button"
+              onClick={() => onView(item.key)}
+              disabled={disabled}
+              aria-current={view === item.key ? "page" : undefined}
+              aria-label={item.label}
+              className={cn(
+                "grid size-9 place-items-center rounded-lg transition-ui",
+                view === item.key
+                  ? "bg-sidebar-primary/15 text-sidebar-primary"
+                  : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                disabled && "cursor-not-allowed opacity-40 hover:bg-transparent"
+              )}
+            >
+              <item.icon className="size-4" />
+            </button>
+          );
+          if (!disabled || !reason) return <div key={item.key}>{button}</div>;
+          return (
+            <Tooltip key={item.key}>
+              <TooltipTrigger asChild>
+                <span>{button}</span>
+              </TooltipTrigger>
+              <TooltipContent side="right">{reason}</TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </nav>
+    );
+  }
 
   return (
-    <nav className="space-y-3 px-3 pb-4">
+    <nav className="space-y-1 px-3 py-3">
       {navSections.map(section => {
-        const items = section.items.map(item => (
-          <NavButton
-            key={item.key}
-            label={item.label}
-            icon={item.icon}
-            active={view === item.key}
-            disabled={!allowed(item)}
-            reason={denyReason(item)}
-            onClick={() => onView(item.key)}
-          />
-        ));
+        // Owner-only entries vanish outright — the sidebar must not advertise a
+        // surface the caller cannot reach — while guild-level gates stay as
+        // disabled buttons that name their reason ("أضف AL AI أولاً"…).
+        const items = section.items
+          .filter(item => !hide(item))
+          .map(item => (
+            <NavButton
+              key={item.key}
+              label={item.label}
+              hint={item.hint}
+              icon={item.icon}
+              active={view === item.key}
+              disabled={!allowed(item)}
+              reason={denyReason(item)}
+              onClick={() => onView(item.key)}
+            />
+          ));
 
         // The first section has no heading and is always visible.
         if (!section.title) return <div key={section.id} className="space-y-1">{items}</div>;
+
+        // A titled section left with nothing (the owner-only «النظام» for a
+        // non-owner) advertises nothing: rendering its heading with zero
+        // entries would read as a broken drawer rather than as "not for you".
+        if (items.length === 0) return null;
 
         const open = openSections[section.id] ?? true;
         return (
@@ -419,27 +748,28 @@ function SidebarNav({
             onOpenChange={value => setOpenSections(current => ({ ...current, [section.id]: value }))}
           >
             <CollapsibleTrigger asChild>
-              <button className="flex w-full items-center justify-between rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground">
+              <button className="flex w-full items-center justify-between rounded-md px-3 py-2 text-[11px] font-semibold tracking-wide text-muted-foreground transition-ui hover:text-foreground">
                 {section.title}
                 <ChevronsUpDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
               </button>
             </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-1 pt-1">{items}</CollapsibleContent>
+            <CollapsibleContent className="space-y-0.5 pt-1">{items}</CollapsibleContent>
           </Collapsible>
         );
       })}
 
-      {!guild.botPresent && (
-        <p className="px-3 pt-2 text-[11px] leading-relaxed text-muted-foreground">
+      {!guild.botPresent ? (
+        <p className="px-3 pt-3 text-[11px] leading-relaxed text-muted-foreground">
           أقسام الإعدادات تُفتح بعد إضافة AL AI إلى السيرفر.
         </p>
-      )}
+      ) : null}
     </nav>
   );
 }
 
 function NavButton({
   label,
+  hint,
   icon: Icon,
   active,
   disabled,
@@ -447,6 +777,7 @@ function NavButton({
   onClick
 }: {
   label: string;
+  hint: string;
   icon: typeof LayoutDashboard;
   active: boolean;
   disabled?: boolean;
@@ -460,14 +791,23 @@ function NavButton({
       disabled={disabled}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
+        "group relative flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-start text-sm transition-ui",
         "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
         disabled && "cursor-not-allowed opacity-40 hover:bg-transparent"
       )}
     >
+      {/* The active marker is a bar on the reading edge, so the current screen
+          is findable without reading the labels. */}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "absolute inset-y-1.5 start-0 w-0.5 rounded-full bg-sidebar-primary transition-ui",
+          active ? "opacity-100" : "opacity-0"
+        )}
+      />
       <Icon className="size-4 shrink-0" />
-      <span className="truncate">{label}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
     </button>
   );
 
@@ -483,81 +823,63 @@ function NavButton({
   );
 }
 
-/**
- * The signed-in operator: real Discord avatar, display name and their tier in the
- * selected guild. Clicking the row opens the account menu.
- */
-function ProfileMenu({ user, guild, onLogout }: { user: SessionInfo["user"]; guild: Guild; onLogout: () => void }) {
-  const { copied, copy } = useCopy();
-
-  return (
-    <div className="p-3">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button className="flex w-full items-center gap-2 rounded-md p-1.5 text-start transition-colors hover:bg-sidebar-accent">
-            <Avatar className="size-8">
-              {user?.avatarUrl && <AvatarImage src={user.avatarUrl} alt="" />}
-              <AvatarFallback>{initials(user?.username)}</AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1 leading-tight">
-              <p className="truncate text-sm">{user?.username ?? "—"}</p>
-              <p className="text-xs text-muted-foreground">{guild.tier ? tierLabels[guild.tier] : "لا توجد رتبة"}</p>
-            </div>
-            <ChevronsUpDown className="size-4 opacity-60" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" side="top" className="w-60">
-          <DropdownMenuLabel className="flex flex-col gap-0.5">
-            <span className="truncate">{user?.username ?? "—"}</span>
-            <span className="text-xs font-normal text-muted-foreground" dir="ltr">
-              {user?.id ?? "—"}
-            </span>
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => void copy(user?.id ?? "", "owner-id")} className="gap-2">
-            {copied === "owner-id" ? <Check className="size-4" /> : <Copy className="size-4" />}
-            نسخ معرّف Discord
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <a href={`https://discord.com/users/${user?.id ?? ""}`} target="_blank" rel="noreferrer" className="gap-2">
-              <ExternalLink className="size-4" />
-              فتح الحساب في Discord
-            </a>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={onLogout} className="gap-2">
-            <LogOut className="size-4" />
-            تسجيل الخروج
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  );
-}
-
-/**
- * The header's overflow menu is gone.
- *
- * Every entry it held is reachable somewhere the operator already is: refresh is
- * its own button in the header, the guild id and the Discord link sit in the
- * guild switcher, the invite is there too, and signing out is in the profile
- * menu. A second copy behind a ⋮ button was one more place to look for the same
- * action, and it competed with the refresh button right beside it.
- */
-
 /* -------------------------------------------------------------------- *
  * Status
  * -------------------------------------------------------------------- */
 
-function StatusBadge({ health }: { health: HealthSnapshot | null }) {
-  if (!health) return <Badge variant="secondary">…</Badge>;
-  const healthy = health.status === "healthy" && health.bot === "connected";
-  const label = healthy ? "متصل" : health.database === "unreachable" ? "قاعدة البيانات" : "محدود";
+/**
+ * The three statuses, kept apart.
+ *
+ * The dashboard being open says nothing about the bot being connected to
+ * Discord, and neither says anything about the database being reachable - so
+ * they are three chips, each answering one question, and each read from the
+ * health payload the server actually returns.
+ */
+function StatusChips({ health }: { health: HealthSnapshot | null }) {
+  if (!health) {
+    return (
+      <Badge variant="secondary" className="hidden gap-1.5 sm:inline-flex">
+        <Activity className="size-3" />
+        …
+      </Badge>
+    );
+  }
+
+  const botConnected = health.bot === "connected";
+  const databaseUp = health.database === "reachable";
+
   return (
-    <Badge variant={healthy ? "secondary" : "destructive"} className="gap-1.5">
-      <Activity className="size-3" />
-      {label}
-    </Badge>
+    <div className="hidden items-center gap-1.5 md:flex">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className="h-6 gap-1.5 px-2 text-[11px]">
+            <Activity className={cn("size-3", health.status === "healthy" ? "text-success" : "text-warning")} />
+            اللوحة
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent>لوحة التحكم {health.status === "healthy" ? "تعمل" : "متعثرة"}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className="h-6 gap-1.5 px-2 text-[11px]">
+            <span className={cn("size-2 rounded-full", botConnected ? "bg-success" : "bg-muted-foreground/40")} />
+            البوت
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent>
+          البوت {botConnected ? "متصل بديسكورد" : health.bot === "configured" ? "مهيأ لكنه غير متصل" : "غير مهيأ"}
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className="h-6 gap-1.5 px-2 text-[11px]">
+            <Database className={cn("size-3", databaseUp ? "text-success" : "text-destructive")} />
+            قاعدة البيانات
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent>قاعدة البيانات {databaseUp ? "متاحة" : "غير متاحة"}</TooltipContent>
+      </Tooltip>
+    </div>
   );
 }
 

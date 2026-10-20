@@ -110,7 +110,8 @@ const guild: Guild = {
   canManageLogging: true,
   canManageCommands: true,
   canManageTiers: true,
-  canInvite: true
+  canInvite: true,
+  canAdminInstance: true
 };
 
 const health: HealthSnapshot = {

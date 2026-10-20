@@ -53,7 +53,7 @@ export function AuditView({ guild }: { guild: Guild }) {
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">إجمالي السجلات</p>
+            <p className="text-xs text-muted-foreground">إجمالي الأحداث</p>
             <p className="text-lg font-semibold tabular">{counts.total.toLocaleString("ar")}</p>
           </CardContent>
         </Card>
@@ -63,10 +63,16 @@ export function AuditView({ guild }: { guild: Guild }) {
             <p className="text-lg font-semibold tabular text-destructive">{counts.critical.toLocaleString("ar")}</p>
           </CardContent>
         </Card>
+        {/*
+          The third card used to hold a sentence and no number, which made a
+          label look like a measurement. It is a property of the trail rather
+          than a figure, so it reads as a note beside the two figures - and it
+          says the same thing the footer of the table does.
+        */}
         <Card>
           <CardContent className="flex items-center gap-2 p-4">
             <Lock className="size-4 text-muted-foreground" />
-            <p className="text-xs text-muted-foreground">append-only — للقراءة فقط</p>
+            <p className="text-xs text-muted-foreground">سجل يُضاف إليه فقط — لا يُعدَّل ولا يُحذف</p>
           </CardContent>
         </Card>
       </div>
@@ -89,6 +95,9 @@ export function AuditView({ guild }: { guild: Guild }) {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-10">
+                      <span className="sr-only">التسلسل</span>
+                    </TableHead>
                     <TableHead>الحدث</TableHead>
                     <TableHead>الخطورة</TableHead>
                     <TableHead>الطبقة</TableHead>
@@ -97,8 +106,26 @@ export function AuditView({ guild }: { guild: Guild }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {entries.map(entry => (
-                    <TableRow key={entry.id}>
+                  {entries.map((entry, index) => (
+                    <TableRow key={entry.id} className="relative">
+                      {/* Timeline rail: a colored node per event, joined by a
+                          vertical line so the audit reads as a chronology. */}
+                      <TableCell className="relative w-10">
+                        <span
+                          aria-hidden
+                          className="absolute top-0 h-full w-px bg-border"
+                          style={{ insetInlineStart: "1.15rem", display: index === entries.length - 1 ? "none" : undefined }}
+                        />
+                        <span
+                          className={`relative z-10 grid size-6 place-items-center rounded-full border ${
+                            entry.severity === "critical"
+                              ? "border-destructive/40 bg-destructive/15 text-destructive"
+                              : "border-warning/40 bg-warning/15 text-warning"
+                          }`}
+                        >
+                          <span className="size-1.5 rounded-full bg-current" />
+                        </span>
+                      </TableCell>
                       <TableCell className="font-mono text-xs" dir="ltr">
                         {entry.eventId}
                       </TableCell>

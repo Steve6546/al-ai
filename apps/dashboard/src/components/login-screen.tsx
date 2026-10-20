@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Bot, LogIn, ShieldCheck } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
+import { LogIn, ShieldCheck } from "lucide-react";
 
 export function LoginScreen({ notice }: { notice: string | null }) {
   return (
@@ -16,11 +17,9 @@ export function LoginScreen({ notice }: { notice: string | null }) {
     <div className="flex h-full justify-center overflow-y-auto overscroll-contain bg-background p-6">
       <Card className="my-auto w-full max-w-sm">
         <CardHeader className="items-center text-center">
-          <div className="mx-auto mb-2 grid size-14 place-items-center rounded-2xl bg-primary text-primary-foreground">
-            <Bot className="size-7" />
-          </div>
+          <BrandMark className="mx-auto mb-2 size-14 text-primary" />
           <CardTitle className="text-2xl">AL AI</CardTitle>
-          <CardDescription>إدارة سيرفرات Discord</CardDescription>
+          <CardDescription>إدارة ديسكورد</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Button asChild className="w-full" size="lg">

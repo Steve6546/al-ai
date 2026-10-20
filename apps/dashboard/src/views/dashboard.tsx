@@ -50,6 +50,17 @@ export function DashboardView({ guild }: { guild: Guild }) {
   }
 
   const { bot, members, punishments24h, recentActivity } = metrics;
+
+  // A payload without these fields is not a metrics screen with zero values -
+  // it is a response this screen cannot read. Reporting zeros would be a
+  // number we made up (the same rule the guild list follows: "unknown" is not
+  // "none"), and reading `bot.pingMs` on a missing `bot` threw inside the
+  // render, which dropped the whole screen into the error boundary instead of
+  // saying what was wrong with the answer.
+  if (!bot || !members || !punishments24h || !Array.isArray(recentActivity)) {
+    return <LoadError message="استجابة المقاييس غير مكتملة. أعد المحاولة." />;
+  }
+
   const ping = bot.pingMs;
   const pingTone: "ok" | "warn" | "bad" = !bot.online ? "bad" : ping === null ? "warn" : ping > PING_WARN_MS ? "warn" : "ok";
 
@@ -157,13 +168,13 @@ export function DashboardView({ guild }: { guild: Guild }) {
               badge={guild.botPresent ? "default" : "destructive"}
             />
             <Separator />
-            <Row label="عقوبات: حظر" value={String(punishments24h.ban)} />
+            <Row label="عقوبات: حظر" value={countOf(punishments24h.ban)} />
             <Separator />
-            <Row label="عقوبات: طرد" value={String(punishments24h.kick)} />
+            <Row label="عقوبات: طرد" value={countOf(punishments24h.kick)} />
             <Separator />
-            <Row label="عقوبات: إسكات" value={String(punishments24h.timeout)} />
+            <Row label="عقوبات: إسكات" value={countOf(punishments24h.timeout)} />
             <Separator />
-            <Row label="عقوبات: تحذير" value={String(punishments24h.warn)} />
+            <Row label="عقوبات: تحذير" value={countOf(punishments24h.warn)} />
           </CardContent>
         </Card>
       </div>
@@ -191,7 +202,10 @@ const actionLabels: Record<string, string> = {
   "moderation.clearwarns": "مسح تحذيرات"
 };
 
-const actionLabel = (eventId: string) => actionLabels[eventId] ?? eventId.replace("moderation.", "");
+const actionLabel = (eventId: string) => {
+  if (typeof eventId !== "string" || eventId.length === 0) return "حدث";
+  return actionLabels[eventId] ?? eventId.replace("moderation.", "");
+};
 
 function ActionIcon({ eventId }: { eventId: string }) {
   const Icon = eventId === "moderation.ban" ? Ban : eventId === "moderation.kick" ? UserMinus : eventId === "moderation.timeout" ? Zap : ShieldAlert;
@@ -204,12 +218,19 @@ function severityClass(severity: "info" | "warning" | "critical") {
   return "bg-muted text-muted-foreground";
 }
 
-/** Why the bot is not shown as live, phrased for an operator. */
+/**
+ * Why the bot is not shown as live, phrased for an operator.
+ *
+ * The final branch is not "online": the heartbeat is fresh but the row says the
+ * bot is not present, so the card already reads «غير متصل». Calling that
+ * «متصل» underneath would contradict the value above it. It reports the fact
+ * instead — the socket is quiet, not that the bot is healthy.
+ */
 function stalenessHint(lastSeenAt: string | null) {
   if (!lastSeenAt) return "لم يُشغَّل بعد";
   const age = Date.now() - Date.parse(lastSeenAt);
   if (age >= BOT_HEARTBEAT_STALE_MS) return `آخر نبضة ${formatRelative(lastSeenAt)}`;
-  return "متصل";
+  return "البوت صامت رغم نبضة حديثة";
 }
 
 /** Short, locale-neutral relative time. Arabic wording, no external library. */
@@ -259,6 +280,17 @@ function Stat({
       </CardContent>
     </Card>
   );
+}
+
+/**
+ * A counter the server did not send.
+ *
+ * `String(undefined)` is the word "undefined" on the screen, which reads like
+ * a value rather than like an absence. A count that is not there is shown as a
+ * dash - the same rule the guild list follows: "unknown" is not "none".
+ */
+function countOf(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString("ar") : "—";
 }
 
 function Row({ label, value, badge }: { label: string; value: string; badge?: "default" | "destructive" }) {

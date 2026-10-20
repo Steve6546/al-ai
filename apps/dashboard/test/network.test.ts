@@ -2,12 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { NetworkInterfaceInfo } from "node:os";
 import {
+  isCallbackRegisteredFor,
   isHostAllowed,
   isLoopbackOrigin,
   isOAuthCapableOrigin,
+  lanHostEntriesFrom,
   lanHostsFrom,
+  lastTunnelUrlIn,
+  normaliseOrigin,
   packOAuthState,
   parseTunnelUrl,
+  probeTunnelReachability,
   splitHostPort,
   unpackOAuthState
 } from "../server/network.js";
@@ -36,6 +41,27 @@ test("lanHostsFrom keeps only real, non-loopback addresses", () => {
     virtual: [{ address: "192.168.56.1", internal: false } as NetworkInterfaceInfo]
   };
   assert.deepEqual(lanHostsFrom(interfaces), ["192.168.1.195", "fe80::1%12", "192.168.56.1"]);
+});
+
+test("lanHostEntriesFrom labels each address by its interface", () => {
+  const interfaces = {
+    lo: [{ address: "127.0.0.1", internal: true } as NetworkInterfaceInfo],
+    "Wi-Fi": [{ address: "192.168.1.195", internal: false } as NetworkInterfaceInfo],
+    "VirtualBox Host-Only Ethernet Adapter": [
+      { address: "192.168.56.1", internal: false } as NetworkInterfaceInfo
+    ]
+  };
+  assert.deepEqual(lanHostEntriesFrom(interfaces), [
+    { host: "192.168.1.195", label: "Wi-Fi" },
+    { host: "192.168.56.1", label: "VirtualBox Host-Only Ethernet Adapter" }
+  ]);
+  // The same address on a second adapter is not listed twice — a row must not
+  // duplicate the interface a VPN is mirroring.
+  const mirrored = {
+    wifi: [{ address: "10.0.0.5", internal: false } as NetworkInterfaceInfo],
+    vpn: [{ address: "10.0.0.5", internal: false } as NetworkInterfaceInfo]
+  };
+  assert.deepEqual(lanHostEntriesFrom(mirrored), [{ host: "10.0.0.5", label: "wifi" }]);
 });
 
 test("splitHostPort handles bare hosts, ports, and bracketed IPv6", () => {
@@ -137,4 +163,112 @@ test("loopback variants are recognised for the same-machine handoff", () => {
   assert.equal(isLoopbackOrigin("http://[::1]:3000"), true);
   assert.equal(isLoopbackOrigin("http://192.168.1.195:3000"), false);
   assert.equal(isLoopbackOrigin("https://quiet-river-1234.trycloudflare.com"), false);
+});
+
+/**
+ * A live cloudflared pid is not proof the URL answers. The probe is the only
+ * thing standing between the screen and a "running" badge on a link nothing
+ * can reach, so each verdict is pinned: probeable states are probed, the rest
+ * pass through untouched, and every failure shape names the cause.
+ */
+const tunnelUrl = "https://quiet-river-1234.trycloudflare.com";
+const ok = async () => new Response("ok", { status: 200 });
+
+test("a probeable tunnel that answers is confirmed running", async () => {
+  assert.deepEqual(
+    await probeTunnelReachability({ mode: "tunnel", url: tunnelUrl, status: "running" }, ok),
+    { status: "running", error: null }
+  );
+  // A URL that appeared in the log late is promoted by the round trip, not by
+  // a string match on the log file.
+  assert.deepEqual(
+    await probeTunnelReachability({ mode: "tunnel", url: tunnelUrl, status: "starting" }, ok),
+    { status: "running", error: null }
+  );
+});
+
+test("a live process with a dead edge becomes an actionable error", async () => {
+  for (const failure of [
+    async () => new Response("nope", { status: 502 }),
+    async () => {
+      throw new Error("fetch failed");
+    }
+  ]) {
+    const verdict = await probeTunnelReachability({ mode: "tunnel", url: tunnelUrl, status: "running" }, failure);
+    assert.equal(verdict.status, "error");
+    assert.ok(verdict.error, "the verdict names the cause rather than reporting a bare failure");
+  }
+});
+
+test("states with nothing to probe are returned untouched", async () => {
+  // No address to ask, and an error already says what is wrong — probing again
+  // would only re-report it, and re-probing "off" must never mint an error.
+  for (const status of ["off", "error"] as const) {
+    assert.deepEqual(
+      await probeTunnelReachability({ mode: "tunnel", url: tunnelUrl, status }, ok),
+      { status, error: null },
+      `${status} is not probeable`
+    );
+  }
+  assert.deepEqual(
+    await probeTunnelReachability({ mode: "lan", url: tunnelUrl, status: "running" }, ok),
+    { status: "running", error: null },
+    "a LAN reach has no tunnel to probe"
+  );
+  assert.deepEqual(
+    await probeTunnelReachability({ mode: "tunnel", url: null, status: "starting" }, ok),
+    { status: "starting", error: null },
+    "a starting tunnel without a URL is still starting"
+  );
+});
+
+/**
+ * The setup card must not ask for a step the operator has already taken, and
+ * must come back when the address changes. Discord has no API to read an
+ * application's redirect URIs, so a completed sign-in through an origin is the
+ * record of registration — and the record is compared by origin, not by the
+ * raw string the operator pasted.
+ */
+test("normaliseOrigin ignores the differences that do not matter", () => {
+  assert.equal(normaliseOrigin("https://Quiet-River-1234.trycloudflare.com/"), "https://quiet-river-1234.trycloudflare.com");
+  assert.equal(normaliseOrigin("http://localhost:3000/auth/discord/callback"), "http://localhost:3000");
+  assert.equal(normaliseOrigin(null), null);
+  assert.equal(normaliseOrigin("not a url"), null);
+});
+
+test("an origin a login completed through counts as registered", () => {
+  const url = "https://quiet-river-1234.trycloudflare.com";
+  assert.equal(isCallbackRegisteredFor(url, url), true);
+  // Trailing slashes and case differences are the same tunnel.
+  assert.equal(isCallbackRegisteredFor(`${url}/`, url.toUpperCase()), true);
+});
+
+test("a new tunnel address is not yet registered, and no tunnel needs nothing", () => {
+  assert.equal(
+    isCallbackRegisteredFor("https://old-tunnel-0000.trycloudflare.com", "https://new-tunnel-9999.trycloudflare.com"),
+    false,
+    "a fresh quick-tunnel URL after a restart must be registered again"
+  );
+  assert.equal(isCallbackRegisteredFor(null, "https://quiet-river-1234.trycloudflare.com"), false);
+  assert.equal(isCallbackRegisteredFor("https://quiet-river-1234.trycloudflare.com", null), false);
+});
+
+/**
+ * The tunnel log is appended across runs and never truncated, so the newest URL
+ * in the whole file is only the live one when nothing older is in view. The
+ * manager hands `lastTunnelUrlIn` a slice starting at its own spawn offset;
+ * this is the rule that keeps a restarted tunnel from inheriting its
+ * predecessor's address as if it were still good.
+ */
+const banner = (url: string) =>
+  `2026-09-30T10:00:00Z INF Your quick Tunnel has been created! Visit it at:\n${url}\n`;
+
+test("lastTunnelUrlIn returns the newest URL in the text it is given", () => {
+  const previous = banner("https://old-tunnel-0000.trycloudflare.com");
+  const fresh = banner("https://new-tunnel-9999.trycloudflare.com");
+  assert.equal(lastTunnelUrlIn(previous), "https://old-tunnel-0000.trycloudflare.com");
+  // A slice containing only this run's output cannot see the one before it.
+  assert.equal(lastTunnelUrlIn(fresh), "https://new-tunnel-9999.trycloudflare.com");
+  assert.equal(lastTunnelUrlIn(previous + fresh), "https://new-tunnel-9999.trycloudflare.com");
+  assert.equal(lastTunnelUrlIn("cloudflared is starting, no URL yet"), null);
 });

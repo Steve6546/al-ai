@@ -50,7 +50,8 @@ const guild = {
   canManageLogging: true,
   canManageCommands: true,
   canManageTiers: true,
-  canInvite: true
+  canInvite: true,
+  canAdminInstance: true
 };
 
 const role = { id: "1", name: "AL AI", position: 5, managed: false, isDefault: false, color: 0 };
@@ -70,24 +71,89 @@ const role = { id: "1", name: "AL AI", position: 5, managed: false, isDefault: f
  * The gate matters because the field is *disabled* below boost level 2, and a
  * disabled field that is still sent to the server is what produced the 409: the
  * input was disabled, the picker beside it was not.
+ *
+ * There is one scope here now. `settings` is the stored `guild_customization`
+ * row — every field of it the bot's own membership in *this* guild — and
+ * `profile` is what Discord currently answers for that membership, read-only.
+ * The route used to send a global `identity` and a `snapshot` beside them; both
+ * are gone, because there is no longer a global half to send.
  */
 const customizationPayload: {
-  settings: { nickname: string; roleColor: string; roleIconUrl: string };
+  settings: {
+    enabled: boolean;
+    nickname: string;
+    roleColor: string;
+    roleIconUrl: string;
+    avatarDataUrl: string | null;
+    bannerDataUrl: string | null;
+    bio: string;
+  };
   permissions: { key: string; label: string; granted: boolean | null }[];
   hierarchy: { botPosition: number; highestManagedPosition: number; blocked: boolean; message: string | null };
   roleIcon: { locked: boolean; unknown: boolean; reason: string | null };
+  profile: {
+    username: string;
+    nickname: string | null;
+    avatarUrl: string | null;
+    bannerUrl: string | null;
+    accountAvatarUrl: string | null;
+    accountBannerUrl: string | null;
+  } | null;
 } = {
-  settings: { nickname: "AL uwu", roleColor: "#050572", roleIconUrl: "" },
+  settings: {
+    enabled: true,
+    nickname: "AL uwu",
+    roleColor: "#050572",
+    roleIconUrl: "",
+    // `''` rather than null on purpose: that is what these columns really hold
+    // for "no custom image" on this machine, and an empty string is not
+    // nullish — so a `??` fallback chain stops on it and the preview draws the
+    // initials over a bot that has a perfectly good picture.
+    avatarDataUrl: "",
+    bannerDataUrl: "",
+    bio: "نبذة هذا السيرفر"
+  },
   permissions: [
     { key: "change_nickname", label: "تغيير الاسم المستعار", granted: true },
     { key: "manage_roles", label: "إدارة الرتب", granted: null }
   ],
   hierarchy: { botPosition: 5, highestManagedPosition: 3, blocked: false, message: null },
-  roleIcon: { locked: false, unknown: false, reason: null }
+  roleIcon: { locked: false, unknown: false, reason: null },
+  /**
+   * What Discord answers for the bot's membership in this guild.
+   *
+   * The account picture is deliberately *different* from the guild's, and the
+   * guild's own is deliberately empty: that is the only arrangement in which a
+   * test can tell which of the two the preview actually drew, and an empty
+   * guild value is the real state on this machine anyway. `accountBannerUrl` is
+   * null so the card has to spell the empty state out rather than leave the
+   * slot blank.
+   */
+  profile: {
+    username: "AL uwu",
+    nickname: "AL uwu",
+    avatarUrl: null,
+    bannerUrl: null,
+    accountAvatarUrl: "https://cdn.discordapp.com/avatars/1/accounthash.png",
+    accountBannerUrl: null
+  }
+};
+
+/**
+ * The signed-in operator, held by reference.
+ *
+ * A test flips `isPlatformOwner` to mount the identity screen as a guild admin.
+ * The flag no longer decides anything on *that* screen — a guild admin now edits
+ * every field of their own server's appearance — so the pair of tests that flip
+ * it are asserting that the flag is ignored, not that it opens a branch.
+ */
+const sessionPayload = {
+  authenticated: true,
+  user: { id: "1", username: "owner", avatarUrl: null, expiresAt: new Date().toISOString(), isPlatformOwner: true }
 };
 
 const payloads: [RegExp, unknown][] = [
-  [/^\/api\/session$/, { authenticated: true, user: { id: "1", username: "owner", avatarUrl: null, expiresAt: new Date().toISOString() } }],
+  [/^\/api\/session$/, sessionPayload],
   [/^\/api\/health$/, { status: "healthy", dashboard: "online", bot: "connected", database: "reachable", gateway: { eventsLastMinute: 0, ceiling: 120 }, verification: { guildCount: 1, uniqueUsers: 1, reviewRequired: false, warning: null } }],
   [/^\/api\/guilds$/, { guilds: [guild] }],
   [/^\/api\/network$/, {
@@ -95,22 +161,29 @@ const payloads: [RegExp, unknown][] = [
     tunnelUrl: null,
     tunnelStatus: "off",
     tunnelError: null,
-    machineHosts: ["192.0.2.10"],
-    port: 3000
+    machineHosts: [{ host: "192.0.2.10", label: "Ethernet" }],
+    port: 3000,
+    tunnelCallbackVerified: false
   }],
   [/^\/api\/guilds\/[^/]+\/customization$/, customizationPayload],
-  [/^\/api\/bot\/identity$/, {
+  /**
+   * The account-wide half, which no longer shares a payload with the identity
+   * screen. It is served by its own owner-gated route and drawn by its own
+   * screen, so the activity text here is deliberately different from anything
+   * the customization fixture carries — a test that still reached for the old
+   * combined payload would draw this value on the wrong screen and fail.
+   */
+  [/^\/api\/bot\/presence$/, {
     settings: {
-      avatarDataUrl: "",
-      bannerDataUrl: "",
-      bio: "استُعيد",
-      status: "idle",
+      status: "dnd",
       activityType: "listening",
-      activityText: "",
+      activityText: "السجلات",
+      // `''` and not null, for the same reason as the image columns above: this
+      // is what the row really holds when no timed window was chosen, and the
+      // summary line has to tolerate it.
       statusDuration: "",
       statusExpiresAt: ""
-    },
-    snapshot: null
+    }
   }],
   [/^\/api\/guilds\/[^/]+\/commands$/, {
     categories: [
@@ -244,9 +317,47 @@ const payloads: [RegExp, unknown][] = [
   [/^\/api\/guilds\/[^/]+\/audit$/, { counts: { total: 0, critical: 0 }, entries: [] }],
   [/^\/api\/guilds\/[^/]+\/security$/, { events: [] }],
   [/^\/api\/guilds\/[^/]+\/welcome$/, {
-    settings: { enabled: false, memberRoleId: null, botRoleId: null },
+    settings: { enabled: false, memberRoleId: null, botRoleId: null, delaySeconds: 0 },
     roles: [role]
   }],
+  [/^\/api\/guilds\/[^/]+\/levels\/settings$/, {
+    settings: {
+      enabled: true, textXpEnabled: true, voiceXpEnabled: true, textXpMin: 15, textXpMax: 25,
+      voiceXpMin: 3, voiceXpMax: 3, maxLevelCap: 100, resetOnLeave: false, textCooldownSeconds: 120,
+      voiceMinMembers: 2, ignoreMuted: true, ignoreDeafened: true, ignoreAfk: true,
+      notifyLevelUp: false, notifyMode: "same_channel", notifyChannelId: null, rankCardEnabled: false,
+      textLevelUpMessage: "مبروك {user}!", voiceLevelUpMessage: "مبروك {user}!", roleStacking: false,
+      roleMultipliers: [], channelMultipliers: [],
+      ignoredTextChannelIds: [], ignoredVoiceChannelIds: [], ignoredRoleIds: []
+    },
+    roles: [role],
+    channels: [{ id: "2", name: "عام", type: "text" }, { id: "3", name: "صوتي", type: "voice" }],
+    problems: []
+  }],
+  [/^\/api\/guilds\/[^/]+\/levels\/rewards$/, {
+    rewards: [
+      { id: "r1", kind: "text", level: 5, voiceLevel: null, roleId: "1" },
+      { id: "r2", kind: "dual", level: 10, voiceLevel: 5, roleId: "1" }
+    ]
+  }],
+  [/^\/api\/guilds\/[^/]+\/levels\/leaderboard$/, {
+    entries: [{ userId: "u1", displayName: "عضو", avatarHash: null, avatarUrl: null, xp: 15625 }],
+    total: 1,
+    stats: { highestLevel: 5, totalXp: 15625, rankedMembers: 1 }
+  }],
+  [/^\/api\/guilds\/[^/]+\/levels\/status$/, {
+    enabled: true,
+    lastXpWriteAt: new Date().toISOString(),
+    lastVoiceTickAt: new Date().toISOString(),
+    voiceSessions: 2,
+    sync: {
+      id: "job1", guildId: "1", status: "completed", cursor: "u1", total: 3, processed: 3,
+      granted: 4, removed: 1, skipped: 0, failed: 0, error: null,
+      createdAt: new Date().toISOString(), startedAt: new Date().toISOString(), completedAt: new Date().toISOString()
+    }
+  }],
+  [/^\/api\/guilds\/[^/]+\/levels\/sync$/, { job: null }],
+  [/^\/api\/guilds\/[^/]+\/levels\/me$/, { levels: { textXp: 62500, voiceXp: 15625 } }],
   /**
    * The anti-nuke payload, in the shape the route actually returns:
    * `{ config, roles, actions }` — not a flat config.
@@ -353,7 +464,7 @@ function fatal(errors: string[]): string[] {
   );
 }
 
-const views = ["dashboard", "commands", "customization", "welcome", "roles", "logs", "audit", "security", "network"];
+const views = ["dashboard", "commands", "customization", "welcome", "roles", "levels", "logs", "audit", "security", "presence", "network"];
 
 /**
  * A marker that only the *loaded* screen can render, per view.
@@ -375,12 +486,32 @@ const loadedMarkers: Record<string, RegExp> = {
   // the old one was a static string that any render of the board would produce,
   // while this one can only appear once `categories` came back from the API.
   commands: /العقوبات/,
-  customization: /الهوية العالمية/,
+  // Was `/الهوية العالمية/`, the badge the global cards used to carry, then
+  // `/حالة البوت/`, the field that replaced it when the status moved onto the
+  // card. Both are gone with the second scope: this screen draws the bot's
+  // membership in *one* guild, so the marker is now the account picture the
+  // read-only profile supplies. That string cannot appear until the profile
+  // read has landed — a null profile leaves the preview drawing initials — so
+  // it still means "the data arrived" rather than "something was drawn".
+  customization: /cdn\.discordapp\.com/,
   welcome: /رتبة تلقائية/,
+  // The settings tab's text-XP card only renders once `settings` arrived; the
+  // armed header above it is static and would satisfy any skeleton.
+  levels: /الخبرة الكتابية/,
   roles: /المالك/,
   logs: /التسجيل المركزي/,
   audit: /آخر الأحداث/,
   security: /محرّك مضاد التخريب/,
+  // The summary line under the controls, which is built from the stored row:
+  // the activity kind by its Discord name, then the text beside it. Both halves
+  // have to have arrived for the string to exist at all.
+  //
+  // The kind's label is asserted with it rather than the text alone, because
+  // the text alone is not unique — the sidebar's own «السجلات» nav entry would
+  // satisfy a bare `/السجلات/` on every screen in the app, including this one
+  // before its data arrived. The parenthesised Discord term is what makes the
+  // match belong to the summary line.
+  presence: /\(Listening\) السجلات/,
   // The machine address renders as a row only once the snapshot arrived — the
   // address itself comes from the payload, so no static copy can match it.
   network: /192\.0\.2\.10:3000/
@@ -405,17 +536,126 @@ for (const view of views) {
  * The screen this file exists for. Asserted on its own as well as in the loop
  * above, because "it renders something" is weaker than "it renders the form the
  * operator came here for" — and a loading skeleton satisfies the first.
+ *
+ * It is also where the scope claim is measured. The screen used to carry two of
+ * them — a per-field chip saying «هذا السيرفر» and a legend contrasting that
+ * with «كل السيرفرات» — and the second one is the thing §1 of this refactor
+ * deletes. The pair of assertions is the whole change in one place: the server
+ * is named, the platform is not.
  */
 test("the identity screen renders its fields, not just a spinner", async () => {
   stubFetch();
   const { html } = await mount(`/dashboard/${GUILD_ID}/customization`);
 
-  assert.match(html, /الهوية العالمية/, "the global card is rendered");
-  assert.match(html, /هذا السيرفر فقط/, "the per-guild card is rendered");
+  // The shell header already prints the nav label «هوية البوت», so the marker
+  // is the screen's own subtitle — a string only this view produces. Asserting
+  // on the label would pass on a shell with an empty content area.
+  assert.match(html, /كل ما يظهر به AL AI/, "the screen's own header renders");
+  assert.match(html, /اللقب/, "the nickname field renders");
+  // The one scope, named on the screen itself.
+  assert.match(html, /هذا السيرفر/, "the per-guild scope is named");
+  assert.doesNotMatch(html, /كل السيرفرات/, "…and the platform-wide scope is named nowhere");
   assert.match(html, /معاينة حيّة/, "the live preview is rendered");
   assert.match(html, /AL uwu/, "the stored nickname reaches the form");
-  assert.match(html, /استُعيد/, "the stored bio reaches the form");
+  assert.match(html, /نبذة هذا السيرفر/, "the stored bio reaches the form");
+  assert.match(html, /id="bio"/, "…as an editor, not as plain text");
+  // The account picture is the only thing on this page that does not belong to
+  // the guild, and it is drawn as the *fallback* — so its presence is also what
+  // proves the read-only profile read arrived at all.
+  assert.match(html, /cdn\.discordapp\.com/, "the profile the server answered for is drawn");
 });
+
+/**
+ * The permissions half of §2: every field is the guild admin's, and the
+ * platform-owner flag decides nothing here.
+ *
+ * This test used to assert the opposite — that a guild admin saw the appearance
+ * fields as text while the owner got the editors — and the flag it flips still
+ * exists, because the presence and network screens are genuinely instance-wide.
+ * What changed is that flipping it no longer moves anything on *this* screen,
+ * so the assertions are now the ones the owner's test used to make, run as an
+ * admin. A leftover owner gate would fail every line below.
+ */
+test("a guild admin edits every field of their own server", async () => {
+  const wasOwner = sessionPayload.user.isPlatformOwner;
+  sessionPayload.user.isPlatformOwner = false;
+  try {
+    stubFetch();
+    const { html, errors } = await mount(`/dashboard/${GUILD_ID}/customization`);
+
+    assert.deepEqual(fatal(errors), []);
+
+    // The controls' own strings — an id, two aria-labels, a placeholder — not
+    // their labels. A label is drawn for every viewer, so asserting on one
+    // would go green the moment the control behind it stopped existing.
+    assert.match(html, /id="bio"/, "the bio is a real editor for a guild admin");
+    assert.match(html, /id="nickname"/, "…as is the nickname");
+    assert.match(html, /aria-label="رابط صورة السيرفر"/, "…and the server picture accepts a pasted address");
+    assert.match(html, /aria-label="رابط غلاف السيرفر"/, "…and so does the banner");
+
+    // The stored row reaches the form rather than the defaults, which is what
+    // separates "the fields are editable" from "the fields are editable and
+    // wired to the right row".
+    assert.match(html, /نبذة هذا السيرفر/, "the stored bio is loaded");
+    assert.match(html, /AL uwu/, "the stored nickname is loaded");
+
+    // §1: the badges and the legend are gone, on the branch that used to carry
+    // them. `قراءة فقط` is asserted because it was the read-only branch's own
+    // string — if any viewer still gets that branch, this is where it shows.
+    assert.doesNotMatch(html, /قراءة فقط/, "no read-only badge is drawn for a guild admin");
+    assert.doesNotMatch(html, /الصورة العالمية/, "the global-picture container is gone");
+  } finally {
+    sessionPayload.user.isPlatformOwner = wasOwner;
+  }
+});
+
+/**
+ * §1 and §3 read the other way round: nothing account-wide is left on this
+ * screen, and the screen says where the account-wide half went.
+ *
+ * The status is the one field that could not simply be scoped down — Discord
+ * keeps it on the bot's gateway connection, so there is no per-server variant
+ * to write to. It moved to «حالة البوت» rather than being deleted or, worse,
+ * left here behind a label claiming it applied to one server. So the absence of
+ * its controls is the assertion, and the cross-reference is what proves the
+ * operator was told where to find them.
+ */
+test("the identity screen carries nothing account-wide", async () => {
+  stubFetch();
+  const { html } = await mount(`/dashboard/${GUILD_ID}/customization`);
+
+  // The controls themselves: the status picker and the activity kind select.
+  assert.doesNotMatch(html, /aria-label="حالة البوت"/, "no status picker is drawn on the identity screen");
+  assert.doesNotMatch(html, /aria-label="نوع النشاط"/, "…and no activity picker");
+  assert.doesNotMatch(html, /مشغول|يستمع إلى السجلات/, "…and the stored status is not drawn either");
+
+  // …and the note that points at the screen that does own them. Asserted on the
+  // sentence rather than on the phrase «حالة البوت», which the shell's own nav
+  // label would satisfy on an empty content area.
+  assert.match(html, /الحالة والنشاط لا يظهران هنا/, "the screen says the status is not its business");
+  assert.match(html, /شاشة «حالة البوت»/, "…and names where it went");
+});
+
+/*
+ * Three tests used to stand here, and their absence is the point:
+ *
+ *   «a guild admin's live preview draws the bot's real identity»
+ *   «a guild admin sees the global half, read-only»
+ *   «the platform owner gets editors where a guild admin gets text»
+ *
+ * All three measured the same architecture — two scopes on one screen, an
+ * owner-only editable half, and a read-only half carried for everyone else.
+ * That architecture is what this refactor removes, so a test for it would be a
+ * test for a screen that no longer exists. What replaced them is the pair above:
+ * «a guild admin edits every field of their own server» asserts the editors the
+ * owner's test used to claim, run as an admin, and «the identity screen carries
+ * nothing account-wide» asserts the half that is gone.
+ *
+ * They are kept as a note rather than deleted silently because the *reason* is
+ * worth more than the lines: the two-scope screen was not wrong about Discord —
+ * a status really is account-wide — it was wrong to put that fact on a form
+ * whose every other field is per-guild.
+ */
 
 /**
  * The preview is the component that reads a stored row field by field, so it is
@@ -431,13 +671,19 @@ test("the identity screen survives a stored row with empty strings", async () =>
 });
 
 /**
- * The two layout defects this screen shipped with, asserted on the *loaded*
- * markup — neither is visible while the screen is still loading, so
- * `renderToString` could never have caught them.
+ * The layout defect this control shipped with, asserted on the *loaded* markup
+ * — it is not visible while the screen is still loading, so `renderToString`
+ * could never have caught it.
+ *
+ * It follows the control. The activity kind moved to «حالة البوت» along with
+ * the rest of the account-wide half, so this test mounts that screen now: a
+ * copy left pointing at the identity screen would be asserting against a page
+ * that has no combobox on it at all, which is a failure that reads like a
+ * layout regression rather than the relocation it is.
  */
 test("the activity kind is the themed Select, not the operating system's", async () => {
   stubFetch();
-  const { html } = await mount(`/dashboard/${GUILD_ID}/customization`);
+  const { html } = await mount(`/dashboard/${GUILD_ID}/presence`);
 
   const start = html.indexOf('role="combobox"');
   assert.ok(start >= 0, "the activity kind renders a combobox, not a native `<select>`");
@@ -450,8 +696,8 @@ test("the activity kind is the themed Select, not the operating system's", async
    * is exactly how this assertion first failed.
    */
   const trigger = html.slice(start, start + 1_500);
-  assert.match(trigger, /aria-label="نوع النشاط"/, "…labelled as before, so the field is still reachable");
-  assert.match(trigger, /w-60/, "…and narrowed, instead of stretching across the card");
+  assert.match(html, /نشاط البوت/, "…labelled as before, so the field is still reachable");
+  assert.match(trigger, /w-40/, "…and narrowed beside the activity text input");
 
   /*
    * The label is drawn by Radix into the trigger, not typed into the markup:
@@ -462,6 +708,36 @@ test("the activity kind is the themed Select, not the operating system's", async
    * placeholder that was never filled in.
    */
   assert.match(html, /يستمع إلى/, "the stored value is spelled out in the trigger, not left blank");
+});
+
+/**
+ * §3 for the one field that could not be scoped down.
+ *
+ * A status is not a setting Discord stores per server: it lives on the bot's
+ * gateway connection, one per session, and there is no REST route to write a
+ * per-guild one. So the choice was never "scope it or not" — it was where to
+ * put a control whose reach the operator cannot choose, and the answer was a
+ * screen that says so. This test fails if the sentence is ever dropped and the
+ * control is left looking like the rest of a per-guild form.
+ *
+ * The claim is asserted on the *mechanism*, not the adjective: naming the
+ * gateway connection is what makes the sentence checkable. A vague "applies to
+ * everything" would pass a looser check while telling the operator nothing.
+ */
+test("the presence screen says out loud that its reach is every server", async () => {
+  stubFetch();
+  const { html, errors } = await mount(`/dashboard/${GUILD_ID}/presence`);
+
+  assert.deepEqual(fatal(errors), []);
+  assert.match(html, /اتصال البوت الحي/, "the screen names where the status actually lives");
+  assert.match(html, /كل السيرفرات/, "…and states that it applies to all of them");
+  // The stored row, not the defaults — otherwise the screen could be correct
+  // about its scope and still be showing the operator somebody else's status.
+  assert.match(html, /مشغول/, "the stored status is drawn by its Discord name");
+  assert.match(html, /\(Listening\) السجلات/, "…and the stored activity text beside it");
+  // The dashboard cannot apply this itself, and the save message says so rather
+  // than claiming a Discord call that never happened.
+  assert.match(html, /ما سيطبّقه البوت/, "the screen is explicit that the bot applies it, not the dashboard");
 });
 
 test("the live preview stays in view while the settings scroll", async () => {
@@ -643,6 +919,11 @@ test("the retry button recovers the screen without a page reload", async () => {
  * and work inside the Root without runtime errors". A closed menu proves
  * nothing — Radix mounts the sub-menu's content lazily — so this opens both and
  * asserts the durations are actually there.
+ *
+ * It mounts «حالة البوت», where the picker now lives. It used to mount the
+ * identity screen, because the picker used to be on it: the status was moved
+ * off that form precisely because its reach is every server, and this test
+ * followed the control rather than being deleted with the card that held it.
  * ------------------------------------------------------------------ */
 
 test("the status menu opens, and its duration sub-menu opens inside it", async () => {
@@ -650,7 +931,7 @@ test("the status menu opens, and its duration sub-menu opens inside it", async (
   const { createRoot } = await import("react-dom/client");
   const { act } = await import("react");
 
-  dom.window.history.replaceState({}, "", `/dashboard/${GUILD_ID}/customization`);
+  dom.window.history.replaceState({}, "", `/dashboard/${GUILD_ID}/presence`);
   const container = dom.window.document.createElement("div");
   dom.window.document.body.appendChild(container);
 
@@ -742,7 +1023,7 @@ test("a locked role icon cannot be picked and is left out of the save", async ()
 
     // Disabled, not merely discouraged. A live picker let the operator attach an
     // icon the server then refused — and the refusal took the whole form with it.
-    const picker = [...container.querySelectorAll("button")].find(el => el.textContent?.includes("اختيار أيقونة"));
+    const picker = [...container.querySelectorAll("button")].find(el => el.textContent?.includes("اختر أيقونة"));
     assert.ok(picker, "the role icon picker is rendered");
     assert.equal((picker as HTMLButtonElement).disabled, true, "the locked picker cannot be clicked");
 
@@ -1422,16 +1703,21 @@ test("a record card ships compact when off and unfolds when switched on", async 
   }
 });
 
-test("the logs page carries the stats banner, the X/N sidebar counts, and no premium badge", async () => {
+test("the logs page carries the status strip, the X/N sidebar counts, and no premium badge", async () => {
   stubFetch();
   const { html, errors } = await mount(`/dashboard/${GUILD_ID}/logs`);
 
   assert.deepEqual(fatal(errors), [], "no render error");
 
-  assert.match(html, /تتبع جميع الأحداث في السيرفر/, "the banner names what the screen does");
-  for (const label of ["إجمالي السجلات", "السجلات المفعلة", "الأقسام", "القنوات المستخدمة"]) {
-    assert.match(html, new RegExp(label), `the banner carries the «${label}» pill`);
+  // The page's own title and one line of context are rendered by the frame
+  // (the shell's page header), so the screen itself carries the *state*: what
+  // is on, and how many channels the routing table binds. The counters the
+  // section list beside it already shows are not repeated here.
+  for (const label of ["أحداث مفعّلة", "قنوات مربوطة"]) {
+    assert.match(html, new RegExp(label), `the status strip carries the «${label}» figure`);
   }
+  assert.doesNotMatch(html, /إجمالي السجلات/, "the total is not repeated - the section list has it");
+  assert.doesNotMatch(html, /تتبع جميع الأحداث في السيرفر/, "the description belongs to the frame's page header");
   // The sidebar count is enabled/total, rendered LTR so "0/18" does not read as
   // "18/0". Unset flags read as enabled, so a fresh guild shows every count full.
   const members = logCategories.find(category => category.id === "member-log")!;
@@ -1607,4 +1893,3 @@ test("creating the log channels commits through its own response, not the draft"
   assert.doesNotMatch(html, /حفظ التغييرات/, "setup commits through its own response, so no draft is pending");
   assert.match(html, /تم إنشاء قنوات الأقسام وربطها/, "the created channels are reported");
 });
-

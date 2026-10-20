@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Gavel,
   Hash,
+  Link2,
   MessageSquare,
   Palette,
   Plus,
@@ -185,6 +186,7 @@ const categoryIcons: Record<CommandCategory, LucideIcon> = {
   "bot-tools": Bot,
   protection: ShieldAlert,
   levels: TrendingUp,
+  invites: Link2,
   "server-stats": BarChart3,
   profile: UserCircle
 };
@@ -357,7 +359,7 @@ export function CommandsBoard({
        * travel inside and the nav would scroll away with the cards.
        * ---------------------------------------------------------------- */}
       <nav aria-label="أقسام الأوامر" className="lg:sticky lg:top-6 lg:self-start">
-        <div className="flex gap-1 overflow-x-auto pb-2 lg:flex-col lg:overflow-visible lg:pb-0">
+        <div className="scrollbar-none flex gap-1 overflow-x-auto pb-2 lg:flex-col lg:overflow-visible lg:pb-0">
           <SectionButton
             label="كل الأوامر"
             icon={SquareTerminal}
@@ -434,7 +436,7 @@ export function CommandsBoard({
             </div>
             <Button variant="ghost" size="sm" className="gap-1" onClick={() => setSection("all")}>
               <X className="size-3.5" />
-              كل الأوامر
+              عرض كل الأقسام
             </Button>
           </div>
         )}
@@ -454,8 +456,12 @@ export function CommandsBoard({
             <section key={category.id} className="space-y-2">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold">{category.label}</h3>
-                <Badge variant="secondary" className="tabular">
-                  {items.length}
+                {/* What this heading counts: the commands *shown* here, and how
+                    many of them are enabled. The section nav on the left counts
+                    the whole draft, so the two numbers are about different
+                    things - and each says which it is. */}
+                <Badge variant="secondary" className="tabular" title="المعروض والمفعّل من هذه المجموعة">
+                  {items.filter(command => command.enabled).length}/{items.length}
                 </Badge>
               </div>
               <div className="space-y-2">
@@ -534,7 +540,10 @@ function SectionButton({
       }`}
     >
       <Icon className="size-4 shrink-0" aria-hidden />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {/* flex-none on the row so the tab never squashes its neighbours; the
+          label keeps min-w-0 so a long Arabic section name truncates instead
+          of pushing the strip wider than the screen. */}
+      <span className="min-w-0 max-w-[12rem] flex-1 truncate lg:max-w-none">{label}</span>
       <span className={`tabular text-xs ${total === 0 ? "text-muted-foreground/60" : ""}`}>
         {enabled}/{total}
       </span>

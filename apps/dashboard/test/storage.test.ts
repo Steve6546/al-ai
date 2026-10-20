@@ -43,8 +43,78 @@ if (db) {
 
 const skip = reachable ? false : "no reachable database at DATABASE_URL";
 
+/**
+ * The presence row exactly as the deployment had it, before any test writes.
+ *
+ * `bot_identity` is a one-row table that belongs to the *deployment*, not to the
+ * fixture: the operator's own status and activity live in it, and the presence
+ * screen renders whatever it holds. Three tests below write to it — a round
+ * trip, a guild deletion, and a missing-seed-row heal — and none of them put it
+ * back, so the last writer won and every `npm test` silently left its own value
+ * on the operator's screen.
+ *
+ * That is not hypothetical: it is why the live screen came to read «استُعيد»,
+ * a word meaning "was restored" that describes nothing the operator ever did.
+ * A test that mutates live state and does not restore it is a test that changes
+ * the thing it is measuring.
+ *
+ * Null means "there was no row at all", which the restore honours by deleting
+ * rather than inventing one.
+ */
+type PresenceRow = {
+  status: string;
+  activity_type: string;
+  activity_text: string;
+  status_duration: string | null;
+  status_expires_at: Date | string | null;
+  updated_at: Date | string;
+};
+
+const presenceBefore: PresenceRow | null = reachable
+  ? ((await pool!.query<PresenceRow>(
+      `SELECT status, activity_type, activity_text, status_duration, status_expires_at, updated_at
+         FROM bot_identity WHERE id = true`
+    )).rows[0] ?? null)
+  : null;
+
+/**
+ * Writes the snapshot back, seed row and all.
+ *
+ * An INSERT rather than an UPDATE, because one of the tests below deletes the
+ * row outright to prove the save heals it. `ON CONFLICT` covers the other two,
+ * which leave a row behind.
+ */
+async function restorePresence(): Promise<void> {
+  if (!presenceBefore) {
+    await pool!.query("DELETE FROM bot_identity");
+    return;
+  }
+  await pool!.query(
+    `INSERT INTO bot_identity (id, status, activity_type, activity_text, status_duration, status_expires_at, updated_at)
+     VALUES (true, $1, $2, $3, $4, $5, $6)
+     ON CONFLICT (id) DO UPDATE
+       SET status = EXCLUDED.status,
+           activity_type = EXCLUDED.activity_type,
+           activity_text = EXCLUDED.activity_text,
+           status_duration = EXCLUDED.status_duration,
+           status_expires_at = EXCLUDED.status_expires_at,
+           updated_at = EXCLUDED.updated_at`,
+    [
+      presenceBefore.status,
+      presenceBefore.activity_type,
+      presenceBefore.activity_text,
+      presenceBefore.status_duration,
+      presenceBefore.status_expires_at,
+      presenceBefore.updated_at
+    ]
+  );
+}
+
 after(async () => {
   if (!pool) return;
+  // The live row first, and before the pool closes: it is the deployment's own
+  // state, and leaving it mutated is the defect this snapshot exists to stop.
+  await restorePresence().catch(() => undefined);
   // The guild row cascades to every child table.
   await pool.query("DELETE FROM guilds WHERE id = $1", [GUILD_ID]).catch(() => undefined);
   await pool.end().catch(() => undefined);
@@ -185,18 +255,18 @@ test("welcome settings survive a round trip", { skip }, async () => {
   // A guild that arms members' auto-role but leaves bots alone is the shape the
   // screen is designed around — the two ids are independent, and null means
   // "leave them alone", not "unsettled default".
-  const written = { enabled: true, memberRoleId: "1540515175826985080", botRoleId: null };
+  const written = { enabled: true, memberRoleId: "1540515175826985080", botRoleId: null, delaySeconds: 30 };
   await db!.saveWelcome(GUILD_ID, written);
   assert.deepEqual(await db!.getWelcome(GUILD_ID), written);
 
   // A save over an existing row updates it rather than duplicating.
-  await db!.saveWelcome(GUILD_ID, { enabled: false, memberRoleId: null, botRoleId: null });
+  await db!.saveWelcome(GUILD_ID, { enabled: false, memberRoleId: null, botRoleId: null, delaySeconds: 0 });
   const { rows } = await pool!.query<{ count: string }>(
     "SELECT count(*)::text AS count FROM guild_welcome WHERE guild_id = $1",
     [GUILD_ID]
   );
   assert.equal(rows[0]?.count, "1");
-  assert.deepEqual(await db!.getWelcome(GUILD_ID), { enabled: false, memberRoleId: null, botRoleId: null });
+  assert.deepEqual(await db!.getWelcome(GUILD_ID), { enabled: false, memberRoleId: null, botRoleId: null, delaySeconds: 0 });
 });
 
 test("the database refuses a limit of zero even if code lets one through", { skip }, async () => {
@@ -348,12 +418,19 @@ test("the legacy allow-list column is gone, so one concept has one column", { sk
 });
 
 /* ------------------------------------------------------------------ *
- * The global bot identity
+ * The bot's presence
  *
- * One row, shared by every guild. The behaviour that matters is that a read
- * never has to special-case "nothing stored yet", and that the database's own
- * CHECK constraints are what stop a value the application layer would have
- * refused — so a hand-written INSERT cannot smuggle one in.
+ * One row, shared by every guild — it carries status and activity and nothing
+ * else, because Discord has no per-guild variant of either. The behaviour that
+ * matters is that a read never has to special-case "nothing stored yet", and
+ * that the database's own CHECK constraints are what stop a value the
+ * application layer would have refused, so a hand-written INSERT cannot smuggle
+ * one in.
+ *
+ * The appearance — nickname, avatar, banner, bio, role colour and icon — lives
+ * on `guild_customization` now and is covered in the section below. A test that
+ * tried to write it here would be asserting against a column that no longer
+ * exists, which is why the round trip below is presence-only.
  * ------------------------------------------------------------------ */
 
 /** A tiny valid PNG data URL, so no test depends on a real file. */
@@ -373,11 +450,19 @@ test("the database refuses a second identity row", { skip }, async () => {
   );
 });
 
-test("an identity round-trips through storage unchanged", { skip }, async () => {
+test("the presence table holds no appearance columns at all", { skip }, async () => {
+  // The split is the point of this round, and it is only real if the columns
+  // are gone. A leftover `avatar_data_url` here would be a second place an
+  // avatar could live, which is exactly the ambiguity the split removed.
+  const { rows } = await pool!.query<{ column_name: string }>(
+    `SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'bot_identity' AND column_name IN ('avatar_data_url', 'banner_data_url', 'bio')`
+  );
+  assert.deepEqual(rows.map(row => row.column_name), [], "the presence row carries no per-guild field");
+});
+
+test("a presence round-trips through storage unchanged", { skip }, async () => {
   const written = {
-    avatarDataUrl: PNG_DATA_URL,
-    bannerDataUrl: null,
-    bio: "يحرس السيرفر",
     status: "dnd" as const,
     activityType: "watching" as const,
     activityText: "السجلات",
@@ -388,8 +473,8 @@ test("an identity round-trips through storage unchanged", { skip }, async () => 
     statusExpiresAt: "2030-01-01T00:00:00.000Z"
   };
 
-  await db!.saveBotIdentity(written);
-  const read = await db!.getBotIdentity();
+  await db!.saveBotPresence(written);
+  const read = await db!.getBotPresence();
 
   assert.deepEqual(read, written, "what was stored is what comes back");
 });
@@ -405,49 +490,36 @@ test("an impossible identity is normalised on read rather than trusted", { skip 
   );
 });
 
-test("the identity row survives a guild deletion", { skip }, async () => {
-  // The identity belongs to no guild, so `ON DELETE CASCADE` from `guilds` must
-  // never reach it. Clearing a guild must not blank the bot's own profile.
+test("the presence row survives a guild deletion", { skip }, async () => {
+  // The presence belongs to no guild, so `ON DELETE CASCADE` from `guilds` must
+  // never reach it. Clearing a guild must not blank the bot's own status.
   await seedBotOwnedGuild();
-  await db!.saveBotIdentity({ ...(await db!.getBotIdentity()), bio: "يبقى" });
+  await db!.saveBotPresence({ ...(await db!.getBotPresence()), activityText: "يبقى" });
 
   await pool!.query("DELETE FROM guilds WHERE id = $1", [GUILD_ID]);
 
-  assert.equal((await db!.getBotIdentity()).bio, "يبقى", "a guild's deletion leaves the global identity alone");
+  assert.equal((await db!.getBotPresence()).activityText, "يبقى", "a guild's deletion leaves the presence alone");
   assert.equal(
     (await pool!.query<{ count: string }>("SELECT count(*)::text AS count FROM bot_identity")).rows[0]?.count,
     "1"
   );
 });
 
-test("saveBotIdentity heals a missing seed row instead of discarding the edit", { skip }, async () => {
+test("saveBotPresence heals a missing seed row instead of discarding the edit", { skip }, async () => {
   // A database restored from a partial dump can lose the seed row. An UPDATE
   // would then affect nothing and report success — the operator's save would
   // vanish with no error anywhere.
   await pool!.query("DELETE FROM bot_identity");
-  await db!.saveBotIdentity({
-    avatarDataUrl: null,
-    bannerDataUrl: null,
-    bio: "استُعيد",
+  await db!.saveBotPresence({
     status: "idle",
     activityType: "listening",
-    activityText: "",
+    activityText: "استُعيد",
     statusDuration: null,
     statusExpiresAt: null
   });
 
-  assert.equal((await db!.getBotIdentity()).bio, "استُعيد");
+  assert.equal((await db!.getBotPresence()).activityText, "استُعيد");
   assert.equal((await pool!.query<{ count: string }>("SELECT count(*)::text AS count FROM bot_identity")).rows[0]?.count, "1");
-});
-
-test("the database refuses an identity image over the ceiling", { skip }, async () => {
-  // The application validates the same thing, but the constraint is what makes
-  // it true for a row written by anything else — a migration, a psql session.
-  const oversized = `data:image/png;base64,${"A".repeat(500_001)}`;
-  await assert.rejects(
-    pool!.query("UPDATE bot_identity SET avatar_data_url = $1 WHERE id = true", [oversized]),
-    /bot_identity_avatar_size_check/
-  );
 });
 
 test("the database refuses an activity type Discord has no number for", { skip }, async () => {
@@ -455,5 +527,84 @@ test("the database refuses an activity type Discord has no number for", { skip }
     pool!.query("UPDATE bot_identity SET activity_type = 'streaming' WHERE id = true"),
     /bot_identity_activity_type_check/,
     "streaming is deliberately absent from the contract"
+  );
+});
+
+/* ------------------------------------------------------------------ *
+ * The per-guild customization
+ *
+ * Everything the bot can present differently per server, and every one of these
+ * constraints is the database's own copy of a rule the BFF also applies. That
+ * duplication is deliberate: the application check is what tells the operator
+ * *why* a save failed, and the constraint is what makes the rule true for a row
+ * written by anything else — a migration, a psql session, a future route that
+ * forgets.
+ * ------------------------------------------------------------------ */
+
+/** Writes a customization row with nothing but the guild id, for the tests below. */
+async function seedCustomization() {
+  await seedBotOwnedGuild();
+  await pool!.query("DELETE FROM guild_customization WHERE guild_id = $1", [GUILD_ID]);
+  await db!.saveCustomization(GUILD_ID, {
+    enabled: true,
+    nickname: "",
+    roleColor: null,
+    roleIconUrl: null,
+    avatarDataUrl: null,
+    bannerDataUrl: null,
+    bio: ""
+  });
+}
+
+test("a customization round-trips through storage unchanged", { skip }, async () => {
+  // The four member fields travel in one Modify Current Member call, so they are
+  // written and read as one row — a round trip that dropped the banner or the
+  // bio would be a control that saves and then shows nothing.
+  await seedCustomization();
+  const written = {
+    enabled: true,
+    nickname: "الحارس",
+    roleColor: "#e91e63",
+    roleIconUrl: PNG_DATA_URL,
+    avatarDataUrl: PNG_DATA_URL,
+    bannerDataUrl: PNG_DATA_URL,
+    bio: "يحرس هذا السيرفر"
+  };
+
+  await db!.saveCustomization(GUILD_ID, written);
+
+  assert.deepEqual(await db!.getCustomization(GUILD_ID), written, "what was stored is what comes back");
+});
+
+test("the database refuses a customization image over the ceiling", { skip }, async () => {
+  // The application validates the same thing, but the constraint is what makes
+  // it true for a row written by anything else — a migration, a psql session.
+  await seedCustomization();
+  const oversized = `data:image/png;base64,${"A".repeat(500_001)}`;
+
+  await assert.rejects(
+    pool!.query("UPDATE guild_customization SET avatar_data_url = $1 WHERE guild_id = $2", [oversized, GUILD_ID]),
+    /guild_customization_avatar_size_check/,
+    "the avatar has its own ceiling"
+  );
+  await assert.rejects(
+    pool!.query("UPDATE guild_customization SET banner_data_url = $1 WHERE guild_id = $2", [oversized, GUILD_ID]),
+    /guild_customization_banner_size_check/,
+    "and the banner is checked separately, so one cannot borrow the other's rule"
+  );
+});
+
+test("the database refuses a bio longer than Discord accepts", { skip }, async () => {
+  // 300 is the measured ceiling on `PATCH /guilds/{id}/members/@me`, and the
+  // constraint is the only thing that makes it true for a row written outside
+  // the BFF. Asserting the *boundary* rather than an absurd value is deliberate:
+  // 300 must be accepted and 301 must not.
+  await seedCustomization();
+
+  await pool!.query("UPDATE guild_customization SET bio = $1 WHERE guild_id = $2", ["ا".repeat(300), GUILD_ID]);
+  await assert.rejects(
+    pool!.query("UPDATE guild_customization SET bio = $1 WHERE guild_id = $2", ["ا".repeat(301), GUILD_ID]),
+    /guild_customization_bio_check/,
+    "one character over the measured limit is refused"
   );
 });

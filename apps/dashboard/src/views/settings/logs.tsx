@@ -15,7 +15,6 @@ import {
   BotOff,
   Brush,
   CalendarCheck,
-  CalendarClock,
   CalendarDays,
   CalendarPlus,
   CalendarX,
@@ -32,8 +31,8 @@ import {
   Eraser,
   FileX2,
   Frown,
-  Gem,
   Hand,
+  Handshake,
   Hash,
   HeadphoneOff,
   Headphones,
@@ -57,7 +56,6 @@ import {
   MessageSquareMore,
   MessageSquareX,
   MessagesSquare,
-  Moon,
   PartyPopper,
   PenLine,
   Pencil,
@@ -72,10 +70,12 @@ import {
   Rocket,
   ScrollText,
   Search,
+  Scale,
   Send,
   Settings,
   Shield,
   ShieldAlert,
+  Trophy,
   ShieldCheck,
   ShieldPlus,
   ShieldX,
@@ -114,6 +114,8 @@ import { SaveBar } from "@/components/save-bar";
 import { Toaster, useToasts } from "@/components/toaster";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { StateBadge } from "@/components/state-badge";
+import { SearchableMultiSelect } from "@/components/searchable-multi-select";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -266,6 +268,10 @@ export const eventIcons: Record<string, LucideIcon> = {
   "server.invite-create": MailPlus,
   "invite.delete": Trash2,
   "invite.use": LogIn,
+  "invites.member-join": Handshake,
+  "invites.member-leave": LogOut,
+  "invites.milestone": Trophy,
+  "invites.admin-adjust": Scale,
 
   /* expression-log */
   "server.expression-create": Smile,
@@ -406,7 +412,10 @@ export const eventHints: Record<string, string> = {
   "server.invite-create": "عند إنشاء رابط دعوة.",
   "invite.delete": "عند حذف رابط دعوة.",
   "invite.use": "عند استخدام رابط دعوة للانضمام.",
-
+  "invites.member-join": "عند انضمام عضو عبر دعوة مُحسوبة لموديول الإحالات: الداعي والتصنيف (عادي/وهمي/عودة) وصافي الدعوات.",
+  "invites.member-leave": "عند مغادرة عضو كان قد دُعي عبر الإحالات، مع خصم النقطة من الداعي إن كانت محسوبة.",
+  "invites.milestone": "عند بلوغ داعٍ عتبة إحالات ومنحه البوت رتبة الإنجاز — أو سحبها عند نزول الصافي.",
+  "invites.admin-adjust": "عند تعديل يدوي على نقاط إحالات عضو عبر أمر الإدارة.",
   /* expression-log */
   "server.expression-create": "عند إضافة إيموجي للسيرفر.",
   "server.expression-delete": "عند حذف إيموجي.",
@@ -650,11 +659,15 @@ export function LogsView({ guild }: { guild: Guild }) {
     }
   };
 
-  /** Every channel the teardown would remove, for its confirmation dialog. */
-  const boundChannelCount =
-    (draft.globalChannelId ? 1 : 0) +
-    Object.values(draft.categoryChannels ?? {}).filter(Boolean).length +
-    Object.values(draft.eventChannels ?? {}).filter(Boolean).length;
+  /**
+   * Every channel the teardown would remove, for its confirmation dialog.
+   *
+   * The same number the status strip shows, from the same expression: two
+   * counts of the same thing could disagree, and the dialog is where a
+   * disagreement would be read as "the dialog is about to delete something
+   * else".
+   */
+  const boundChannelCount = channelsInUse;
 
   const needle = query.trim().toLowerCase();
   /**
@@ -681,25 +694,26 @@ export function LogsView({ guild }: { guild: Guild }) {
           four counters as pills on the other. They are derived from the draft,
           so they move with the operator's edits and never disagree with the
           switches below them. */}
-      <Card>
-        <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-              <ScrollText className="size-5" aria-hidden />
-            </span>
-            <div>
-              <p className="text-base font-bold">السجلات</p>
-              <p className="text-xs text-muted-foreground">تتبع جميع الأحداث في السيرفر</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <StatPill icon={Target} tone="text-sky-400" label="إجمالي السجلات" value={allRecords.length} />
-            <StatPill icon={CheckCircle2} tone="text-emerald-400" label="السجلات المفعلة" value={enabledCount} />
-            <StatPill icon={LayoutGrid} tone="text-violet-400" label="الأقسام" value={logCategories.length} />
-            <StatPill icon={Hash} tone="text-pink-400" label="القنوات المستخدمة" value={channelsInUse} />
-          </div>
-        </CardContent>
-      </Card>
+      {/*
+        The status strip.
+        *
+        * It used to be a banner with the page's own title, its description and
+        * four counters - three of which the section list beside it already
+        * showed (the total, the enabled count and the number of sections). What
+        * is left here is what the list cannot answer: how many events are on
+        * out of all of them, and how many channels the routing table currently
+        * binds - the number the teardown dialog is about to act on.
+      */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-card px-4 py-3">
+        <StatPill icon={CheckCircle2} tone="text-success" label="أحداث مفعّلة" value={`${enabledCount} من ${allRecords.length}`} />
+        <StatPill icon={Hash} tone="text-primary" label="قنوات مربوطة" value={channelsInUse} />
+        {coolingDown ? (
+          <Badge variant="outline" className="gap-1.5 border-warning/40 text-warning" dir="ltr">
+            <Settings className="size-3" />
+            إعداد القنوات متاح بعد قليل
+          </Badge>
+        ) : null}
+      </div>
 
       {/*
         The auto-setup card. Creating and deleting channels is a real change to
@@ -720,7 +734,7 @@ export function LogsView({ guild }: { guild: Guild }) {
               </div>
             </div>
             {coolingDown && (
-              <Badge variant="outline" className="gap-1.5 border-amber-500/40 text-amber-400" dir="ltr">
+              <Badge variant="outline" className="gap-1.5 border-warning/40 text-warning" dir="ltr">
                 <Hourglass className="size-3.5" aria-hidden />
                 {formatCooldown(cooldownRemaining)}
               </Badge>
@@ -775,11 +789,11 @@ export function LogsView({ guild }: { guild: Guild }) {
                   active={selection === category.id}
                   onClick={() => setSelection(category.id)}
                 >
-                  <span className="flex items-center gap-2">
-                    <Icon className="size-4 text-muted-foreground" aria-hidden />
-                    <span className="text-sm">{category.label}</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <span className="truncate text-sm">{category.label}</span>
                   </span>
-                  <Badge variant="secondary" className="tabular-nums" dir="ltr">
+                  <Badge variant="secondary" className="shrink-0 tabular-nums" dir="ltr">
                     {`${enabledInSection(category.id)}/${category.events.length}`}
                   </Badge>
                 </NavButton>
@@ -842,14 +856,18 @@ export function LogsView({ guild }: { guild: Guild }) {
             />
           ) : selection === GENERAL ? (
             <Card>
-              <CardHeader className="flex-row items-center justify-between space-y-0">
-                <CardTitle className="text-base">التسجيل المركزي</CardTitle>
-                <Switch
-                  checked={draft.enabled}
-                  aria-label="تفعيل السجلات"
-                  onCheckedChange={enabled => patch({ enabled })}
-                />
+              <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
+                <CardTitle className="min-w-0 text-base">التسجيل المركزي</CardTitle>
+                <div className="flex shrink-0 items-center gap-2">
+                  <StateBadge enabled={draft.enabled} />
+                  <Switch
+                    checked={draft.enabled}
+                    aria-label="تفعيل السجلات"
+                    onCheckedChange={enabled => patch({ enabled })}
+                  />
+                </div>
               </CardHeader>
+              {draft.enabled ? (
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>وضع التوزيع</Label>
@@ -907,66 +925,34 @@ export function LogsView({ guild }: { guild: Guild }) {
                 <Separator />
 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>القنوات المستثناة</Label>
-                    <ScrollArea className="h-36 rounded-md border border-border p-2">
-                      <div className="space-y-1.5">
-                        {textChannels.length === 0 && <p className="text-xs text-muted-foreground">لا توجد قنوات نصية</p>}
-                        {textChannels.map(channel => (
-                          <label
-                            key={channel.id}
-                            className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-accent"
-                          >
-                            <Checkbox
-                              checked={draft.ignoredChannelIds.includes(channel.id)}
-                              onCheckedChange={checked =>
-                                patch({
-                                  ignoredChannelIds: checked
-                                    ? [...draft.ignoredChannelIds, channel.id]
-                                    : draft.ignoredChannelIds.filter(id => id !== channel.id)
-                                })
-                              }
-                            />
-                            #{channel.name}
-                          </label>
-                        ))}
-                      </div>
-                    </ScrollArea>
-                    <p className="text-xs text-muted-foreground">لا يُسجَّل أي حدث يقع داخل هذه القنوات.</p>
-                  </div>
+                  <SearchableMultiSelect
+                    id="logs-ignored-channels"
+                    label="القنوات المستثناة"
+                    kind="text"
+                    hint="لا يُسجَّل أي حدث يقع داخل هذه القنوات."
+                    options={textChannels}
+                    selected={draft.ignoredChannelIds}
+                    onChange={ignoredChannelIds => patch({ ignoredChannelIds })}
+                  />
 
-                  <div className="space-y-2">
-                    <Label>الرتب المستثناة</Label>
-                    <ScrollArea className="h-36 rounded-md border border-border p-2">
-                      <div className="space-y-1.5">
-                        {roles.length === 0 && <p className="text-xs text-muted-foreground">لا توجد رتب</p>}
-                        {roles.map(role => (
-                          <label
-                            key={role.id}
-                            className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-accent"
-                          >
-                            <Checkbox
-                              checked={draft.ignoredRoleIds.includes(role.id)}
-                              onCheckedChange={checked =>
-                                patch({
-                                  ignoredRoleIds: checked
-                                    ? [...draft.ignoredRoleIds, role.id]
-                                    : draft.ignoredRoleIds.filter(id => id !== role.id)
-                                })
-                              }
-                            />
-                            <RoleSwatch color={role.color} />
-                            <span className="truncate">{role.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </ScrollArea>
-                    <p className="text-xs text-muted-foreground">
-                      من يحمل إحدى هذه الرتب لا يظهر في السجلات — سواء كان الفاعل أو الطرف المتأثر. مفيد لاستثناء البوتات.
-                    </p>
-                  </div>
+                  <SearchableMultiSelect
+                    id="logs-ignored-roles"
+                    label="الرتب المستثناة"
+                    kind="role"
+                    hint="من يحمل إحدى هذه الرتب لا يظهر في السجلات — سواء كان الفاعل أو الطرف المتأثر. مفيد لاستثناء البوتات."
+                    options={roles}
+                    selected={draft.ignoredRoleIds}
+                    onChange={ignoredRoleIds => patch({ ignoredRoleIds })}
+                  />
                 </div>
               </CardContent>
+              ) : (
+                <CardContent className="pt-0">
+                  <p className="py-4 text-center text-sm text-muted-foreground">
+                    السجلات <strong>مُعطّلة</strong> — فعّلها من المفتاح أعلى البطاقة لتظهر خيارات التوزيع والاستثناءات.
+                  </p>
+                </CardContent>
+              )}
             </Card>
           ) : selected ? (
             <SectionCard
@@ -1134,7 +1120,7 @@ function StatPill({
   icon: LucideIcon;
   tone: string;
   label: string;
-  value: number;
+  value: number | string;
 }) {
   return (
     <span className="flex items-center gap-2 rounded-full border border-border px-3 py-1.5">
@@ -1174,11 +1160,11 @@ function ChannelActionButton({
       disabled={disabled || busy}
       className={`rounded-lg border p-3 text-start transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
         destructive
-          ? "border-red-900/60 hover:border-red-700 hover:bg-red-950/40"
+          ? "border-destructive/50 hover:bg-destructive/10"
           : "border-border hover:border-primary/60 hover:bg-accent"
       }`}
     >
-      <span className={`block text-sm font-bold ${destructive ? "text-red-400" : ""}`}>{title}</span>
+      <span className={`block text-sm font-bold ${destructive ? "text-destructive" : ""}`}>{title}</span>
       <span className="mt-1 block text-xs text-muted-foreground">{busy ? "جارٍ التنفيذ…" : description}</span>
     </button>
   );

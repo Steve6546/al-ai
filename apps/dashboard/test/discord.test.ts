@@ -1,6 +1,7 @@
 import test, { after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import {
+  DiscordApiError,
   fetchBotHighestRolePosition,
   fetchBotPermissions,
   fetchGuildChannels,
@@ -8,7 +9,8 @@ import {
   fetchGuildPremiumTier,
   fetchGuildRoles,
   resetBotUserIdCache,
-  resetGuildReadCaches
+  resetGuildReadCaches,
+  resolveBotUserId
 } from "../server/discord.js";
 import { botIdentityPermissionStatus } from "../server/authorization.js";
 
@@ -136,6 +138,27 @@ test("an unreadable member object yields null, not a guessed position", async ()
 
   assert.equal(await fetchGuildHierarchy("token", GUILD_ID), null);
   assert.equal(await fetchBotHighestRolePosition("token", GUILD_ID), null);
+});
+
+/**
+ * The OAuth callback's self-sign-in guard reads the bot's own id to reject a
+ * code that somehow resolves to the application itself.
+ *
+ * That read is a safety net, not the gate: the operator's identity is already
+ * resolved with their own access token. When the read fails — a token rotated
+ * under a live process is the case that shipped this bug, and it took every
+ * sign-in down with «فشل تسجيل الدخول» — `resolveBotUserId` must reject so the
+ * caller can degrade, and the next caller must retry rather than inherit the
+ * failure for the life of the process.
+ */
+test("a dead bot token rejects instead of poisoning the cached bot user id", async () => {
+  routes = [{ match: "/users/@me", respond: failure(401, "401: Unauthorized") }];
+
+  await assert.rejects(() => resolveBotUserId("revoked-token"), DiscordApiError);
+
+  // No cached failure: a later caller with a working token resolves normally.
+  routes = [{ match: "/users/@me", respond: json({ id: BOT_USER_ID }) }];
+  assert.equal(await resolveBotUserId("good-token"), BOT_USER_ID);
 });
 
 test("an unreadable permission bitfield is null, which is not the same as 0n", async () => {

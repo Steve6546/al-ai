@@ -1,63 +1,177 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+/* HeroUI v3 — must come after Tailwind so its layers and components resolve
+   in order. The app sets `data-theme` on <html> (and the matching `light` /
+   `dark` class), which selects HeroUI's own semantic variables; our palette
+   below then refines the shared ones. */
+@import "@heroui/styles";
 
-/* AL AI is a dark-only product: the dark palette is the default. */
+/* AL AI's two palettes. The neutrals are true grey (hue 0) so nothing competes
+   with the brand, and the brand itself is one accent colour that the operator
+   can choose from a small, curated set. Both modes are the *same* design with
+   the lightness flipped - there is no separate "light theme" to drift from the
+   dark one. */
 @custom-variant dark (&:is(.dark *));
+
+/* HeroUI bridge. Our shadcn tokens and HeroUI's share some variable names
+   (--accent in particular), and the two systems mean different things by it:
+   ours is a quiet hover surface, HeroUI's is the brand action colour. The
+   HeroUI-flavoured screens and the shared wrappers opt in with `data-heroui`,
+   which scopes HeroUI's brand variables to that subtree only - legacy screens
+   keep their neutral accent until they are migrated too. */
+[data-heroui] {
+  --accent: var(--primary);
+  --accent-foreground: var(--primary-foreground);
+}
+
+/* ------------------------------------------------------------------ *
+ * Accents
+ *
+ * One hue and one chroma per choice; the mode decides the lightness. The
+ * foreground is stated per accent, because a light amber needs dark text and
+ * the rest take white.
+ * ------------------------------------------------------------------ */
+:root {
+  --accent-h: 262;
+  --accent-c: 0.19;
+  --accent-l: 0.55;
+  --primary-foreground: oklch(0.99 0 0);
+}
+
+[data-accent="violet"] {
+  --accent-h: 292;
+  --accent-c: 0.17;
+  --accent-l: 0.55;
+  --primary-foreground: oklch(0.99 0 0);
+}
+
+[data-accent="emerald"] {
+  --accent-h: 158;
+  --accent-c: 0.14;
+  --accent-l: 0.52;
+  --primary-foreground: oklch(0.99 0 0);
+}
+
+[data-accent="amber"] {
+  --accent-h: 72;
+  --accent-c: 0.15;
+  /* Amber is a light colour: it needs a higher lightness to carry dark text,
+     and dark text is what it gets. */
+  --accent-l: 0.68;
+  --primary-foreground: oklch(0.22 0.02 72);
+}
+
+[data-accent="rose"] {
+  --accent-h: 18;
+  --accent-c: 0.18;
+  --accent-l: 0.55;
+  --primary-foreground: oklch(0.99 0 0);
+}
 
 :root {
   --radius: 0.7rem;
 
-  /* Dark-only palette. The neutrals are true grey (hue 0) so nothing competes
-     with the brand, and the brand itself is AL AI's blue — the same #3b82f6
-     every log embed ships with by default, so the chrome and the content the
-     bot posts read as one product.
+  /* The light palette: a white page, near-black text, and a brand that carries
+     the only chroma on the screen. Every neutral is a true grey, so the accent
+     is the one thing that draws the eye. */
+  color-scheme: light;
 
-     `--primary` was left at shadcn's near-white default once, which made every
-     primary button render as a white box with dark text: on a dark page that
-     reads as plain text rather than as the one action to take. Anything tinted
-     here must stay legible against `--background`, so the blue sits at 600
-     (≈6:1 with white text) rather than a lighter step. */
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
+  --background: oklch(0.99 0 0);
+  --foreground: oklch(0.24 0.005 285.8);
 
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.24 0.005 285.8);
 
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.24 0.005 285.8);
 
-  /* AL AI blue (blue-600) — the embed default, not a second brand colour. */
-  --primary: oklch(0.546 0.245 262.881);
-  --primary-foreground: oklch(0.985 0 0);
+  /* The brand. A single step for both modes: the colour must read as the same
+     brand whether the page behind it is white or near-black. The foreground
+     comes from the accent block above, because a light amber needs dark text
+     and every other accent takes white. */
+  --primary: oklch(var(--accent-l) var(--accent-c) var(--accent-h));
+
+  --secondary: oklch(0.955 0.002 285.8);
+  --secondary-foreground: oklch(0.28 0.005 285.8);
+
+  --muted: oklch(0.955 0.002 285.8);
+  --muted-foreground: oklch(0.52 0.008 285.8);
+
+  --accent: oklch(0.955 0.002 285.8);
+  --accent-foreground: oklch(0.28 0.005 285.8);
+
+  --destructive: oklch(0.55 0.21 27);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --success: oklch(0.52 0.13 155);
+  --success-foreground: oklch(0.99 0 0);
+
+  --warning: oklch(0.68 0.15 75);
+  --warning-foreground: oklch(0.22 0.02 75);
+
+  --border: oklch(0 0 0 / 12%);
+  --input: oklch(0 0 0 / 18%);
+  /* Focus rings carry the brand, so a keyboard user can see where they are. */
+  --ring: oklch(0.55 var(--accent-c) var(--accent-h));
+
+  --sidebar: oklch(0.975 0.002 285.8);
+  --sidebar-foreground: oklch(0.24 0.005 285.8);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: oklch(0.94 0.003 285.8);
+  --sidebar-accent-foreground: oklch(0.24 0.005 285.8);
+  --sidebar-border: oklch(0 0 0 / 10%);
+  --sidebar-ring: var(--ring);
+}
+
+.dark,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: oklch(0.145 0.004 285.8);
+  --foreground: oklch(0.97 0 0);
+
+  --card: oklch(0.205 0.006 285.8);
+  --card-foreground: oklch(0.97 0 0);
+
+  --popover: oklch(0.205 0.006 285.8);
+  --popover-foreground: oklch(0.97 0 0);
+
+  /* The same brand, a step lighter for the dark page: a saturated blue at the
+     light step's lightness sits too close to the background to read as a
+     button. The foreground is the accent's own, unchanged by the mode. */
+  --primary: oklch(var(--accent-l) var(--accent-c) var(--accent-h));
 
   --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
+  --secondary-foreground: oklch(0.97 0 0);
 
   --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
+  --muted-foreground: oklch(0.72 0 0);
 
   --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --accent-foreground: oklch(0.97 0 0);
 
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.99 0 0);
 
-  --success: oklch(0.72 0.166 152);
-  --warning: oklch(0.79 0.155 78);
+  --success: oklch(0.72 0.15 152);
+  --success-foreground: oklch(0.16 0.02 152);
 
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  /* Focus rings carry the brand, so a keyboard user can see where they are. */
-  --ring: oklch(0.623 0.214 259.815);
+  --warning: oklch(0.79 0.14 78);
+  --warning-foreground: oklch(0.2 0.02 78);
 
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.546 0.245 262.881);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.66 var(--accent-c) var(--accent-h));
+
+  --sidebar: oklch(0.185 0.005 285.8);
+  --sidebar-foreground: oklch(0.97 0 0);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-accent-foreground: oklch(0.97 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.623 0.214 259.815);
+  --sidebar-ring: var(--ring);
 }
 
 @theme inline {
@@ -105,10 +219,6 @@
     border-color: var(--border);
   }
 
-  html {
-    color-scheme: dark;
-  }
-
   /*
    * The frame is exactly one viewport tall, and the *document* never scrolls.
    *
@@ -146,5 +256,70 @@
   .tabular {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
+  }
+
+  /*
+   * A visible focus ring on everything focusable. The components that carry
+   * their own ring (the buttons) keep it; this is the floor for the links and
+   * inputs that do not, so a keyboard user is never left guessing where the
+   * caret is.
+   */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /*
+   * The motion budget: short, and gone entirely when the reader has asked for
+   * less of it. A dashboard is a work surface, not a showcase - a transition
+   * that takes a fifth of a second to dismiss a menu is a transition that has
+   * been in the way five times.
+   */
+  .transition-ui {
+    transition-duration: 140ms;
+    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Mobile hardening (added with the responsive-layout pass).
+ *
+ * Tailwind's preflight already owns box-sizing: border-box globally, so the
+ * fixes here are the two things preflight does not give: a scroll strip that
+ * hides its scrollbar without disabling touch or keyboard scrolling, and a
+ * guard against text being the thing that decides a container's width —
+ * long Arabic labels inside flex rows used to push their card past the
+ * viewport instead of wrapping or truncating.
+ * ------------------------------------------------------------------ */
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@layer base {
+  /* Long unbroken tokens — snowflake ids, URLs, code spans — overflow a
+     320px card rather than wrap; let the word break instead of the layout. */
+  body {
+    overflow-wrap: break-word;
   }
 }

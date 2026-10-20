@@ -143,47 +143,118 @@ test("the caller's guild list is read only through loadUserGuilds", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * The global bot identity route
+ * The bot's presence route
  *
- * It is the one guild-sensitive route that carries no `:guildId` in its path —
- * the guild arrives in the body, because the identity itself belongs to no
+ * It is the one account-wide route that carries no `:guildId` in its path — the
+ * guild arrives in the body, because a status belongs to the bot and not to a
  * guild. That makes it invisible to the scanner above, so it is asserted here
  * explicitly rather than left relying on a convention it does not follow.
  * ------------------------------------------------------------------ */
 
-const identityRoute = routes.find(route => route.path === "/api/bot/identity" && route.method === "PUT");
-const identityRead = routes.find(route => route.path === "/api/bot/identity" && route.method === "GET");
+const presenceRoute = routes.find(route => route.path === "/api/bot/presence" && route.method === "PUT");
+const presenceRead = routes.find(route => route.path === "/api/bot/presence" && route.method === "GET");
 
-test("the global identity write route exists and is scanned", () => {
-  assert.ok(identityRoute, "PUT /api/bot/identity is declared");
+test("the presence write route exists and is scanned", () => {
+  assert.ok(presenceRoute, "PUT /api/bot/presence is declared");
 });
 
-test("the global identity write resolves the caller's tier in a guild from the body", () => {
-  const body = identityRoute!.body;
+test("the presence write is gated to the platform owner on the server", () => {
+  const body = presenceRoute!.body;
 
-  // The guild is a *location to check*, never a claim. The tier must be resolved
-  // server-side from it, which is what `requireTierForGuild` does — it re-reads
-  // the caller's roles from Discord rather than trusting anything sent up.
-  assert.match(body, /requireTierForGuild\(/, "the write re-resolves the tier on the server");
-  assert.match(body, /normaliseSnowflake\(body\??\.guildId\)/, "the guild id is validated before it is used");
-
-  // A route that checked only for a session would let any signed-in account
-  // rewrite the bot's profile across every guild.
-  assert.doesNotMatch(body, /const\s+\w+\s*=\s*await requireSession\(/, "a bare session check is not enough");
+  // The value being edited is the bot's: one status on one gateway connection,
+  // identical in every guild. Standing in any single guild is therefore the
+  // wrong currency — and handing this to a guild admin would give them a switch
+  // that changes every other server, which is precisely the cross-server reach
+  // the identity screen was stripped of. The guildId stays mandatory as the
+  // *location* the audit trail names and the place the caller's tier is
+  // resolved.
+  assert.match(body, /requirePlatformOwner\(/, "the write goes through the platform-owner gate");
+  assert.match(body, /normaliseSnowflake\(body\?\.guildId\)/, "the guild id is validated before it is used");
+  assert.doesNotMatch(body, /requireTierForGuild\(/, "a guild tier does not authorise an account-wide write");
 });
 
-test("the global identity read requires guild standing, not just a session", () => {
-  assert.ok(identityRead, "GET /api/bot/identity is declared");
-  // The read once stopped at a bare session, which let any signed-in Discord
-  // account — reachable through the tunnel — read the bot's stored profile. It
-  // now resolves the caller's tier in the guildId the client already sends,
-  // the same shape the write uses, floored at the screen's own visibility rule.
-  assert.match(identityRead!.body, /requireTierForGuild\(/, "the read re-resolves standing per guild");
-  assert.doesNotMatch(identityRead!.body, /const\s+\w+\s*=\s*await readSession\(/, "a bare session check is not enough");
+test("the presence read carries the same gate as the write", () => {
+  assert.ok(presenceRead, "GET /api/bot/presence is declared");
+  assert.match(presenceRead!.body, /requirePlatformOwner\(/, "the read goes through the platform-owner gate");
+  assert.doesNotMatch(presenceRead!.body, /requireTierForGuild\(/, "a guild tier does not widen the read");
 });
 
-test("the global identity write refuses a body with no guild to authorise against", () => {
+test("the presence write refuses a body with no guild to authorise against", () => {
   // Without a guild there is nowhere to resolve standing, and the honest answer
   // is a 400 — not a default that silently grants or denies.
-  assert.match(identityRoute!.body, /GUILD_ID_REQUIRED/, "a missing guild id is refused with a reason");
+  assert.match(presenceRoute!.body, /GUILD_ID_REQUIRED/, "a missing guild id is refused with a reason");
+});
+
+test("the presence write makes no Discord call, because there is none to make", () => {
+  // A status lives on the gateway connection and the *bot* applies it; the
+  // dashboard can only store the choice. A route that ran the appearance writer
+  // here, or that answered with an `applied` list, would be reporting a write
+  // that never happened — the "محفوظ ≠ منفّذ" defect arriving from the other
+  // direction.
+  const body = presenceRoute!.body;
+  assert.doesNotMatch(body, /applyAppearance\(/, "the presence is not written through the appearance writer");
+  assert.doesNotMatch(body, /applied:/, "and no field outcome is invented for it");
+});
+
+/* ------------------------------------------------------------------ *
+ * The identity screen's write is a guild admin's
+ *
+ * The screen is 100% server-scoped now, and this is the other half of that
+ * claim: every field on it must be editable by whoever may administer the
+ * server, with no platform-owner gate and no per-field restriction. The
+ * `:guildId` scanner above already proves it goes through the admin tier; this
+ * pins that nothing owner-only was left on it by accident.
+ * ------------------------------------------------------------------ */
+
+const customizationWrite = routes.find(route => route.path === "/api/guilds/:guildId/customization" && route.method === "PUT");
+
+test("every identity field is writable by a guild admin, with no owner gate", () => {
+  assert.ok(customizationWrite, "PUT /api/guilds/:guildId/customization is declared");
+  const body = customizationWrite!.body;
+
+  assert.match(body, /requireTierForGuild\(/, "the write resolves the caller's tier in this guild");
+  assert.doesNotMatch(body, /requirePlatformOwner\(/, "and nothing on it is reserved for the platform owner");
+  assert.doesNotMatch(body, /GLOBAL_APPEARANCE_FIELDS/, "there is no separate set of account-wide fields to gate");
+});
+
+test("the identity write accepts the four member fields the screen offers", () => {
+  // Nickname, avatar, banner and bio travel in one Modify Current Member call.
+  // A route that silently ignored one of them would leave a control that saves
+  // and changes nothing.
+  const body = customizationWrite!.body;
+  for (const field of ["nickname", "avatarDataUrl", "bannerDataUrl", "bio"]) {
+    assert.match(body, new RegExp(field), `${field} is handled by the route`);
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * The overview metrics route
+ *
+ * The bot status card is the whole point of the overview, and it has exactly
+ * one input: `guild_health`. `deriveBotStatus` cannot separate "no row" from
+ * "the read threw", because both reach it as `null` — and `null` is what the
+ * screen renders as «لم يُشغّل بعد», "start the bot and reload". A read failure
+ * would therefore be presented as a dead bot and send the operator to restart
+ * a process that is healthy, while the real fault is the dashboard's own
+ * database. The route must fail the request instead of guessing.
+ * ------------------------------------------------------------------ */
+
+const metricsRoute = routes.find(route => route.path === "/api/guilds/:guildId/metrics" && route.method === "GET");
+
+test("the overview metrics route is scanned", () => {
+  assert.ok(metricsRoute, "GET /api/guilds/:guildId/metrics is declared");
+});
+
+test("the overview metrics route does not swallow a heartbeat read failure as «never started»", () => {
+  const body = metricsRoute!.body;
+
+  // The four supporting reads stay best-effort: an empty activity feed and an
+  // unknown member count degrade honestly. The heartbeat read cannot, because
+  // its failure mode is a false diagnosis rather than missing data.
+  assert.doesNotMatch(
+    body,
+    /getGuildHealth\([^)]*\)\s*\.catch\(\(\)\s*=>\s*null\)/,
+    "a failed heartbeat read must not become the «bot was never started» state"
+  );
+  assert.match(body, /METRICS_UNAVAILABLE/, "a failed heartbeat read answers with a named error");
 });

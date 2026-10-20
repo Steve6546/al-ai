@@ -10,7 +10,11 @@ export { SecurityView } from "./security";
 
 export { CommandsView } from "./settings/commands";
 export { CustomizationView } from "./settings/customization";
+export { BotPresenceView } from "./settings/bot-presence";
+export { InvitesView } from "./settings/invites";
+export { LevelsView } from "./settings/levels";
 export { LogsView } from "./settings/logs";
 export { NetworkView } from "./settings/network";
 export { RolesView } from "./settings/roles";
+export { WelcomeMessagesView } from "./settings/welcome-messages";
 export { WelcomeView } from "./settings/welcome";

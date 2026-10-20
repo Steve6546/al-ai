@@ -1,32 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, IdCard, Image as ImageIcon, Loader2, Lock, Palette, Upload, X } from "lucide-react";
 import {
-  CircleHelp,
-  Globe,
-  Info,
-  Loader2,
-  Lock,
-  Palette,
-  RotateCcw,
-  Server,
-  TriangleAlert,
-  Upload
-} from "lucide-react";
-import {
-  DEFAULT_BOT_IDENTITY,
   DEFAULT_CUSTOMIZATION,
-  MAX_ACTIVITY_TEXT_LENGTH,
   MAX_BIO_LENGTH,
+  MAX_IMAGE_DATA_URL_LENGTH,
   MAX_NICKNAME_LENGTH,
-  activityTypeLabels,
-  activityTypes,
   describeAppearanceResult
 } from "@al-ai/core/browser";
 import { api } from "@/api";
 import { useDraftForm } from "@/lib/use-draft-form";
+import { cn } from "@/lib/utils";
 import { ColorPicker } from "@/components/color-picker";
-import { ImageCropper, ImagePickerButton, readImageFile, type CropTarget, type LoadedImage } from "@/components/image-cropper";
 import { SaveBar } from "@/components/save-bar";
-import { StatusPicker } from "@/components/status-picker";
 import { Toaster, useToasts } from "@/components/toaster";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -34,151 +19,288 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { BotLivePreview } from "@/views/settings/bot-preview";
-import type {
-  BotIdentitySettings,
-  BotIdentitySnapshot,
-  CustomizationSettings,
-  Guild,
-  PermissionStatus,
-  RoleHierarchyVerdict,
-  RoleIconGate
-} from "@/types";
+import type { CustomizationSettings, Guild, GuildProfileSnapshot, PermissionStatus, RoleIconGate } from "@/types";
 
 /**
- * Bot appearance — both scopes on one screen.
+ * The bot's profile in ONE server.
  *
- * Discord splits a bot's identity in two, and the split is the whole reason this
- * screen is shaped the way it is:
+ *   header    — title, and the master switch for THIS server's profile
+ *   right     — the form: الهوية, الصور, رتبة البوت
+ *   left      — the live preview card, bound to the drafts, never to storage
  *
- *   global     — the account avatar and banner, the application's "About me",
- *                and the gateway presence (status + activity)
- *   per guild  — the nickname, and the colour and icon of the AL AI role
+ * Every field on this screen is scoped to the guild in the address bar, and that
+ * is now the whole truth rather than half of it. Discord's Modify Current Member
+ * endpoint accepts a nickname, an avatar, a banner and a bio together, so all
+ * four are per-server; the role's colour and icon belong to a role that only
+ * exists here. Nothing on this form reaches another server, which is why there
+ * are no scope chips left to read: a chip that says «هذا السيرفر» beside every
+ * field of a one-scope form is noise, and the sentence belongs in the header.
  *
- * An earlier build only exposed the per-guild half, and the predictable mistake
- * followed: an operator looking for "the bot's picture" found a nickname and a
- * role colour and concluded the feature was missing. So the two scopes now live
- * side by side, each labelled, with a live preview that draws both at once — the
- * preview is what makes "this field is global" land, not a sentence saying so.
+ * The presence is deliberately *not* here. A status lives on the bot's gateway
+ * connection and is therefore identical in every server — a control that reaches
+ * everywhere cannot sit on a form whose whole promise is «هذا ما يظهر به البوت
+ * هنا». It has its own screen, «حالة البوت», and this one says so.
  *
- * Each scope saves on its own route and reports on its own, because each has a
- * different writer: the dashboard performs the REST writes (it can read back the
- * real per-field outcome), and the bot performs the presence write on its sync
- * tick (only a live gateway connection can set a status). A single Save button
- * would have to lie about one of them.
- *
- * Nothing here is optimistic. "محفوظ" and "منفّذ" stay distinct: the row is
- * written first and always, and what Discord actually accepted arrives as
- * `applied`/`failed` and is reported per field.
+ * Nothing here is optimistic: the row is written first, and what Discord
+ * accepted arrives as `applied`/`failed` and is reported per field.
  */
 
-/** Which cropper is open, if any. */
-type CropState = { target: CropTarget; image: LoadedImage } | null;
+const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
+
+/** Reads an image file into a capped base64 data URL, or fails with a reason. */
+function readImageAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith("image/")) {
+      reject(new Error("الملف ليس صورة. استخدم PNG أو JPG أو WEBP أو GIF."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result);
+      if (dataUrl.length > MAX_IMAGE_DATA_URL_LENGTH) {
+        reject(new Error("حجم الصورة يتجاوز الحد المسموح (500 كيلوبايت تقريباً بعد الترميز)."));
+        return;
+      }
+      resolve(dataUrl);
+    };
+    reader.onerror = () => reject(new Error("تعذّر قراءة الصورة."));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * One image slot: a single drop zone that *is* the preview.
+ *
+ * It used to render the same image three times over — a thumbnail beside the
+ * zone, the zone itself, and a file bar — which read as three controls for one
+ * value. Now there is one zone: it shows the stored image or the fallback, and
+ * grows استبدال/إزالة only when there is something to replace.
+ */
+function ImageSlot({
+  label,
+  hint,
+  dataUrl,
+  fallbackLabel,
+  fileName,
+  urlText = "",
+  onUrlText,
+  onPick,
+  onDrop,
+  onRemove,
+  round = false,
+  disabled = false
+}: {
+  label: string;
+  hint: string;
+  dataUrl: string | null;
+  fallbackLabel: string;
+  fileName: string;
+  urlText?: string;
+  onUrlText?: (next: string) => void;
+  onPick: () => void;
+  onDrop: (file: File | undefined) => void;
+  onRemove: () => void;
+  round?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <Label className="flex items-center gap-1.5 text-xs font-medium">{label}</Label>
+        {dataUrl ? (
+          <span className="flex items-center gap-1 text-[11px] text-success">
+            <CheckCircle2 className="size-3.5" aria-hidden />
+            جاهزة للحفظ
+          </span>
+        ) : null}
+      </div>
+
+      <div
+        className={cn(
+          "flex items-center gap-3 rounded-xl border border-dashed border-border p-3 transition-colors",
+          !disabled && "hover:border-primary/50 hover:bg-primary/5"
+        )}
+        onDragOver={event => event.preventDefault()}
+        onDrop={event => {
+          event.preventDefault();
+          if (!disabled) onDrop(event.dataTransfer.files?.[0]);
+        }}
+      >
+        <span
+          className={cn(
+            "grid size-16 shrink-0 place-items-center overflow-hidden border border-border bg-muted text-center text-[9px] leading-tight text-muted-foreground",
+            round ? "rounded-full" : "rounded-lg"
+          )}
+        >
+          {dataUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={dataUrl} alt="" className="size-full object-cover" />
+          ) : (
+            fallbackLabel
+          )}
+        </span>
+
+        <div className="min-w-0 flex-1 space-y-2">
+          <p className="text-[11px] leading-relaxed text-muted-foreground">{hint}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={onPick} disabled={disabled}>
+              <Upload className="size-3.5" />
+              {dataUrl ? "استبدال" : "اختر صورة"}
+            </Button>
+            {dataUrl ? (
+              <>
+                <span className="max-w-40 truncate text-[11px] text-muted-foreground" dir="ltr">
+                  {fileName}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="hover:text-destructive"
+                  disabled={disabled}
+                  aria-label={`إزالة ${label}`}
+                  onClick={onRemove}
+                >
+                  <X className="size-3.5" />
+                  إزالة
+                </Button>
+              </>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <Input
+        dir="ltr"
+        value={urlText}
+        onChange={event => onUrlText?.(event.target.value)}
+        placeholder="أو الصق رابط صورة مباشر (https://…)"
+        className="h-8 rounded-lg text-xs"
+        aria-label={`رابط ${label}`}
+        disabled={disabled}
+      />
+    </div>
+  );
+}
+
+/** The `n/max` counter that sits opposite a card title. */
+function Counter({ value, max }: { value: number; max: number }) {
+  return (
+    <span className="tabular text-xs text-muted-foreground">
+      {value}/{max}
+    </span>
+  );
+}
+
+/**
+ * The first candidate that is actually an image address.
+ *
+ * `??` is not enough here and the difference is not academic: these columns
+ * hold `''` for "no image" on this machine (`role_icon_url`, `status_duration`
+ * and the rest were all read back as empty strings), and an empty string is
+ * *not* nullish — so `stored ?? snapshot` returned the empty string and the
+ * preview drew the initials over a bot that has a perfectly good avatar. The
+ * fallback chain has to skip blanks, not just nulls.
+ */
+function firstImage(...candidates: (string | null | undefined)[]): string | null {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim() !== "") return candidate;
+  }
+  return null;
+}
 
 export function CustomizationView({ guild }: { guild: Guild }) {
-  /* ---- per-guild scope ---- */
   const [guildSettings, setGuildSettings] = useState<CustomizationSettings | null>(null);
   const guildForm = useDraftForm(guildSettings);
 
-  /* ---- global scope ---- */
-  const [identitySettings, setIdentitySettings] = useState<BotIdentitySettings | null>(null);
-  const identityForm = useDraftForm(identitySettings);
-  const [snapshot, setSnapshot] = useState<BotIdentitySnapshot | null>(null);
+  /**
+   * What Discord serves for the bot in this guild right now.
+   *
+   * The preview needs it for the same reason the form needs the row: the row is
+   * what the operator last chose *here*, and this is what members actually see —
+   * including a nickname set from Discord itself, and the account's picture
+   * wherever this server has no override. It is this server's own data, so there
+   * is nothing owner-gated about reading it.
+   */
+  const [profile, setProfile] = useState<GuildProfileSnapshot | null>(null);
 
   /* ---- advisory reads ---- */
   const [permissions, setPermissions] = useState<PermissionStatus[]>([]);
-  const [hierarchy, setHierarchy] = useState<RoleHierarchyVerdict | null>(null);
   const [roleIcon, setRoleIcon] = useState<RoleIconGate | null>(null);
 
+  /* ---- pending pasted URLs (fetched server-side at save time) ---- */
+  const [avatarUrlText, setAvatarUrlText] = useState("");
+  const [bannerUrlText, setBannerUrlText] = useState("");
+  /* ---- display-only names of the last picked files ---- */
+  const [fileNames, setFileNames] = useState<{ avatar?: string; banner?: string; roleIcon?: string }>({});
+
   const [error, setError] = useState<string | null>(null);
-  const [crop, setCrop] = useState<CropState>(null);
-  const [cropError, setCropError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const pendingTarget = useRef<CropTarget>("avatar");
+  const pendingTarget = useRef<"avatar" | "banner" | "roleIcon">("avatar");
   const { toasts, push, dismiss } = useToasts();
 
   useEffect(() => {
     let cancelled = false;
     setGuildSettings(null);
-    setIdentitySettings(null);
-    setHierarchy(null);
+    setProfile(null);
     setRoleIcon(null);
     setError(null);
+    setAvatarUrlText("");
+    setBannerUrlText("");
 
-    // Both halves are fetched together but neither is required for the other to
-    // render: the per-guild read is what gates the screen, and the global read
-    // degrades to "not readable" rather than blanking the form the operator came
-    // here to use.
     api
       .customization(guild.id)
       .then(result => {
         if (cancelled) return;
         setGuildSettings(result.settings);
         setPermissions(result.permissions);
-        setHierarchy(result.hierarchy);
         setRoleIcon(result.roleIcon);
+        setProfile(result.profile ?? null);
       })
       .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
-
-    api
-      .botIdentity(guild.id)
-      .then(result => {
-        if (cancelled) return;
-        setIdentitySettings(result.settings);
-        setSnapshot(result.snapshot);
-      })
-      .catch(cause => {
-        if (cancelled) return;
-        // The global half unreadable must not present an editable form whose
-        // save would overwrite values it never read. Clearing the source keeps
-        // the form inert, and the toast says why.
-        setIdentitySettings(null);
-        push({
-          tone: "error",
-          title: "تعذّر تحميل الهوية العالمية",
-          description: cause instanceof Error ? cause.message : "أعد تحميل الصفحة."
-        });
-      });
 
     return () => {
       cancelled = true;
     };
-    // `push` is stable for the life of the screen; re-running on it would refetch
-    // on every toast.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guild.id]);
 
-  /* ---------------------------------------------------------------- *
-   * The preview source
+  /*
+   * The preview draws the drafts — a picked file or a pasted URL lands here the
+   * instant it is chosen, with no save and no refetch.
    *
-   * Every hook in this component must run on *every* render, including the
-   * loading one, and this one sits above the two early returns below for
-   * exactly that reason. Placed after them — where it reads more naturally —
-   * the loading pass calls 15 hooks and the loaded pass calls 16, and React
-   * answers with "Rendered more hooks than during the previous render". That
-   * error unmounts the tree: the operator clicks "هوية البوت", the spinner
-   * shows, and the screen goes black the instant the data lands.
-   * ---------------------------------------------------------------- */
-  /** Whatever the preview should draw: the draft when there is one, else stored. */
-  const previewIdentity = useMemo(() => {
-    const source = identityForm.draft ?? identityForm.saved ?? DEFAULT_BOT_IDENTITY;
+   * The fallback chain is the one Discord itself walks, and it has to walk it in
+   * this order: the draft (what you just picked), then what Discord serves for
+   * this guild, then the account's picture, which is what a member sees where
+   * this server has no override. Skipping the last step would draw the initials
+   * over a bot whose face is perfectly visible to everybody.
+   *
+   * With the master switch off the server's own values are all cleared, so the
+   * live per-guild values are skipped as well and the account's show through —
+   * which is exactly what the switch means.
+   */
+  const preview = useMemo(() => {
+    const draft = guildForm.draft ?? guildForm.saved ?? DEFAULT_CUSTOMIZATION;
+    const enabled = draft.enabled;
     return {
-      username: snapshot?.username ?? "AL AI",
-      // The draft's data URL wins while cropping; otherwise fall back to the CDN
-      // address Discord serves, so the preview shows what actually exists today.
-      avatarDataUrl: source.avatarDataUrl ?? snapshot?.avatarUrl ?? null,
-      bannerDataUrl: source.bannerDataUrl ?? snapshot?.bannerUrl ?? null,
-      bio: source.bio,
-      status: source.status,
-      activityType: source.activityType,
-      activityText: source.activityText,
-      statusDuration: source.statusDuration
+      username: profile?.username ?? "AL AI",
+      nickname: enabled ? draft.nickname : "",
+      // A pasted URL previews directly: <img> needs no CORS to display. It is a
+      // value for THIS server, so it belongs in the server slot and not in the
+      // fallback.
+      serverAvatarDataUrl: enabled ? firstImage(avatarUrlText, draft.avatarDataUrl) : null,
+      serverBannerDataUrl: enabled ? firstImage(bannerUrlText, draft.bannerDataUrl) : null,
+      accountAvatarUrl: profile?.accountAvatarUrl ?? null,
+      accountBannerUrl: profile?.accountBannerUrl ?? null,
+      bio: enabled ? draft.bio : "",
+      roleColor: draft.roleColor,
+      roleIconUrl: draft.roleIconUrl
     };
-  }, [identityForm.draft, identityForm.saved, snapshot]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guildForm.draft, guildForm.saved, profile, avatarUrlText, bannerUrlText]);
 
   if (error) {
     return (
@@ -196,493 +318,370 @@ export function CustomizationView({ guild }: { guild: Guild }) {
     );
   }
 
-  const { draft: guildDraft, patch: patchGuild } = guildForm;
-  const { draft: identityDraft, patch: patchIdentity } = identityForm;
+  const { draft, patch, reset, dirty } = guildForm;
 
-  const guildDirty = guildForm.dirty;
-  const identityDirty = identityForm.dirty;
-
-  const nicknamePermission = permissions.find(item => item.key === "change_nickname");
-  // Only a *known* absence blocks the save. `granted` is null when the permission
-  // read failed, and treating that as a refusal would disable Save for every
-  // guild whenever Discord had a hiccup.
-  const canSaveGuild =
-    guild.canManageIdentity && nicknamePermission?.granted !== false && guildDraft.nickname.length <= MAX_NICKNAME_LENGTH;
+  /*
+   * Who may change what, resolved once.
+   *
+   * `canManageIdentity` is the server's verdict on the screen; the permission
+   * read adds the one thing the server cannot know in advance — whether the bot
+   * itself may rename a member here. All four member fields travel in one
+   * Modify Current Member call and all four need Change Nickname, so a missing
+   * permission blocks all four together rather than pretending the avatar might
+   * still work.
+   */
+  const memberPermission = permissions.find(item => item.key === "change_nickname");
+  const memberBlocked = memberPermission?.granted === false;
+  const memberEditable = guild.canManageIdentity && !memberBlocked && draft.enabled;
+  const roleEditable = guild.canManageIdentity;
   const permissionsUnreadable = permissions.length > 0 && permissions.every(permission => permission.granted === null);
 
-  /* ---------------------------------------------------------------- *
-   * Image picking
-   * ---------------------------------------------------------------- */
-  const openPicker = (target: CropTarget) => {
+  /* A pasted URL is a pending change too — the bar must not hide it. */
+  const urlsPending = avatarUrlText.trim() !== "" || bannerUrlText.trim() !== "";
+  const anyDirty = dirty || urlsPending;
+
+  /* ---------------- image picking (direct, no crop round-trip) ---------------- */
+  const openPicker = (target: "avatar" | "banner" | "roleIcon") => {
     pendingTarget.current = target;
-    setCropError(null);
     fileInputRef.current?.click();
   };
 
   const onFileChosen = async (file: File | undefined) => {
     if (!file) return;
     try {
-      const loaded = await readImageFile(file);
-      setCrop({ target: pendingTarget.current, image: loaded });
-      setCropError(null);
+      const dataUrl = await readImageAsDataUrl(file);
+      const target = pendingTarget.current;
+      if (target === "avatar") {
+        patch({ avatarDataUrl: dataUrl });
+        setFileNames(current => ({ ...current, avatar: file.name }));
+      } else if (target === "banner") {
+        patch({ bannerDataUrl: dataUrl });
+        setFileNames(current => ({ ...current, banner: file.name }));
+      } else {
+        patch({ roleIconUrl: dataUrl });
+        setFileNames(current => ({ ...current, roleIcon: file.name }));
+      }
+      setAvatarUrlText("");
+      setBannerUrlText("");
     } catch (cause) {
-      setCropError(cause instanceof Error ? cause.message : "تعذّر قراءة الصورة.");
+      push({ tone: "error", title: cause instanceof Error ? cause.message : "تعذّر قراءة الصورة." });
     }
   };
 
-  const applyCrop = (dataUrl: string) => {
-    if (!crop) return;
-    if (crop.target === "roleIcon") patchGuild({ roleIconUrl: dataUrl });
-    else if (crop.target === "avatar") patchIdentity({ avatarDataUrl: dataUrl });
-    else patchIdentity({ bannerDataUrl: dataUrl });
-    setCrop(null);
-  };
-
-  /* ---------------------------------------------------------------- *
-   * Saving
-   *
-   * The two scopes are saved one after the other and reported separately, so a
-   * refusal on the nickname cannot be presented as a refusal of the avatar.
-   * ---------------------------------------------------------------- */
-  const saveGuild = async () => {
-    // Below boost level 2 the icon is disabled, so it is left out of the request
-    // entirely rather than sent and refused. On the server an absent field means
-    // "leave it alone", which is what lets the nickname and the colour save in
-    // one click: the 409 that used to answer here failed the whole form — and
-    // with it the fields that were perfectly valid — over one gated control.
-    const payload: Partial<CustomizationSettings> = { ...guildDraft };
+  /* ---------------- saving ---------------- */
+  const save = async () => {
+    const payload: Partial<CustomizationSettings> = { ...draft };
+    // A locked icon is omitted rather than echoed back: the server reads an
+    // absent field as "leave it alone" and a `null` as "clear it", so sending
+    // the stored value would be a no-op at best and a wipe at worst.
     if (roleIcon?.locked) delete payload.roleIconUrl;
+    if (avatarUrlText.trim()) Object.assign(payload, { avatarUrl: avatarUrlText.trim() });
+    if (bannerUrlText.trim()) Object.assign(payload, { bannerUrl: bannerUrlText.trim() });
 
     const result = await api.saveCustomization(guild.id, payload);
     guildForm.commit(result.settings);
+    setAvatarUrlText("");
+    setBannerUrlText("");
+    // The profile the preview falls back to is now one save out of date. The
+    // refetch is what makes a cleared override fall back to the account picture
+    // instead of the picture Discord served a moment ago.
+    void api
+      .customization(guild.id)
+      .then(next => setProfile(next.profile ?? null))
+      .catch(() => undefined);
     return describeAppearanceResult(result);
   };
 
-  const saveIdentity = async () => {
-    if (!identityDraft) return { ok: false, message: "تعذّر تحميل الهوية العالمية." };
-    const result = await api.saveBotIdentity(guild.id, identityDraft);
-    identityForm.commit(result.settings);
-    return describeAppearanceResult(result);
-  };
-
-  const saveAll = async () => {
-    const results = await Promise.all([guildDirty ? saveGuild() : null, identityDirty ? saveIdentity() : null]);
-    const attempted = results.filter((entry): entry is { ok: boolean; message: string } => entry !== null);
-    if (attempted.length === 0) return;
-
-    const failed = attempted.filter(entry => !entry.ok);
-    if (failed.length === 0) {
-      push({ tone: "success", title: "تم حفظ وتطبيق التغييرات بنجاح على البوت والسيرفر" });
+  const onSave = async () => {
+    const outcome = await save();
+    if (outcome.ok) {
+      push({ tone: "success", title: "تم حفظ وتطبيق التغييرات على البوت في هذا السيرفر" });
       return;
     }
-    // The refusal is surfaced, not swallowed: the operator needs the sentence
-    // Discord gave us, not a generic failure.
-    const refused = new Error(failed.map(entry => entry.message).join(" "));
-    push({ tone: "error", title: "تعذّر تطبيق بعض التغييرات", description: refused.message });
+    const refused = new Error(outcome.message);
+    push({ tone: "error", title: "تعذّر تطبيق بعض التغييرات", description: outcome.message });
     throw refused;
   };
 
   const resetAll = () => {
-    guildForm.reset();
-    identityForm.reset();
-    setCrop(null);
+    reset();
+    setAvatarUrlText("");
+    setBannerUrlText("");
   };
-
-  const anyDirty = guildDirty || identityDirty;
 
   return (
     <div className="space-y-4 pb-24">
       <Toaster toasts={toasts} onDismiss={dismiss} />
 
-      {/* One file input for all three targets — which crop to open is decided by
-          `pendingTarget`, set by whichever button was pressed. */}
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif"
+        accept={IMAGE_ACCEPT}
         className="hidden"
-        aria-hidden="true"
+        aria-hidden
         tabIndex={-1}
         onChange={event => {
           void onFileChosen(event.target.files?.[0]);
-          // Cleared so picking the same file twice fires `change` again.
           event.target.value = "";
         }}
       />
 
-      {permissionsUnreadable ? (
+      {/* ---------------- Header: title + the per-guild master switch ---------------- */}
+      <div className="flex flex-wrap items-start justify-between gap-3 pt-1">
+        <div className="space-y-1">
+          <h1 className="text-lg font-semibold">هوية البوت</h1>
+          <p className="text-xs text-muted-foreground">
+            كل ما يظهر به AL AI في <span className="font-medium text-foreground">{guild.name}</span>: اللقب والنبذة والصورة والغلاف، ولون
+            الرتبة وأيقونتها. كل حقل هنا يخصّ هذا السيرفر وحده، ولا يظهر في سيرفر آخر.
+          </p>
+        </div>
+        <label className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">تفعيل التخصيص في هذا السيرفر</span>
+          <Switch checked={draft.enabled} onCheckedChange={enabled => patch({ enabled })} aria-label="تفعيل التخصيص في هذا السيرفر" />
+        </label>
+      </div>
+
+      {!draft.enabled && (
         <Alert>
-          <CircleHelp />
+          <IdCard className="size-4" />
           <AlertDescription>
-            تعذّر قراءة صلاحيات البوت الآن. الحفظ يبقى متاحاً، وسيتحقق البوت من الصلاحية عند التطبيق.
+            التخصيص <strong>معطّل</strong> — سيظهر البوت باسمه وصورته الأساسيين في هذا السيرفر. عند الحفظ يُعاد اللقب والصورة والغلاف
+            والنبذة إلى الوضع الافتراضي تلقائياً، والقيم المحفوظة تبقى في النموذج.
           </AlertDescription>
         </Alert>
-      ) : null}
+      )}
 
-      {cropError ? (
+      {memberBlocked && (
         <Alert variant="destructive">
-          <AlertDescription>{cropError}</AlertDescription>
+          <Lock className="size-4" />
+          <AlertDescription>
+            البوت لا يملك صلاحية «تغيير الاسم المستعار» (Change Nickname) في هذا السيرفر، وهي اللازمة للقب والصورة والغلاف والنبذة معاً —
+            فالحفظ سيرفضه Discord. امنح البوت الصلاحية ثم أعد المحاولة.
+          </AlertDescription>
         </Alert>
-      ) : null}
+      )}
 
-      <HierarchyWarning verdict={hierarchy} />
-
-      {/* ================================================================ *
-       * Two columns: the form on the reading side, the preview pinned
-       * beside it. On a narrow screen the preview moves above the form so
-       * the operator sees the object before the controls.
-       * ================================================================ */}
+      {/* ---------------- Two columns: forms (right) / live preview (left) ---------------- */}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="space-y-4">
-          {/* ---------------------------------------------------------- *
-           * Card 1 — the global profile
-           * ---------------------------------------------------------- */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Globe className="size-4" />
-                    الهوية العالمية
-                  </CardTitle>
-                  <CardDescription>تُطبَّق على حساب البوت في كل السيرفرات التي يدخلها.</CardDescription>
-                </div>
-                <Badge variant="outline" className="shrink-0 gap-1">
-                  <Globe className="size-3" />
-                  عالمي
-                </Badge>
-              </div>
+        <div className="min-w-0 space-y-4">
+          {/* ------------------------------------------------ CARD 1 · الهوية */}
+          <Card className={cn(!draft.enabled && "opacity-70")}>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <IdCard className="size-4" />
+                الهوية
+              </CardTitle>
+              <CardDescription>ما يُعرف به AL AI في هذا السيرفر: الاسم الظاهر، والنبذة التي يقرأها من يفتح ملفه.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-5">
-              {/* --- avatar --- */}
-              <div className="space-y-2">
-                <Label>الصورة الرمزية</Label>
-                <div className="flex items-center gap-3">
-                  <span
-                    className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-full border border-border bg-muted text-xs"
-                    style={
-                      identityDraft?.avatarDataUrl || snapshot?.avatarUrl
-                        ? { backgroundImage: `url(${identityDraft?.avatarDataUrl ?? snapshot?.avatarUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
-                        : undefined
-                    }
-                  >
-                    {identityDraft?.avatarDataUrl || snapshot?.avatarUrl ? "" : "AI"}
-                  </span>
-                  <div className="flex flex-wrap gap-2">
-                    <ImagePickerButton label="رفع صورة" busy={crop?.target === "avatar"} onPick={() => openPicker("avatar")} />
-                    {identityDraft?.avatarDataUrl ? (
-                      <Button type="button" variant="ghost" size="sm" onClick={() => patchIdentity({ avatarDataUrl: null })}>
-                        <RotateCcw />
-                        الافتراضية
-                      </Button>
-                    ) : null}
-                  </div>
+            <CardContent className="space-y-4">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="nickname" className="text-xs">
+                    اللقب
+                  </Label>
+                  <Counter value={draft.nickname.length} max={MAX_NICKNAME_LENGTH} />
                 </div>
-                <p className="text-xs text-muted-foreground">تُقصّ إلى 256×256 قبل الإرسال، فلا يرفضها Discord.</p>
+                <Input
+                  id="nickname"
+                  value={draft.nickname}
+                  onChange={event => patch({ nickname: event.target.value })}
+                  maxLength={MAX_NICKNAME_LENGTH}
+                  placeholder={`مثال: AL AI في ${guild.name}`}
+                  disabled={!memberEditable}
+                  className="rounded-xl"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  الاسم الذي يظهر به AL AI في قائمة أعضاء هذا السيرفر. اتركه فارغاً ليظهر باسمه الأصلي{" "}
+                  <span dir="ltr">{DEFAULT_CUSTOMIZATION.nickname}</span>.
+                </p>
               </div>
 
               <Separator />
 
-              {/* --- banner --- */}
-              <div className="space-y-2">
-                <Label>البانر</Label>
-                <div
-                  className="relative aspect-[5/2] w-full overflow-hidden rounded-lg border border-border bg-muted"
-                  style={
-                    identityDraft?.bannerDataUrl || snapshot?.bannerUrl
-                      ? { backgroundImage: `url(${identityDraft?.bannerDataUrl ?? snapshot?.bannerUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
-                      : undefined
-                  }
-                >
-                  {!identityDraft?.bannerDataUrl && !snapshot?.bannerUrl ? (
-                    <span className="absolute inset-0 grid place-items-center text-xs text-muted-foreground">لا يوجد بانر</span>
-                  ) : null}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="bio" className="text-xs">
+                    نبذة عني
+                  </Label>
+                  <Counter value={draft.bio.length} max={MAX_BIO_LENGTH} />
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <ImagePickerButton label="رفع بانر" busy={crop?.target === "banner"} onPick={() => openPicker("banner")} />
-                  {identityDraft?.bannerDataUrl ? (
-                    <Button type="button" variant="ghost" size="sm" onClick={() => patchIdentity({ bannerDataUrl: null })}>
-                      <RotateCcw />
-                      إزالة
-                    </Button>
-                  ) : null}
-                </div>
-                <p className="text-xs text-muted-foreground">يُقصّ إلى 600×240.</p>
-              </div>
-
-              <Separator />
-
-              {/* --- bio --- */}
-              <div className="space-y-2">
-                <Label htmlFor="bio">النبذة التعريفية</Label>
                 <Textarea
                   id="bio"
                   rows={3}
-                  value={identityDraft?.bio ?? ""}
+                  value={draft.bio}
                   maxLength={MAX_BIO_LENGTH}
-                  placeholder="نبذة قصيرة يراها من يفتح ملف البوت."
-                  onChange={event => patchIdentity({ bio: event.target.value })}
+                  placeholder="ما يميّز AL AI في هذا السيرفر"
+                  onChange={event => patch({ bio: event.target.value })}
+                  disabled={!memberEditable}
+                  className="rounded-xl"
                 />
-                <div className="flex justify-end">
-                  <p className="tabular text-xs text-muted-foreground">
-                    {(identityDraft?.bio ?? "").length} / {MAX_BIO_LENGTH}
-                  </p>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* --- presence: status + activity, deliberately in the same card
-                      as the name and the images, because it is the same scope
-                      and the same save. --- */}
-              <div className="space-y-3">
-                <Label>الحالة والنشاط</Label>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    {/* <Label>, like every sibling field on this screen — the
-                        pair used to read as muted captions rather than as two
-                        labelled controls sitting side by side. */}
-                    <Label>الحالة</Label>
-                    <div>
-                      <StatusPicker
-                        status={identityDraft?.status ?? "online"}
-                        duration={identityDraft?.statusDuration ?? null}
-                        onChange={({ status, duration }) =>
-                          patchIdentity({
-                            status,
-                            statusDuration: duration,
-                            // The expiry is a wall-clock instant, so only the
-                            // server can compute it: the client sends the choice
-                            // and the route turns it into a timestamp. Sending a
-                            // client clock would let a skewed machine set a
-                            // window that is already over.
-                            statusExpiresAt: null
-                          })
-                        }
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>نوع النشاط</Label>
-                    {/*
-                     * A real Select, not a native `<select>`.
-                     *
-                     * The native popup is drawn by the operating system, so on
-                     * this dark-only palette it opened as a white panel with
-                     * near-white option text: "يلعب", "يشاهد" and the rest were
-                     * all there and all invisible. `color-scheme: dark` on
-                     * `<html>` is only a hint, and the two platforms disagreed
-                     * about honouring it — which is why the control looked fine
-                     * in one browser and broken in another.
-                     *
-                     * This is the same component the rest of the dashboard uses,
-                     * so the popover colours, the 256px height cap and the
-                     * trigger-width sizing all come with it.
-                     *
-                     * `w-60` narrows the field itself: the activity kind is one
-                     * short label, and at full width beside the status picker it
-                     * read as a control asking for something substantial.
-                     */}
-                    <Select
-                      value={identityDraft?.activityType ?? "playing"}
-                      onValueChange={value => patchIdentity({ activityType: value as BotIdentitySettings["activityType"] })}
-                    >
-                      <SelectTrigger className="w-60 max-w-full" aria-label="نوع النشاط">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {activityTypes.map(type => (
-                          <SelectItem key={type} value={type}>
-                            {activityTypeLabels[type]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <Input
-                  dir="auto"
-                  aria-label="نص النشاط"
-                  placeholder="مثال: يحرس بغداد"
-                  maxLength={MAX_ACTIVITY_TEXT_LENGTH}
-                  value={identityDraft?.activityText ?? ""}
-                  onChange={event => patchIdentity({ activityText: event.target.value })}
-                />
-                <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                  <Info className="mt-0.5 size-3.5 shrink-0" />
-                  النشاط الفارغ يعني «بلا نشاط ظاهر»، لا نشاطاً باسم فارغ. الحالة والنشاط يطبّقهما البوت نفسه
-                  خلال ثوانٍ من الحفظ، لأنه الطرف الوحيد المتصل بـGateway.
+                <p className="text-[11px] text-muted-foreground">
+                  ما يقرأه من يفتح ملف البوت في هذا السيرفر. الحد {MAX_BIO_LENGTH} حرفاً — وهو سقف Discord نفسه لهذا الحقل.
                 </p>
               </div>
             </CardContent>
           </Card>
 
-          {/* ---------------------------------------------------------- *
-           * Card 2 — this guild only
-           * ---------------------------------------------------------- */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Server className="size-4" />
-                    هذا السيرفر فقط
-                  </CardTitle>
-                  <CardDescription>لا تؤثر على باقي السيرفرات.</CardDescription>
-                </div>
-                <Badge variant={canSaveGuild ? "secondary" : "destructive"} className="shrink-0">
-                  {canSaveGuild ? "جاهز" : "الحفظ معطّل"}
-                </Badge>
-              </div>
+          {/* ------------------------------------------------ CARD 2 · الصور */}
+          <Card className={cn(!draft.enabled && "opacity-70")}>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ImageIcon className="size-4" />
+                الصور
+              </CardTitle>
+              <CardDescription>
+                الصورة والغلاف اللذان يراهما أعضاء هذا السيرفر. كل منهما يقبل رفعاً من الجهاز أو رابطاً مباشراً، وما تتركه فارغاً يعود
+                إلى الصورة الأساسية للبوت.
+              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-5">
-              <div className="space-y-2">
-                <Label htmlFor="nickname">الاسم المستعار</Label>
-                <Input
-                  id="nickname"
-                  value={guildDraft.nickname}
-                  maxLength={MAX_NICKNAME_LENGTH}
-                  placeholder={DEFAULT_CUSTOMIZATION.nickname}
-                  onChange={event => patchGuild({ nickname: event.target.value })}
-                />
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs text-muted-foreground">
-                    اتركه فارغاً ليظهر البوت باسمه الأصلي <span dir="ltr">{DEFAULT_CUSTOMIZATION.nickname}</span>.
-                  </p>
-                  <p className="tabular text-xs text-muted-foreground">
-                    {guildDraft.nickname.length} / {MAX_NICKNAME_LENGTH}
-                  </p>
-                </div>
-              </div>
+            <CardContent className="space-y-4">
+              <ImageSlot
+                label="صورة السيرفر"
+                hint="مربعة 256×256 على الأقل. PNG أو JPG أو WEBP أو GIF — الحد 500 ك.ب بعد الترميز. تُطبَّق على عضوية البوت في هذا السيرفر فقط."
+                dataUrl={draft.avatarDataUrl}
+                fallbackLabel={profile?.accountAvatarUrl ? "الصورة الأساسية" : "الافتراضية"}
+                fileName={fileNames.avatar ?? "guild-avatar.png"}
+                urlText={avatarUrlText}
+                onUrlText={setAvatarUrlText}
+                onPick={() => openPicker("avatar")}
+                onDrop={file => {
+                  pendingTarget.current = "avatar";
+                  void onFileChosen(file);
+                }}
+                onRemove={() => patch({ avatarDataUrl: null })}
+                disabled={!memberEditable}
+                round
+              />
 
               <Separator />
 
-              <div className="space-y-3">
-                <Label>لون رتبة AL AI</Label>
-                <ColorPicker
-                  id="role-color"
-                  value={guildDraft.roleColor}
-                  unsetLabel="لون Discord الافتراضي"
-                  onChange={hex => patchGuild({ roleColor: hex })}
-                />
+              <ImageSlot
+                label="غلاف السيرفر"
+                hint="يُعرض بنسبة 5:2 تقريباً (مثل 600×240). PNG أو JPG أو WEBP أو GIF — الحد 500 ك.ب بعد الترميز."
+                dataUrl={draft.bannerDataUrl}
+                fallbackLabel={profile?.accountBannerUrl ? "الغلاف الأساسي" : "لا يوجد غلاف"}
+                fileName={fileNames.banner ?? "guild-banner.png"}
+                urlText={bannerUrlText}
+                onUrlText={setBannerUrlText}
+                onPick={() => openPicker("banner")}
+                onDrop={file => {
+                  pendingTarget.current = "banner";
+                  void onFileChosen(file);
+                }}
+                onRemove={() => patch({ bannerDataUrl: null })}
+                disabled={!memberEditable}
+              />
+            </CardContent>
+          </Card>
+
+          {/* ------------------------------------------------ CARD 3 · رتبة البوت */}
+          <Card className={cn(!draft.enabled && "opacity-70")}>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Palette className="size-4" />
+                رتبة البوت
+              </CardTitle>
+              <CardDescription>
+                رتبة AL AI في <span className="font-medium text-foreground">{guild.name}</span> — لونها وأيقونتها، وهي رتبة لا توجد إلا
+                هنا.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-medium text-muted-foreground">اللون والأيقونة يظهران في قائمة الأعضاء بجانب الاسم.</p>
+                {!roleEditable ? (
+                  <Badge variant="destructive" className="shrink-0 text-[10px]">
+                    الحفظ معطّل
+                  </Badge>
+                ) : null}
               </div>
 
-              <Separator />
-
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Label>أيقونة الرتبة</Label>
-                  {roleIcon?.locked ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex cursor-help items-center gap-1 rounded-md bg-warning/15 px-2 py-0.5 text-xs text-warning">
-                          <Lock className="size-3" />
-                          مقفلة
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs text-right leading-relaxed">{roleIcon.reason}</TooltipContent>
-                    </Tooltip>
-                  ) : null}
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <span className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-full border border-border bg-muted text-xs">
-                    {guildDraft.roleIconUrl ? (
-                      <img src={guildDraft.roleIconUrl} alt="" className="size-full object-cover" />
-                    ) : (
-                      "AL"
-                    )}
-                  </span>
-                  <div className="flex flex-wrap gap-2">
-                    <ImagePickerButton
-                      label="اختيار أيقونة"
-                      busy={crop?.target === "roleIcon"}
-                      disabled={roleIcon?.locked}
-                      onPick={() => openPicker("roleIcon")}
-                    />
-                    {guildDraft.roleIconUrl ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={roleIcon?.locked}
-                        onClick={() => patchGuild({ roleIconUrl: null })}
-                      >
-                        <RotateCcw />
-                        إزالة
-                      </Button>
-                    ) : null}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">لون رتبة البوت</Label>
+                  {/* The controls follow the *same* gate the badge above
+                      announces. They used to be gated by the icon's own lock
+                      only, so a caller without the identity permission could
+                      still pick a colour and a role icon, and the server would
+                      refuse the save - the badge and the controls disagreed
+                      about what was allowed. */}
+                  <div className={cn(!roleEditable && "pointer-events-none opacity-60")} aria-disabled={!roleEditable}>
+                    <ColorPicker value={draft.roleColor ?? ""} onChange={value => patch({ roleColor: value || null })} />
                   </div>
                 </div>
-
-                <Input
-                  dir="ltr"
-                  aria-label="رابط أيقونة الرتبة"
-                  placeholder="https://…/icon.png"
-                  value={guildDraft.roleIconUrl?.startsWith("data:") ? "" : guildDraft.roleIconUrl ?? ""}
-                  disabled={roleIcon?.locked}
-                  onChange={event => patchGuild({ roleIconUrl: event.target.value.trim() || null })}
-                />
-
-                {roleIcon?.locked ? (
-                  <p className="flex items-start gap-1.5 text-xs leading-relaxed text-warning">
-                    <Lock className="mt-0.5 size-3.5 shrink-0" />
-                    {roleIcon.reason}
-                  </p>
-                ) : (
-                  <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                    <Info className="mt-0.5 size-3.5 shrink-0" />
-                    ارفع صورة مربعة أو ضع رابط HTTPS. لأن صورة الحساب عامة لكل السيرفرات، فإن الأيقونة الخاصة
-                    بسيرفر واحد تظهر على رتبة AL AI بدلاً من الحساب.
-                    {roleIcon?.unknown ? " تعذّر قراءة مستوى تعزيز السيرفر الآن، وسيتحقق البوت عند التطبيق." : ""}
-                  </p>
-                )}
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5 text-xs">
+                    أيقونة الرتبة
+                    {roleIcon?.locked ? (
+                      <Badge variant="outline" className="gap-1 text-[10px]" title={roleIcon.reason ?? undefined}>
+                        <Lock className="size-3" />
+                        مقفلة
+                      </Badge>
+                    ) : null}
+                  </Label>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={roleIcon?.locked || !roleEditable}
+                      onClick={() => openPicker("roleIcon")}
+                    >
+                      <Upload className="size-3.5" /> اختر أيقونة
+                    </Button>
+                    {draft.roleIconUrl ? (
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={draft.roleIconUrl} alt="" className="size-8 rounded-lg object-cover" />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 hover:text-destructive"
+                          aria-label="إزالة أيقونة الرتبة"
+                          disabled={roleIcon?.locked || !roleEditable}
+                          onClick={() => patch({ roleIconUrl: null })}
+                        >
+                          <X />
+                        </Button>
+                      </>
+                    ) : (
+                      <span className="text-[11px] text-muted-foreground">اختيارية</span>
+                    )}
+                  </div>
+                  {roleIcon?.locked ? (
+                    <p className="text-[11px] text-muted-foreground">{roleIcon.reason ?? "أيقونة الرتبة تتطلب مستوى تعزيز 2."}</p>
+                  ) : null}
+                </div>
               </div>
 
-              <Alert>
-                <Info />
-                <AlertDescription>
-                  إن لم تظهر التغييرات، تأكّد من أن رتبة AL AI أعلى من الرتب التي يحاول تعديلها.
-                </AlertDescription>
-              </Alert>
+              {permissionsUnreadable ? (
+                <p className="text-[11px] text-muted-foreground">تعذّر قراءة صلاحيات البوت الآن — الحفظ يبقى متاحاً والبوت يتحقق عند التطبيق.</p>
+              ) : null}
             </CardContent>
           </Card>
         </div>
 
-        {/* ------------------------------------------------------------ *
-         * The preview column. Sticky on a wide screen so it stays beside
-         * the field being edited rather than scrolling away.
+        {/* ---------------- Live preview (left column, sticky) ----------------
          *
-         * `self-start` is what makes it work: a grid item stretches to the
-         * row's full height by default, and a sticky element that already fills
-         * its container has nowhere to travel. `top-6` matches the shell's own
-         * `lg:p-6`, so the card comes to rest exactly at the top of the visible
-         * content rather than floating below it.
-         * ------------------------------------------------------------ */}
-        <div className="space-y-3 lg:sticky lg:top-6 lg:self-start">
-          {crop ? (
-            <ImageCropper target={crop.target} image={crop.image} onApply={applyCrop} onCancel={() => setCrop(null)} />
-          ) : null}
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Palette className="size-4" />
-                معاينة حيّة
-              </CardTitle>
-              <CardDescription>هكذا سيظهر AL AI فعلاً، في كل السيرفرات وفي هذا السيرفر.</CardDescription>
+         * `lg:sticky` + `lg:self-start` pins the preview beside the form — and
+         * that only works while the column is *shorter* than the scrollport: a
+         * pinned box taller than the viewport has nowhere to stick and scrolls
+         * away with the form. The preview is therefore kept deliberately
+         * compact, and `browser-check.mjs` measures that it really does stay
+         * put through a 600px scroll.
+         * ---------------------------------------------------------------- */}
+        <div className="lg:sticky lg:top-6 lg:self-start">
+          <Card className="border-primary/20 bg-card/70 shadow-lg shadow-primary/5 backdrop-blur-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">معاينة حيّة</CardTitle>
+              <CardDescription>هكذا سيظهر AL AI في هذا السيرفر — تتحدّث مع كل ضغطة دون حفظ.</CardDescription>
             </CardHeader>
             <CardContent>
-              <BotLivePreview
-                identity={previewIdentity}
-                guild={{
-                  nickname: guildDraft.nickname,
-                  roleColor: guildDraft.roleColor,
-                  roleIconUrl: guildDraft.roleIconUrl,
-                  guildName: guild.name,
-                  memberCount: guild.memberCount
-                }}
-              />
+              <BotLivePreview profile={preview} guildName={guild.name} memberCount={guild.memberCount} enabled={draft.enabled} />
+              <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+                الحالة والنشاط لا يظهران هنا: يخصّان البوت كله لا هذا السيرفر، وتُعدَّلان من شاشة «حالة البوت».
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -690,43 +689,13 @@ export function CustomizationView({ guild }: { guild: Guild }) {
 
       {anyDirty ? (
         <SaveBar
+          message="لديك تغييرات غير محفوظة"
+          saveLabel="حفظ التغييرات"
+          cancelLabel="تجاهل"
           onCancel={resetAll}
-          onSave={saveAll}
-          saveLabel={identityDirty && guildDirty ? "حفظ الكل" : identityDirty ? "حفظ الهوية العالمية" : "حفظ إعدادات السيرفر"}
+          onSave={onSave}
         />
       ) : null}
     </div>
   );
 }
-
-/**
- * The advisory shown when the bot's own role sits at or below a role it is
- * expected to manage.
- *
- * This is the single most common reason a correctly configured bot silently
- * does nothing, and Discord reports it only as a failed API call. Saying it on
- * the screen turns an unexplained no-op into a fixable problem.
- *
- * Exported for its render test: a null verdict (roles unreadable) and a passing
- * verdict both render nothing, so the test can prove the warning is not shown
- * speculatively.
- */
-export function HierarchyWarning({ verdict }: { verdict: RoleHierarchyVerdict | null }) {
-  if (!verdict?.blocked) return null;
-  return (
-    <div className="flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning/10 p-3">
-      <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
-      <div className="space-y-1">
-        <p className="text-sm font-medium">ترتيب الرتب يمنع البوت من العمل</p>
-        <p className="text-xs leading-relaxed text-muted-foreground">{verdict.message}</p>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          افتح إعدادات السيرفر ← الرتب، واسحب رتبة AL AI إلى ما فوق أعلى رتبة إدارية.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-/* Re-exported so the file has one obvious import site for the upload icon the
- * tests and any sibling screen reach for. */
-export { Upload };

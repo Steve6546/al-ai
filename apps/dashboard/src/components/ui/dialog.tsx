@@ -1,57 +1,77 @@
 "use client"
 
 import * as React from "react"
-import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { X } from "lucide-react"
+import { Modal as HeroModal } from "@heroui/react"
 
 import { cn } from "@/lib/utils"
 
-const Dialog = DialogPrimitive.Root
+/**
+ * HeroUI v3 Modal behind the dashboard's original dialog names. `Dialog`
+ * owns the open state and shares it through context; `DialogContent` renders
+ * HeroUI's Backdrop → Container → Dialog stack, so focus trapping, dismissal
+ * and animations are HeroUI's while every call site stays untouched.
+ */
+const DialogContext = React.createContext<{
+  open: boolean;
+  onOpenChange?: (open: boolean) => void;
+}>({ open: false });
 
-const DialogTrigger = DialogPrimitive.Trigger
+const Dialog = ({
+  open,
+  onOpenChange,
+  children
+}: {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  children: React.ReactNode;
+}) => (
+  <DialogContext.Provider value={{ open: open ?? false, onOpenChange }}>
+    {children}
+  </DialogContext.Provider>
+)
+Dialog.displayName = "Dialog"
 
-const DialogPortal = DialogPrimitive.Portal
+/** Legacy shadcn trigger/close exports. No screen uses them with HeroUI's
+    trigger pattern, so they render their children unchanged. */
+const DialogTrigger = ({ children }: { children?: React.ReactNode }) => <>{children}</>
+DialogTrigger.displayName = "DialogTrigger"
 
-const DialogClose = DialogPrimitive.Close
+const DialogClose = ({ children }: { children?: React.ReactNode }) => <>{children}</>
+DialogClose.displayName = "DialogClose"
+
+const DialogPortal = ({ children }: { children?: React.ReactNode }) => <>{children}</>
+DialogPortal.displayName = "DialogPortal"
 
 const DialogOverlay = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
+  HTMLDivElement,
+  React.HTMLAttributes<HTMLDivElement>
 >(({ className, ...props }, ref) => (
-  <DialogPrimitive.Overlay
-    ref={ref}
-    className={cn(
-      "fixed inset-0 z-50 bg-black/80  data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-      className
-    )}
-    {...props}
-  />
+  <div ref={ref} className={cn("fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px]", className)} {...props} />
 ))
-DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
+DialogOverlay.displayName = "DialogOverlay"
 
-const DialogContent = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
-        className
-      )}
-      {...props}
-    >
-      {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </DialogPortal>
-))
-DialogContent.displayName = DialogPrimitive.Content.displayName
+const DialogContent = ({
+  className,
+  children
+}: {
+  className?: string;
+  children: React.ReactNode;
+}) => {
+  const { open, onOpenChange } = React.useContext(DialogContext);
+  return (
+    <HeroModal.Backdrop isOpen={open} onOpenChange={onOpenChange}>
+      <HeroModal.Container>
+        <HeroModal.Dialog className={cn("w-full max-w-lg gap-4 border border-border/80 bg-card/95 p-6 shadow-xl backdrop-blur-md", className)}>
+          {/* Project rule: no corner X. Modals close through their footer
+              buttons (إلغاء / حفظ), Escape, or an outside click — all of
+              which HeroUI's dismissal already handles. */}
+          {children}
+        </HeroModal.Dialog>
+      </HeroModal.Container>
+    </HeroModal.Backdrop>
+  )
+}
+DialogContent.displayName = "DialogContent"
 
 const DialogHeader = ({
   className,
@@ -82,10 +102,10 @@ const DialogFooter = ({
 DialogFooter.displayName = "DialogFooter"
 
 const DialogTitle = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Title>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
+  HTMLHeadingElement,
+  React.HTMLAttributes<HTMLHeadingElement>
 >(({ className, ...props }, ref) => (
-  <DialogPrimitive.Title
+  <h2
     ref={ref}
     className={cn(
       "text-lg font-semibold leading-none tracking-tight",
@@ -94,19 +114,19 @@ const DialogTitle = React.forwardRef<
     {...props}
   />
 ))
-DialogTitle.displayName = DialogPrimitive.Title.displayName
+DialogTitle.displayName = "DialogTitle"
 
 const DialogDescription = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Description>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
+  HTMLParagraphElement,
+  React.HTMLAttributes<HTMLParagraphElement>
 >(({ className, ...props }, ref) => (
-  <DialogPrimitive.Description
+  <p
     ref={ref}
     className={cn("text-sm text-muted-foreground", className)}
     {...props}
   />
 ))
-DialogDescription.displayName = DialogPrimitive.Description.displayName
+DialogDescription.displayName = "DialogDescription"
 
 export {
   Dialog,

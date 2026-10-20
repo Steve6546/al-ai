@@ -36,7 +36,7 @@ function nextToastId(): string {
 }
 
 const TONE_STYLES: Record<ToastTone, { wrapper: string; Icon: typeof CheckCircle2 }> = {
-  success: { wrapper: "border-emerald-500/40 bg-emerald-500/10 text-emerald-200", Icon: CheckCircle2 },
+  success: { wrapper: "border-success/40 bg-success/10 text-success", Icon: CheckCircle2 },
   error: { wrapper: "border-destructive/50 bg-destructive/10 text-destructive", Icon: AlertTriangle },
   info: { wrapper: "border-border bg-popover text-foreground", Icon: CheckCircle2 }
 };
