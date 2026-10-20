@@ -1,26 +1,53 @@
 import pg from "pg";
+import { randomUUID } from "node:crypto";
 import {
   DEFAULT_ANTI_NUKE_CONFIG,
-  DEFAULT_BOT_IDENTITY,
+  DEFAULT_BOT_PRESENCE,
   DEFAULT_EMBED_COLOR,
+  DEFAULT_INVITE_SETTINGS,
+  DEFAULT_LEVEL_SETTINGS,
   DEFAULT_LOGGING_MODE,
+  DEFAULT_WELCOME_MESSAGE_SETTINGS,
   DEFAULT_WELCOME_SETTINGS,
+  EMPTY_INVITE_STATS,
   encryptSecret,
   isLoggingMode,
   isTier,
   normaliseAntiNukeConfig,
+  normaliseInviteSettings,
+  normaliseLevelSettings,
+  normaliseLevelRewardList,
   normaliseLoggingMode,
-  normaliseBotIdentity,
+  normaliseBotPresence,
   normaliseTierRoles,
+  normaliseWelcomeMessageSettings,
   normaliseWelcomeSettings,
   type AntiNukeConfig,
-  type BotIdentitySettings,
+  type BotPresenceSettings,
   type CommandConfig,
+  type InviteJoinKind,
+  type InviteSettings,
+  type InviteStats,
+  type LevelRoleReward,
+  type LevelSettings,
   type LogDestination,
   type LoggingMode,
   type TierRoles,
+  type WelcomeMessageSettings,
   type WelcomeSettings
 } from "@al-ai/core";
+
+/** One member's invite history row, as the bot's callers read it. */
+export type InviteMemberRow = {
+  userId: string;
+  inviterId: string | null;
+  inviteCode: string | null;
+  kind: InviteJoinKind;
+  counted: boolean;
+  accountAgeMs: number | null;
+  joinedAt: string;
+  leftAt: string | null;
+};
 
 const { Pool } = pg;
 
@@ -202,8 +229,9 @@ export function createBotDatabase(databaseUrl: string) {
         enabled: boolean;
         member_role_id: string | null;
         bot_role_id: string | null;
+        delay_seconds: number;
       }>(
-        `SELECT enabled, member_role_id, bot_role_id FROM guild_welcome WHERE guild_id = $1`,
+        `SELECT enabled, member_role_id, bot_role_id, delay_seconds FROM guild_welcome WHERE guild_id = $1`,
         [guildId]
       );
       const row = rows[0];
@@ -211,47 +239,44 @@ export function createBotDatabase(databaseUrl: string) {
       return normaliseWelcomeSettings({
         enabled: row.enabled,
         memberRoleId: row.member_role_id,
-        botRoleId: row.bot_role_id
+        botRoleId: row.bot_role_id,
+        delaySeconds: row.delay_seconds
       });
     },
 
     /**
-     * The global bot identity: the fields that are the same in every guild.
+     * The bot's presence: the fields that are the same in every guild.
      *
-     * The bot reads only the presence slice from this (status and activity); the
-     * dashboard applies the images and the bio over REST. The row is single, so
-     * there is no per-guild argument — see the note on `bot_identity` in core.
+     * This is the one appearance value the dashboard cannot write. A status
+     * lives on the gateway connection, so the bot reads it from here and applies
+     * it itself; everything a single server can override — nickname, avatar,
+     * banner, bio, role appearance — is on `guild_customization` and written by
+     * the dashboard over REST.
      */
-    async loadBotIdentity(): Promise<BotIdentitySettings> {
+    async loadBotIdentity(): Promise<BotPresenceSettings> {
       const { rows } = await pool.query<{
-        avatar_data_url: string | null;
-        banner_data_url: string | null;
-        bio: string | null;
         status: string | null;
         activity_type: string | null;
         activity_text: string | null;
         status_duration: string | null;
         status_expires_at: Date | string | null;
-      }>(`SELECT avatar_data_url, banner_data_url, bio, status, activity_type, activity_text, status_duration, status_expires_at FROM bot_identity WHERE id = true`);
+      }>(`SELECT status, activity_type, activity_text, status_duration, status_expires_at FROM bot_identity WHERE id = true`);
       const row = rows[0];
       // No row means nothing has been customised yet, so the shipped defaults apply.
-      return normaliseBotIdentity({
-        avatarDataUrl: row?.avatar_data_url ?? DEFAULT_BOT_IDENTITY.avatarDataUrl,
-        bannerDataUrl: row?.banner_data_url ?? DEFAULT_BOT_IDENTITY.bannerDataUrl,
-        bio: row?.bio ?? DEFAULT_BOT_IDENTITY.bio,
-        status: row?.status ?? DEFAULT_BOT_IDENTITY.status,
-        activityType: row?.activity_type ?? DEFAULT_BOT_IDENTITY.activityType,
-        activityText: row?.activity_text ?? DEFAULT_BOT_IDENTITY.activityText,
+      return normaliseBotPresence({
+        status: row?.status ?? DEFAULT_BOT_PRESENCE.status,
+        activityType: row?.activity_type ?? DEFAULT_BOT_PRESENCE.activityType,
+        activityText: row?.activity_text ?? DEFAULT_BOT_PRESENCE.activityText,
         // The window matters to the gateway: it is what makes a timed status
         // end. Omitting these two columns would leave the bot applying `dnd`
         // forever while the dashboard showed a countdown — the duration would
         // save and never apply.
-        statusDuration: row?.status_duration ?? DEFAULT_BOT_IDENTITY.statusDuration,
+        statusDuration: row?.status_duration ?? DEFAULT_BOT_PRESENCE.statusDuration,
         // `pg` returns a TIMESTAMPTZ as a Date; the contract promises an ISO
-        // string, and `normaliseBotIdentity` parses only strings.
+        // string, and `normaliseBotPresence` parses only strings.
         statusExpiresAt:
           row?.status_expires_at === null || row?.status_expires_at === undefined
-            ? DEFAULT_BOT_IDENTITY.statusExpiresAt
+            ? DEFAULT_BOT_PRESENCE.statusExpiresAt
             : new Date(row.status_expires_at).toISOString()
       });
     },
@@ -728,6 +753,548 @@ export function createBotDatabase(databaseUrl: string) {
     async probeAuditTrail() {
       await pool.query(`SELECT 1 FROM audit_trail LIMIT 1`);
       return true;
+    },
+
+    /* ---------------------------------------------------------------- *
+     * Levels system. The bot is the writer of XP rows and the reader of
+     * settings; the dashboard owns the settings' write path. Both go through
+     * the same core normalisers, so a value cannot mean one thing in the panel
+     * and another in the engine.
+     * ---------------------------------------------------------------- */
+
+    /** A guild's level settings, or the shipped defaults when it has no row. */
+    async loadLevelSettings(guildId: string): Promise<LevelSettings> {
+      const { rows } = await pool.query<Record<string, unknown>>(
+        `SELECT enabled, text_xp_enabled, voice_xp_enabled, text_xp_min, text_xp_max, voice_xp_min, voice_xp_max,
+                max_level_cap, reset_on_leave, text_cooldown_seconds, voice_min_members, ignore_muted, ignore_deafened,
+                ignore_afk, notify_level_up, notify_mode, notify_channel_id, rank_card, text_level_up_message,
+                voice_level_up_message, role_stacking, role_multipliers, channel_multipliers,
+                ignored_text_channel_ids, ignored_voice_channel_ids, ignored_role_ids
+         FROM guild_levels WHERE guild_id = $1`,
+        [guildId]
+      );
+      const row = rows[0];
+      if (!row) return { ...DEFAULT_LEVEL_SETTINGS };
+      return normaliseLevelSettings({
+        enabled: row.enabled,
+        textXpEnabled: row.text_xp_enabled,
+        voiceXpEnabled: row.voice_xp_enabled,
+        textXpMin: row.text_xp_min,
+        textXpMax: row.text_xp_max,
+        voiceXpMin: row.voice_xp_min,
+        voiceXpMax: row.voice_xp_max,
+        maxLevelCap: row.max_level_cap,
+        resetOnLeave: row.reset_on_leave,
+        textCooldownSeconds: row.text_cooldown_seconds,
+        voiceMinMembers: row.voice_min_members,
+        ignoreMuted: row.ignore_muted,
+        ignoreDeafened: row.ignore_deafened,
+        ignoreAfk: row.ignore_afk,
+        notifyLevelUp: row.notify_level_up,
+        notifyMode: row.notify_mode,
+        notifyChannelId: row.notify_channel_id,
+        rankCardEnabled: row.rank_card,
+        textLevelUpMessage: row.text_level_up_message,
+        voiceLevelUpMessage: row.voice_level_up_message,
+        roleStacking: row.role_stacking,
+        roleMultipliers: row.role_multipliers,
+        channelMultipliers: row.channel_multipliers,
+        ignoredTextChannelIds: row.ignored_text_channel_ids,
+        ignoredVoiceChannelIds: row.ignored_voice_channel_ids,
+        ignoredRoleIds: row.ignored_role_ids
+      });
+    },
+
+    /** The guild's reward rules — text, voice and dual-condition, in one read. */
+    async loadLevelRewards(guildId: string): Promise<LevelRoleReward[]> {
+      const { rows } = await pool.query<Record<string, unknown>>(
+        `SELECT id, kind, level, required_voice_level, role_id, always_keep
+         FROM level_role_rewards WHERE guild_id = $1 ORDER BY kind, level, required_voice_level NULLS LAST`,
+        [guildId]
+      );
+      return normaliseLevelRewardList(
+        rows.map(row => ({
+          id: row.id,
+          kind: row.kind,
+          level: row.level,
+          voiceLevel: row.required_voice_level,
+          roleId: row.role_id,
+          alwaysKeep: row.always_keep
+        }))
+      );
+    },
+
+    /**
+     * Adds text XP and returns the previous *and* new totals from one atomic
+     * statement. The `prev` CTE shares the statement's snapshot, so it sees
+     * the row exactly as it was before the upsert — a read failure can no
+     * longer be mistaken for "0 XP", and a level-up is only ever detected
+     * from a previous state the same write itself vouched for.
+     */
+    async recordTextXp(
+      guildId: string,
+      userId: string,
+      amount: number,
+      meta: { displayName?: string | null; avatarHash?: string | null }
+    ): Promise<{ previous: { textXp: number; voiceXp: number } | null; current: { textXp: number; voiceXp: number } }> {
+      const { rows } = await pool.query<{
+        text_xp: number;
+        voice_xp: number;
+        prev_text_xp: number | null;
+        prev_voice_xp: number | null;
+      }>(
+        `WITH prev AS (
+           SELECT text_xp, voice_xp FROM user_guild_levels WHERE guild_id = $1 AND user_id = $2
+         ), upsert AS (
+           INSERT INTO user_guild_levels (guild_id, user_id, text_xp, display_name, avatar_hash, last_text_xp_at)
+           VALUES ($1, $2, $3, $4, $5, now())
+           ON CONFLICT (guild_id, user_id) DO UPDATE SET
+             text_xp = user_guild_levels.text_xp + $3,
+             display_name = COALESCE($4, user_guild_levels.display_name),
+             avatar_hash = COALESCE($5, user_guild_levels.avatar_hash),
+             last_text_xp_at = now(),
+             updated_at = now()
+           RETURNING text_xp, voice_xp
+         )
+         SELECT upsert.text_xp, upsert.voice_xp, prev.text_xp AS prev_text_xp, prev.voice_xp AS prev_voice_xp
+         FROM upsert LEFT JOIN prev ON true`,
+        [guildId, userId, amount, meta.displayName ?? null, meta.avatarHash ?? null]
+      );
+      const row = rows[0];
+      return {
+        previous: row.prev_text_xp === null ? null : { textXp: row.prev_text_xp, voiceXp: row.prev_voice_xp ?? 0 },
+        current: { textXp: row.text_xp, voiceXp: row.voice_xp }
+      };
+    },
+
+    /** Same as `recordTextXp`, on the voice track. */
+    async recordVoiceXp(
+      guildId: string,
+      userId: string,
+      amount: number,
+      meta: { displayName?: string | null; avatarHash?: string | null }
+    ): Promise<{ previous: { textXp: number; voiceXp: number } | null; current: { textXp: number; voiceXp: number } }> {
+      const { rows } = await pool.query<{
+        text_xp: number;
+        voice_xp: number;
+        prev_text_xp: number | null;
+        prev_voice_xp: number | null;
+      }>(
+        `WITH prev AS (
+           SELECT text_xp, voice_xp FROM user_guild_levels WHERE guild_id = $1 AND user_id = $2
+         ), upsert AS (
+           INSERT INTO user_guild_levels (guild_id, user_id, voice_xp, display_name, avatar_hash, last_voice_xp_at)
+           VALUES ($1, $2, $3, $4, $5, now())
+           ON CONFLICT (guild_id, user_id) DO UPDATE SET
+             voice_xp = user_guild_levels.voice_xp + $3,
+             display_name = COALESCE($4, user_guild_levels.display_name),
+             avatar_hash = COALESCE($5, user_guild_levels.avatar_hash),
+             last_voice_xp_at = now(),
+             updated_at = now()
+           RETURNING text_xp, voice_xp
+         )
+         SELECT upsert.text_xp, upsert.voice_xp, prev.text_xp AS prev_text_xp, prev.voice_xp AS prev_voice_xp
+         FROM upsert LEFT JOIN prev ON true`,
+        [guildId, userId, amount, meta.displayName ?? null, meta.avatarHash ?? null]
+      );
+      const row = rows[0];
+      return {
+        previous: row.prev_text_xp === null ? null : { textXp: row.prev_text_xp, voiceXp: row.prev_voice_xp ?? 0 },
+        current: { textXp: row.text_xp, voiceXp: row.voice_xp }
+      };
+    },
+
+    /**
+     * One keyset-paginated page of ranked members, ordered by the stable
+     * `user_id` primary key. Keyset — not OFFSET — because XP totals move
+     * during a sync: an OFFSET page can skip or repeat members when the sort
+     * key changes mid-pass, while `user_id > cursor` is immune.
+     */
+    async levelRanksPage(
+      guildId: string,
+      afterUserId: string | null,
+      batchSize: number
+    ): Promise<{ userId: string; textXp: number; voiceXp: number }[]> {
+      const { rows } = await pool.query<{ user_id: string; text_xp: number; voice_xp: number }>(
+        `SELECT user_id, text_xp, voice_xp FROM user_guild_levels
+         WHERE guild_id = $1 AND (text_xp > 0 OR voice_xp > 0) AND user_id > $2
+         ORDER BY user_id
+         LIMIT $3`,
+        [guildId, afterUserId ?? "", batchSize]
+      );
+      return rows.map(row => ({ userId: row.user_id, textXp: row.text_xp, voiceXp: row.voice_xp }));
+    },
+
+    /** How many ranked members a sync will visit, recorded as the job's total. */
+    async countLevelRanks(guildId: string): Promise<number> {
+      const { rows } = await pool.query<{ n: string }>(
+        `SELECT COUNT(*) AS n FROM user_guild_levels
+         WHERE guild_id = $1 AND (text_xp > 0 OR voice_xp > 0)`,
+        [guildId]
+      );
+      return Number(rows[0].n);
+    },
+
+    /* ---------------------------------------------------------------- *
+     * Sync jobs. The state machine lives in the database, not in the
+     * browser or the bot's memory: pending → running → completed | failed,
+     * resumable through `cursor` (the last member id processed). A crash
+     * mid-pass leaves a `running` row that boot resets to `pending`, and
+     * the pass continues from where it stopped.
+     * ---------------------------------------------------------------- */
+
+    /**
+     * Ensures one open job per guild and returns it. A pending or running job
+     * is returned as-is (idempotent double-click); a failed job is resumed
+     * from its cursor; a completed job's new request starts a fresh pass.
+     */
+    async createOrResumeSyncJob(guildId: string): Promise<{
+      id: string;
+      status: "pending" | "running" | "completed" | "failed";
+      cursor: string | null;
+      processed: number;
+      total: number | null;
+    }> {
+      const { rows } = await pool.query<{ id: string; status: string; cursor: string | null; processed: number; total: number | null }>(
+        `SELECT id, status, cursor, processed, total FROM level_sync_jobs
+         WHERE guild_id = $1 AND status IN ('pending','running')
+         ORDER BY created_at DESC LIMIT 1`,
+        [guildId]
+      );
+      if (rows[0]) {
+        return { id: rows[0].id, status: rows[0].status as "pending" | "running", cursor: rows[0].cursor, processed: rows[0].processed, total: rows[0].total };
+      }
+      // The most recent failed job is resumed rather than duplicated — the
+      // cursor makes "start over" the wrong default after a partial pass.
+      const failed = await pool.query<{ id: string; cursor: string | null }>(
+        `SELECT id, cursor FROM level_sync_jobs
+         WHERE guild_id = $1 AND status = 'failed'
+         ORDER BY created_at DESC LIMIT 1`,
+        [guildId]
+      );
+      if (failed.rows[0]) {
+        const resumed = await pool.query<{ id: string; status: string; cursor: string | null; processed: number; total: number | null }>(
+          `UPDATE level_sync_jobs SET status = 'pending', error = NULL, updated_at = now()
+           WHERE id = $1
+           RETURNING id, status, cursor, processed, total`,
+          [failed.rows[0].id]
+        );
+        const row = resumed.rows[0];
+        return { id: row.id, status: "pending", cursor: row.cursor, processed: row.processed, total: row.total };
+      }
+      const inserted = await pool.query<{ id: string; status: string; cursor: string | null; processed: number; total: number | null }>(
+        `INSERT INTO level_sync_jobs (id, guild_id) VALUES ($1, $2)
+         RETURNING id, status, cursor, processed, total`,
+        [randomUUID(), guildId]
+      );
+      const row = inserted.rows[0];
+      return { id: row.id, status: "pending", cursor: row.cursor, processed: row.processed, total: row.total };
+    },
+
+    /** Open jobs the bot should work on, oldest first. */
+    async openSyncJobs(): Promise<{ id: string; guildId: string; cursor: string | null }[]> {
+      const { rows } = await pool.query<{ id: string; guild_id: string; cursor: string | null }>(
+        `SELECT id, guild_id, cursor FROM level_sync_jobs
+         WHERE status = 'pending'
+         ORDER BY created_at
+         LIMIT 5`
+      );
+      return rows.map(row => ({ id: row.id, guildId: row.guild_id, cursor: row.cursor }));
+    },
+
+    /**
+     * Claims a pending job for this pass. The conditional update is the
+     * double-run guard: exactly one claimer flips the row out of `pending`,
+     * so even two racing bots cannot process the same job concurrently.
+     */
+    async claimSyncJob(id: string): Promise<boolean> {
+      const { rowCount } = await pool.query(
+        `UPDATE level_sync_jobs SET status = 'running', started_at = COALESCE(started_at, now()), updated_at = now()
+         WHERE id = $1 AND status = 'pending'`,
+        [id]
+      );
+      return rowCount === 1;
+    },
+
+    /** Records the job's total before the first batch, so progress is a ratio from the start. */
+    async setSyncJobTotal(id: string, total: number) {
+      await pool.query(`UPDATE level_sync_jobs SET total = $2, updated_at = now() WHERE id = $1`, [id, total]);
+    },
+
+    /** Advances the cursor and counters after one processed batch. */
+    async updateSyncJobProgress(
+      id: string,
+      progress: { cursor: string | null; processed: number; granted: number; removed: number; skipped: number; failed: number }
+    ) {
+      await pool.query(
+        `UPDATE level_sync_jobs SET cursor = $2, processed = $3, granted = $4, removed = $5, skipped = $6, failed = $7, updated_at = now()
+         WHERE id = $1`,
+        [id, progress.cursor, progress.processed, progress.granted, progress.removed, progress.skipped, progress.failed]
+      );
+    },
+
+    async completeSyncJob(id: string, counters: { granted: number; removed: number; skipped: number; failed: number }) {
+      await pool.query(
+        `UPDATE level_sync_jobs
+         SET status = 'completed', completed_at = now(), error = NULL,
+             granted = $2, removed = $3, skipped = $4, failed = $5, updated_at = now()
+         WHERE id = $1`,
+        [id, counters.granted, counters.removed, counters.skipped, counters.failed]
+      );
+    },
+
+    async failSyncJob(id: string, error: string) {
+      await pool.query(
+        `UPDATE level_sync_jobs SET status = 'failed', completed_at = now(), error = $2, updated_at = now()
+         WHERE id = $1`,
+        [id, error.slice(0, 500)]
+      );
+    },
+
+    /** Boot recovery: this deployment runs one bot, so any `running` row it finds is its own crashed pass. */
+    async resetStaleSyncJobs(): Promise<number> {
+      const { rowCount } = await pool.query(
+        `UPDATE level_sync_jobs SET status = 'pending', updated_at = now()
+         WHERE status = 'running'`
+      );
+      return rowCount ?? 0;
+    },
+
+    /** Zeroes both XP tracks for one member (the reset-on-leave write). */
+    async resetMemberXp(guildId: string, userId: string): Promise<boolean> {
+      const { rowCount } = await pool.query(
+        `UPDATE user_guild_levels SET text_xp = 0, voice_xp = 0, updated_at = now()
+         WHERE guild_id = $1 AND user_id = $2`,
+        [guildId, userId]
+      );
+      return rowCount === 1;
+    },
+
+    /* ---------------------------------------------------------------- *
+     * Invites (referrals) module. Reads go through the core normaliser so
+     * the bot and the dashboard cannot disagree about a stored value; the
+     * counters move through atomic CTE upserts so two joins landing at the
+     * same moment both survive.
+     * ---------------------------------------------------------------- */
+
+    async loadWelcomeMessages(guildId: string): Promise<WelcomeMessageSettings> {
+      const { rows } = await pool.query<Record<string, unknown>>(
+        `SELECT enabled, image_enabled, image_mode, image_channel_id, channel_id, mode, text, embed, image_config
+         FROM guild_welcome_messages WHERE guild_id = $1`,
+        [guildId]
+      );
+      const row = rows[0];
+      if (!row) return { ...DEFAULT_WELCOME_MESSAGE_SETTINGS };
+      return normaliseWelcomeMessageSettings({
+        enabled: row.enabled,
+        imageEnabled: row.image_enabled,
+        imageMode: row.image_mode,
+        imageChannelId: row.image_channel_id,
+        channelId: row.channel_id,
+        mode: row.mode,
+        text: row.text,
+        embed: row.embed,
+        image: row.image_config
+      });
+    },
+
+    async loadInviteSettings(guildId: string): Promise<InviteSettings> {
+      const { rows } = await pool.query<Record<string, unknown>>(
+        `SELECT enabled, fake_account_days, keep_roles_on_leave, log_self_invites, log_joins,
+                log_leaves, log_milestones, join_message, leave_message, milestone_message, milestone_roles
+         FROM guild_invites WHERE guild_id = $1`,
+        [guildId]
+      );
+      const row = rows[0];
+      if (!row) return { ...DEFAULT_INVITE_SETTINGS };
+      return normaliseInviteSettings({
+        enabled: row.enabled,
+        fakeAccountDays: row.fake_account_days,
+        keepRolesOnLeave: row.keep_roles_on_leave,
+        logSelfInvites: row.log_self_invites,
+        logJoins: row.log_joins,
+        logLeaves: row.log_leaves,
+        logMilestones: row.log_milestones,
+        joinMessage: row.join_message,
+        leaveMessage: row.leave_message,
+        milestoneMessage: row.milestone_message,
+        milestoneRoles: row.milestone_roles
+      });
+    },
+
+    /** The member's prior invite row, when this account has joined this guild before. */
+    async getInviteMember(guildId: string, userId: string): Promise<InviteMemberRow | null> {
+      const { rows } = await pool.query<Record<string, unknown>>(
+        `SELECT user_id, inviter_id, invite_code, kind, counted, account_age_ms, joined_at, left_at
+         FROM invite_members WHERE guild_id = $1 AND user_id = $2`,
+        [guildId, userId]
+      );
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        userId: String(row.user_id),
+        inviterId: row.inviter_id === null ? null : String(row.inviter_id),
+        inviteCode: row.invite_code === null ? null : String(row.invite_code),
+        kind: String(row.kind) as InviteJoinKind,
+        counted: row.counted === true,
+        accountAgeMs: row.account_age_ms === null ? null : Number(row.account_age_ms),
+        joinedAt: row.joined_at instanceof Date ? row.joined_at.toISOString() : String(row.joined_at),
+        leftAt: row.left_at === null || row.left_at === undefined ? null : String(row.left_at)
+      };
+    },
+
+    /**
+     * Records a join and reports whether this account had a prior row — read
+     * and written in one statement, so two nearly-simultaneous joins by the
+     * same account cannot both read "no prior row" and both count.
+     */
+    async recordInviteJoin(
+      guildId: string,
+      userId: string,
+      entry: { inviterId: string | null; inviteCode: string | null; kind: InviteJoinKind; counted: boolean; accountAgeMs: number | null }
+    ): Promise<boolean> {
+      const { rows } = await pool.query<{ prior: boolean }>(
+        `WITH prior AS (
+           SELECT true AS prior FROM invite_members WHERE guild_id = $1 AND user_id = $2
+         ), upsert AS (
+           INSERT INTO invite_members (guild_id, user_id, inviter_id, invite_code, kind, counted, account_age_ms, joined_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+           ON CONFLICT (guild_id, user_id) DO UPDATE SET
+             inviter_id = EXCLUDED.inviter_id,
+             invite_code = EXCLUDED.invite_code,
+             kind = EXCLUDED.kind,
+             counted = EXCLUDED.counted,
+             account_age_ms = EXCLUDED.account_age_ms,
+             joined_at = now(),
+             left_at = NULL,
+             updated_at = now()
+           RETURNING user_id
+         )
+         SELECT prior.prior AS prior FROM upsert LEFT JOIN prior ON true`,
+        [guildId, userId, entry.inviterId, entry.inviteCode, entry.kind, entry.counted, entry.accountAgeMs]
+      );
+      return rows[0]?.prior === true;
+    },
+
+    /** Marks a member's row as departed. The row itself stays: the re-join rule reads it. */
+    async markInviteMemberLeft(guildId: string, userId: string): Promise<void> {
+      await pool.query(
+        `UPDATE invite_members SET counted = false, left_at = now(), updated_at = now()
+         WHERE guild_id = $1 AND user_id = $2`,
+        [guildId, userId]
+      );
+    },
+
+    async getInviteStats(guildId: string, userId: string): Promise<InviteStats> {
+      const { rows } = await pool.query<Record<string, unknown>>(
+        `SELECT regular, fakes, rejoins, leaves, bonus FROM invite_stats WHERE guild_id = $1 AND user_id = $2`,
+        [guildId, userId]
+      );
+      const row = rows[0];
+      if (!row) return { ...EMPTY_INVITE_STATS };
+      return {
+        regular: Number(row.regular),
+        fakes: Number(row.fakes),
+        rejoins: Number(row.rejoins),
+        leaves: Number(row.leaves),
+        bonus: Number(row.bonus)
+      };
+    },
+
+    /**
+     * Moves the counters for one inviter atomically and returns the row after
+     * the move — the caller logs the totals it actually produced, not the ones
+     * it hoped for. The row is created on first touch, so a first-time inviter
+     * reads back as exactly one.
+     */
+    async bumpInviteStats(
+      guildId: string,
+      userId: string,
+      delta: { regular?: number; fakes?: number; rejoins?: number; leaves?: number }
+    ): Promise<InviteStats> {
+      const { rows } = await pool.query<Record<string, unknown>>(
+        `INSERT INTO invite_stats (guild_id, user_id, regular, fakes, rejoins, leaves)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (guild_id, user_id) DO UPDATE SET
+           regular = invite_stats.regular + $3,
+           fakes = invite_stats.fakes + $4,
+           rejoins = invite_stats.rejoins + $5,
+           leaves = invite_stats.leaves + $6,
+           updated_at = now()
+         RETURNING regular, fakes, rejoins, leaves, bonus`,
+        [guildId, userId, delta.regular ?? 0, delta.fakes ?? 0, delta.rejoins ?? 0, delta.leaves ?? 0]
+      );
+      const row = rows[0];
+      return {
+        regular: Number(row.regular),
+        fakes: Number(row.fakes),
+        rejoins: Number(row.rejoins),
+        leaves: Number(row.leaves),
+        bonus: Number(row.bonus)
+      };
+    },
+
+    /**
+     * A moderator's manual edit, as a signed bonus move on the same row.
+     * `regular` stays the record of what actually happened; the adjustment
+     * lives beside it so an audit can always separate history from correction.
+     */
+    async adjustInviteStats(guildId: string, userId: string, bonusDelta: number): Promise<InviteStats> {
+      const { rows } = await pool.query<Record<string, unknown>>(
+        `INSERT INTO invite_stats (guild_id, user_id, bonus) VALUES ($1, $2, $3)
+         ON CONFLICT (guild_id, user_id) DO UPDATE SET
+           bonus = LEAST(100000, GREATEST(-100000, invite_stats.bonus + $3)),
+           updated_at = now()
+         RETURNING regular, fakes, rejoins, leaves, bonus`,
+        [guildId, userId, bonusDelta]
+      );
+      const row = rows[0];
+      return {
+        regular: Number(row.regular),
+        fakes: Number(row.fakes),
+        rejoins: Number(row.rejoins),
+        leaves: Number(row.leaves),
+        bonus: Number(row.bonus)
+      };
+    },
+
+    /** The reset half of `/admin-invites reset`: the counters are zeroed, the member history stays. */
+    async resetInviteStats(guildId: string, userId: string): Promise<void> {
+      await pool.query(`DELETE FROM invite_stats WHERE guild_id = $1 AND user_id = $2`, [guildId, userId]);
+    },
+
+    /** One leaderboard page, ranked by net (regular − leaves + bonus). */
+    async inviteLeaderboardPage(guildId: string, limit: number, offset: number): Promise<(InviteStats & { userId: string })[]> {
+      const { rows } = await pool.query<Record<string, unknown>>(
+        `SELECT user_id, regular, fakes, rejoins, leaves, bonus
+         FROM invite_stats WHERE guild_id = $1
+         ORDER BY (regular - leaves + bonus) DESC, regular DESC, user_id
+         LIMIT $2 OFFSET $3`,
+        [guildId, limit, offset]
+      );
+      return rows.map(row => ({
+        userId: String(row.user_id),
+        regular: Number(row.regular),
+        fakes: Number(row.fakes),
+        rejoins: Number(row.rejoins),
+        leaves: Number(row.leaves),
+        bonus: Number(row.bonus)
+      }));
+    },
+
+    /** How many inviters a leaderboard counts, for the pager's page total. */
+    async countInviteStats(guildId: string): Promise<number> {
+      const { rows } = await pool.query<{ n: string }>(`SELECT COUNT(*) AS n FROM invite_stats WHERE guild_id = $1`, [guildId]);
+      return Number(rows[0].n);
+    },
+
+    /** Instance-wide bookkeeping keys written by the bot's minute clock (last tick time, session count). */
+    async setSetting(key: string, value: string) {
+      await pool.query(
+        `INSERT INTO instance_settings (key, value, updated_at) VALUES ($1, $2, now())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+        [key, value]
+      );
     },
 
     async close() {

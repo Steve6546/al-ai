@@ -108,8 +108,10 @@ test("commands are hidden from everyone by default, except the informational cor
   // so a member without an AL AI role must not even see a command that punishes
   // somebody. The exceptions are the commands that only ever answer a question:
   // a help command nobody can see is a missing feature rather than a gate, and a
-  // new member would have no way to learn what the bot does.
-  const visibleByDesign = new Set(["al-status", "help", "commands", "dashboard", "colors"]);
+  // new member would have no way to learn what the bot does. The invites module's
+  // read commands are the same case — a member checking their own referrals or
+  // claiming their personal link is the feature working, not a privilege.
+  const visibleByDesign = new Set(["al-status", "help", "commands", "dashboard", "colors", "invites", "leaderboard", "invite-link"]);
 
   for (const command of buildAllCommands()) {
     const name = (command as { name: string }).name;

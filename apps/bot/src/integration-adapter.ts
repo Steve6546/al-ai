@@ -197,8 +197,6 @@ export function startIntegrationAdapter(deps: IntegrationAdapterDeps) {
   };
 }
 
-export type IntegrationAdapter = ReturnType<typeof startIntegrationAdapter>;
-
 /** Helper for callers that need to sign an adapter request. */
 export function signAdapterRequest(body: string, secret: string, timestamp = new Date().toISOString()) {
   const nonce = newNonce();

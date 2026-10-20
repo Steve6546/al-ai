@@ -7,10 +7,12 @@
     "./browser": "./src/browser.ts"
   },
   "scripts": {
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "lint": "tsc --noEmit"
   },
   "dependencies": {},
   "devDependencies": {
-    "tsx": "^4.23.13"
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
   }
 }

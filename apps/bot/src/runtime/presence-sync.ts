@@ -17,13 +17,13 @@
  * Dependencies are injected so the decision logic can be tested without Discord.
  */
 
-import { effectiveBotStatus, normaliseBotIdentity, type BotIdentitySettings } from "@al-ai/core";
+import { effectiveBotStatus, normaliseBotPresence, type BotPresenceSettings } from "@al-ai/core";
 
 /** The slice of the global identity the gateway owns. */
-export type BotPresence = Pick<BotIdentitySettings, "status" | "activityType" | "activityText">;
+export type BotPresence = Pick<BotPresenceSettings, "status" | "activityType" | "activityText">;
 
 export type PresenceSyncDeps = {
-  loadIdentity: () => Promise<BotIdentitySettings>;
+  loadIdentity: () => Promise<BotPresenceSettings>;
   /** Applies the presence and reports whether it actually reached the gateway. */
   applyPresence: (presence: BotPresence) => Promise<boolean>;
   onError?: (error: unknown) => void;
@@ -44,7 +44,7 @@ export function createPresenceSync(deps: PresenceSyncDeps) {
       try {
         // Normalised on the way in with the same rules the BFF applied on the way
         // out, so a stored value can never mean two things on the two sides.
-        const identity = normaliseBotIdentity(await deps.loadIdentity());
+        const identity = normaliseBotPresence(await deps.loadIdentity());
         desired = {
           // The *effective* status, not the stored one. A timed `dnd` whose
           // window has closed must read as `online` — that is the whole point of
@@ -78,4 +78,3 @@ export function createPresenceSync(deps: PresenceSyncDeps) {
   };
 }
 
-export type PresenceSync = ReturnType<typeof createPresenceSync>;

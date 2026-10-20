@@ -31,16 +31,19 @@ function sourceFiles(dir: string): string[] {
 }
 
 /**
- * The three ways this repository reaches for the environment.
+ * The ways this repository reaches for the environment.
  *
- * `read("NAME")` is `apps/dashboard/server/env.ts`'s own accessor, which is why
- * a scan for `process.env` alone reported a clean bill of health while `PORT`
- * and the two retention settings were being read through it.
+ * `read("NAME")` is `apps/dashboard/server/env.ts`'s local wrapper, and
+ * `readEnv(source, "NAME")` is the shared `@al-ai/core` accessor the bot reads
+ * through. A scan for `process.env` alone reported a clean bill of health while
+ * `PORT`, the two retention settings, and every bot secret were being read
+ * through one of the two wrappers instead.
  */
 const patterns = [
   /process\.env\.([A-Z_][A-Z0-9_]*)/g,
   /process\.env\[\s*["']([A-Z_][A-Z0-9_]*)["']\s*\]/g,
-  /\bread\(\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)/g
+  /\bread\(\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)/g,
+  /\breadEnv\(\s*[^,()]*,\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)/g
 ];
 
 /**
@@ -92,9 +95,11 @@ const documented = new Set(
 
 test("the scan finds the environment reads it is meant to find", () => {
   // A guard that silently matches nothing passes forever. These two are read in
-  // places the scan has to reach: the bot's own source and the dashboard's
-  // accessor wrapper.
-  assert.ok(read.has("BOT_TOKEN"), "expected to see the bot read BOT_TOKEN");
+  // places the scan has to reach: BOT_TOKEN through the shared `readEnv`
+  // accessor, PORT through the dashboard's local `read` wrapper. If a future
+  // refactor changes how either is read, this fails before the documentation
+  // check can quietly pass on an empty scan.
+  assert.ok(read.has("BOT_TOKEN"), "expected to see the bot read BOT_TOKEN through readEnv()");
   assert.ok(read.has("PORT"), "expected to see the dashboard read PORT through read()");
 });
 

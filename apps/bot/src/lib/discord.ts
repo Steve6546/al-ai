@@ -1,8 +1,11 @@
 import {
+  ActionRowBuilder,
   ActivityType as DiscordActivityType,
   ApplicationCommandOptionType,
   AuditLogEvent,
   AutoModerationActionType,
+  ButtonBuilder,
+  ButtonStyle,
   ChannelType,
   Client,
   EmbedBuilder,
@@ -15,25 +18,36 @@ import {
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
   type Guild,
+  type GuildBasedChannel,
   type GuildChannel,
   type Integration,
   type MessageReaction,
+  type MessageMentionOptions,
+  type NewsChannel,
   type PartialMessageReaction,
   type SlashCommandStringOption,
-  type SlashCommandUserOption
+  type SlashCommandUserOption,
+  type TextChannel
 } from "discord.js";
 // Re-exported so callers can type callback parameters without importing
 // discord.js themselves — GOVERNANCE rule 2 keeps that import in this module.
-export type { GuildMember } from "discord.js";
-import type { GuildMember } from "discord.js";
+export type { GuildMember, APIEmbed } from "discord.js";
+import type { GuildMember, PartialGuildMember, APIEmbed } from "discord.js";
 import type { ActivityType, BotStatus, LogDestination, Severity } from "@al-ai/core";
 import {
+  LOG_CATEGORY_LABELS,
   activityTypeNumbers,
+  logVisualFor,
+  renderValue as renderValueCore,
+  twemojiThumbnailUrl,
   BOT_ROLE_NAME,
   commandRegistry,
   groupPagesIntoMessages,
   normaliseSnowflake,
+  chunkField,
+  EMBED_MAX_FIELDS,
   planEmbedFields,
+  type EmbedField,
   SEVERITY_EMBED_COLOR,
   TIMEOUT_MAX_SECONDS
 } from "@al-ai/core";
@@ -96,8 +110,43 @@ const AL_AI_INTENTS = [
   GatewayIntentBits.AutoModerationExecution
 ];
 
+/**
+ * Who a message is allowed to notify.
+ *
+ * Discord's own documentation is precise about the shape, and the shape is not
+ * what a "mention policy" usually guesses:
+ *
+ * - `parse` and `users`/`roles` are **mutually exclusive**. Sending both is a
+ *   validation error, not a merged policy.
+ * - `parse: []` suppresses every mention.
+ * - `users: [...]` **without** `parse` allows exactly those user ids - and
+ *   only those that actually appear in the content.
+ *
+ * So the correct way to say "this message may ping this one member" is
+ * `{ users: [id] }`, and the correct default for everything else is
+ * `{ parse: [] }`.
+ *
+ * The wrong policy is `parse: ["users"]`: it still lets *any* user mentioned
+ * in the content be notified, which is the whole hole - a message built from
+ * untrusted text could name another member and have the bot notify them.
+ */
+export function allowedMentionsFor(...userIds: (string | null | undefined)[]): MessageMentionOptions {
+  const users = userIds.filter((id): id is string => typeof id === "string" && id.length > 0);
+  return users.length > 0 ? { users } : { parse: [] };
+}
+
 export function createDiscordClient() {
-  return new Client({ intents: AL_AI_INTENTS });
+  return new Client({
+    intents: AL_AI_INTENTS,
+    // Nobody is notified unless the message says who may be.
+    //
+    // Discord's default for a regular message parses *every* mention type, so
+    // a moderator types `@everyone` in a warning reason, the bot posts it, and
+    // the server is pinged by a message the operator never meant as a ping.
+    // The one ping the bot actually means - the member a level-up is about -
+    // is asked for explicitly, with `allowedMentionsFor(userId)`.
+    allowedMentions: { parse: [] }
+  });
 }
 
 // Severity colours come from @al-ai/core so the bot and the dashboard agree.
@@ -120,21 +169,124 @@ export type LogEnvelope = {
  * Every page keeps the same correlationId so the record can be reassembled,
  * and pages are numbered when there is more than one.
  */
-function buildLogEmbeds(envelope: LogEnvelope, colorOverride?: string) {
-  const color = colorOverride ? Number.parseInt(colorOverride.replace("#", ""), 16) : severityColor[envelope.severity];
-  const plan = planEmbedFields(envelope.data);
+/**
+ * The visual identity of a log embed: emoji, colour and Arabic title per
+ * event, plus the Twemoji thumbnail CDN — the palette the operator picked
+ * (green = added, red = removed, amber = edited, blue = informational).
+ */
 
-  return plan.pages.map((fields, index) => {
+/** Arabic labels for the payload keys the emitters actually send. */
+const LOG_FIELD_LABELS: Record<string, string> = {
+  actorId: "المنفذ",
+  targetId: "الطرف المتأثر",
+  memberId: "العضو",
+  roleId: "الرتبة",
+  channelId: "القناة",
+  toChannelId: "إلى القناة",
+  fromChannelId: "من القناة",
+  threadId: "الثريد",
+  messageId: "الرسالة",
+  reason: "السبب",
+  count: "العدد",
+  emoji: "التفاعل",
+  duration: "المدة",
+  before: "قبل",
+  after: "بعد",
+  inviterId: "صاحب الدعوة",
+  inviteCode: "كود الدعوة",
+  kind: "الحالة",
+  accountAge: "عمر الحساب",
+  deducted: "الخصم",
+  net: "الصافي",
+  threshold: "العتبة",
+  action: "الإجراء"
+};
+
+/** Keys rendered as Discord mentions rather than raw numbers. */
+const MENTION_KEYS = new Set(["actorId", "targetId", "memberId", "roleId", "channelId", "toChannelId", "fromChannelId", "threadId", "inviterId"]);
+/**
+ * Keys that never become fields. `text` is the emitter's rendered template —
+ * an event that carries prose shows that prose as the embed's description
+ * instead of a field labelled after its own variable name.
+ */
+const HIDDEN_KEYS = new Set(["text"]);
+const CHANNEL_KEYS = new Set(["channelId", "toChannelId", "fromChannelId", "threadId"]);
+const INLINE_KEYS = new Set(["actorId", "targetId", "memberId", "roleId", "channelId", "toChannelId", "fromChannelId", "threadId", "messageId", "count", "emoji", "duration"]);
+
+function fieldLabel(key: string): string {
+  return LOG_FIELD_LABELS[key] ?? key;
+}
+
+function fieldValue(key: string, value: unknown): string {
+  const text = renderValueCore(value);
+  if (key === "before" || key === "after") return `\`\`\`\n${text === "—" ? "—" : text}\n\`\`\``;
+  if (MENTION_KEYS.has(key) && typeof value === "string" && /^\d+$/.test(value)) {
+    const mention = CHANNEL_KEYS.has(key) ? `<#${value}>` : key === "roleId" ? `<@&${value}>` : `<@${value}>`;
+    return `${mention}\n\`${value}\``;
+  }
+  return text;
+}
+
+/** One enriched, chunked field per payload key, in the emitter's own order. */
+function buildLogFields(data: Record<string, unknown>): EmbedField[] {
+  const fields: EmbedField[] = [];
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined || value === null || HIDDEN_KEYS.has(key)) continue;
+    fields.push(...chunkField(fieldLabel(key), fieldValue(key, value)));
+  }
+  return fields;
+}
+
+/** Colour resolution: the operator's per-record override wins, else the event's palette colour. */
+function logVisualsFor(envelope: LogEnvelope, colorOverride?: string) {
+  const visual = logVisualFor(envelope.eventId);
+  const color = colorOverride ? Number.parseInt(colorOverride.replace("#", ""), 16) : visual.color;
+  return { visual, color };
+}
+
+/**
+ * Builds the redesigned log embed: author (the actor's own avatar and name),
+ * an emoji-titled event with a matching Twemoji thumbnail, inline mention
+ * fields, an old→new code block for edits, a relative Discord timestamp and a
+ * footer naming the server. `planEmbedFields`'s ceilings are honoured through
+ * the same chunk/paginate helpers, so GOVERNANCE rule 11 still holds.
+ */
+export function buildLogEmbeds(
+  envelope: LogEnvelope,
+  colorOverride?: string,
+  author?: { name: string; iconURL?: string },
+  guildName?: string | null
+) {
+  const { visual, color } = logVisualsFor(envelope, colorOverride);
+  const unix = Math.floor(new Date(envelope.timestampUTC).getTime() / 1000);
+  // An event that carries rendered prose (`text`) leads with it: the template
+  // the operator wrote is the headline, and the structured fields stay below.
+  const text = typeof envelope.data.text === "string" && envelope.data.text.trim() ? envelope.data.text : null;
+
+  const dataFields = buildLogFields(envelope.data);
+  const pages: EmbedField[][] = [];
+  for (let index = 0; index < dataFields.length; index += EMBED_MAX_FIELDS) {
+    pages.push(dataFields.slice(index, index + EMBED_MAX_FIELDS));
+  }
+  if (!pages.length) pages.push([]);
+
+  return pages.map((fields, index) => {
     const embed = new EmbedBuilder()
       .setColor(color)
-      .setTitle(plan.pages.length > 1 ? `${envelope.eventId} (${index + 1}/${plan.pages.length})` : envelope.eventId)
-      .setDescription(`الفئة: \`${envelope.category}\``)
-      .addFields(fields)
-      .setFooter({ text: `${envelope.sourceLayer} · ${envelope.correlationId}` })
+      .setTitle(`${visual.emoji} ${visual.title} | ${envelope.eventId}`)
+      .setDescription(text ? `${text}\n\n<t:${unix}:R>` : `<t:${unix}:R>`)
+      .setThumbnail(twemojiThumbnailUrl(visual.emoji))
+      .setFooter({
+        text: `${guildName ?? "AL AI"} · ${LOG_CATEGORY_LABELS[envelope.category] ?? envelope.category} · ${envelope.correlationId.slice(0, 8)}`
+      })
       .setTimestamp(new Date(envelope.timestampUTC));
+    if (author) embed.setAuthor(author);
 
-    if (plan.overflowed && index === plan.pages.length - 1) {
-      embed.addFields({ name: "تنبيه", value: `الحدث تجاوز الحد الآمن (${plan.totalFields} حقلاً) — التفاصيل الكاملة في سجل التدقيق.` });
+    const page = index > 0 ? fields.map(field => ({ ...field, name: `${field.name} (${index + 1})` })) : fields;
+    embed.addFields(page.slice(0, EMBED_MAX_FIELDS - 1));
+    embed.addFields({ name: "الوقت", value: `<t:${unix}:R>`, inline: true });
+    if (index === pages.length - 1 && dataFields.length > EMBED_MAX_FIELDS * 5) {
+      embed.addFields({ name: "تنبيه", value: `الحدث ضخم (${dataFields.length} حقلاً) — التفاصيل الكاملة في سجل التدقيق.` });
     }
     return embed;
   });
@@ -148,7 +300,17 @@ export async function sendLogEmbed(client: Client, channelId: string, envelope: 
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel || !channel.isTextBased() || channel.isDMBased()) return false;
 
-  const embeds = buildLogEmbeds(envelope, colorOverride);
+  // The author is the human (or bot) who actually did the thing, with their
+  // own avatar — resolved cache-first so a burst of logs costs no REST calls
+  // for members the bot already knows.
+  const actorId = typeof envelope.data.actorId === "string" ? envelope.data.actorId : null;
+  let author: { name: string; iconURL?: string } | undefined;
+  if (actorId) {
+    const member = channel.guild.members.cache.get(actorId) ?? (await channel.guild.members.fetch(actorId).catch(() => null));
+    author = member ? { name: member.displayName, iconURL: member.displayAvatarURL({ size: 64 }) } : undefined;
+  }
+
+  const embeds = buildLogEmbeds(envelope, colorOverride, author, channel.guild.name);
   for (const batch of groupPagesIntoMessages(embeds)) {
     if (batch.length) await channel.send({ embeds: batch });
   }
@@ -276,6 +438,12 @@ export async function applyBotPresence(
       ? [{ name: presence.activityText, type: activityTypeNumbers[presence.activityType] as DiscordActivityType }]
       : []
   });
+
+  // Application is observable: the operator changes the presence in the
+  // dashboard, and this line is the receipt that the gateway took it.
+  console.log(
+    `AL AI presence applied: status=${presence.status} activity=${presence.activityType}${presence.activityText ? ` "${presence.activityText}"` : " (none)"}`
+  );
 
   return true;
 }
@@ -663,9 +831,59 @@ export function buildModerationCommands() {
   ];
 }
 
+/** The invites module's own command bounds. */
+export const INVITES_MAX_ADJUST = 10_000;
+/** Rows per page of the invites leaderboard. */
+export const INVITES_LEADERBOARD_PER_PAGE = 10;
+
+/** The custom-id prefix the invites leaderboard pager answers to. */
+export const INVITES_PAGER_PREFIX = "invites:lb:";
+
+/**
+ * The invites commands. The three member-facing ones stay visible — a member
+ * checking their own referrals or claiming their personal link is the feature
+ * working — while the manual adjust command is hidden like every moderation
+ * tool and granted per role.
+ */
+function buildInviteCommands() {
+  return [
+    new SlashCommandBuilder()
+      .setName("invites")
+      .setDescription("عرض إحصائيات إحالات عضو")
+      .addUserOption(option => option.setName("user").setDescription("العضو (اتركه فارغاً لعرض إحصائياتك)").setRequired(false))
+      .toJSON(),
+
+    new SlashCommandBuilder().setName("leaderboard").setDescription("صدارة أكثر الأعضاء دعوةً للناس").toJSON(),
+
+    new SlashCommandBuilder().setName("invite-link").setDescription("إنشاء رابط دعوة شخصي ودائم وإرساله لك خاصاً").toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("admin-invites")
+      .setDescription("تعديل يدوي على نقاط إحالات عضو")
+      .addUserOption(targetOption)
+      .addStringOption(option =>
+        option
+          .setName("action")
+          .setDescription("الإجراء")
+          .setRequired(true)
+          .addChoices(
+            { name: "إضافة نقاط", value: "add" },
+            { name: "خصم نقاط", value: "remove" },
+            { name: "تصفير", value: "reset" }
+          )
+      )
+      .addIntegerOption(option =>
+        option.setName("amount").setDescription("عدد النقاط (مطلوب للإضافة والخصم)").setRequired(false).setMinValue(1).setMaxValue(INVITES_MAX_ADJUST)
+      )
+      .addStringOption(option => option.setName("reason").setDescription("السبب").setMaxLength(512).setAutocomplete(true))
+      .setDefaultMemberPermissions(0n)
+      .toJSON()
+  ];
+}
+
 /** Everything AL AI publishes. Used by scripts/deploy-commands.ts. */
 export function buildAllCommands() {
-  return [buildStatusCommand(), ...buildCoreCommands(), ...buildModerationCommands()];
+  return [buildStatusCommand(), ...buildCoreCommands(), ...buildModerationCommands(), ...buildInviteCommands()];
 }
 
 /**
@@ -1061,7 +1279,9 @@ export async function notifyTarget(client: Client, guildId: string, userId: stri
   if (!guild) return false;
   const member = await guild.members.fetch(userId).catch(() => null);
   if (!member) return false;
-  return member.send({ content }).then(() => true).catch(() => false);
+  // A direct message reaches one person, but the content can name others; the
+  // whitelist keeps the notification to the member it is about.
+  return member.send({ content, allowedMentions: allowedMentionsFor(userId) }).then(() => true).catch(() => false);
 }
 
 /**
@@ -1384,6 +1604,65 @@ export type BindOptions = {
    */
   onBotJoin?: (member: GuildMember) => Promise<void>;
   /**
+   * Fires once a join's invite attribution settles — the guild's invite list
+   * was fetched and diffed, and the tracker either named a code (with the
+   * inviter it carries) or could not. `isVanity` marks the case where no code
+   * matched but the guild's vanity URL use count rose. The invites module
+   * subscribes here; the raw `invite.use` log line still fires separately for
+   * the un-attributed record.
+   */
+  onInviteUse?: (info: { guildId: string; memberId: string; inviteCode: string | null; inviterId: string | null; isVanity: boolean }) => Promise<void>;
+  /**
+   * Handles a button press on a message AL AI sent — the invites leaderboard's
+   * pager, today. Not a command: none of the command pipeline (tiers, scopes,
+   * cooldowns) applies, so the callback itself decides who may press what.
+   */
+  onComponent?: (context: ComponentContext) => Promise<void>;
+  /**
+   * Fires on every guild message, before the logging cache's own filters — the
+   * levels engine must see messages even when logging is off, and it applies
+   * its own bot/webhook/ignore rules. Started detached like the join writes:
+   * a slow levels decision must never delay the message being logged.
+   */
+  onGuildMessage?: (message: {
+    guildId: string;
+    channelId: string;
+    /** The thread's parent channel, so ignoring a channel ignores its threads. */
+    parentChannelId: string | null;
+    authorId: string;
+    isBot: boolean;
+    isWebhook: boolean;
+    /** Join/boost/pin and other non-conversation messages — never worth XP. */
+    isSystem: boolean;
+    /** The author's role ids, or null when the member could not be resolved. */
+    memberRoleIds: string[] | null;
+    /** The member's chosen display name at send time, for the leaderboard. */
+    displayName: string | null;
+    /** The author's avatar hash, for the leaderboard's server-side CDN build. */
+    avatarHash: string | null;
+  }) => Promise<void>;
+  /**
+   * Fires when a member leaves the guild, so the levels system can zero their
+   * XP when the operator turned on reset-on-leave. Detached like the join
+   * writes — the leave is logged regardless.
+   */
+  onMemberLeave?: (member: GuildMember | PartialGuildMember) => Promise<void>;
+  /**
+   * Fires on every voice state change so the levels engine can open, move and
+   * close voice sessions: the hybrid timing credits time from the moment of
+   * joining, not from the next heartbeat, and pays the remaining whole
+   * minutes the moment a member leaves.
+   */
+  onVoiceStateChange?: (change: {
+    guildId: string;
+    memberId: string;
+    channelId: string | null;
+    selfMute: boolean;
+    selfDeaf: boolean;
+    serverMute: boolean;
+    serverDeaf: boolean;
+  }) => Promise<void>;
+  /**
    * Supplies the ready-made reasons for the focused option.
    *
    * Answers an autocomplete interaction, which Discord expects within three
@@ -1465,9 +1744,14 @@ export type CommandContext = {
    *
    * `autoDeleteSeconds` is the guild's tidiness setting: when set, the reply is
    * removed after that many seconds so a moderation channel does not fill up
-   * with bot confirmations.
+   * with bot confirmations. `embeds`/`components` carry the rich replies — the
+   * invites leaderboard's card and its pager buttons — that plain-text replies
+   * cannot express.
    */
-  reply: (content: string, options?: { autoDeleteSeconds?: number }) => Promise<void>;
+  reply: (
+    content: string,
+    options?: { autoDeleteSeconds?: number; embeds?: APIEmbed[]; components?: unknown[] }
+  ) => Promise<void>;
   /**
    * Withdraws this command's own reply once the member it acted on leaves.
    *
@@ -1482,6 +1766,21 @@ export type CommandContext = {
    * be the worse answer.
    */
   retractOnLeave: (targetMemberId: string) => void;
+};
+
+/**
+ * A button press on a message AL AI sent, as the subscribing module sees it.
+ * `update` rewrites the message the button lives on (the pager's next page);
+ * `reply` answers with a fresh ephemeral message instead, for the cases where
+ * rewriting would be wrong.
+ */
+export type ComponentContext = {
+  customId: string;
+  guildId: string;
+  userId: string;
+  roleIds: string[];
+  update: (payload: { content?: string; embeds?: APIEmbed[]; components?: unknown[] }) => Promise<void>;
+  replyEphemeral: (content: string) => Promise<void>;
 };
 
 /**
@@ -1532,6 +1831,10 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
   // supplies its own only to test the diff at the boundary.
   const derived = options.derivedState ?? createDerivedState();
   const inviteTracker = options.inviteTracker;
+  // The last observed vanity use count per guild, so "the vanity URL brought
+  // this member in" is a rise we measured rather than a guess — the same diff
+  // logic the invite tracker applies to ordinary invites.
+  const vanityUses = new Map<string, number>();
   const emit = (event: BotEvent) => {
     try {
       sink(event);
@@ -1578,14 +1881,46 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
     if (inviteTracker) {
       void member.guild.invites
         .fetch()
-        .then(fetched =>
-          inviteTracker.observe(
+        .then(fetched => {
+          const code = inviteTracker.observe(
             member.guild.id,
             fetched.map(invite => ({ code: invite.code, inviterId: invite.inviterId ?? null, uses: invite.uses ?? 0 }))
-          )
-        )
-        .then(code => {
+          );
           if (code) emit({ type: "invite.use", guildId: member.guild.id, inviteCode: code, memberId: member.id });
+          // The invites module needs the attribution decision, not just the
+          // code: the inviter rides along from the fetch that named the code.
+          // No code means either the honest "cannot attribute" or the guild's
+          // vanity URL — which Discord reports on its own endpoint, so one
+          // bounded probe separates the two instead of guessing.
+          const attributed = code ? fetched.find(invite => invite.code === code) : null;
+          if (!options.onInviteUse) return;
+          if (attributed) {
+            void options
+              .onInviteUse({
+                guildId: member.guild.id,
+                memberId: member.id,
+                inviteCode: attributed.code,
+                inviterId: attributed.inviterId ?? null,
+                isVanity: false
+              })
+              .catch(error => console.error("AL AI invites attribution failed", error));
+            return;
+          }
+          void member.guild
+            .fetchVanityData()
+            .then(vanity => {
+              const previous = vanityUses.get(member.guild.id);
+              vanityUses.set(member.guild.id, vanity.uses ?? 0);
+              const rose = previous !== undefined && (vanity.uses ?? 0) > previous;
+              return options.onInviteUse!({
+                guildId: member.guild.id,
+                memberId: member.id,
+                inviteCode: rose ? vanity.code ?? null : null,
+                inviterId: null,
+                isVanity: rose
+              });
+            })
+            .catch(() => undefined);
         })
         .catch(() => undefined);
     }
@@ -1606,6 +1941,11 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
       emit({ type: "bot.leave", guildId: member.guild.id, memberId: member.id });
     } else {
       emit({ type: "member.leave", guildId: member.guild.id, memberId: member.id });
+    }
+    // The levels engine's reset-on-leave hook — detached, like the join
+    // writes: the leave is logged whatever the engine decides to do.
+    if (options.onMemberLeave) {
+      void options.onMemberLeave(member).catch(() => undefined);
     }
     // Withdraw any reply that was waiting on this member's departure. Not
     // awaited on purpose: the withdrawal is cosmetic and the leave event is
@@ -1698,6 +2038,23 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
     const memberId = after.id || before.id;
     const guild = after.guild ?? before.guild;
     const guildId = guild.id;
+    // The levels engine tracks sessions off the same event. Detached, like
+    // every other write beside the logger: a slow levels update must never
+    // delay the voice log entry.
+    if (options.onVoiceStateChange) {
+      const state = after.channelId ? after : before;
+      void options
+        .onVoiceStateChange({
+          guildId,
+          memberId,
+          channelId: after.channelId,
+          selfMute: state.selfMute ?? false,
+          selfDeaf: state.selfDeaf ?? false,
+          serverMute: state.serverMute ?? false,
+          serverDeaf: state.serverDeaf ?? false
+        })
+        .catch(() => undefined);
+    }
     if (before.channelId !== after.channelId) {
       if (!before.channelId && after.channelId) {
         emit({ type: "voice.join", guildId, memberId, toChannelId: after.channelId });
@@ -1808,7 +2165,30 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
   });
 
   client.on(Events.MessageCreate, message => {
-    if (!cache || !message.guildId || message.author.bot) return;
+    // The levels engine sees every guild message, ahead of the cache's own
+    // filters: XP must flow even when logging is off, and the engine applies
+    // its own bot/webhook/ignore rules. Detached — never delays the log entry.
+    if (options.onGuildMessage && message.guildId) {
+      const member = message.member;
+      const channel = message.channel;
+      void options
+        .onGuildMessage({
+          guildId: message.guildId,
+          channelId: message.channelId,
+          parentChannelId: channel?.isThread() ? channel.parentId : null,
+          authorId: message.author.id,
+          isBot: message.author.bot,
+          isWebhook: message.webhookId !== null,
+          isSystem: message.system,
+          memberRoleIds: member ? [...member.roles.cache.keys()] : null,
+          displayName: member?.displayName ?? null,
+          avatarHash: message.author.avatar
+        })
+        .catch(() => undefined);
+    }
+    if (!cache || !message.guildId || message.author.bot) {
+      return;
+    }
     cache.put({
       id: message.id,
       guildId: message.guildId,
@@ -2212,6 +2592,31 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
       return;
     }
 
+    // A button on AL AI's own message. Not a command: the pipeline's tiers,
+    // scopes and cooldowns are a chat-input contract, so button callbacks are
+    // handed to their subscriber raw — the subscriber decides who may press.
+    if (interaction.isButton() && options.onComponent) {
+      const roleIds = roleIdsOf(interaction.member);
+      void options
+        .onComponent({
+          customId: interaction.customId,
+          guildId: interaction.guildId,
+          userId: interaction.user.id,
+          roleIds,
+          update: payload =>
+            interaction
+              .update({
+                ...(payload.content !== undefined ? { content: payload.content } : {}),
+                ...(payload.embeds ? { embeds: payload.embeds } : {}),
+                ...(payload.components ? { components: payload.components as never[] } : {})
+              })
+              .then(() => undefined),
+          replyEphemeral: content => interaction.reply({ content, ephemeral: true }).then(() => undefined)
+        })
+        .catch(error => console.error("AL AI component handling failed", error));
+      return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
 
     const guildId = interaction.guildId;
@@ -2258,7 +2663,17 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
       reason: interaction.options.getString("reason") ?? "",
       reply: async (content, replyOptions) => {
         // Ephemeral: a moderation reply is for the operator, not the channel.
-        await interaction.reply({ content, ephemeral: true }).catch(() => undefined);
+        await interaction
+          .reply({
+            content,
+            // Rich replies ride along only when the caller supplied them — an
+            // undefined key would be dropped by Discord.js anyway, but spelling
+            // the condition keeps the plain-text path exactly what it was.
+            ...(replyOptions?.embeds?.length ? { embeds: replyOptions.embeds } : {}),
+            ...(replyOptions?.components?.length ? { components: replyOptions.components as never[] } : {}),
+            ephemeral: true
+          })
+          .catch(() => undefined);
         const seconds = replyOptions?.autoDeleteSeconds ?? 0;
         if (seconds <= 0) return;
         // Ephemeral replies are private to the caller, so removing one after a
@@ -2277,6 +2692,113 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
       }
     });
   });
+}
+
+/**
+ * Sends one pre-built welcome payload — plain content, an API embed and at
+ * most one attachment — exactly as the caller composed it. The caller owns
+ * every decision (tokens, embed shape, image mode); this is the single
+ * Discord-shaped hand it goes through, and it reports whether Discord took
+ * the message rather than guessing success.
+ */
+export async function sendWelcomePayload(
+  client: Client,
+  channelId: string,
+  payload: {
+    content?: string;
+    embed?: APIEmbed;
+    file?: { buffer: Buffer; name: string; contentType: string } | null;
+    /** The member the greeting is about - the only one it may notify. */
+    memberId?: string | null;
+  }
+): Promise<boolean> {
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel || !channel.isTextBased() || channel.isDMBased()) return false;
+  const attachment = payload.file
+    ? [{ attachment: payload.file.buffer, name: payload.file.name, contentType: payload.file.contentType }]
+    : undefined;
+  const message = await channel
+    .send({
+      ...(payload.content ? { content: payload.content } : {}),
+      ...(payload.embed ? { embeds: [payload.embed] } : {}),
+      ...(attachment ? { files: attachment } : {}),
+      // The greeting names its member, and that member is the one who should
+      // hear about it. Nobody else in the text is notified.
+      allowedMentions: allowedMentionsFor(payload.memberId)
+    })
+    .catch(() => null);
+  return message !== null;
+}
+
+/* ------------------------------------------------------------------ *
+ * Invites module — Discord-side helpers.
+ *
+ * The scoring decisions live in @al-ai/core (pure, unit-tested); these two are
+ * the only parts that must touch the API: creating the personal link, and
+ * rendering the leaderboard as an embed with its pager.
+ * ------------------------------------------------------------------ */
+
+export type CreatedInvite = { code: string; url: string; channelId: string };
+
+/**
+ * Creates a permanent, unlimited-use invite for one member on the guild's
+ * system channel — or the first text channel when the system channel is unset,
+ * which is where a guild without one still wants the link to point.
+ *
+ * `unique: false` is deliberate: the endpoint reuses the caller's existing
+ * identical invite when one exists, so pressing the button twice does not
+ * litter the guild's invite list with duplicates.
+ */
+export async function createPersonalInvite(client: Client, guildId: string, reason: string): Promise<CreatedInvite | null> {
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return null;
+  // Only real top-level channels carry invites: the rules channel first (that
+  // is what it exists for), then the system channel, then the first text or
+  // announcement channel. Threads and stages are excluded by the same check.
+  const isInviteChannel = (channel: GuildBasedChannel | null): channel is TextChannel | NewsChannel =>
+    channel?.type === ChannelType.GuildText || channel?.type === ChannelType.GuildAnnouncement;
+  const candidates = [guild.rulesChannelId, guild.systemChannelId].map(id => (id ? guild.channels.cache.get(id) ?? null : null));
+  const channel =
+    candidates.find(candidate => isInviteChannel(candidate)) ??
+    guild.channels.cache.find(candidate => isInviteChannel(candidate)) ??
+    null;
+  if (!channel) return null;
+  const invite = await channel
+    .createInvite({ maxAge: 0, maxUses: 0, unique: false, reason })
+    .catch(() => null);
+  if (!invite) return null;
+  return { code: invite.code, url: invite.url, channelId: channel.id };
+}
+
+/**
+ * One page of the invites leaderboard as an embed plus its pager row. The
+ * buttons carry only the target page — `invites:lb:<page>` — because the
+ * guild and its data are re-read on every press: a cached page would show a
+ * score that has moved the moment someone joins or leaves.
+ */
+export function buildInviteLeaderboardMessage(
+  rows: readonly { userId: string; net: number; total: number; leaves: number }[],
+  page: number,
+  totalPages: number
+): { embeds: APIEmbed[]; components: unknown[] } {
+  const medals = ["🥇", "🥈", "🥉"];
+  const start = page * INVITES_LEADERBOARD_PER_PAGE;
+  const lines = rows.map((row, index) => {
+    const rank = start + index + 1;
+    const medal = medals[index] ?? `\`${rank}.\``;
+    return `${medal} <@${row.userId}> — **${row.net}** صافي (${row.total} كلي، ${row.leaves} مغادرون)`;
+  });
+  const embed: APIEmbed = {
+    title: "🏆 سدارة الإحالات",
+    description: lines.length ? lines.join("\n") : "لا توجد إحالات مسجلة بعد — كن أول من يدعو أصدقاءه!",
+    color: SEVERITY_EMBED_COLOR.info,
+    footer: { text: `الصفحة ${page + 1} من ${totalPages}` }
+  };
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`${INVITES_PAGER_PREFIX}${page - 1}`).setLabel("السابق").setStyle(ButtonStyle.Secondary).setDisabled(page <= 0),
+    new ButtonBuilder().setCustomId(`${INVITES_PAGER_PREFIX}${page + 1}`).setLabel("التالي").setStyle(ButtonStyle.Secondary).setDisabled(page >= totalPages - 1)
+  );
+  return { embeds: [embed], components: [row.toJSON()] };
 }
 
 export { ChannelType };

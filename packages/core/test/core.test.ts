@@ -21,9 +21,11 @@ import {
   layerSignature,
   logDestinations,
   type LogDestination,
+  MAX_BIO_LENGTH,
   MAX_NICKNAME_LENGTH,
   newNonce,
-  normaliseBotIdentity,
+  normaliseBio,
+  normaliseBotPresence,
   normaliseCustomization,
   normaliseHexColor,
   normaliseIconUrl,
@@ -162,7 +164,9 @@ test("every destination carries exactly the events its section promises", () => 
     // Version 5 split the boost tier by direction and added the banner; the AFK
     // and system-channel events are real but moved to bot-log.
     ["server-log", 7],
-    ["invite-log", 3],
+    // The invites module added its own four: the classified join, the leave and
+    // its deduction, the milestone grant, and the moderator's manual adjust.
+    ["invite-log", 7],
     ["expression-log", 6],
     ["event-log", 7],
     ["integration-log", 8],
@@ -175,8 +179,8 @@ test("every destination carries exactly the events its section promises", () => 
   for (const [destination, count] of expected) {
     assert.equal(eventsByCategory(destination).length, count, `${destination} should carry ${count} events`);
   }
-  // 107 the operator can mute, plus the 20 internal ones.
-  assert.equal([...eventSchema.keys()].length, 127);
+  // 111 the operator can mute, plus the 20 internal ones.
+  assert.equal([...eventSchema.keys()].length, 131);
 });
 
 test("the recategorisation moved events without renaming them", () => {
@@ -361,10 +365,47 @@ test("verification counts are never negative or fractional", () => {
  */
 
 test("the shipped appearance only describes what Discord can apply per guild", () => {
-  assert.deepEqual(Object.keys(DEFAULT_CUSTOMIZATION).sort(), ["nickname", "roleColor", "roleIconUrl"]);
+  // Every key here is one `PATCH /guilds/{id}/members/@me` accepts: `nick`,
+  // `avatar`, `banner` and `bio` for the member, plus the two the bot applies
+  // through its own managed role. `avatarDataUrl` and `bannerDataUrl` are the
+  // guild-local member images — Modify Current Member takes both, which is what
+  // makes a per-server banner real rather than aspirational — and `bio` is the
+  // member bio, validated by Discord on write.
+  //
+  // What is deliberately *not* here is the status and the activity. They have no
+  // REST route at all; they live on the gateway connection and are therefore the
+  // same in every guild, so they belong to `BotPresenceSettings` and not to a
+  // contract whose whole meaning is "in one server".
+  assert.deepEqual(Object.keys(DEFAULT_CUSTOMIZATION).sort(), [
+    "avatarDataUrl",
+    "bannerDataUrl",
+    "bio",
+    "enabled",
+    "nickname",
+    "roleColor",
+    "roleIconUrl"
+  ]);
+  assert.equal(DEFAULT_CUSTOMIZATION.enabled, true, "the custom profile ships applied");
   assert.equal(DEFAULT_CUSTOMIZATION.nickname, DEFAULT_BOT_NICKNAME);
   assert.equal(DEFAULT_CUSTOMIZATION.roleColor, null);
   assert.equal(DEFAULT_CUSTOMIZATION.roleIconUrl, null);
+  assert.equal(DEFAULT_CUSTOMIZATION.avatarDataUrl, null);
+  assert.equal(DEFAULT_CUSTOMIZATION.bannerDataUrl, null);
+  assert.equal(DEFAULT_CUSTOMIZATION.bio, "", "an unset bio is the empty string, not null");
+});
+
+test("a bio is trimmed and capped at the limit Discord actually enforces", () => {
+  // 300, measured: a 4000-character member bio comes back as
+  // `BASE_TYPE_MAX_LENGTH — Must be 300 or fewer in length.` The 190 the account
+  // endpoint enforces on About me is a different field's limit, and using it
+  // here would truncate text Discord would have accepted.
+  assert.equal(MAX_BIO_LENGTH, 300);
+  assert.equal(normaliseBio("  ما يميّز AL AI  "), "ما يميّز AL AI");
+  assert.equal(normaliseBio("x".repeat(400)).length, MAX_BIO_LENGTH);
+  // Not a string means unset, the same way the other normalisers read it.
+  assert.equal(normaliseBio(undefined), "");
+  assert.equal(normaliseBio(null), "");
+  assert.equal(normaliseBio(42), "");
 });
 
 test("a nickname is trimmed and capped at Discord's limit", () => {
@@ -399,11 +440,59 @@ test("only an absolute https image URL is accepted as a role icon", () => {
 });
 
 test("normalising a whole appearance never invents a value the operator did not set", () => {
-  assert.deepEqual(normaliseCustomization(null), { nickname: "", roleColor: null, roleIconUrl: null });
+  assert.deepEqual(normaliseCustomization(null), {
+    enabled: true,
+    nickname: "",
+    roleColor: null,
+    roleIconUrl: null,
+    avatarDataUrl: null,
+    bannerDataUrl: null,
+    bio: ""
+  });
   assert.deepEqual(
     normaliseCustomization({ nickname: "  AL AI  ", roleColor: "#ABC", roleIconUrl: "http://insecure/i.png" }),
-    { nickname: "AL AI", roleColor: "#aabbcc", roleIconUrl: null }
+    {
+      enabled: true,
+      nickname: "AL AI",
+      roleColor: "#aabbcc",
+      roleIconUrl: null,
+      avatarDataUrl: null,
+      bannerDataUrl: null,
+      bio: ""
+    }
   );
+});
+
+/**
+ * The two image fields are read back into the preview as an `<img src>`, and a
+ * hand-written request could use them to push megabytes into a text column — so
+ * the contract decides what may be stored, not the route alone.
+ *
+ * Both spellings a real value can have are accepted: the data URL the cropper
+ * produces, and the https address the route fetches when the operator pastes a
+ * link (it is turned into a data URL before it is stored, but the bot reads
+ * rows written before that, and a stored link must keep working). Everything
+ * else — including a `javascript:` address and a `data:text/html` payload — is
+ * refused rather than rendered.
+ */
+test("a server image is a data URL or an https link, and nothing else", () => {
+  const png = "data:image/png;base64,iVBORw0KGgo=";
+  const kept = normaliseCustomization({ avatarDataUrl: png, bannerDataUrl: png });
+  assert.equal(kept.avatarDataUrl, png);
+  assert.equal(kept.bannerDataUrl, png);
+
+  const link = "https://cdn.example.com/i.png";
+  const linked = normaliseCustomization({ avatarDataUrl: link, bannerDataUrl: link });
+  assert.equal(linked.avatarDataUrl, link, "a stored https link keeps working");
+  assert.equal(linked.bannerDataUrl, link);
+
+  for (const bad of ["javascript:alert(1)", "data:text/html;base64,PHNjcmlwdD4=", "http://insecure/i.png", "  ", 7]) {
+    // The `7` is deliberately not a string: the normaliser has to refuse what
+    // the type system forbids, and the cast is the narrowest way to say that.
+    const refused = normaliseCustomization({ avatarDataUrl: bad as unknown as string, bannerDataUrl: bad as unknown as string });
+    assert.equal(refused.avatarDataUrl, null, `${JSON.stringify(bad)} must not be stored as a server image`);
+    assert.equal(refused.bannerDataUrl, null, `${JSON.stringify(bad)} must not be stored as a server banner`);
+  }
 });
 
 test("normalising is idempotent, so a second pass cannot change a value", () => {
@@ -447,7 +536,7 @@ test("every duration option has a distinct id and a non-empty label", () => {
 test("a duration on a status Discord does not time is discarded, not stored", () => {
   // The dangerous half is the expiry: keeping it would leave a clock counting
   // down behind `online` and make a later `dnd` appear already expired.
-  const identity = normaliseBotIdentity({
+  const identity = normaliseBotPresence({
     status: "online",
     statusDuration: "8h",
     statusExpiresAt: "2030-01-01T00:00:00.000Z"
@@ -457,13 +546,13 @@ test("a duration on a status Discord does not time is discarded, not stored", ()
 });
 
 test("forever stores the choice but no expiry, so the menu can still show it", () => {
-  const identity = normaliseBotIdentity({ status: "dnd", statusDuration: "forever", statusExpiresAt: null });
+  const identity = normaliseBotPresence({ status: "dnd", statusDuration: "forever", statusExpiresAt: null });
   assert.equal(identity.statusDuration, "forever");
   assert.equal(identity.statusExpiresAt, null);
 });
 
 test("a corrupt expiry reads as no window rather than a permanently expired one", () => {
-  const identity = normaliseBotIdentity({ status: "dnd", statusDuration: "1h", statusExpiresAt: "not a date" });
+  const identity = normaliseBotPresence({ status: "dnd", statusDuration: "1h", statusExpiresAt: "not a date" });
   assert.equal(identity.statusDuration, "1h");
   assert.equal(identity.statusExpiresAt, null);
   assert.equal(isStatusWindowExpired(identity, Date.now()), false, "an unparseable clock is not proof of expiry");
@@ -471,12 +560,12 @@ test("a corrupt expiry reads as no window rather than a permanently expired one"
 
 test("an elapsed window reports the fallback status without rewriting the row", () => {
   const now = Date.parse("2026-09-14T12:00:00.000Z");
-  const past = normaliseBotIdentity({
+  const past = normaliseBotPresence({
     status: "dnd",
     statusDuration: "1h",
     statusExpiresAt: "2026-09-14T11:00:00.000Z"
   });
-  const future = normaliseBotIdentity({
+  const future = normaliseBotPresence({
     status: "dnd",
     statusDuration: "1h",
     statusExpiresAt: "2026-09-14T13:00:00.000Z"
@@ -490,27 +579,35 @@ test("an elapsed window reports the fallback status without rewriting the row", 
 });
 
 test("a status with no duration is never expired", () => {
-  const identity = normaliseBotIdentity({ status: "invisible", statusDuration: null, statusExpiresAt: null });
+  const identity = normaliseBotPresence({ status: "invisible", statusDuration: null, statusExpiresAt: null });
   assert.equal(isStatusWindowExpired(identity, Date.now()), false);
   assert.equal(effectiveBotStatus(identity, Date.now()), "invisible");
 });
 
 test("an absent duration normalises to no window rather than throwing", () => {
-  const identity = normaliseBotIdentity({ status: "idle" });
+  const identity = normaliseBotPresence({ status: "idle" });
   assert.equal(identity.statusDuration, null);
   assert.equal(identity.statusExpiresAt, null);
 });
 
 test("welcome settings normalise rather than trust", () => {
   // A missing row is the feature, off — never an error and never half-armed.
-  assert.deepEqual(normaliseWelcomeSettings(undefined), { enabled: false, memberRoleId: null, botRoleId: null });
+  assert.deepEqual(normaliseWelcomeSettings(undefined), {
+    enabled: false,
+    memberRoleId: null,
+    botRoleId: null,
+    delaySeconds: 0
+  });
   // Only the literal true arms it: a truthy string from a stale client does not.
   assert.equal(normaliseWelcomeSettings({ enabled: "yes" }).enabled, false);
   // A snowflake survives; anything else degrades to null, which the bot reads
   // as "no auto-role for this kind of arrival" instead of a grant that cannot
   // exist.
-  const written = { enabled: true, memberRoleId: "1540515175826985080", botRoleId: "1540515175826985081" };
+  const written = { enabled: true, memberRoleId: "1540515175826985080", botRoleId: "1540515175826985081", delaySeconds: 45 };
   assert.deepEqual(normaliseWelcomeSettings(written), written);
+  // A garbled delay degrades to immediate rather than a NaN timer.
+  assert.equal(normaliseWelcomeSettings({ delaySeconds: "soon" }).delaySeconds, 0);
+  assert.equal(normaliseWelcomeSettings({ delaySeconds: 9_999 }).delaySeconds, 3600);
   assert.equal(normaliseWelcomeSettings({ memberRoleId: "not-a-snowflake" }).memberRoleId, null);
   assert.equal(normaliseWelcomeSettings({ memberRoleId: 123 }).memberRoleId, null);
 });

@@ -129,9 +129,17 @@
     {
       "id": "invite-log",
       "label": "الدعوات",
-      "subCategories": ["server.invite-create", "invite.delete", "invite.use"],
+      "subCategories": [
+        "server.invite-create",
+        "invite.delete",
+        "invite.use",
+        "invites.member-join",
+        "invites.member-leave",
+        "invites.milestone",
+        "invites.admin-adjust"
+      ],
       "required": false,
-      "note": "invite.use يُستنتج بالفرق: Discord لا يسمّي الدعوة على الانضمام، فيُجلب список الدعوات ويُقارن باللقطة السابقة. invite.expire اتقاعد في الإصدار 5."
+      "note": "invite.use يُستنتج بالفرق: Discord لا يسمّي الدعوة على الانضمام، فيُجلب список الدعوات ويُقارن باللقطة السابقة. invite.expire اتقاعد في الإصدار 5. سجلات invites.* هي موديول الإحالات المستقل: تصنيف الانضمام (عادي/وهمي/عودة/ذاتي)، الخصم عند المغادرة، رتب الإنجاز، والتعديل اليدوي."
     },
     {
       "id": "expression-log",

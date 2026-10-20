@@ -114,4 +114,3 @@ export function createIntrusionDetector(options: IntrusionDetectorOptions = {}) 
   };
 }
 
-export type IntrusionDetector = ReturnType<typeof createIntrusionDetector>;

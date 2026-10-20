@@ -247,6 +247,14 @@ const entries: EventDefinition[] = [
   // moved. `invite.expire` — a derived guess Discord never announces — was
   // retired in version 5 to make room; its old audit rows keep the raw id.
   { id: "invite.use", category: "invite-log", requiredFields: ["inviteCode", "memberId"], severity: "info" },
+  /* The invites module's own records. These carry what the raw `invite.use`
+   * line cannot: the attribution decision (regular / fake / rejoin / self),
+   * the inviter and their running totals. `text` is the operator's rendered
+   * template — the embed shows it as its description rather than as a field. */
+  { id: "invites.member-join", category: "invite-log", requiredFields: ["memberId", "kind"], severity: "info" },
+  { id: "invites.member-leave", category: "invite-log", requiredFields: ["memberId", "deducted"], severity: "info" },
+  { id: "invites.milestone", category: "invite-log", requiredFields: ["memberId", "roleId", "net"], severity: "info" },
+  { id: "invites.admin-adjust", category: "invite-log", requiredFields: ["targetId", "actorId", "action"], severity: "warning" },
 
   // expression-log — الإيموجي والاستيكرز (6)
   { id: "server.expression-create", category: "expression-log", requiredFields: ["expressionId", "actorId"], severity: "info" },

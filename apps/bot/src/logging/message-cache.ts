@@ -99,4 +99,3 @@ export function createMessageCache(options: MessageCacheOptions = {}) {
   };
 }
 
-export type MessageCache = ReturnType<typeof createMessageCache>;

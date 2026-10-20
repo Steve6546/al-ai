@@ -57,6 +57,7 @@ export type CommandCategory =
   | "bot-tools"
   | "protection"
   | "levels"
+  | "invites"
   | "server-stats"
   | "profile";
 
@@ -73,6 +74,7 @@ export const commandCategories: readonly CommandCategory[] = [
   "bot-tools",
   "protection",
   "levels",
+  "invites",
   "server-stats",
   "profile"
 ] as const;
@@ -90,6 +92,7 @@ export const commandCategoryLabels: Record<CommandCategory, string> = {
   "bot-tools": "أدوات البوت الخاص",
   protection: "الحماية",
   levels: "المستويات والخبرة",
+  invites: "الإحالات والدعوات",
   "server-stats": "إحصائيات السيرفر",
   profile: "الملف الشخصي"
 };
@@ -107,6 +110,7 @@ export const commandCategoryDescriptions: Record<CommandCategory, string> = {
   "bot-tools": "أوامر تشغيلية خاصة ببوت AL AI نفسه.",
   protection: "مضاد التخريب والحجر الصحي وحدود الحماية.",
   levels: "نظام الخبرة والمستويات.",
+  invites: "تتبع من دعا من، وصدارة الإحالات ورتب الإنجاز.",
   "server-stats": "عدادات الأعضاء والرسائل.",
   profile: "ملف العضو الشخصي وتخصيصه."
 };
@@ -241,7 +245,18 @@ export const commandRegistry: readonly CommandDefinition[] = [
   { name: "clear", category: "chat-tools", description: "حذف عدد من الرسائل", minimumTier: "moderator", target: "none", requiredPermission: "MANAGE_MESSAGES" },
   { name: "lock", category: "chat-tools", description: "إغلاق القناة", minimumTier: "admin", target: "none", supportsReason: true, requiredPermission: "MANAGE_CHANNELS" },
   { name: "unlock", category: "chat-tools", description: "فتح القناة", minimumTier: "admin", target: "none", supportsReason: true, requiredPermission: "MANAGE_CHANNELS" },
-  { name: "slowmode", category: "chat-tools", description: "ضبط الوضع البطيء", minimumTier: "moderator", target: "none", requiredPermission: "MANAGE_CHANNELS" }
+  { name: "slowmode", category: "chat-tools", description: "ضبط الوضع البطيء", minimumTier: "moderator", target: "none", requiredPermission: "MANAGE_CHANNELS" },
+
+  /* ---------------- Invites ----------------
+   * The referrals module. The three read/create commands are open to every
+   * member — a member checking their own invites or claiming their personal
+   * link is the feature working, not a privilege — while the manual adjust
+   * command edits a score directly, which is an admin's decision and nothing
+   * less. */
+  { name: "invites", category: "invites", description: "عرض إحصائيات إحالات عضو", minimumTier: "moderator", target: "member" },
+  { name: "leaderboard", category: "invites", description: "صدارة أكثر الأعضاء دعوةً للناس", minimumTier: "moderator", target: "none" },
+  { name: "invite-link", category: "invites", description: "إنشاء رابط دعوة شخصي ودائم", minimumTier: "moderator", target: "none" },
+  { name: "admin-invites", category: "invites", description: "تعديل يدوي على نقاط إحالات عضو", minimumTier: "admin", target: "member", supportsReason: true, requiredPermission: "MANAGE_GUILD" }
 ] as const;
 
 const byName = new Map(commandRegistry.map(entry => [entry.name, entry]));

@@ -243,7 +243,7 @@ test("the bot's only appearance write is the presence, over the gateway", () => 
   assert.ok(sync, "the presence sync module exists");
 
   const code = codeOf(sync!.source);
-  assert.match(code, /normaliseBotIdentity/, "the presence is normalised with the shared helper");
+  assert.match(code, /normaliseBotPresence/, "the presence is normalised with the shared helper");
   assert.equal(/avatarDataUrl|bannerDataUrl|roleColor/.test(code), false, "the sync touches the presence only");
 
   // The sync works on plain data and must never reach Discord itself: the

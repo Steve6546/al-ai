@@ -6,10 +6,14 @@ import {
   applyModeration,
   applyRoleChange,
   bindEvents,
+  buildInviteLeaderboardMessage,
   createDiscordClient,
+  createPersonalInvite,
   dmGuildOwner,
   ensureBotRole,
   Events,
+  INVITES_LEADERBOARD_PER_PAGE,
+  INVITES_PAGER_PREFIX,
   listLoggableChannels,
   moveMemberToChannel,
   notifyTarget,
@@ -20,11 +24,26 @@ import {
   readMemberRoleIds,
   readStrippableRoleIds,
   sendLogEmbed,
+  allowedMentionsFor,
+  sendWelcomePayload,
   sendLogEmbedToWebhook,
+  type APIEmbed,
   type GuildMember,
   type LogEnvelope
 } from "./lib/discord.js";
 import {
+  applyXpMultipliers,
+  classifyInviteJoin,
+  formatAccountAge,
+  isProduction,
+  missingEnv,
+  readEnv,
+  inviteNet,
+  inviteTotal,
+  MAX_LEVEL_CAP,
+  UNLIMITED_LEVEL_CAP,
+  planMilestoneRoleChanges,
+  renderInviteTemplate,
   assessCommandScope,
   buildAliasMap,
   commandCategories,
@@ -36,15 +55,38 @@ import {
   discordPermissionLabels,
   EMPTY_TIER_ROLES,
   isAdmittedByAllowList,
+  levelFromXp,
+  levelProgress,
   normaliseCommandConfig,
+  renderLevelMessage,
+  renderWelcomeMessage,
   requireCommand,
   resolveCommandDuration,
   scopeReasonMessages,
-  type CommandConfig
+  type CommandConfig,
+  type InviteMilestone,
+  type InviteStats,
+  type WelcomeEmbed,
+  type WelcomeMessageSettings,
+  type LevelRoleReward,
+  type LevelSettings
 } from "@al-ai/core";
 import { checkHierarchy, hierarchyMessages } from "./permissions/permission-guard.js";
 import { createBotDatabase } from "./storage/database.js";
 import { ConfigCache } from "./storage/config-cache.js";
+import {
+  TextCooldownGate,
+  VoiceSessionTracker,
+  countEligibleVoiceMembers,
+  voiceXpGain,
+  desiredLevelRoles,
+  isVoiceEligible,
+  levelStep,
+  planLevelRoleChanges,
+  shouldEarnTextXp,
+  textXpGain,
+  voiceMemberMeetsRules
+} from "./runtime/levels.js";
 import { createMessageCache } from "./logging/message-cache.js";
 import { createInviteTracker } from "./logging/invite-tracker.js";
 import { EventPipeline } from "./runtime/event-pipeline.js";
@@ -65,6 +107,7 @@ import {
 } from "./config/control-plane.js";
 import { APPLYABLE_KEYS, startIntegrationAdapter } from "./integration-adapter.js";
 import { sweepExpiredDowns } from "./punishments/expiry.js";
+import { dataUrlToBuffer, fetchImageBytes, renderWelcomeImage } from "./runtime/welcome-image.js";
 import { logEvent, type LogRuntime } from "./logging/log-router.js";
 
 /* ------------------------------------------------------------------ *
@@ -89,7 +132,7 @@ try {
 const undecided = undecidedSettings(controlPlane);
 if (undecided.length) {
   const message = `AL AI has undecided operational settings: ${undecided.join(", ")} (see apps/bot/config/control-plane.json).`;
-  if (process.env.NODE_ENV === "production") {
+  if (isProduction(process.env)) {
     console.error(message);
     process.exit(1);
   }
@@ -101,9 +144,13 @@ if (undecided.length) {
  *
  * The bot must not connect to Discord when its secrets are absent. It exits
  * cleanly with a clear message instead of half-starting.
+ *
+ * The blank-is-absent rule and the "which are missing" answer come from
+ * `@al-ai/core`, shared with the dashboard, so the two services cannot drift on
+ * what counts as a configured secret.
  * ------------------------------------------------------------------ */
 const required = ["BOT_TOKEN", "DATABASE_URL", "EVENT_HMAC_SECRET", "ENCRYPTION_KEY"] as const;
-const missing = required.filter(key => !process.env[key]?.trim());
+const missing = missingEnv(process.env, required);
 
 if (missing.length) {
   console.warn(`AL AI bot is waiting for secrets; Discord connection intentionally skipped. Missing: ${missing.join(", ")}`);
@@ -117,18 +164,18 @@ if (missing.length) {
  * accepts one over the wire — the dashboard authorises operators, it never
  * carries a credential that can act as the bot.
  */
-const token = process.env.BOT_TOKEN!;
-const databaseUrl = process.env.DATABASE_URL!;
-const hmacSecret = process.env.EVENT_HMAC_SECRET!;
-const encryptionKey = process.env.ENCRYPTION_KEY!;
-const dashboardUrl = process.env.DASHBOARD_URL?.trim() || null;
+const token = readEnv(process.env, "BOT_TOKEN")!;
+const databaseUrl = readEnv(process.env, "DATABASE_URL")!;
+const hmacSecret = readEnv(process.env, "EVENT_HMAC_SECRET")!;
+const encryptionKey = readEnv(process.env, "ENCRYPTION_KEY")!;
+const dashboardUrl = readEnv(process.env, "DASHBOARD_URL");
 /**
  * Where AL AI's own errors and security events are delivered. Deliberately an
  * environment value rather than a per-guild setting: a customer's server must
  * never receive the bot's internals, and no guild should be able to redirect
  * them. Unset means internal events are audited but not delivered anywhere.
  */
-const developerWebhookUrl = process.env.DEVELOPER_WEBHOOK_URL?.trim() || null;
+const developerWebhookUrl = readEnv(process.env, "DEVELOPER_WEBHOOK_URL");
 
 const lock = acquireInstanceLock();
 const database = createBotDatabase(databaseUrl);
@@ -305,6 +352,895 @@ const antiNuke = createAntiNukeEngine({
   selfId: () => client.user?.id ?? null
 });
 
+/* ------------------------------------------------------------------ *
+ * Levels system — text/voice XP and the role-reward engine.
+ *
+ * The decision rules live in runtime/levels.ts (pure, unit-tested); this
+ * section is the Discord side of the same contract: it reads live state,
+ * mutates member roles under the same hierarchy re-check `grantAutoRole`
+ * runs, and posts level-up notifications. The settings ride the same 30s
+ * ConfigCache terms as every other feature, so a dashboard save lands
+ * within half a minute rather than within a restart.
+ *
+ * The pipeline is one flow for every entry point — message, voice tick,
+ * leave-delta, sync: eligibility (core policy) → atomic XP write → level
+ * diff → role reconciliation → notification. No path keeps private rules.
+ * ------------------------------------------------------------------ */
+
+const levelFlags = new ConfigCache(guildId => database.loadLevelSettings(guildId));
+const levelRewards = new ConfigCache(guildId => database.loadLevelRewards(guildId));
+// The invites module rides the same 30 second terms: a dashboard save arms —
+// or disarms — the scoring within half a minute rather than within a restart.
+const inviteFlags = new ConfigCache(guildId => database.loadInviteSettings(guildId));
+// رسائل الترحيب ride the same 30 second terms: a dashboard save arms or
+// disarms the greeting within half a minute rather than within a restart.
+const welcomeMsgFlags = new ConfigCache(guildId => database.loadWelcomeMessages(guildId));
+const textCooldown = new TextCooldownGate();
+const voiceSessions = new VoiceSessionTracker();
+
+/** Level-up policy, stated once: a jump from level N to N+M notifies once, for N+M. */
+const SYNC_BATCH_SIZE = 100;
+const SYNC_MEMBER_PACE_MS = 200;
+
+/**
+ * Grants and revokes this system's reward roles on one member, counting what
+ * actually happened so the sync pass and the logs can report facts instead of
+ * intentions. Every change is guarded like `grantAutoRole`: the role must
+ * exist, be unmanaged, and sit below the bot's highest — and a Discord
+ * refusal is caught and logged, never allowed to end the pass mid-member.
+ * Changes are sequential: member edits are per-member rate limited.
+ */
+async function applyLevelRoles(
+  member: GuildMember,
+  toAdd: string[],
+  toRemove: string[],
+  reason: string
+): Promise<{ granted: number; removed: number; failed: number }> {
+  const outcome = { granted: 0, removed: 0, failed: 0 };
+  const me = member.guild.members.me;
+  if (!me) return outcome;
+  for (const roleId of toAdd) {
+    const role = member.guild.roles.cache.get(roleId);
+    if (!role || role.managed || role.position >= me.roles.highest.position) {
+      console.warn(`AL AI levels: role ${roleId} is beyond the bot's reach in ${member.guild.id}; skipped`);
+      outcome.failed++;
+      continue;
+    }
+    try {
+      if (!member.roles.cache.has(roleId)) {
+        await member.roles.add(roleId, `AL AI — ${reason}`);
+        outcome.granted++;
+      }
+    } catch (error) {
+      outcome.failed++;
+      console.warn(`AL AI levels: granting ${roleId} in ${member.guild.id} was refused`, error);
+    }
+  }
+  for (const roleId of toRemove) {
+    const role = member.guild.roles.cache.get(roleId);
+    if (!role || role.managed || role.position >= me.roles.highest.position) continue;
+    try {
+      if (member.roles.cache.has(roleId)) {
+        await member.roles.remove(roleId, `AL AI — ${reason}`);
+        outcome.removed++;
+      }
+    } catch (error) {
+      outcome.failed++;
+      console.warn(`AL AI levels: revoking ${roleId} in ${member.guild.id} was refused`, error);
+    }
+  }
+  return outcome;
+}
+
+/**
+ * Evaluates and applies a member's reward roles for their current levels.
+ *
+ * The desired set is union semantics: a role stays while ANY rule — text,
+ * voice or dual — still earns it, and is only revoked when every source is
+ * gone. Revokes are confined to roles a rule names; a moderator's
+ * hand-assigned role is never touched.
+ */
+async function evaluateAndApplyRoles(
+  member: GuildMember,
+  settings: LevelSettings,
+  rewards: LevelRoleReward[],
+  textLevel: number,
+  voiceLevel: number,
+  reason: string
+): Promise<{ granted: number; removed: number; failed: number }> {
+  if (!rewards.length) return { granted: 0, removed: 0, failed: 0 };
+  const desired = desiredLevelRoles(rewards, textLevel, voiceLevel, settings.roleStacking);
+  const plan = planLevelRoleChanges([...member.roles.cache.keys()], desired, rewards.map(reward => reward.roleId));
+  if (!plan.toAdd.length && !plan.toRemove.length) return { granted: 0, removed: 0, failed: 0 };
+  return applyLevelRoles(member, plan.toAdd, plan.toRemove, reason);
+}
+
+/* ------------------------------------------------------------------ *
+ * Invites module — the Discord side of the scoring contract.
+ *
+ * The decisions (regular / fake / rejoin / self, the milestone diff, the
+ * templates) live in @al-ai/core as pure functions; this section is the
+ * plumbing: it reads live state, moves the counters, applies the milestone
+ * roles through the same hierarchy-guarded writer the levels engine uses,
+ * and posts the operator's rendered templates into the invite-log section.
+ * ---------------------------------------------------------------- */
+
+/** Cache-first member fetch — bursts of joins must not become bursts of REST calls. */
+async function fetchGuildMember(guildId: string, userId: string): Promise<GuildMember | null> {
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) return null;
+  return guild.members.cache.get(userId) ?? (await guild.members.fetch(userId).catch(() => null));
+}
+
+/**
+ * Reconciles one inviter's milestone roles against their current net, grants
+ * what they newly qualify for (revoking only what the milestones themselves
+ * name, and only when the operator did not pick keep-roles), and logs one
+ * record per granted role.
+ */
+async function reconcileMilestoneRoles(
+  inviter: GuildMember,
+  net: number,
+  stats: InviteStats,
+  settings: Awaited<ReturnType<typeof database.loadInviteSettings>>,
+  reason: string
+): Promise<void> {
+  if (!settings.milestoneRoles.length) return;
+  const plan = planMilestoneRoleChanges([...inviter.roles.cache.keys()], net, settings.milestoneRoles, settings.keepRolesOnLeave);
+  if (plan.toAdd.length) {
+    const outcome = await applyLevelRoles(inviter, plan.toAdd, plan.toRemove, reason);
+    if (settings.logMilestones) {
+      const text = renderInviteTemplate(settings.milestoneMessage, {
+        userMention: `<@${inviter.id}>`,
+        userId: inviter.id,
+        userAge: "",
+        inviterMention: `<@${inviter.id}>`,
+        stats,
+        inviteCode: ""
+      });
+      for (const roleId of plan.toAdd.slice(0, Math.max(outcome.granted, 0))) {
+        await logEvent(
+          "invites.milestone",
+          { guildId: inviter.guild.id, actorId: "system", data: { memberId: inviter.id, roleId, net, threshold: net, text } },
+          runtime
+        ).catch(() => undefined);
+      }
+    }
+    return;
+  }
+  if (plan.toRemove.length) await applyLevelRoles(inviter, [], plan.toRemove, reason);
+}
+
+/**
+ * The join half: classify the attribution the gateway resolved, record it,
+ * move the inviter's counters, and log the operator's rendered template.
+ *
+ * Every read between the classification and the write is ordered so the
+ * counters report the values the log shows: the bump returns the row *after*
+ * the move, and the log carries exactly that row.
+ */
+async function handleInviteJoin(info: { guildId: string; memberId: string; inviteCode: string | null; inviterId: string | null; isVanity: boolean }): Promise<void> {
+  const settings = await inviteFlags.get(info.guildId).catch(() => null);
+  if (!settings?.enabled) return;
+  const member = await fetchGuildMember(info.guildId, info.memberId);
+  if (!member) return;
+
+  const now = Date.now();
+  const createdAt = member.user.createdTimestamp;
+  const previous = await database.getInviteMember(info.guildId, info.memberId).catch(() => null);
+  const decision = classifyInviteJoin({
+    joinerId: info.memberId,
+    inviteCode: info.inviteCode,
+    inviterId: info.inviterId,
+    isVanity: info.isVanity,
+    accountAgeMs: Math.max(0, now - createdAt),
+    previous: previous ? { counted: previous.counted } : null,
+    settings
+  });
+
+  await database
+    .recordInviteJoin(info.guildId, info.memberId, {
+      inviterId: decision.inviterId,
+      inviteCode: info.inviteCode,
+      kind: decision.kind,
+      counted: decision.countsToInviter,
+      accountAgeMs: now - createdAt
+    })
+    .catch(() => undefined);
+
+  // Self-invite attempts are recorded (the row says `self`) but their log line
+  // is the operator's opt-in: a server under an alt flood turns it off, the
+  // scoring never did.
+  if (decision.kind === "self" && !settings.logSelfInvites) return;
+  if (!settings.logJoins && !decision.countsToInviter && !decision.countsAsFake) return;
+
+  let stats: InviteStats = { regular: 0, fakes: 0, rejoins: 0, leaves: 0, bonus: 0 };
+  if (decision.inviterId) {
+    stats = decision.countsToInviter
+      ? await database.bumpInviteStats(info.guildId, decision.inviterId, { regular: 1 }).catch(() => stats)
+      : decision.countsAsFake
+        ? await database.bumpInviteStats(info.guildId, decision.inviterId, { fakes: 1 }).catch(() => stats)
+        : decision.countsAsRejoin
+          ? await database.bumpInviteStats(info.guildId, decision.inviterId, { rejoins: 1 }).catch(() => stats)
+          : await database.getInviteStats(info.guildId, decision.inviterId).catch(() => stats);
+  }
+
+  const text = renderInviteTemplate(settings.joinMessage, {
+    userMention: `<@${info.memberId}>`,
+    userId: info.memberId,
+    userAge: formatAccountAge(createdAt, now),
+    inviterMention: decision.inviterId ? `<@${decision.inviterId}>` : "",
+    stats,
+    inviteCode: info.inviteCode ?? ""
+  });
+  if (settings.logJoins) {
+    await logEvent(
+      "invites.member-join",
+      {
+        guildId: info.guildId,
+        actorId: "system",
+        data: {
+          memberId: info.memberId,
+          ...(info.inviteCode ? { inviteCode: info.inviteCode } : {}),
+          ...(decision.inviterId ? { inviterId: decision.inviterId } : {}),
+          kind: decision.kind,
+          accountAge: formatAccountAge(createdAt, now),
+          inviterNet: inviteNet(stats),
+          inviterTotal: inviteTotal(stats),
+          inviterLeaves: stats.leaves,
+          inviterFakes: stats.fakes,
+          text
+        }
+      },
+      runtime
+    ).catch(() => undefined);
+  }
+
+  // Milestones are checked only where the net could have crossed a threshold:
+  // a counted join. Fake, rejoin and unattributed joins never move it.
+  if (decision.countsToInviter && decision.inviterId) {
+    const inviter = await fetchGuildMember(info.guildId, decision.inviterId);
+    if (inviter) await reconcileMilestoneRoles(inviter, inviteNet(stats), stats, settings, "رتبة إحالات عند بلوغ العتبة");
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Welcome messages — the send half of رسائل الترحيب.
+ *
+ * The dashboard composes; this resolves the member's real facts (tokens),
+ * renders the configured image through the canvas runtime, and hands the
+ * payload to Discord. Attribution for {inviter} is a *race*, not a guess:
+ * the invite fetch the join already triggered lands within a couple of
+ * seconds, so the handler polls the recorded row briefly and prints
+ * "غير معروف" the moment the window closes — never a fabricated name.
+ * ------------------------------------------------------------------ */
+
+const INVITER_WAIT_MS = 2_500;
+const INVITER_POLL_MS = 250;
+
+async function resolveInviterMention(guildId: string, memberId: string): Promise<string> {
+  const deadline = Date.now() + INVITER_WAIT_MS;
+  while (Date.now() < deadline) {
+    const row = await database.getInviteMember(guildId, memberId).catch(() => null);
+    if (row?.inviterId) return `<@${row.inviterId}>`;
+    await new Promise(resolve => setTimeout(resolve, INVITER_POLL_MS));
+  }
+  return "";
+}
+
+/** The member's facts, in the shape every welcome template's tokens read. */
+async function welcomeValuesFor(member: GuildMember): Promise<import("@al-ai/core").WelcomeTemplateValues> {
+  const inviterMention = await resolveInviterMention(member.guild.id, member.id);
+  return {
+    userMention: `<@${member.id}>`,
+    username: member.user.username,
+    server: member.guild.name,
+    memberCount: member.guild.memberCount,
+    inviterMention,
+    joinDate: new Date().toLocaleDateString("ar", { year: "numeric", month: "long", day: "numeric" })
+  };
+}
+
+/** The embed half as a plain APIEmbed — discord.js accepts it verbatim. */
+function buildWelcomeEmbed(
+  embed: WelcomeEmbed,
+  member: GuildMember,
+  values: import("@al-ai/core").WelcomeTemplateValues,
+  attachedImageName: string | null
+): APIEmbed {
+  const api: APIEmbed = {
+    ...(embed.title.trim()
+      ? { title: renderWelcomeMessage(embed.title, values), ...(embed.titleUrl ? { url: embed.titleUrl } : {}) }
+      : {}),
+    ...(embed.description.trim() ? { description: renderWelcomeMessage(embed.description, values) } : {}),
+    ...(embed.color ? { color: Number.parseInt(embed.color.slice(1), 16) } : {}),
+    ...(embed.thumbnailMode === "member_avatar"
+      ? { thumbnail: { url: member.displayAvatarURL({ extension: "png", size: 128 }) } }
+      : embed.thumbnailMode === "custom" && embed.thumbnailUrl
+        ? { thumbnail: { url: embed.thumbnailUrl } }
+        : {}),
+    ...(embed.fields.length
+      ? {
+          fields: embed.fields.map(field => ({
+            name: renderWelcomeMessage(field.name, values),
+            value: renderWelcomeMessage(field.value, values),
+            inline: field.inline
+          }))
+        }
+      : {}),
+    ...(embed.footer.trim()
+      ? { footer: { text: renderWelcomeMessage(embed.footer, values), ...(embed.footerIconUrl ? { icon_url: embed.footerIconUrl } : {}) } }
+      : {}),
+    ...(embed.timestamp ? { timestamp: new Date().toISOString() } : {})
+  };
+  // The generated card takes the embed's large-image slot via its attachment.
+  // The embed's own linked image is the fallback when there is no card — and
+  // an uploaded image arrives as the message's file, which Discord renders
+  // beneath the embed by itself.
+  if (attachedImageName) return { ...api, image: { url: `attachment://${attachedImageName}` } };
+  if (embed.imageMode === "url" && embed.imageUrl) return { ...api, image: { url: embed.imageUrl } };
+  return api;
+}
+
+/**
+ * The join-time greeting. Every failure degrades one step — no image, then no
+ * embed — and never blocks the join pipeline, because the caller runs it
+ * detached like every other join write.
+ *
+ * The three image modes order the sends:
+ *  - with_message: one message; the card rides it as its attachment.
+ *  - before_message: the card alone leads, then the message follows.
+ *  - separate_channel: the card goes to imageChannelId, the message to channelId.
+ */
+async function handleWelcomeMessage(member: GuildMember): Promise<void> {
+  const settings = await welcomeMsgFlags.get(member.guild.id).catch(() => null);
+  if (!settings?.enabled || !settings.channelId) return;
+
+  const values = await welcomeValuesFor(member);
+
+  // The generated card. Built once, reused by whichever mode carries it.
+  let image: { buffer: Buffer; contentType: string; extension: string } | null = null;
+  if (settings.imageEnabled) {
+    try {
+      const [avatarBuffer, backgroundBuffer] = await Promise.all([
+        fetchImageBytes(member.displayAvatarURL({ extension: "png", size: 256 })),
+        settings.image.background.imageDataUrl
+          ? Promise.resolve(dataUrlToBuffer(settings.image.background.imageDataUrl))
+          : Promise.resolve(null)
+      ]);
+      image = await renderWelcomeImage(settings.image, { values, avatarBuffer, backgroundBuffer });
+    } catch (error) {
+      console.warn(`AL AI welcome: image render failed in ${member.guild.id}; sending without it`, error);
+    }
+  }
+
+  const embedImageName = image ? `welcome.${image.extension}` : null;
+  const content = settings.mode === "text" ? renderWelcomeMessage(settings.text, values) : undefined;
+
+  // Embed mode with the embed's OWN uploaded image and no generated card:
+  // the data URL is decoded into the attachment here, once.
+  let embedFile: { buffer: Buffer; name: string; contentType: string } | null = null;
+  if (settings.mode === "embed" && !image && settings.embed.imageMode === "upload" && settings.embed.imageDataUrl) {
+    const buffer = dataUrlToBuffer(settings.embed.imageDataUrl);
+    if (buffer) embedFile = { buffer, name: "embed-image.png", contentType: "image/png" };
+  }
+
+  const embed =
+    settings.mode === "embed"
+      ? buildWelcomeEmbed(
+          settings.embed,
+          member,
+          values,
+          settings.imageEnabled && settings.imageMode === "with_message" ? embedImageName : null
+        )
+      : undefined;
+
+  const card = image
+    ? { buffer: image.buffer, name: embedImageName!, contentType: image.contentType }
+    : embedFile;
+
+  const sendMessage = () =>
+    sendWelcomePayload(client, settings.channelId!, {
+      ...(content ? { content } : {}),
+      ...(embed ? { embed } : {}),
+      // An uploaded embed image (no generated card) rides the message itself.
+      ...(!image && embedFile ? { file: embedFile } : {}),
+      // The greeting names its member; that member is the only one it may notify.
+      memberId: member.id
+    });
+
+  if (settings.imageMode === "with_message") {
+    const delivered = await sendWelcomePayload(client, settings.channelId, {
+      ...(content ? { content } : {}),
+      ...(embed ? { embed } : {}),
+      ...(card ? { file: card } : {}),
+      memberId: member.id
+    });
+    if (!delivered) console.warn(`AL AI welcome: channel ${settings.channelId} refused the message in ${member.guild.id}`);
+    return;
+  }
+
+  if (settings.imageMode === "before_message") {
+    if (card) {
+      const cardSent = await sendWelcomePayload(client, settings.channelId, { file: card, memberId: member.id });
+      if (!cardSent) console.warn(`AL AI welcome: the leading card was refused in ${member.guild.id}`);
+    }
+    const delivered = await sendMessage();
+    if (!delivered) console.warn(`AL AI welcome: channel ${settings.channelId} refused the message in ${member.guild.id}`);
+    return;
+  }
+
+  // separate_channel: the card goes where the operator picked it; the message
+  // does not wait for it, and a refused image channel is logged, not fatal.
+  if (card) {
+    if (settings.imageChannelId) {
+      const imageSent = await sendWelcomePayload(client, settings.imageChannelId, { file: card });
+      if (!imageSent) {
+        console.warn(`AL AI welcome: image channel ${settings.imageChannelId} refused the card in ${member.guild.id}`);
+      }
+    } else {
+      console.warn(`AL AI welcome: separate-channel image mode has no image channel set in ${member.guild.id}; card skipped`);
+    }
+  }
+  const delivered = await sendMessage();
+  if (!delivered) console.warn(`AL AI welcome: channel ${settings.channelId} refused the message in ${member.guild.id}`);
+}
+
+/**
+ * The leave half: a counted referral that departs costs its inviter one leaf
+ * and one net point — exactly once, because the row's `counted` flag is what
+ * decides, and it flips off in the same breath the deduction lands.
+ */
+async function handleInviteLeave(guildId: string, memberId: string): Promise<void> {
+  const settings = await inviteFlags.get(guildId).catch(() => null);
+  if (!settings?.enabled) return;
+  const row = await database.getInviteMember(guildId, memberId).catch(() => null);
+  if (!row) return;
+
+  const deducted = row.counted && row.inviterId !== null;
+  let stats: InviteStats | null = null;
+  if (deducted && row.inviterId) {
+    stats = await database.bumpInviteStats(guildId, row.inviterId, { leaves: 1 }).catch(() => null);
+  }
+  await database.markInviteMemberLeft(guildId, memberId).catch(() => undefined);
+
+  if (settings.logLeaves) {
+    const inviterStats = stats ?? (row.inviterId ? await database.getInviteStats(guildId, row.inviterId).catch(() => null) : null);
+    const text = renderInviteTemplate(settings.leaveMessage, {
+      userMention: `<@${memberId}>`,
+      userId: memberId,
+      userAge: "",
+      inviterMention: row.inviterId ? `<@${row.inviterId}>` : "",
+      stats: inviterStats ?? { regular: 0, fakes: 0, rejoins: 0, leaves: 0, bonus: 0 },
+      inviteCode: row.inviteCode ?? ""
+    });
+    await logEvent(
+      "invites.member-leave",
+      {
+        guildId,
+        actorId: "system",
+        data: {
+          memberId,
+          ...(row.inviterId ? { inviterId: row.inviterId } : {}),
+          deducted,
+          ...(inviterStats ? { inviterNet: inviteNet(inviterStats) } : {}),
+          text
+        }
+      },
+      runtime
+    ).catch(() => undefined);
+  }
+
+  // The milestone check runs only for a real deduction: an uncounted member
+  // leaving changes nothing about their inviter's standing.
+  if (deducted && row.inviterId && stats) {
+    const inviter = await fetchGuildMember(guildId, row.inviterId);
+    if (inviter) await reconcileMilestoneRoles(inviter, inviteNet(stats), stats, settings, "سحب رتبة إحالات بعد مغادرة مُحال");
+  }
+}
+
+/**
+ * Sends a level-up notification to its configured destination.
+ *
+ * A voice level-up has no source channel — it was earned in a voice room —
+ * so "نفس القناة" falls back to the guild's system channel, and to nowhere
+ * when that is unset: inventing a destination the operator never picked is
+ * worse than staying silent. A closed DM set is dropped quietly, like every
+ * other best-effort notify in this bot.
+ */
+async function sendLevelUpMessage(
+  guildId: string,
+  kind: "text" | "voice",
+  userId: string,
+  sourceChannelId: string | null,
+  level: number,
+  xp: number
+): Promise<void> {
+  const settings = await levelFlags.get(guildId).catch(() => null);
+  if (!settings?.notifyLevelUp) return;
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) return;
+  const template = kind === "text" ? settings.textLevelUpMessage : settings.voiceLevelUpMessage;
+  const content = renderLevelMessage(template, { user: `<@${userId}>`, level, xp, server: guild.name });
+
+  // The rank card: a rich embed carrying the member's avatar and a real
+  // progress bar built from the same core formula the screens use. It is an
+  // embed card, not a rendered bitmap — Discord-native, so it needs no image
+  // pipeline and shows the member's actual numbers.
+  let embed: APIEmbed | undefined;
+  if (settings.rankCardEnabled) {
+    const cap = settings.maxLevelCap === UNLIMITED_LEVEL_CAP ? MAX_LEVEL_CAP : settings.maxLevelCap;
+    const progress = levelProgress(xp, cap);
+    const filled = Math.round(progress.percent / 10);
+    const bar = "█".repeat(filled) + "░".repeat(10 - filled);
+    const member = guild.members.cache.get(userId);
+    embed = {
+      title: kind === "text" ? "🎖️ ترقية مستوى كتابي" : "🎙️ ترقية مستوى صوتي",
+      description: `${bar}\nالتقدم نحو المستوى ${progress.level + 1}: ${progress.percent}%`,
+      color: 0xf59e0b,
+      ...(member?.user.displayAvatarURL({ size: 128 }) ? { thumbnail: { url: member.user.displayAvatarURL({ size: 128 }) } } : {}),
+      fields: [
+        { name: "المستوى", value: String(progress.level), inline: true },
+        { name: "إجمالي XP", value: xp.toLocaleString("en"), inline: true },
+        { name: "للمستوى التالي", value: progress.xpForNextLevel.toLocaleString("en"), inline: true }
+      ]
+    };
+  }
+
+  if (settings.notifyMode === "send_dm") {
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (member) {
+      await member
+        .send({ content, embeds: embed ? [embed] : undefined, allowedMentions: allowedMentionsFor(userId) })
+        .catch(() => undefined);
+    }
+    return;
+  }
+  const channelId =
+    settings.notifyMode === "custom_channel"
+      ? settings.notifyChannelId
+      : kind === "text"
+        ? sourceChannelId
+        : (guild.systemChannelId ?? null);
+  if (!channelId) return;
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (channel?.isTextBased() && "send" in channel) {
+    // The level-up names the member it is about; that member is the only one
+    // it may notify.
+    await channel
+      .send({ content, embeds: embed ? [embed] : undefined, allowedMentions: allowedMentionsFor(userId) })
+      .catch(() => undefined);
+  }
+}
+
+/**
+ * The text-XP leg: cooldown gate, then one atomic XP write, then level-up
+ * handling. The write returns the previous *and* new totals from the same
+ * statement, so a level-up is only announced on a previous state that the
+ * write itself vouched for — a database hiccup skips the grant entirely
+ * rather than minting a level-up from a fake zero.
+ */
+async function handleLevelTextMessage(message: {
+  guildId: string;
+  channelId: string;
+  parentChannelId: string | null;
+  authorId: string;
+  isBot: boolean;
+  isWebhook: boolean;
+  isSystem: boolean;
+  memberRoleIds: string[] | null;
+  displayName: string | null;
+  avatarHash: string | null;
+}): Promise<void> {
+  const settings = await levelFlags.get(message.guildId).catch(() => null);
+  if (
+    !settings ||
+    !shouldEarnTextXp(settings, {
+      isBot: message.isBot,
+      isWebhook: message.isWebhook,
+      isSystem: message.isSystem,
+      channelId: message.channelId,
+      parentChannelId: message.parentChannelId,
+      memberRoleIds: message.memberRoleIds
+    })
+  ) {
+    return;
+  }
+  if (!textCooldown.tryConsume(message.guildId, message.authorId, settings.textCooldownSeconds)) return;
+
+  const result = await database
+    .recordTextXp(
+      message.guildId,
+      message.authorId,
+      applyXpMultipliers(textXpGain(settings), settings.roleMultipliers, settings.channelMultipliers, {
+        roleIds: message.memberRoleIds,
+        channelId: message.channelId
+      }),
+      {
+      displayName: message.displayName,
+      avatarHash: message.avatarHash
+    })
+    .catch(() => null);
+  if (!result) return;
+  const cap = settings.maxLevelCap === UNLIMITED_LEVEL_CAP ? MAX_LEVEL_CAP : settings.maxLevelCap;
+  const step = levelStep(result.previous?.textXp ?? 0, result.current.textXp, cap);
+  if (!step.leveledUp) return;
+
+  const rewards = await levelRewards.get(message.guildId).catch(() => []);
+  const guild = client.guilds.cache.get(message.guildId);
+  const member = guild ? await guild.members.fetch(message.authorId).catch(() => null) : null;
+  if (guild && member) {
+    await evaluateAndApplyRoles(
+      member,
+      settings,
+      rewards,
+      step.level,
+      levelFromXp(result.current.voiceXp),
+      `بلوغ المستوى الكتابي ${step.level}`
+    );
+  }
+  await sendLevelUpMessage(message.guildId, "text", message.authorId, message.channelId, step.level, result.current.textXp);
+}
+
+/**
+ * Credits whole accrued voice minutes for one member.
+ *
+ * Called by the minute tick (for every eligible session) and by the leave
+ * handler (for the final delta). The XP write is atomic — previous and new
+ * totals in one statement — so a jump across several levels notifies once,
+ * for the highest level reached, and never from an unreliable previous state.
+ */
+async function creditVoiceMinutes(
+  guildId: string,
+  member: GuildMember,
+  minutes: number,
+  settings: LevelSettings,
+  rewards: LevelRoleReward[]
+): Promise<void> {
+  // One draw per minute: a three-minute credit draws three times, so the
+  // range shapes the total the way one-minute credits do.
+  let amount = 0;
+  for (let i = 0; i < minutes; i++) {
+    amount += applyXpMultipliers(voiceXpGain(settings), settings.roleMultipliers, settings.channelMultipliers, {
+      roleIds: [...member.roles.cache.keys()],
+      channelId: member.voice.channelId
+    });
+  }
+  const result = await database
+    .recordVoiceXp(guildId, member.id, amount, {
+      displayName: member.displayName,
+      avatarHash: member.user.avatar
+    })
+    .catch(() => null);
+  if (!result) return;
+  const cap = settings.maxLevelCap === UNLIMITED_LEVEL_CAP ? MAX_LEVEL_CAP : settings.maxLevelCap;
+  const step = levelStep(result.previous?.voiceXp ?? 0, result.current.voiceXp, cap);
+  if (!step.leveledUp) return;
+  await evaluateAndApplyRoles(
+    member,
+    settings,
+    rewards,
+    levelFromXp(result.current.textXp),
+    step.level,
+    `بلوغ المستوى الصوتي ${step.level}`
+  );
+  await sendLevelUpMessage(guildId, "voice", member.id, null, step.level, result.current.voiceXp);
+}
+
+/**
+ * The voice-state leg of hybrid timing: sessions open on join, follow channel
+ * moves, and close on leave with the remaining whole minutes credited.
+ *
+ * The leave-time delta is credited only if the member still passes the
+ * member-level rules and the room they left still meets the minimum — the
+ * engine cannot re-judge the past, and a dropped remainder is at most one
+ * minute because the tick credits every minute.
+ */
+async function handleLevelVoiceStateChange(change: {
+  guildId: string;
+  memberId: string;
+  channelId: string | null;
+  selfMute: boolean;
+  selfDeaf: boolean;
+  serverMute: boolean;
+  serverDeaf: boolean;
+}): Promise<void> {
+  if (change.channelId) {
+    if (!voiceSessions.isActive(change.guildId, change.memberId)) {
+      voiceSessions.onJoin(change.guildId, change.memberId, change.channelId, Date.now());
+    } else {
+      voiceSessions.onMove(change.guildId, change.memberId, change.channelId);
+    }
+    return;
+  }
+  const minutes = voiceSessions.minutesToCredit(change.guildId, change.memberId, Date.now());
+  const leftChannelId = voiceSessions.onLeave(change.guildId, change.memberId);
+  if (!leftChannelId || minutes <= 0) return;
+  const settings = await levelFlags.get(change.guildId).catch(() => null);
+  if (!settings?.enabled || !settings.voiceXpEnabled || settings.voiceXpMax <= 0) return;
+  const guild = client.guilds.cache.get(change.guildId);
+  if (!guild) return;
+  const member = await guild.members.fetch(change.memberId).catch(() => null);
+  if (!member) return;
+  // The room the member left: remaining eligible members decide whether the
+  // final minutes qualify. The leaver is already out of the live cache.
+  const channel = guild.channels.cache.get(leftChannelId);
+  const remaining = channel?.isVoiceBased() ? [...channel.members.values()].filter(m => !m.user.bot) : [];
+  const remainingEligible = countEligibleVoiceMembers(
+    settings,
+    remaining.map(m => ({
+      isBot: m.user.bot,
+      channelId: m.voice.channelId,
+      memberRoleIds: [...m.roles.cache.keys()],
+      selfMute: m.voice.selfMute ?? false,
+      selfDeaf: m.voice.selfDeaf ?? false,
+      serverMute: m.voice.serverMute ?? false,
+      serverDeaf: m.voice.serverDeaf ?? false
+    })),
+    { afkChannelId: guild.afkChannelId }
+  );
+  const passesRules = voiceMemberMeetsRules(
+    settings,
+    {
+      isBot: false,
+      channelId: leftChannelId,
+      memberRoleIds: [...member.roles.cache.keys()],
+      selfMute: change.selfMute,
+      selfDeaf: change.selfDeaf,
+      serverMute: change.serverMute,
+      serverDeaf: change.serverDeaf
+    },
+    { afkChannelId: guild.afkChannelId }
+  );
+  if (!passesRules || remainingEligible + 1 < settings.voiceMinMembers) return;
+  const rewards = await levelRewards.get(change.guildId).catch(() => []);
+  await creditVoiceMinutes(change.guildId, member, minutes, settings, rewards);
+}
+
+/**
+ * The minute clock: sync jobs first, then voice credit.
+ *
+ * The in-flight guard makes overlapping ticks impossible — a slow pass
+ * (a large sync, a DB latency spike) is skipped by the next interval rather
+ * than run a second time in parallel, which would double every credit.
+ */
+async function runLevelsTick(): Promise<void> {
+  const startedAt = Date.now();
+  textCooldown.sweep();
+
+  // Sync jobs: claimed atomically, worked to completion (or failure with the
+  // cursor kept for resume), never dropped.
+  const jobs = await database.openSyncJobs().catch(() => []);
+  for (const job of jobs) {
+    if (!(await database.claimSyncJob(job.id).catch(() => false))) continue;
+    await runLevelRoleSyncJob(job.id, job.guildId).catch(async error => {
+      console.warn(`AL AI levels: sync job ${job.id} failed`, error);
+      await database.failSyncJob(job.id, error instanceof Error ? error.message : String(error)).catch(() => undefined);
+    });
+  }
+
+  // Voice credit, per guild per channel. The tracker is reconciled against
+  // live state first: a member in voice without a session (a missed event, a
+  // restart) opens one now so they start accruing; a session whose member has
+  // left voice closes without paying.
+  for (const guild of client.guilds.cache.values()) {
+    const settings = await levelFlags.get(guild.id).catch(() => null);
+    if (!settings?.enabled || !settings.voiceXpEnabled || settings.voiceXpMax <= 0) continue;
+    const rewards = await levelRewards.get(guild.id).catch(() => []);
+    for (const channel of guild.channels.cache.values()) {
+      if (!channel.isVoiceBased()) continue;
+      const humans = [...channel.members.values()].filter(member => !member.user.bot);
+      const facts = humans.map(member => ({
+        isBot: member.user.bot,
+        channelId: channel.id,
+        memberRoleIds: [...member.roles.cache.keys()],
+        selfMute: member.voice.selfMute ?? false,
+        selfDeaf: member.voice.selfDeaf ?? false,
+        serverMute: member.voice.serverMute ?? false,
+        serverDeaf: member.voice.serverDeaf ?? false
+      }));
+      // One eligibility policy for both the count and the grant.
+      const eligibleCount = countEligibleVoiceMembers(settings, facts, { afkChannelId: guild.afkChannelId });
+      for (let i = 0; i < humans.length; i++) {
+        const member = humans[i];
+        const now = Date.now();
+        if (!voiceSessions.isActive(guild.id, member.id)) {
+          voiceSessions.onJoin(guild.id, member.id, channel.id, now);
+          continue;
+        }
+        if (voiceSessions.minutesToCredit(guild.id, member.id, now) <= 0) continue;
+        const eligible = isVoiceEligible(settings, facts[i], { afkChannelId: guild.afkChannelId, eligibleCount });
+        if (eligible) {
+          const minutes = voiceSessions.minutesToCredit(guild.id, member.id, now);
+          await creditVoiceMinutes(guild.id, member, minutes, settings, rewards);
+        }
+        // The clock advances whether or not the minute was eligible — the
+        // engine judges the present, never the past.
+        voiceSessions.markCredited(guild.id, member.id, now);
+      }
+    }
+  }
+
+  const durationMs = Date.now() - startedAt;
+  await database.setSetting("levels.last_voice_tick_at", new Date().toISOString()).catch(() => undefined);
+  await database.setSetting("levels.voice_sessions", String(voiceSessions.size())).catch(() => undefined);
+  if (durationMs > 5_000) {
+    console.warn(`AL AI levels: tick took ${durationMs}ms — consider the sync pace on large guilds`);
+  }
+}
+
+/**
+ * Runs one claimed sync job to completion: keyset-paginated over every ranked
+ * member (no silent cap), reconciling reward roles and reporting counters
+ * into the persistent job row as it goes, so the dashboard shows live
+ * progress and a restart resumes from the cursor rather than starting over.
+ */
+async function runLevelRoleSyncJob(jobId: string, guildId: string): Promise<void> {
+  const settings = await levelFlags.get(guildId).catch(() => null);
+  if (!settings?.enabled) {
+    await database.failSyncJob(jobId, "نظام المستويات معطل في هذا السيرفر — فعّله ثم أعد المزامنة.");
+    return;
+  }
+  const rewards = await levelRewards.get(guildId).catch(() => []);
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) {
+    await database.failSyncJob(jobId, "البوت غير موجود في هذا السيرفر حالياً.");
+    return;
+  }
+  const total = await database.countLevelRanks(guildId).catch(() => 0);
+  await database.setSyncJobTotal(jobId, total);
+
+  const counters = { processed: 0, granted: 0, removed: 0, skipped: 0, failed: 0 };
+  let cursor: string | null = null;
+  if (!rewards.length) {
+    await database.completeSyncJob(jobId, { granted: 0, removed: 0, skipped: 0, failed: 0 });
+    return;
+  }
+  for (;;) {
+    const page = await database.levelRanksPage(guildId, cursor, SYNC_BATCH_SIZE);
+    if (!page.length) break;
+    for (const rank of page) {
+      cursor = rank.userId;
+      counters.processed++;
+      const member = await guild.members.fetch(rank.userId).catch(() => null);
+      if (!member) {
+        counters.skipped++;
+        continue;
+      }
+      const syncCap = settings.maxLevelCap === UNLIMITED_LEVEL_CAP ? MAX_LEVEL_CAP : settings.maxLevelCap;
+      const outcome = await evaluateAndApplyRoles(
+        member,
+        settings,
+        rewards,
+        levelFromXp(rank.textXp, syncCap),
+        levelFromXp(rank.voiceXp, syncCap),
+        "مزامنة رتب المستويات"
+      );
+      counters.granted += outcome.granted;
+      counters.removed += outcome.removed;
+      counters.failed += outcome.failed;
+      await new Promise(resolve => setTimeout(resolve, SYNC_MEMBER_PACE_MS));
+    }
+    await database.updateSyncJobProgress(jobId, {
+      cursor,
+      processed: counters.processed,
+      granted: counters.granted,
+      removed: counters.removed,
+      skipped: counters.skipped,
+      failed: counters.failed
+    });
+  }
+  await database.completeSyncJob(jobId, {
+    granted: counters.granted,
+    removed: counters.removed,
+    skipped: counters.skipped,
+    failed: counters.failed
+  });
+  console.log(
+    `AL AI levels: sync ${jobId} of ${guildId} completed — processed ${counters.processed}, granted ${counters.granted}, removed ${counters.removed}, skipped ${counters.skipped}, failed ${counters.failed}`
+  );
+}
+
 /**
  * The sink the bot actually binds.
  *
@@ -406,14 +1342,100 @@ bindEvents(client, guardedDispatch, {
    * guild picked a role for that kind of arrival.
    */
   onMemberJoin: async member => {
+    // رسائل الترحيب: detached beside the join — a slow render or a refused
+    // channel never delays the auto-role grant or the join being logged.
+    void handleWelcomeMessage(member).catch(error =>
+      console.error("AL AI welcome: greeting failed", error)
+    );
     const settings = await welcomeFlags.get(member.guild.id).catch(() => null);
     if (!settings?.enabled) return;
+    if (settings.delaySeconds > 0) {
+      // The delay is a scheduled write, not a blocked one: the join is logged
+      // now, and the grant fires later against whatever hierarchy holds then —
+      // grantAutoRole re-checks everything, so a stale delay is still safe.
+      const timer = setTimeout(() => {
+        void grantAutoRole(member, settings.memberRoleId, "رتبة تلقائية لعضو جديد (بعد التأخير)").catch(() => undefined);
+      }, settings.delaySeconds * 1000);
+      timer.unref?.();
+      return;
+    }
     await grantAutoRole(member, settings.memberRoleId, "رتبة تلقائية لعضو جديد");
   },
   onBotJoin: async member => {
     const settings = await welcomeFlags.get(member.guild.id).catch(() => null);
     if (!settings?.enabled) return;
     await grantAutoRole(member, settings.botRoleId, "رتبة تلقائية لبوت جديد");
+  },
+
+
+  /**
+   * The invites module's join half, fed by the attribution the gateway
+   * listener resolved after the join (a diff, not a field). Detached by the
+   * same contract as every join write: the join is logged whatever the
+   * scoring decides.
+   */
+  onInviteUse: info => handleInviteJoin(info),
+
+  /**
+   * The invites leaderboard's pager. No command pipeline applies to a button,
+   * so the guard here is the honest one: the page must parse, and the module
+   * must still be armed — a pager left on a message outliving its feature
+   * answers with an explanation rather than stale data.
+   */
+  onComponent: async ({ customId, guildId, update, replyEphemeral }) => {
+    if (!customId.startsWith(INVITES_PAGER_PREFIX)) return;
+    const page = Number(customId.slice(INVITES_PAGER_PREFIX.length));
+    if (!Number.isInteger(page) || page < 0) return;
+    const settings = await inviteFlags.get(guildId).catch(() => null);
+    if (!settings?.enabled) {
+      await replyEphemeral("موديول الإحالات معطّل في هذا السيرفر حالياً.");
+      return;
+    }
+    const total = await database.countInviteStats(guildId).catch(() => 0);
+    const totalPages = Math.max(1, Math.ceil(total / INVITES_LEADERBOARD_PER_PAGE));
+    const target = Math.min(page, totalPages - 1);
+    const rows = await database.inviteLeaderboardPage(guildId, INVITES_LEADERBOARD_PER_PAGE, target * INVITES_LEADERBOARD_PER_PAGE).catch(() => []);
+    const card = buildInviteLeaderboardMessage(
+      rows.map(row => ({ userId: row.userId, net: inviteNet(row), total: inviteTotal(row), leaves: row.leaves })),
+      target,
+      totalPages
+    );
+    await update({ embeds: card.embeds, components: card.components }).catch(() => undefined);
+  },
+
+  /**
+   * The levels system's text-XP leg. Detached like the join writes: the
+   * cooldown gate answers from memory, so a busy channel never slows the
+   * message being logged.
+   */
+  onGuildMessage: message => handleLevelTextMessage(message),
+
+  /**
+   * The voice sessions leg of hybrid timing: join/move/leave keep the
+   * tracker in sync with reality, and a leave credits its remaining whole
+   * minutes immediately instead of waiting for the next tick.
+   */
+  onVoiceStateChange: change => handleLevelVoiceStateChange(change),
+
+  /**
+   * Reset-on-leave: when the operator armed it, a departing member's XP is
+   * zeroed and their reward roles are queued for reconciliation — a role the
+   * member no longer qualifies for must not outlive the levels that earned it.
+   */
+  onMemberLeave: async member => {
+    const settings = await levelFlags.get(member.guild.id).catch(() => null);
+    if (settings?.enabled && settings.resetOnLeave) {
+      const removed = await database.resetMemberXp(member.guild.id, member.id).catch(() => false);
+      if (removed) {
+        await database.createOrResumeSyncJob(member.guild.id).catch(() => undefined);
+        console.log(`AL AI levels: reset XP of departing member ${member.id} in ${member.guild.id}`);
+      }
+    }
+    // The invites module's leave half: a counted referral costs its inviter a
+    // point, the milestone roles re-check, and the operator's template logs.
+    await handleInviteLeave(member.guild.id, member.id).catch(error =>
+      console.error(`AL AI invites: leave handling failed for ${member.id} in ${member.guild.id}`, error)
+    );
   },
 
   /**
@@ -1284,6 +2306,85 @@ bindEvents(client, guardedDispatch, {
       }
     }
 
+    /* ---------------- Invites ----------------
+     * Read-only and bookkeeping commands: no Discord mutation, so the gateway
+     * logs nothing and the handler answers directly. */
+
+    if (commandName === "invites") {
+      const subject = targetId ?? userId;
+      const stats = await database.getInviteStats(guildId, subject).catch(() => null);
+      if (!stats) {
+        await reply(`لا توجد إحالات مسجلة لـ <@${subject}> بعد.`, { autoDeleteSeconds });
+        return;
+      }
+      const lines = [
+        `إحصائيات إحالات <@${subject}>:`,
+        `• الصافي: **${inviteNet(stats)}**`,
+        `• الإجمالي: ${inviteTotal(stats)}`,
+        `• المغادرون: ${stats.leaves}`,
+        `• الحسابات الوهمية: ${stats.fakes}`,
+        `• إعادة الانضمام: ${stats.rejoins}`
+      ];
+      if (stats.bonus !== 0) lines.push(`• تعديل يدوي: ${stats.bonus > 0 ? "+" : ""}${stats.bonus}`);
+      await reply(lines.join("\n"), { autoDeleteSeconds });
+      return;
+    }
+
+    if (commandName === "leaderboard") {
+      const total = await database.countInviteStats(guildId).catch(() => 0);
+      const totalPages = Math.max(1, Math.ceil(total / INVITES_LEADERBOARD_PER_PAGE));
+      const rows = await database.inviteLeaderboardPage(guildId, INVITES_LEADERBOARD_PER_PAGE, 0).catch(() => []);
+      const card = buildInviteLeaderboardMessage(
+        rows.map(row => ({ userId: row.userId, net: inviteNet(row), total: inviteTotal(row), leaves: row.leaves })),
+        0,
+        totalPages
+      );
+      await reply("", { autoDeleteSeconds, embeds: card.embeds, components: card.components });
+      return;
+    }
+
+    if (commandName === "invite-link") {
+      const created = await createPersonalInvite(client, guildId, `رابط شخصي طُلب عبر /invite-link بواسطة ${userId}`);
+      if (!created) {
+        await reject("تعذّر إنشاء رابط الدعوة. تأكّد من أن البوت يملك صلاحية إنشاء الدعوات في قناة النظام أو القنوات النصية.", "INVITE_CREATE_FAILED");
+        return;
+      }
+      await reply(`رابط دعوتك الشخصي — دائم وغير محدود الاستخدام:\n${created.url}`, { autoDeleteSeconds });
+      return;
+    }
+
+    if (commandName === "admin-invites") {
+      if (!targetId) {
+        await reject("حدّد العضو المطلوب تعديل إحالاته.", "MISSING_TARGET");
+        return;
+      }
+      const action = strings.action ?? "";
+      if (action === "reset") {
+        await database.resetInviteStats(guildId, targetId);
+        await logEvent("invites.admin-adjust", { guildId, actorId: userId, data: { targetId, actorId: userId, action: "reset" } }, runtime).catch(() => undefined);
+        await succeed(`تم تصفير إحالات <@${targetId}>.`);
+        return;
+      }
+      const amount = numbers.amount;
+      if (!amount || amount < 1) {
+        await reject("حدّد عدد النقاط في خيار amount.", "MISSING_AMOUNT");
+        return;
+      }
+      const bonusDelta = action === "add" ? amount : action === "remove" ? -amount : 0;
+      if (!bonusDelta) {
+        await reject("إجراء غير معروف. الاستخدام: add / remove / reset.", "UNKNOWN_ACTION");
+        return;
+      }
+      const stats = await database.adjustInviteStats(guildId, targetId, bonusDelta);
+      await logEvent(
+        "invites.admin-adjust",
+        { guildId, actorId: userId, data: { targetId, actorId: userId, action, count: amount, reason: trimmedReason || "بدون سبب", inviterNet: inviteNet(stats) } },
+        runtime
+      ).catch(() => undefined);
+      await succeed(`${action === "add" ? "أُضيفت" : "خُصمت"} ${amount} نقطة ${action === "add" ? "إلى" : "من"} إحالات <@${targetId}>. الصافي الآن: ${inviteNet(stats)}.`);
+      return;
+    }
+
     // 7. Apply the Discord mutation. The gateway logs it; we only report back.
     //    `/setnick` follows the same rule by a different route: the gateway
     //    reports the nickname change itself, as `member.nickname-change`.
@@ -1365,6 +2466,13 @@ client.once(Events.ClientReady, async () => {
   }
   console.log(`AL AI intent budget: ${intentUsage.describe()}`);
   await presence.run();
+
+  // Boot recovery for the levels sync state machine: this deployment runs
+  // exactly one bot (the instance lock), so any `running` job it finds is a
+  // pass its previous life crashed out of — back to `pending`, and the next
+  // minute clock resumes it from the stored cursor.
+  const resumed = await database.resetStaleSyncJobs().catch(() => 0);
+  if (resumed > 0) console.log(`AL AI levels: resumed ${resumed} interrupted sync job(s)`);
 });
 
 /* ------------------------------------------------------------------ *
@@ -1438,6 +2546,25 @@ const downSweep = setInterval(() => {
 }, 60_000);
 downSweep.unref?.();
 
+/* ------------------------------------------------------------------ *
+ * Levels minute clock — sync jobs and voice credit
+ *
+ * The in-flight guard is the double-XP guard: a tick that outlives its
+ * interval (a large sync, a slow database) makes the next interval skip
+ * instead of running in parallel and paying every member twice.
+ * ------------------------------------------------------------------ */
+let levelsTickInFlight = false;
+const levelsTick = setInterval(() => {
+  if (levelsTickInFlight) return;
+  levelsTickInFlight = true;
+  void runLevelsTick()
+    .catch(error => console.warn("AL AI levels tick failed", error))
+    .finally(() => {
+      levelsTickInFlight = false;
+    });
+}, 60_000);
+levelsTick.unref?.();
+
 const supervisor = startSupervisor({
   pipeline,
   database,
@@ -1456,7 +2583,7 @@ const supervisor = startSupervisor({
  * It stays off unless explicitly enabled.
  * ------------------------------------------------------------------ */
 const adapter =
-  process.env.INTEGRATION_ADAPTER_ENABLED === "true"
+  readEnv(process.env, "INTEGRATION_ADAPTER_ENABLED") === "true"
     ? startIntegrationAdapter({
         hmacSecret,
         sourceLayer: controlPlane.instance.sourceLayer,

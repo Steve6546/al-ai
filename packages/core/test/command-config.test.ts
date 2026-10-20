@@ -52,7 +52,7 @@ test("every registered command belongs to a known category", () => {
   }
 });
 
-test("the fourteen sections are the ones that exist, in render order", () => {
+test("the fifteen sections are the ones that exist, in render order", () => {
   assert.deepEqual(
     [...commandCategories],
     [
@@ -68,6 +68,7 @@ test("the fourteen sections are the ones that exist, in render order", () => {
       "bot-tools",
       "protection",
       "levels",
+      "invites",
       "server-stats",
       "profile"
     ]
@@ -99,10 +100,11 @@ test("the commands land in the section the directive names", () => {
   }
 });
 
-test("the eleven sections with no commands really are empty", () => {
+test("the ten sections with no commands really are empty", () => {
   // Pinned so a placeholder command cannot be slipped in later without this
   // test being changed deliberately: the brief forbids inventing commands, and
   // a count that quietly stops being zero is how that rule gets broken.
+  // (The invites section joined the populated set with its four commands.)
   const populated = new Set(commandRegistry.map(definition => definition.category));
   const empty = commandCategories.filter(category => !populated.has(category));
   assert.deepEqual(
@@ -127,6 +129,7 @@ test("the registry is exactly the commands the bot publishes", () => {
   assert.deepEqual(
     [...commandRegistry].map(definition => definition.name).sort(),
     [
+      "admin-invites",
       "al-status",
       "ban",
       "blacklist",
@@ -141,7 +144,10 @@ test("the registry is exactly the commands the bot publishes", () => {
       "delwarn",
       "down",
       "help",
+      "invite-link",
+      "invites",
       "kick",
+      "leaderboard",
       "lock",
       "mute",
       "prison",
@@ -640,7 +646,10 @@ test("aliases default to none and are normalised on the way in", () => {
   assert.deepEqual(defaultCommandConfig(ban).aliases, [], "no aliases unless asked for");
 
   const config = normaliseCommandConfig(ban, {
-    aliases: ["  باند  ", "BAN", "باند", "", "ban-2", 42]
+    // The trailing `42` is deliberately not a string: the normaliser has to
+    // survive a value the type system forbids, and the test says so out loud
+    // instead of hiding the case behind a cast that hides the input too.
+    aliases: ["  \"باند\"  ", "BAN", "باند", "", "ban-2", 42] as unknown as string[]
   });
   assert.deepEqual(config.aliases, ["باند", "ban-2"], "trimmed, validated, deduplicated");
 });
@@ -661,7 +670,9 @@ test("aliases are capped at the declared maximum", () => {
 
 test("a non-array aliases value becomes an empty list rather than throwing", () => {
   for (const value of [null, undefined, "باند", 7, {}]) {
-    assert.deepEqual(normaliseCommandConfig(requireCommand("ban"), { aliases: value }).aliases, []);
+    // The values are wrong on purpose - the normaliser has to survive what the
+    // type system forbids - and the cast is the narrowest one that says so.
+    assert.deepEqual(normaliseCommandConfig(requireCommand("ban"), { aliases: value as unknown as string[] }).aliases, []);
   }
 });
 

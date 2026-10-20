@@ -108,4 +108,3 @@ export function createIntentUsageTracker(options: IntentUsageTrackerOptions = {}
   };
 }
 
-export type IntentUsageTracker = ReturnType<typeof createIntentUsageTracker>;

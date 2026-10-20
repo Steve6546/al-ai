@@ -72,4 +72,3 @@ export function createWatchdog(deps: WatchdogDeps) {
   };
 }
 
-export type Watchdog = ReturnType<typeof createWatchdog>;

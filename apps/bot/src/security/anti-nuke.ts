@@ -112,8 +112,6 @@ export function createAntiNukeTracker(options: AntiNukeTrackerOptions = {}) {
   };
 }
 
-export type AntiNukeTracker = ReturnType<typeof createAntiNukeTracker>;
-
 /* ------------------------------------------------------------------ *
  * Mitigation
  * ------------------------------------------------------------------ */
@@ -297,4 +295,3 @@ export function createAntiNukeEngine(deps: AntiNukeEngineDeps, options: AntiNuke
   };
 }
 
-export type AntiNukeEngine = ReturnType<typeof createAntiNukeEngine>;

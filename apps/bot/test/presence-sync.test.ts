@@ -10,14 +10,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createPresenceSync } from "../src/runtime/presence-sync.ts";
-import { DEFAULT_BOT_IDENTITY, type BotIdentitySettings } from "@al-ai/core";
+import { DEFAULT_BOT_PRESENCE, type BotPresenceSettings } from "@al-ai/core";
 
-function identity(overrides: Partial<BotIdentitySettings>): BotIdentitySettings {
-  return { ...DEFAULT_BOT_IDENTITY, ...overrides };
+function identity(overrides: Partial<BotPresenceSettings>): BotPresenceSettings {
+  return { ...DEFAULT_BOT_PRESENCE, ...overrides };
 }
 
 /** Collects what the sync asked the gateway to show. */
-function harness(load: () => Promise<BotIdentitySettings>) {
+function harness(load: () => Promise<BotPresenceSettings>) {
   const applied: { status: string; activityType: string; activityText: string }[] = [];
   const errors: unknown[] = [];
   const sync = createPresenceSync({

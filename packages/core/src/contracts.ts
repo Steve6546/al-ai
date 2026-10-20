@@ -27,6 +27,14 @@ export type GuildSummary = {
   /** Owner-only: binding tiers decides who can do everything else. */
   canManageTiers: boolean;
   canInvite: boolean;
+  /**
+   * Instance-wide controls (the «الوصول للشبكة» screen). True when the caller
+   * administers at least one guild this deployment's bot actually serves —
+   * owning an unrelated server elsewhere on Discord must not buy the keys to
+   * somebody else's deployment. The server applies the identical test to the
+   * write, so this flag only decides whether the screen is offered.
+   */
+  canAdminInstance: boolean;
 };
 
 /**
@@ -185,10 +193,13 @@ export type ActivityType = "playing" | "listening" | "watching" | "competing";
 export const activityTypes = ["playing", "listening", "watching", "competing"] as const;
 
 export const activityTypeLabels: Record<ActivityType, string> = {
-  playing: "يلعب",
-  listening: "يستمع إلى",
-  watching: "يشاهد",
-  competing: "يتنافس في"
+  // Each label carries its Discord term beside the Arabic verb, so the
+  // operator sees exactly which Discord presence kind they are picking
+  // instead of guessing from a bare verb.
+  playing: "يلعب (Playing)",
+  listening: "يستمع إلى (Listening)",
+  watching: "يشاهد (Watching)",
+  competing: "يتنافس في (Competing)"
 };
 
 /** Discord's own numbers for the activity kinds. */
@@ -204,8 +215,28 @@ export const DEFAULT_ACTIVITY_TYPE: ActivityType = "playing";
 /** Discord rejects a longer activity name. */
 export const MAX_ACTIVITY_TEXT_LENGTH = 128;
 
-/** Discord's limit for an application description, which is the bot's "About me". */
-export const MAX_BIO_LENGTH = 400;
+/**
+ * The real presence the product ships when the operator leaves the activity
+ * text empty — an activity without a name renders nothing on Discord, which
+ * made the «نوع النشاط» picker read as broken. The schema default, the BFF's
+ * save fill, and fresh rows all take this one value.
+ */
+export const DEFAULT_ACTIVITY_TEXT = "سيرفرات ديسكورد";
+
+/**
+ * Discord's limit for a guild member's bio — the per-server "about" the operator
+ * edits on the identity screen.
+ *
+ * 300, and that number was measured rather than assumed: the live API answered a
+ * longer value with `400 BASE_TYPE_MAX_LENGTH — Must be 300 or fewer in length`
+ * on `PATCH /guilds/{id}/members/@me`. It is deliberately *not* 190 — that is
+ * the cap on the account's About me (the application description), a different
+ * field on a different endpoint, and using it here would refuse 110 characters
+ * Discord would have accepted. Values are truncated by `normaliseBio` on the way
+ * in, and the route rejects an over-long one outright so the operator is told
+ * rather than silently shortened.
+ */
+export const MAX_BIO_LENGTH = 300;
 
 /**
  * Largest base64 data URL accepted for an avatar, a banner or a role icon.
@@ -216,20 +247,56 @@ export const MAX_BIO_LENGTH = 400;
  */
 export const MAX_IMAGE_DATA_URL_LENGTH = 500_000;
 
+/**
+ * Everything about how the bot presents itself in ONE server.
+ *
+ * All of it, not most of it. Discord's Modify Current Member endpoint
+ * (`PATCH /guilds/{id}/members/@me`) accepts `nick`, `avatar`, `banner` and
+ * `bio` together, so a bot can hold a complete profile per guild — name,
+ * picture, banner and about text — while the role carries the colour and icon.
+ * Nothing here reaches another server, which is why this type is the whole of
+ * the identity screen's model.
+ */
 export type CustomizationSettings = {
+  /**
+   * Whether the per-guild custom profile is applied at all. Off means the bot
+   * presents its defaults in THIS server — the application's own name and the
+   * account's picture — and the next save walks the nickname, the guild avatar,
+   * the banner and the bio back through Discord (all four accept null on Modify
+   * Current Member).
+   */
+  enabled: boolean;
   /** Empty string means "use the application's own name" and is sent as null. */
   nickname: string;
   /** "#rrggbb" for the AL AI role, or null to leave Discord's default. */
   roleColor: string | null;
   /** Icon for the AL AI role, or null. Discord requires an https URL. */
   roleIconUrl: string | null;
+  /**
+   * This server's avatar as a base64 data URL, or null to fall back to the
+   * account's picture. Discord accepts it on Modify Current Member beside the
+   * nickname.
+   */
+  avatarDataUrl: string | null;
+  /** This server's banner, as a base64 data URL, or null to fall back. */
+  bannerDataUrl: string | null;
+  /**
+   * This server's "about" text. Capped at `MAX_BIO_LENGTH`, which is the 300
+   * Discord enforces on the member field — not the 190 it enforces on the
+   * account's About me.
+   */
+  bio: string;
 };
 
 /** What a guild looks like before the operator changes anything. */
 export const DEFAULT_CUSTOMIZATION: CustomizationSettings = {
+  enabled: true,
   nickname: DEFAULT_BOT_NICKNAME,
   roleColor: null,
-  roleIconUrl: null
+  roleIconUrl: null,
+  avatarDataUrl: null,
+  bannerDataUrl: null,
+  bio: ""
 };
 
 /**
@@ -358,31 +425,32 @@ export function normaliseActivityType(value: unknown): ActivityType {
  */
 export function normaliseCustomization(input: Partial<CustomizationSettings> | null | undefined): CustomizationSettings {
   return {
+    enabled: input?.enabled !== false,
     nickname: normaliseNickname(input?.nickname),
     roleColor: normaliseHexColor(input?.roleColor),
     // A data URL from the cropper or an https link from a value stored earlier.
-    roleIconUrl: normaliseImageValue(input?.roleIconUrl)
+    roleIconUrl: normaliseImageValue(input?.roleIconUrl),
+    // An absent field keeps null rather than wiping a stored picture: only an
+    // explicit send decides the image, and the route validates the value before
+    // this normaliser ever sees it.
+    avatarDataUrl: normaliseImageValue(input?.avatarDataUrl),
+    bannerDataUrl: normaliseImageValue(input?.bannerDataUrl),
+    bio: normaliseBio(input?.bio)
   };
 }
 
 /* ------------------------------------------------------------------ *
- * Global bot identity
+ * The bot's presence
  *
- * The counterpart to the per-guild settings above, and a separate type because
- * it is a separate scope: Discord gives the application ONE avatar and ONE
- * banner, and one presence shared by every guild it is in. Storing these per
- * guild would mean N rows holding the same value, where the last writer wins and
- * the others silently disagree — so they live in their own single-row table and
- * this contract says so.
+ * The one appearance field with no REST route at all. A status lives on the
+ * gateway connection, so it is identical in every guild the bot is in, and the
+ * bot — not the dashboard — is what applies it. Everything a single server can
+ * override (nickname, avatar, banner, bio, role colour, role icon) is in
+ * `CustomizationSettings` above; what is left here is the account-wide pair of
+ * status and activity, which is why this type carries no images and no bio.
  * ------------------------------------------------------------------ */
 
-export type BotIdentitySettings = {
-  /** Global account avatar as a base64 data URL, or null for Discord's default. */
-  avatarDataUrl: string | null;
-  /** Global account banner as a base64 data URL, or null. */
-  bannerDataUrl: string | null;
-  /** The application description Discord shows as the bot's "About me". */
-  bio: string;
+export type BotPresenceSettings = {
   status: BotStatus;
   activityType: ActivityType;
   /** Empty means "show no activity" rather than an activity with a blank name. */
@@ -414,10 +482,7 @@ export type BotIdentitySettings = {
   statusExpiresAt: string | null;
 };
 
-export const DEFAULT_BOT_IDENTITY: BotIdentitySettings = {
-  avatarDataUrl: null,
-  bannerDataUrl: null,
-  bio: "",
+export const DEFAULT_BOT_PRESENCE: BotPresenceSettings = {
   status: DEFAULT_BOT_STATUS,
   activityType: DEFAULT_ACTIVITY_TYPE,
   activityText: "",
@@ -428,9 +493,9 @@ export const DEFAULT_BOT_IDENTITY: BotIdentitySettings = {
 /**
  * A stored identity as it comes *out* of the database, before validation.
  *
- * The distinction from `BotIdentitySettings` is the whole point of this type.
- * `normaliseBotIdentity` exists to turn unvalidated input into a valid identity,
- * so typing its parameter as `Partial<BotIdentitySettings>` was a contradiction:
+ * The distinction from `BotPresenceSettings` is the whole point of this type.
+ * `normaliseBotPresence` exists to turn unvalidated input into a valid identity,
+ * so typing its parameter as `Partial<BotPresenceSettings>` was a contradiction:
  * it demanded a `BotStatus` and then spent its body checking whether the value
  * was one. That mismatch is what made both database readers — the bot's and the
  * dashboard's — fail to compile over a string that the function is designed to
@@ -439,12 +504,9 @@ export const DEFAULT_BOT_IDENTITY: BotIdentitySettings = {
  * `unknown` on the narrowed fields is deliberate rather than `string`: the point
  * is that the caller has not validated them, and the function is what decides.
  * Widening the parameter does not weaken the result — the return type is still
- * a fully-validated `BotIdentitySettings`.
+ * a fully-validated `BotPresenceSettings`.
  */
-export type RawBotIdentity = Partial<{
-  avatarDataUrl: unknown;
-  bannerDataUrl: unknown;
-  bio: unknown;
+export type RawBotPresence = Partial<{
   status: unknown;
   activityType: unknown;
   activityText: unknown;
@@ -473,7 +535,7 @@ function normaliseStatusWindow(
   status: BotStatus,
   duration: unknown,
   expiresAt: unknown
-): Pick<BotIdentitySettings, "statusDuration" | "statusExpiresAt"> {
+): Pick<BotPresenceSettings, "statusDuration" | "statusExpiresAt"> {
   if (!isTimedBotStatus(status) || !isBotStatusDuration(duration)) {
     return { statusDuration: null, statusExpiresAt: null };
   }
@@ -488,12 +550,9 @@ function normaliseStatusWindow(
   };
 }
 
-export function normaliseBotIdentity(input: RawBotIdentity | null | undefined): BotIdentitySettings {
+export function normaliseBotPresence(input: RawBotPresence | null | undefined): BotPresenceSettings {
   const status = normaliseBotStatus(input?.status);
   return {
-    avatarDataUrl: normaliseImageDataUrl(input?.avatarDataUrl),
-    bannerDataUrl: normaliseImageDataUrl(input?.bannerDataUrl),
-    bio: normaliseBio(input?.bio),
     status,
     activityType: normaliseActivityType(input?.activityType),
     activityText: normaliseActivityText(input?.activityText),
@@ -510,7 +569,7 @@ export function normaliseBotIdentity(input: RawBotIdentity | null | undefined): 
  * duration is never expired.
  */
 export function isStatusWindowExpired(
-  identity: Pick<BotIdentitySettings, "statusDuration" | "statusExpiresAt">,
+  identity: Pick<BotPresenceSettings, "statusDuration" | "statusExpiresAt">,
   now: number
 ): boolean {
   if (identity.statusDuration === null || identity.statusExpiresAt === null) return false;
@@ -526,7 +585,7 @@ export function isStatusWindowExpired(
  * rewritten on read: a read must not mutate, and the operator's chosen state is
  * worth keeping until they change it.
  */
-export function effectiveBotStatus(identity: BotIdentitySettings, now: number): BotStatus {
+export function effectiveBotStatus(identity: BotPresenceSettings, now: number): BotStatus {
   return isStatusWindowExpired(identity, now) ? DEFAULT_BOT_STATUS : identity.status;
 }
 
@@ -547,7 +606,13 @@ export function effectiveBotStatus(identity: BotIdentitySettings, now: number): 
 /** Arabic labels for the fields an operator can change, for messages. */
 export const APPEARANCE_FIELD_LABELS_AR = {
   nickname: "الاسم المستعار",
-  avatarDataUrl: "الصورة الرمزية",
+  /**
+   * Keeps its `guild` prefix even though every field here is now guild-scoped:
+   * the name is what the failure messages and the saved-outcome list carry, and
+   * renaming it would touch every stored response shape for no gain the operator
+   * can see. The label is what they read.
+   */
+  guildAvatarDataUrl: "صورة السيرفر",
   bannerDataUrl: "البانر",
   bio: "النبذة التعريفية",
   roleColor: "لون الرتبة",
@@ -870,13 +935,23 @@ export type WelcomeSettings = {
   enabled: boolean;
   memberRoleId: string | null;
   botRoleId: string | null;
+  /** Seconds to wait after joining before the auto-role lands. 0–3600. */
+  delaySeconds: number;
 };
 
 export const DEFAULT_WELCOME_SETTINGS: WelcomeSettings = {
   enabled: false,
   memberRoleId: null,
-  botRoleId: null
+  botRoleId: null,
+  delaySeconds: 0
 };
+
+/** A join-to-grant delay: 0–3600 seconds, non-numeric degrades to immediate. */
+function clampWelcomeDelay(value: unknown): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.min(3600, Math.max(0, Math.round(numeric)));
+}
 
 /**
  * Normalised, not trusted: the same helper the BFF writes through and the bot
@@ -890,6 +965,7 @@ export function normaliseWelcomeSettings(value: unknown): WelcomeSettings {
   return {
     enabled: source.enabled === true,
     memberRoleId: normaliseSnowflake(source.memberRoleId),
-    botRoleId: normaliseSnowflake(source.botRoleId)
+    botRoleId: normaliseSnowflake(source.botRoleId),
+    delaySeconds: clampWelcomeDelay(source.delaySeconds)
   };
 }
