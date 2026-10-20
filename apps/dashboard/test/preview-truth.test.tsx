@@ -1,0 +1,187 @@
+import "./dom-env.js";
+import test from "node:test";
+import assert from "node:assert/strict";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { dom } from "./dom-env.js";
+import { BotLivePreview } from "@/views/settings/bot-preview";
+import { WelcomeMessagePreview } from "@/components/welcome-message-preview";
+import type { PreviewProfile } from "@/views/settings/bot-preview";
+import type { WelcomeMessageSettings } from "@al-ai/core/browser";
+
+/**
+ * The two previews, and the promise they make.
+ *
+ * A preview is the operator's only view of what the members will see, so it
+ * has to answer two questions honestly: *what* will be shown, and *is it
+ * saved yet*. The first bug this file pins is the banner: the preview used to
+ * fall back to the **account's** banner, so a server with no banner of its own
+ * showed a picture that had never belonged to it.
+ */
+
+const PROFILE: PreviewProfile = {
+  username: "AL AI",
+  nickname: "AL AI",
+  serverAvatarDataUrl: null,
+  serverBannerDataUrl: null,
+  accountAvatarUrl: "https://cdn.discordapp.com/avatars/1/account-avatar.png",
+  accountBannerUrl: "https://cdn.discordapp.com/banners/1/account-banner.png",
+  bio: null,
+  roleColor: null,
+  roleIconUrl: null
+};
+
+function render(element: React.ReactElement) {
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(container);
+  const root = createRoot(container);
+  act(() => {
+    root.render(element);
+  });
+  return { container, root };
+}
+
+test("the bot's banner is the server's banner, never the account's", () => {
+  const { container, root } = render(
+    <BotLivePreview profile={PROFILE} guildName="سيرفر" memberCount={42} />
+  );
+  try {
+    const html = container.innerHTML;
+    // The *picture* falls back to the account's - that is Discord's own rule
+    // for a member with no override. The *banner* does not.
+    assert.equal(html.includes("account-avatar.png"), true, "the picture falls back to the account's, as Discord does");
+    assert.equal(html.includes("account-banner.png"), false, "the account's banner is never the server's banner");
+    assert.equal(html.includes("لا يوجد غلاف"), true, "a server with no banner says so");
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});
+
+test("the server's own banner is drawn", () => {
+  const { container, root } = render(
+    <BotLivePreview
+      profile={{ ...PROFILE, serverBannerDataUrl: "data:image/png;base64,AAA" }}
+      guildName="سيرفر"
+      memberCount={42}
+    />
+  );
+  try {
+    assert.equal(container.innerHTML.includes("data:image/png;base64,AAA"), true, "the server's banner is drawn");
+    assert.equal(container.innerHTML.includes("لا يوجد غلاف"), false, "and the empty state is gone");
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});
+
+test("a draft that is not saved says so instead of claiming Discord has it", () => {
+  const { container, root } = render(
+    <BotLivePreview profile={PROFILE} guildName="سيرفر" memberCount={42} pending />
+  );
+  try {
+    assert.equal(container.textContent.includes("لم تُحفظ بعد"), true);
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});
+
+const SETTINGS: WelcomeMessageSettings = {
+  enabled: true,
+  imageEnabled: false,
+  imageMode: "with_message",
+  imageChannelId: null,
+  channelId: "10",
+  mode: "text",
+  text: "أهلاً {user} في {server}",
+  embed: {
+    content: "",
+    title: "",
+    titleUrl: null,
+    description: "",
+    color: null,
+    thumbnailMode: "none",
+    thumbnailUrl: null,
+    imageMode: "none",
+    imageDataUrl: null,
+    imageUrl: null,
+    footer: "",
+    footerIconUrl: null,
+    timestamp: false,
+    fields: []
+  },
+  image: {
+    width: 1024,
+    height: 512,
+    quality: 0.9,
+    background: { type: "color", color: "#0b1020", imageDataUrl: null },
+    avatar: { x: 40, y: 40, size: 160, circular: true, strokeColor: null, strokeWidth: 0, enabled: true },
+    username: {
+      id: "username",
+      text: "{user}",
+      x: 240,
+      y: 200,
+      fontFamily: "IBM Plex Sans Arabic",
+      fontSize: 48,
+      color: "#ffffff",
+      weight: "bold",
+      align: "start"
+    },
+    customTexts: []
+  }
+};
+
+test("the message preview applies the variables and says where it goes", () => {
+  const { container, root } = render(
+    <WelcomeMessagePreview
+      settings={SETTINGS}
+      values={{
+        userMention: "@العضو",
+        username: "عضو",
+        server: "سيرفر الاختبار",
+        memberCount: 12,
+        inviterMention: "@الداعي",
+        joinDate: "اليوم"
+      }}
+      avatarUrl={null}
+      botName="AL AI"
+      channelName="الترحيب"
+    />
+  );
+  try {
+    const text = container.textContent ?? "";
+    assert.equal(text.includes("أهلاً @العضو في سيرفر الاختبار"), true, "the variables are applied");
+    assert.equal(text.includes("إلى #الترحيب"), true, "the channel is named");
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});
+
+test("a message with no text says so instead of drawing an empty bubble", () => {
+  const { container, root } = render(
+    <WelcomeMessagePreview
+      settings={{ ...SETTINGS, text: "" }}
+      values={{
+        userMention: "@العضو",
+        username: "عضو",
+        server: "سيرفر",
+        memberCount: 12,
+        inviterMention: "@الداعي",
+        joinDate: "اليوم"
+      }}
+      avatarUrl={null}
+      botName="AL AI"
+      channelName={null}
+    />
+  );
+  try {
+    const text = container.textContent ?? "";
+    assert.equal(text.includes("لا يوجد نص"), true);
+    assert.equal(text.includes("لم تُختر القناة بعد"), true, "and the missing channel is named");
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});

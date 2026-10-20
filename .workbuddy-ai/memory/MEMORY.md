@@ -9,8 +9,11 @@
 - `RULES-DISCORD.md` — واجهة Discord، تصنيف الأخطاء، منع 429.
 - `RULES-ARCH.md` — الترحيل والسكيما، الحوكمة (27 قاعدة)، منهج الفحص.
 
-**المهارات:** `al-ai-stack-verify` (تشغيل/فحص) · `al-ai-git-recovery` · `repo-architecture-audit` ·
-`react-jsdom-mount-test`.
+**المهارات:** لا توجد مهارات داخل المستودع بعد الآن؛ المهارات الموجودة في `.agents/skills` هي أدوات
+HeroUI فقط. **فحوص المشروع الحيّة هي:** `scripts/ui-check.mjs` (متصفح حقيقي: العرضان، الوضعان، قائمة
+الحساب، لوحة المظهر، **axe-core**، وصفحات حيّة بـ`--live`) · `scripts/oauth-check.mjs` (دورة OAuth
+و`state` وحارس CSRF والخروج) · `scripts/load-check.mjs` (زمن الاستجابة وتأخير Event loop والذاكرة).
+ما كان في `.workbuddy-ai/verify/` أدوات جولة سابقة؛ `browser-check.mjs` أقدم منها وما زال يُشغَّل يدويًا.
 **كثير من القواعد مُفروضة باختبار** ⇒ `npm run verify` يكشفها. ما في هذه الصفحة هو **ما لا يكشفه اختبار**.
 
 ## التشغيل والبيئة — → `al-ai-stack-verify`
@@ -27,8 +30,10 @@
   القفل**: زواله = المسار عمل، بقاؤه = قتل قسري.
 - **`.env` غير مُتتبَّع** (`.env.example` هو العقد). **صحة محوّل التكامل `GET /ping` لا `/health`**.
 - **`.workbuddy-ai/memory/*.md` مُتتبَّعة ومرفوعة لمستودع عام** — لا أسرار؛ `backups/`/`preview/` **مُتَجاهَلان**.
-- **الفحص الحيّ:** `browser-check.mjs` · `write-path-check.mjs` · `live-screens-check.mjs` ·
-  `live-session-probe.mjs`. **جلسة حقيقية من `oauth_sessions` — العمود `id` هو قيمة الكوكي**، واسمها
+- **الفحص الحيّ:** `scripts/ui-check.mjs` (متصفح حقيقي: العرضان، الوضعان، قائمة الحساب، لوحة المظهر،
+  **axe-core**، وصفحات حيّة بـ`--live`) · `scripts/oauth-check.mjs` (دورة OAuth و`state` وحارس CSRF
+  والخروج) · `scripts/load-check.mjs` (زمن الاستجابة وتأخير Event loop والذاكرة). ما في
+  `.workbuddy-ai/verify/` أدوات جولة سابقة (و`browser-check.mjs` أقدمها). **جلسة حقيقية من `oauth_sessions` — العمود `id` هو قيمة الكوكي**، واسمها
   **`__Host-al_ai_session`** في `NODE_ENV=production` و`al_ai_session` خارجه ⇒ **اسم خاطئ = صفحات
   مسجَّلة-خروجاً وتقرير «clean» كاذب** (`dev-issue-session.mts` توكنه وهمي ⇒ 401).
   **سيرفر الفحص:** `1523473815555018782`. **⚠️ لا `curl` بلا `--noproxy '*'`** — الوكيل يرد **502** مضلِّلاً.

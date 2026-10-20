@@ -144,7 +144,8 @@ test("the message tab switches between text and embed, and the preview renders t
     const description = fields.find(element => element.value === "وصف الترحيب");
     assert.ok(description, "the description is editable in place");
     await press(container, clickButton(container, "نص فقط"));
-    assert.equal(container.textContent.includes("رسالة الترحيب (نص عادي)"), true);
+    assert.equal(container.textContent.includes("نص الرسالة"), true);
+    assert.equal(container.textContent.includes("معاينة الرسالة"), true, "the live preview is on the text tab");
     assert.equal(container.textContent.includes("مرحباً بك! 🎉"), false, "the embed form is gone in text mode");
   } finally {
     await act(async () => root.unmount());

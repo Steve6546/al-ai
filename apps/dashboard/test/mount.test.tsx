@@ -590,8 +590,13 @@ test("a guild admin edits every field of their own server", async () => {
     // would go green the moment the control behind it stopped existing.
     assert.match(html, /id="bio"/, "the bio is a real editor for a guild admin");
     assert.match(html, /id="nickname"/, "…as is the nickname");
-    assert.match(html, /aria-label="رابط صورة السيرفر"/, "…and the server picture accepts a pasted address");
-    assert.match(html, /aria-label="رابط غلاف السيرفر"/, "…and so does the banner");
+    // The names are the screen's own: «الصورة الأساسية» is the picture the
+    // members of this server see, and «غلاف البوت» is this server's banner -
+    // neither is the account's.
+    assert.match(html, /aria-label="رابط الصورة الأساسية"/, "…and the server picture accepts a pasted address");
+    assert.match(html, /aria-label="رابط غلاف البوت"/, "…and so does the banner");
+    assert.doesNotMatch(html, /رابط صورة السيرفر/, "the picture is not named after the server any more");
+    assert.doesNotMatch(html, /الغلاف الأساسي/, "the account's banner is not the server's banner");
 
     // The stored row reaches the form rather than the defaults, which is what
     // separates "the fields are editable" from "the fields are editable and

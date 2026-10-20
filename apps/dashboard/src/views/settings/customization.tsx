@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, IdCard, Image as ImageIcon, Loader2, Lock, Palette, Upload, X } from "lucide-react";
-import {
+import { CheckCircle2, IdCard, Image as ImageIcon, Loader2, Lock, Palette, Pencil, TriangleAlert, Upload, X } from "lucide-react";
+import {
   DEFAULT_CUSTOMIZATION,
   MAX_BIO_LENGTH,
   MAX_IMAGE_DATA_URL_LENGTH,
@@ -51,8 +51,24 @@ import type { CustomizationSettings, Guild, GuildProfileSnapshot, PermissionStat
 
 const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 
-/** Reads an image file into a capped base64 data URL, or fails with a reason. */
-function readImageAsDataUrl(file: File): Promise<string> {
+/**
+ * Discord's own minimums, used to *warn* rather than to refuse: a smaller
+ * image is accepted and scaled, so the operator is told what will happen
+ * instead of being blocked by a rule they did not ask for.
+ */
+const AVATAR_MIN_SIDE = 256;
+const BANNER_MIN_SIZE = { width: 600, height: 240 };
+
+type ReadImage = { dataUrl: string; width: number; height: number };
+
+/**
+ * Reads an image file into a capped base64 data URL, or fails with a reason.
+ *
+ * The file's *dimensions* are read as well: a picture that is too small is a
+ * fact the operator should see before the save, not after Discord has already
+ * scaled it.
+ */
+function readImageAsDataUrl(file: File): Promise<ReadImage> {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith("image/")) {
       reject(new Error("الملف ليس صورة. استخدم PNG أو JPG أو WEBP أو GIF."));
@@ -65,7 +81,11 @@ function readImageAsDataUrl(file: File): Promise<string> {
         reject(new Error("حجم الصورة يتجاوز الحد المسموح (500 كيلوبايت تقريباً بعد الترميز)."));
         return;
       }
-      resolve(dataUrl);
+      const image = new Image();
+      image.onload = () => resolve({ dataUrl, width: image.naturalWidth, height: image.naturalHeight });
+      // A picture the browser cannot decode is not one we can send either.
+      image.onerror = () => reject(new Error("تعذّر قراءة الصورة. تأكّد أن الملف صورة صحيحة."));
+      image.src = dataUrl;
     };
     reader.onerror = () => reject(new Error("تعذّر قراءة الصورة."));
     reader.readAsDataURL(file);
@@ -84,6 +104,7 @@ function ImageSlot({
   label,
   hint,
   dataUrl,
+  savedDataUrl,
   fallbackLabel,
   fileName,
   urlText = "",
@@ -91,12 +112,15 @@ function ImageSlot({
   onPick,
   onDrop,
   onRemove,
-  round = false,
-  disabled = false
+  shape = "square",
+  disabled = false,
+  state = "saved"
 }: {
   label: string;
   hint: string;
   dataUrl: string | null;
+  /** What is stored right now - the slot says whether the shown image is new. */
+  savedDataUrl?: string | null;
   fallbackLabel: string;
   fileName: string;
   urlText?: string;
@@ -104,24 +128,51 @@ function ImageSlot({
   onPick: () => void;
   onDrop: (file: File | undefined) => void;
   onRemove: () => void;
-  round?: boolean;
+  /** The preview's shape: the picture is square, the banner is a 5:2 strip. */
+  shape?: "square" | "banner";
   disabled?: boolean;
+  /** The state of the image itself: stored, changed, saving, or refused. */
+  state?: "saved" | "pending" | "saving" | "failed";
 }) {
+  const pending = state === "pending" || state === "saving";
+  const shown = dataUrl ?? savedDataUrl ?? null;
+  const isNew = Boolean(dataUrl) && dataUrl !== (savedDataUrl ?? null);
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <Label className="flex items-center gap-1.5 text-xs font-medium">{label}</Label>
-        {dataUrl ? (
+        {/*
+          The state of the image, said plainly. The old badge said "جاهزة
+          للحفظ" for any image that existed - including the one that was
+          stored a week ago - which is a statement about nothing.
+        */}
+        {state === "failed" ? (
+          <span className="flex items-center gap-1 text-[11px] text-destructive">
+            <TriangleAlert className="size-3.5" aria-hidden />
+            فشل الحفظ
+          </span>
+        ) : state === "saving" ? (
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+            جارٍ الحفظ…
+          </span>
+        ) : pending ? (
+          <span className="flex items-center gap-1 text-[11px] text-warning">
+            <Pencil className="size-3.5" aria-hidden />
+            تغيير غير محفوظ
+          </span>
+        ) : shown ? (
           <span className="flex items-center gap-1 text-[11px] text-success">
             <CheckCircle2 className="size-3.5" aria-hidden />
-            جاهزة للحفظ
+            محفوظة
           </span>
         ) : null}
       </div>
 
       <div
         className={cn(
-          "flex items-center gap-3 rounded-xl border border-dashed border-border p-3 transition-colors",
+          "flex items-start gap-3 rounded-xl border border-dashed border-border p-3 transition-colors",
           !disabled && "hover:border-primary/50 hover:bg-primary/5"
         )}
         onDragOver={event => event.preventDefault()}
@@ -130,18 +181,29 @@ function ImageSlot({
           if (!disabled) onDrop(event.dataTransfer.files?.[0]);
         }}
       >
+        {/*
+          The picture itself, big enough to judge: the square picture is
+          rendered large, and the banner as the wide strip Discord draws it in.
+        */}
         <span
           className={cn(
-            "grid size-16 shrink-0 place-items-center overflow-hidden border border-border bg-muted text-center text-[9px] leading-tight text-muted-foreground",
-            round ? "rounded-full" : "rounded-lg"
+            "relative shrink-0 overflow-hidden border border-border bg-muted text-center leading-tight text-muted-foreground",
+            shape === "square" ? "size-28 rounded-full" : "h-16 w-40 rounded-lg"
           )}
         >
-          {dataUrl ? (
+          {shown ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={dataUrl} alt="" className="size-full object-cover" />
+            <img src={shown} alt="" className="size-full object-cover" />
           ) : (
-            fallbackLabel
+            <span className={cn("grid size-full place-items-center", shape === "square" ? "text-[10px]" : "text-[9px]")}>
+              {fallbackLabel}
+            </span>
           )}
+          {isNew ? (
+            <span className="absolute inset-x-0 bottom-0 bg-warning/90 py-0.5 text-center text-[9px] font-medium text-warning-foreground">
+              لم يُحفظ بعد
+            </span>
+          ) : null}
         </span>
 
         <div className="min-w-0 flex-1 space-y-2">
@@ -149,9 +211,9 @@ function ImageSlot({
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" size="sm" onClick={onPick} disabled={disabled}>
               <Upload className="size-3.5" />
-              {dataUrl ? "استبدال" : "اختر صورة"}
+              {shown ? "استبدال" : "اختر صورة"}
             </Button>
-            {dataUrl ? (
+            {shown ? (
               <>
                 <span className="max-w-40 truncate text-[11px] text-muted-foreground" dir="ltr">
                   {fileName}
@@ -237,6 +299,10 @@ export function CustomizationView({ guild }: { guild: Guild }) {
   const [bannerUrlText, setBannerUrlText] = useState("");
   /* ---- display-only names of the last picked files ---- */
   const [fileNames, setFileNames] = useState<{ avatar?: string; banner?: string; roleIcon?: string }>({});
+  /* ---- the state of the images themselves ---- */
+  const [saving, setSaving] = useState(false);
+  const [failedField, setFailedField] = useState<"avatar" | "banner" | null>(null);
+  const [imageWarning, setImageWarning] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -318,7 +384,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
     );
   }
 
-  const { draft, patch, reset, dirty } = guildForm;
+  const { draft, saved, patch, reset, dirty } = guildForm;
 
   /*
    * Who may change what, resolved once.
@@ -349,17 +415,29 @@ export function CustomizationView({ guild }: { guild: Guild }) {
   const onFileChosen = async (file: File | undefined) => {
     if (!file) return;
     try {
-      const dataUrl = await readImageAsDataUrl(file);
+      const image = await readImageAsDataUrl(file);
+      const dataUrl = image.dataUrl;
       const target = pendingTarget.current;
       if (target === "avatar") {
         patch({ avatarDataUrl: dataUrl });
         setFileNames(current => ({ ...current, avatar: file.name }));
+        setImageWarning(
+          image.width < AVATAR_MIN_SIDE || image.height < AVATAR_MIN_SIDE
+            ? `الأبعاد ${image.width}×${image.height} أصغر من 256×256؛ ديسكورد سيصغّرها.`
+            : null
+        );
       } else if (target === "banner") {
         patch({ bannerDataUrl: dataUrl });
         setFileNames(current => ({ ...current, banner: file.name }));
+        setImageWarning(
+          image.width < BANNER_MIN_SIZE.width || image.height < BANNER_MIN_SIZE.height
+            ? `الأبعاد ${image.width}×${image.height} أصغر من 600×240؛ ديسكورد سيصغّرها.`
+            : null
+        );
       } else {
         patch({ roleIconUrl: dataUrl });
         setFileNames(current => ({ ...current, roleIcon: file.name }));
+        setImageWarning(null);
       }
       setAvatarUrlText("");
       setBannerUrlText("");
@@ -389,24 +467,54 @@ export function CustomizationView({ guild }: { guild: Guild }) {
       .customization(guild.id)
       .then(next => setProfile(next.profile ?? null))
       .catch(() => undefined);
-    return describeAppearanceResult(result);
+    return { ...describeAppearanceResult(result), result };
   };
 
   const onSave = async () => {
-    const outcome = await save();
-    if (outcome.ok) {
-      push({ tone: "success", title: "تم حفظ وتطبيق التغييرات على البوت في هذا السيرفر" });
-      return;
+    setSaving(true);
+    setFailedField(null);
+    try {
+      const { result, ...outcome } = await save();
+      if (outcome.ok) {
+        push({ tone: "success", title: "تم حفظ وتطبيق التغييرات على البوت في هذا السيرفر" });
+        return;
+      }
+      // Which image failed, so the slot can say so instead of the screen
+      // showing a picture as if it had been stored.
+      const failed = result.failed.find(
+        entry => entry.field === "guildAvatarDataUrl" || entry.field === "bannerDataUrl"
+      );
+      if (failed) setFailedField(failed.field === "guildAvatarDataUrl" ? "avatar" : "banner");
+      const refused = new Error(outcome.message);
+      push({ tone: "error", title: "تعذّر تطبيق بعض التغييرات", description: outcome.message });
+      throw refused;
+    } finally {
+      setSaving(false);
     }
-    const refused = new Error(outcome.message);
-    push({ tone: "error", title: "تعذّر تطبيق بعض التغييرات", description: outcome.message });
-    throw refused;
   };
 
   const resetAll = () => {
     reset();
     setAvatarUrlText("");
     setBannerUrlText("");
+    setFailedField(null);
+    setImageWarning(null);
+  };
+
+  /*
+   * The state of one image slot, said plainly: stored, changed, saving, or
+   * refused. The old badge claimed "ready to save" for any image that existed
+   * - including the one stored a week ago - which described nothing.
+   */
+  const imageState = (target: "avatar" | "banner"): "saved" | "pending" | "saving" | "failed" => {
+    if (saving) return "saving";
+    if (failedField === target) return "failed";
+    const draftValue = target === "avatar" ? draft.avatarDataUrl : draft.bannerDataUrl;
+    const savedValue = target === "avatar" ? saved.avatarDataUrl : saved.bannerDataUrl;
+    const pasted = target === "avatar" ? avatarUrlText.trim() : bannerUrlText.trim();
+    if (pasted !== "") return "pending";
+    if ((draftValue ?? null) !== (savedValue ?? null)) return "pending";
+    return "saved";
   };
 
   return (
@@ -535,11 +643,19 @@ export function CustomizationView({ guild }: { guild: Guild }) {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/*
+                The picture and the banner, each with its own value, its own
+                preview and its own save - they are two different fields of
+                Discord's member edit, and one of them (the picture) falls back
+                to the account's picture where the server has no override,
+                while the other (the banner) does not.
+              */}
               <ImageSlot
-                label="صورة السيرفر"
-                hint="مربعة 256×256 على الأقل. PNG أو JPG أو WEBP أو GIF — الحد 500 ك.ب بعد الترميز. تُطبَّق على عضوية البوت في هذا السيرفر فقط."
+                label="الصورة الأساسية"
+                hint="الصورة التي يراها أعضاء هذا السيرفر. مربعة 256×256 على الأقل. PNG أو JPG أو WEBP أو GIF — الحد 500 ك.ب بعد الترميز. تُطبَّق على عضوية البوت في هذا السيرفر فقط."
                 dataUrl={draft.avatarDataUrl}
-                fallbackLabel={profile?.accountAvatarUrl ? "الصورة الأساسية" : "الافتراضية"}
+                savedDataUrl={saved.avatarDataUrl ?? null}
+                fallbackLabel={profile?.accountAvatarUrl ? "صورة الحساب" : "الافتراضية"}
                 fileName={fileNames.avatar ?? "guild-avatar.png"}
                 urlText={avatarUrlText}
                 onUrlText={setAvatarUrlText}
@@ -550,16 +666,18 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                 }}
                 onRemove={() => patch({ avatarDataUrl: null })}
                 disabled={!memberEditable}
-                round
+                shape="square"
+                state={imageState("avatar")}
               />
 
               <Separator />
 
               <ImageSlot
-                label="غلاف السيرفر"
-                hint="يُعرض بنسبة 5:2 تقريباً (مثل 600×240). PNG أو JPG أو WEBP أو GIF — الحد 500 ك.ب بعد الترميز."
+                label="غلاف البوت"
+                hint="الغلاف الذي يراه أعضاء هذا السيرفر، بنسبة 5:2 تقريباً (مثل 600×240). PNG أو JPG أو WEBP أو GIF — الحد 500 ك.ب بعد الترميز. غلاف الحساب العام لا يُعرض هنا: لكل سيرفر غلافه."
                 dataUrl={draft.bannerDataUrl}
-                fallbackLabel={profile?.accountBannerUrl ? "الغلاف الأساسي" : "لا يوجد غلاف"}
+                savedDataUrl={saved.bannerDataUrl ?? null}
+                fallbackLabel="لا يوجد غلاف"
                 fileName={fileNames.banner ?? "guild-banner.png"}
                 urlText={bannerUrlText}
                 onUrlText={setBannerUrlText}
@@ -570,6 +688,8 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                 }}
                 onRemove={() => patch({ bannerDataUrl: null })}
                 disabled={!memberEditable}
+                shape="banner"
+                state={imageState("banner")}
               />
             </CardContent>
           </Card>
@@ -678,7 +798,18 @@ export function CustomizationView({ guild }: { guild: Guild }) {
               <CardDescription>هكذا سيظهر AL AI في هذا السيرفر — تتحدّث مع كل ضغطة دون حفظ.</CardDescription>
             </CardHeader>
             <CardContent>
-              <BotLivePreview profile={preview} guildName={guild.name} memberCount={guild.memberCount} enabled={draft.enabled} />
+              <BotLivePreview
+                profile={preview}
+                guildName={guild.name}
+                memberCount={guild.memberCount}
+                enabled={draft.enabled}
+                pending={anyDirty}
+              />
+              {imageWarning ? (
+                <p className="mt-2 rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-[11px] text-warning">
+                  {imageWarning}
+                </p>
+              ) : null}
               <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
                 الحالة والنشاط لا يظهران هنا: يخصّان البوت كله لا هذا السيرفر، وتُعدَّلان من شاشة «حالة البوت».
               </p>

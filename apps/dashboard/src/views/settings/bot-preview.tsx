@@ -138,22 +138,34 @@ export function BotLivePreview({
   profile,
   guildName,
   memberCount,
-  enabled = true
+  enabled = true,
+  pending = false
 }: {
   profile: PreviewProfile;
   guildName: string;
   memberCount: number | null;
   /** False while the master switch is off, when Discord shows the defaults. */
   enabled?: boolean;
+  /** True while the draft differs from what is stored - nothing is saved yet. */
+  pending?: boolean;
 }) {
-  // The same resolution Discord walks: this server's picture where it has one,
-  // the account's otherwise. The caller has already emptied the server values
-  // when the master switch is off, so a disabled profile falls straight through
-  // to the account's — which is exactly what the switch means.
+  /*
+   * The same resolution Discord walks - with one deliberate difference.
+   *
+   * A *picture* falls back: where this server has no override, members see
+   * the account's picture, so the preview shows the account's picture too.
+   *
+   * A *banner* does not: the account's banner is the account's, and Discord
+   * never draws it as the member's banner. Falling back to it here put a
+   * completely different image in the server's banner slot - the operator
+   * removed the server's banner, and the preview kept showing a picture that
+   * had never belonged to this server at all. The server's banner is the only
+   * banner this screen owns, and "no banner" is said plainly.
+   */
   const serverAvatar = profile.serverAvatarDataUrl ?? null;
   const serverBanner = profile.serverBannerDataUrl ?? null;
   const avatar = serverAvatar ?? profile.accountAvatarUrl;
-  const banner = serverBanner ?? profile.accountBannerUrl;
+  const banner = serverBanner;
 
   // Normalised once, at the point a stored row meets the DOM: `bio` is trimmed
   // and would be a TypeError if it arrived as a non-string, and a presentational
@@ -168,6 +180,17 @@ export function BotLivePreview({
       {!enabled ? (
         <p className="rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground">
           التخصيص معطّل: هذه هي القيم الأساسية التي يراها الأعضاء الآن.
+        </p>
+      ) : null}
+
+      {/*
+        The preview shows the *draft*, so it is ahead of Discord until the save
+        succeeds. Saying so is the difference between "this is what your members
+        will see" and "this is what they will see once you save".
+      */}
+      {pending ? (
+        <p className="rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-[11px] text-warning">
+          معاينة: هذه التغييرات لم تُحفظ بعد، وديسكورد لم يستلمها.
         </p>
       ) : null}
 

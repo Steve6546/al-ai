@@ -5,6 +5,7 @@ import { useDraftForm } from "@/lib/use-draft-form";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { SaveBar } from "@/components/save-bar";
 import { Toaster, useToasts } from "@/components/toaster";
+import { WelcomeMessagePreview } from "@/components/welcome-message-preview";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,7 +25,7 @@ import {
 import { EmbedEditor } from "./welcome-embed-editor";
 import { EmojiPicker, FieldRow, TokenStrip, insertAtCursor } from "./welcome-messages-parts";
 import { WelcomeImageCanvas } from "./welcome-image-canvas";
-import type { ChannelOption, Guild, WelcomeEmbedField, WelcomeMessageSettings, WelcomeTextLayer } from "@/types";
+import type { ChannelOption, Guild, GuildProfileSnapshot, WelcomeEmbedField, WelcomeMessageSettings, WelcomeTextLayer } from "@/types";
 
 type Tab = "settings" | "message" | "image";
 type CanvasPanel = "background" | "avatar" | "username" | "custom" | "canvas-settings";
@@ -73,6 +74,9 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
   const [tab, setTab] = useState<Tab>("settings");
   const [settings, setSettings] = useState<WelcomeMessageSettings | null>(null);
   const [channels, setChannels] = useState<ChannelOption[]>([]);
+  /* The bot's picture and name in THIS guild, for the preview. The same read the
+     identity screen uses, so the preview shows the bot the members see. */
+  const [profile, setProfile] = useState<GuildProfileSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [canvasPanel, setCanvasPanel] = useState<CanvasPanel>("background");
   const [selection, setSelection] = useState<Selection>(null);
@@ -104,6 +108,14 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
         setChannels(result.channels);
       })
       .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
+    // The bot's own picture and name in this guild, for the preview. The same
+    // read the identity screen uses, so the preview shows the bot the members
+    // of *this* server see - and a read that fails leaves the preview with a
+    // placeholder instead of failing the screen.
+    void api
+      .customization(guild.id)
+      .then(result => !cancelled && setProfile(result.profile ?? null))
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -120,6 +132,13 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
     }),
     [guild.name, guild.memberCount]
   );
+
+  /** The chosen channel's name, for the preview's header. */
+  const channelName = useMemo(() => {
+    const id = draft?.channelId ?? null;
+    if (!id) return null;
+    return channels.find(channel => channel.id === id)?.name ?? null;
+  }, [channels, draft?.channelId]);
 
   if (error) return <LoadError message={error} />;
   if (!settings || !draft) return <LoadingRow />;
@@ -378,29 +397,42 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
           </div>
 
           {draft.mode === "text" ? (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">رسالة الترحيب (نص عادي)</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="relative">
-                  <Textarea
-                    ref={textRef}
-                    rows={4}
-                    value={draft.text}
-                    onChange={event => patch({ text: event.target.value })}
-                    className="rounded-xl text-sm"
-                  />
-                  <span className="absolute top-2 start-2">
-                    <EmojiPicker label="إدراج إيموجي" onPick={emoji => patch({ text: insertAtCursor(textRef.current, draft.text, emoji) })} />
-                  </span>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-[11px] text-muted-foreground">المتغيرات المتاحة:</span>
-                  <TokenStrip onInsert={token => patch({ text: insertAtCursor(textRef.current, draft.text, token) })} activeRef={textRef} />
-                </div>
-              </CardContent>
-            </Card>
+            <div className="grid gap-4 lg:grid-cols-[1fr_22rem]">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">نص الرسالة</CardTitle>
+                  <CardDescription>ما يصل العضو الجديد، والمتغيرات تُدرج عند المؤشر.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="relative">
+                    <Textarea
+                      ref={textRef}
+                      rows={4}
+                      value={draft.text}
+                      onChange={event => patch({ text: event.target.value })}
+                      className="rounded-xl text-sm"
+                    />
+                    <span className="absolute top-2 start-2">
+                      <EmojiPicker label="إدراج إيموجي" onPick={emoji => patch({ text: insertAtCursor(textRef.current, draft.text, emoji) })} />
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[11px] text-muted-foreground">المتغيرات المتاحة:</span>
+                    <TokenStrip onInsert={token => patch({ text: insertAtCursor(textRef.current, draft.text, token) })} activeRef={textRef} />
+                  </div>
+                </CardContent>
+              </Card>
+              {/* The preview, bound to the draft: it answers the instant a letter
+                  is typed, and it never claims Discord has received anything. */}
+              <WelcomeMessagePreview
+                settings={draft}
+                values={sampleValues}
+                avatarUrl={profile?.avatarUrl ?? null}
+                botName={profile?.nickname || profile?.username || null}
+                channelName={channelName}
+                className="lg:sticky lg:top-6 lg:self-start"
+              />
+            </div>
           ) : (
             <Card className="border-primary/20 bg-card/70 shadow-lg shadow-primary/5 backdrop-blur-sm">
               <CardHeader className="pb-3">
@@ -466,8 +498,11 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
 
           <Card className="border-primary/20 bg-card/70 shadow-lg shadow-primary/5 backdrop-blur-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">مصمم الصورة</CardTitle>
-              <CardDescription>معاينة حية بالأبعاد الحقيقية — اسحب الطبقات لتحريكها، والمقبض الدائري لتغيير حجمها.</CardDescription>
+              <CardTitle className="text-base">مصمم صورة الترحيب</CardTitle>
+              <CardDescription>
+                معاينة حية بالأبعاد الحقيقية — اسحب الطبقات لتحريكها، والمقبض الدائري لتغيير حجمها حول
+                الزاوية الثابتة (فلا يقفز العنصر). ما تراه هنا هو ما يرسمه البوت.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <WelcomeImageCanvas
