@@ -127,6 +127,19 @@ const UNSUPPORTED = [
   /LANGUAGE\s+plpgsql/i
 ];
 
+/**
+ * PostgreSQL 15's `UNIQUE NULLS NOT DISTINCT` treats NULLs as equal when
+ * deduplicating — the levels rewards table needs it, because a plain UNIQUE
+ * would admit two identical 'text' rules whose NULL voice level reads as
+ * pairwise distinct. The parser has no production for the phrase, so the two
+ * tokens are stripped for the syntax check only: the statement that reaches
+ * PostgreSQL still carries them, and a rewritten form that changed semantics
+ * would defeat the reason the lint parses real SQL at all.
+ */
+function forParser(statement) {
+  return statement.replace(/NULLS\s+NOT\s+DISTINCT/gi, "");
+}
+
 const statements = splitStatements(sql).filter(statement => statement.trim().length > 0);
 const failures = [];
 const skipped = [];
@@ -135,7 +148,7 @@ let parsed = 0;
 for (const [index, statement] of statements.entries()) {
   const head = statement.trim().split(/\s+/).slice(0, 4).join(" ");
   try {
-    parse(statement);
+    parse(forParser(statement));
     parsed += 1;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -1,0 +1,82 @@
+# The quality gate, run on every push and pull request.
+#
+# Five rules this workflow follows:
+#
+# 1. `npm ci`, never `npm install`: the lockfile is the contract, and `install`
+#    is free to rewrite it. A green build that installed something else is not
+#    a green build.
+# 2. The actions are pinned to a commit SHA, not to a tag: a tag can be moved,
+#    and a workflow that runs someone else's code is a supply-chain hole. The
+#    version comment next to each SHA is the release it came from.
+# 3. The token gets the least it can do: `contents: read` and nothing else.
+# 4. The Node versions are the two the project declares - the minimum it
+#    supports (`.nvmrc` holds the version it is developed on) - so a release
+#    that breaks the floor fails here, not in a deployment.
+# 5. No secret is ever needed: the checks below are static (lint, types,
+#    schema, tests, build, dependency audit, dead code). The database-backed
+#    check (`db:verify`) is deliberately *not* here - it needs a real
+#    PostgreSQL with the project's credentials, which is a deployment concern,
+#    not a pull-request one. `npm run db:verify` runs against a real database
+#    in the deployment pipeline.
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["22.19.0", "24.22.0"]
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install the locked tree
+        run: npm ci --no-audit --no-fund
+
+      - name: Audit the dependencies
+        run: npm audit --audit-level=high
+
+      - name: Lint, schema, tests, build
+        run: npm run verify
+
+      - name: Dead code and unused dependencies
+        run: npm run check:dead
+
+  dashboard-dist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: "24.22.0"
+          cache: npm
+
+      - name: Install the locked tree
+        run: npm ci --no-audit --no-fund
+
+      - name: Build the dashboard
+        run: npm run build --workspace=@al-ai/dashboard
+
+      - name: Upload the built dashboard
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: dashboard-dist
+          path: apps/dashboard/dist
+          retention-days: 7

@@ -2,26 +2,45 @@
   "name": "al-ai",
   "private": true,
   "version": "0.1.0",
-  "packageManager": "npm@10",
+  "packageManager": "npm@11.19.1",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
+    "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1",
+    "dev:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 -Action stop",
+    "dev:restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 -Action restart",
+    "dev:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 -Action status",
+    "db:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/postgres.ps1 -Action start",
+    "db:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/postgres.ps1 -Action stop",
+    "db:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/postgres.ps1 -Action status",
+    "db:verify": "node --env-file=.env scripts/verify-db.mjs",
     "dev:dashboard": "npm run dev --workspace=@al-ai/dashboard",
     "dev:bot": "npm run dev --workspace=@al-ai/bot",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "check:schema": "node scripts/parse-schema.mjs infra/schema.sql",
+    "check:dead": "knip",
+    "check:ui": "npm run build --workspace=@al-ai/dashboard && node scripts/ui-check.mjs",
+    "check:ui:live": "node scripts/ui-check.mjs --live",
+    "check:oauth": "node scripts/oauth-check.mjs",
+    "check:load": "node scripts/load-check.mjs",
     "verify": "npm run lint && npm run check:schema && npm test && npm run build",
-    "backup": "node --env-file=.env scripts/backup-db.mjs"
+    "backup": "node --env-file=.env scripts/backup-db.mjs",
+    "secrets:rotate": "node --env-file=.env scripts/rotate-secrets.mjs",
+    "keys:rotate": "node --env-file=.env scripts/rotate-encryption-key.mts",
+    "dev:session": "node --env-file=.env scripts/dev-issue-session.mts",
+    "ui:pull": "node scripts/pull-shadcn.mjs"
   },
   "devDependencies": {
+    "axe-core": "^4.14.0",
+    "knip": "^6.42.1",
     "pgsql-ast-parser": "^12.0.2",
     "typescript": "7.0.2"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.19.0"
   }
 }

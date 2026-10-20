@@ -14,6 +14,15 @@ import { fileURLToPath } from "node:url";
 const STYLE = "new-york";
 const REGISTRY = `https://ui.shadcn.com/r/styles/${STYLE}`;
 
+/**
+ * The components this project actually keeps.
+ *
+ * The list used to name `skeleton` and `tabs` - neither of which exists in
+ * `apps/dashboard/src/components/ui` - and to omit `popover`, which does. The
+ * list is the tool's contract with the folder, so it has to match the folder:
+ * a name that is not there means a file that does not exist, and a file that is
+ * not named means an upstream refresh silently stops tracking it.
+ */
 const COMPONENTS = [
   "alert",
   "avatar",
@@ -26,14 +35,13 @@ const COMPONENTS = [
   "dropdown-menu",
   "input",
   "label",
+  "popover",
   "scroll-area",
   "select",
   "separator",
   "sheet",
-  "skeleton",
   "switch",
   "table",
-  "tabs",
   "textarea",
   "tooltip"
 ];

@@ -12,6 +12,15 @@ Arabic RTL Discord management bot and secure control dashboard.
 The rules that keep this codebase coherent are in [`docs/GOVERNANCE.md`](docs/GOVERNANCE.md).
 Several of them are enforced by tests in `apps/bot/test/governance.test.ts`.
 
+> **Delivery note.** The working tree holds a large body of work that is *not*
+> in Git yet: the PowerShell entry points (`scripts/*.ps1`), the verification
+> tools (`scripts/*.mjs`), the theme engine and the new dashboard components,
+> and the test files that go with them. **A copy of only the tracked files does
+> not build** - the first missing module is `src/lib/theme.ts`. The project
+> becomes reproducible the moment those paths are added; the list of what has to
+> be included is in the delivery report, and `git status --short` is the
+> authority on it. Nothing here is a secret, and `.env` stays out of Git.
+
 ## Architecture
 
 ```
@@ -116,11 +125,69 @@ Then open <http://localhost:3000>.
 If your machine already runs PostgreSQL on 5432, set `POSTGRES_HOST_PORT` in
 `.env` to a free port (the compose file publishes the container there).
 
+The images are built on `node:24.22.0-bookworm-slim` - the version in
+`.nvmrc`, which is the version the project is developed and verified on. They
+run `node_modules/.bin/tsx` rather than `npx tsx`, so the stop signal reaches
+the program instead of a wrapper.
+
 ## 3. Run against a local PostgreSQL
 
 The stack runs without Docker as well. In this workspace PostgreSQL 17 lives at
 `C:\Users\dlwta\.al-ai\pgdata` on port **55432**, and that data directory is
 deliberately outside the repository.
+
+### The toolchain
+
+| Tool | Version | Why |
+|---|---|---|
+| Node | **24.22.0** (`.nvmrc`) | the current LTS; the floor the project supports is 22.19.0 (`engines`), and CI tests both |
+| npm | **11.19.1** (`packageManager`) | the npm that ships with that Node, and the one the lock was resolved against |
+
+`npm ci` reproduces the locked tree exactly. It needs the services **stopped**:
+the bot holds `@napi-rs/canvas`'s native binary open, and `npm ci` cannot
+replace a file that is in use.
+
+### One command
+
+```bash
+npm run dev                # database (on demand) + dashboard + bot, then supervise
+npm run dev -- -Tunnel     # the same, plus the Cloudflare tunnel
+npm run dev -- -Detach      # start and return to the prompt (fire and forget)
+npm run dev:status         # what is up, on which ports, and the health verdict
+npm run dev:restart        # stop, then start
+npm run dev:stop           # graceful stop (a real Ctrl-C to each service)
+```
+
+`scripts/dev.ps1` starts the database only if its port is closed and waits for it
+before launching anything, sends each service's output to `.al-ai/logs/`, and
+records the running pids in `.al-ai/dev.json`. **By default it supervises**: it
+stays in the foreground, and a Ctrl+C there stops the whole stack — the trap
+turns the interrupt into a graceful stop, so the bot flushes its pipeline and
+releases its lock while the dashboard closes its pool. Nothing is orphaned: each
+child is named by port owner, command line, and remembered pid rather than
+assumed to have died with the shell. A forced kill is the fallback, not the norm.
+A quick tunnel the run served is ended as well; a **named** tunnel (started with
+`CLOUDFLARED_TUNNEL_TOKEN`) is never touched, so its public ingress and
+registered OAuth callback survive. Ownership is decided by the tunnel's birth
+time, not just by the port: a `cloudflared` serving the same port that was born
+before this run belongs to someone else and is left running.
+`-Detach` skips supervision when you want the prompt back; `npm run dev:stop`
+then stops that stack later.
+Extra flags go after `--`: `-Tunnel`, `-Detach`, `-NoDb`, `-NoDashboard`, `-NoBot`.
+
+The database alone has its own entry point (`npm run db:start`, `db:stop`,
+`db:status`, `db:verify`). `db:verify` reads `DATABASE_URL`, connects with those
+credentials using the same `pg` driver the dashboard uses, and runs one read-only
+query (`SELECT 1`). It exits non-zero on a missing variable, a bad URL, a refused
+connection, failed authentication, or a database mismatch, and it never prints
+the password or the URL - the right check to gate a deploy or a CI step.
+`scripts/postgres.ps1 -Action verify` is the faster protocol-level probe
+(`pg_isready`, no login); PostgreSQL documents that it can succeed with wrong
+credentials, which is why it is not the deploy gate. To
+make the database an auto-starting Windows service instead, run
+`scripts/setup-db-service.ps1` once from an elevated shell.
+
+### By hand
 
 ```bash
 # 1. PostgreSQL — start it as a *background task*, not with pg_ctl.
@@ -142,7 +209,9 @@ cd apps/bot && ../../node_modules/.bin/tsx --env-file=../../.env src/index.ts
 ```
 
 Use the local `tsx` binary directly rather than through `npx`: `npx` adds a
-wrapper process per service, worth roughly 70 MB each while running.
+wrapper process per service, worth roughly 70 MB each while running. The
+bootstrapper avoids the wrapper a third way, `node --import tsx`, which loads the
+loader in the service's own process so there is nothing extra to orphan.
 
 `node server/index.ts` **does not work** — on Node 22.22 with
 `process.features.typescript === "strip"`, the source imports `./env.js` while
@@ -150,8 +219,12 @@ the file is `env.ts`, and Node does not rewrite the extension. That is a
 tsx/esbuild feature, not type-stripping.
 
 The dashboard binds `0.0.0.0:3000`; set `PORT` to move it. The bot holds a lock
-file (`.al-ai-bot.lock`) and refuses to start if another instance owns it, so a
-bot killed uncleanly needs its stale lock removed before it will boot.
+file (`.al-ai-bot.lock`) recording the owning pid, its image, and when the lock
+was taken. A lock left by a process that has since exited is reclaimed on the
+next start, and so is one whose pid was recycled: the holder must be a Node
+process that started no later than the lock was written, so neither an unrelated
+program nor *another* Node process that took over the number can wedge startup.
+Only a lock held by a still-running bot blocks a second instance.
 
 ### Ports
 
@@ -183,15 +256,58 @@ npm run verify   # lint → check:schema → test → build, in that order
 
 | Suite | Tests | Covers |
 |---|---|---|
-| `apps/bot/test` | 246 | crypto, nonces, routing, permissions, pipeline, presence sync, governance, Discord-constant alignment, anti-nuke, adapter, security |
-| `apps/dashboard/test` | 242 | every screen renders without throwing (real jsdom mount, not `renderToString`); the error boundary contains a failure and recovers on retry; a gated role icon is disabled and omitted from the write; the unsaved-changes bar driven through the interface — absent until an edit, cleared by «إعادة ضبط», cleared by a clean save, and kept with the server's reason when the save is refused; Discord read shapes; storage round-trips; appearance field outcomes; route guards; cache |
-| `packages/core/test` | 177 | event schema, tiers, session policy, appearance normalisation, commands, metrics, hierarchy, anti-nuke limits |
+| `apps/bot/test` | 301 | crypto, nonces, routing, permissions, pipeline, presence sync, governance, Discord-constant alignment, anti-nuke, adapter, security, the instance lock (including the two starters racing for it), the mention policy |
+| `apps/dashboard/test` | 345 | every screen renders without throwing (real jsdom mount, not `renderToString`); the error boundary contains a failure and recovers on retry; a gated role icon is disabled and omitted from the write; the unsaved-changes bar driven through the interface — absent until an edit, cleared by «إعادة ضبط», cleared by a clean save, and kept with the server's reason when the save is refused; Discord read shapes; the upstream retry policy (a read survives one 5xx, a write does not); the image-by-URL policy (private hosts, redirects, pinned addresses, size and type ceilings); storage round-trips; appearance field outcomes; route guards; cache |
+| `packages/core/test` | 203 | event schema, tiers, session policy, appearance normalisation, commands, metrics, hierarchy, anti-nuke limits |
 
 **Read `# skipped`, not `# pass`.** `apps/dashboard/test/storage.test.ts` reads
 `DATABASE_URL`; with no reachable database it logs
 `{ skip: "no reachable database" }` for each case. The suite still *reports* the
 same number of tests with every one of them skipped, and `npm run verify`
 **still exits 0**. Start PostgreSQL first or the green tick means nothing.
+
+Three more checks live beside it, each with its own command:
+
+```bash
+npm run check:dead   # knip: unused files, exports and dependencies
+npm run check:ui     # a real browser: both palettes, every width, the shell and its panels
+npm run check:ui:live # the real pages, against the running stack (needs a session and a guild)
+npm run check:oauth  # the OAuth leg and the cross-site guard, against a running stack
+npm run check:load   # latency, event-loop delay and memory under local load
+npm run db:verify    # an authenticated query against the real database
+```
+
+`check:ui` needs a built dashboard (it builds one) and a Chrome or Edge binary;
+it writes its screenshots to `.al-ai/ui-check/`. It launches the browser with
+extensions disabled, which is what makes a clean console a statement about
+this app rather than about whatever the operator has installed. It measures
+**both palettes** (the light and the dark one, by emulating the system's
+colour preference) at 320, 375, 390, 430, 768, 1024 and 1440 pixels, opens
+the account menu and the appearance panel for real - the palette it switches
+to is read back off the document, so the check is of the behaviour and not of
+a screenshot - and runs **axe-core** over the two main screens, so the
+accessibility result is a measurement (WCAG 2.2 A/AA rules, colour-contrast
+included) rather than a claim. The findings are in `.al-ai/ui-check/axe.json`.
+
+`check:ui:live` drives the **real** pages - the dashboard, the levels, the
+commands, the logs, the welcome messages, the security screen, the audit trail, the
+network settings and the bot identity - against the running BFF and the real
+database, in both palettes and at 375 and 1440 pixels, with axe-core over each
+of them. It signs the browser in with the session the database holds (never
+printed) and paces itself, because the dashboard throttles a session to 120
+requests a minute and a page load spends five or six of them. It takes about
+five minutes.
+
+`check:oauth` and `check:load` need a running stack (`npm run dev -- -Detach`).
+`check:oauth` follows the login leg, checks the state cookie's attributes,
+refuses a callback with a missing or a wrong state, proves a failed token
+exchange mints no session, and checks that a request from another site is
+refused. It does **not** sign a human in: that needs a real Discord account
+and a real authorisation code, and is still to be done before a public
+deployment.
+
+`check:load` measures the local routes only. The guild routes are deliberately
+not measured, because every one of them spends Discord's rate-limit budget.
 
 Two more checks are enforced by tests rather than by eye:
 `apps/bot/test/governance.test.ts` fails if `docs/GOVERNANCE.md` and the source
@@ -242,6 +358,35 @@ three are needed — a retry in the client alone treats the symptom:
 - **"Saved" is not "applied".** A save is stored even when Discord refuses it (a
   rate limit is momentary; a lost form is not), but the response reports each
   field's outcome separately, so the two can never be conflated in the UI.
+
+## The dashboard's appearance
+
+The dashboard has two palettes and one accent, and the reader picks them.
+
+| Control | Where | What it does |
+|---|---|---|
+| **الوضع** (light / dark / system) | the sun button next to the account, in the sidebar and in the phone drawer | switches the palette; "system" follows the operating system as it changes |
+| **لون التمييز** (five swatches) | the same panel | recolours the brand: the primary button, the active navigation marker, the focus ring |
+
+Both are stored in this browser's `localStorage` (`al-ai.appearance`) and
+applied **before the first paint** — an inline script in `index.html` reads the
+same value, so the page never flashes the wrong palette. Nothing is stored on
+the server: a theme is a preference of the person looking at the screen, not a
+setting of the deployment.
+
+The two palettes are one design with the lightness flipped: the same neutrals,
+the same spacing, the same radii, and the same accent in both. The tokens live
+in `apps/dashboard/src/index.css` (`--background`, `--card`, `--border`,
+`--primary`, `--success`, `--warning`, `--destructive`, and the sidebar set);
+HeroUI's own variables are bridged through `[data-heroui]`, so the screens
+migrated to HeroUI keep the brand colour.
+
+The navigation is grouped by what the operator is doing - overview, the
+server's own configuration, moderation and commands, the logs, and the
+deployment-wide screens that belong to the platform owner - and every screen
+the project has appears exactly once. The sidebar can be folded into an icon
+rail on the desktop; the state is a layout preference of this machine and is
+stored the same way the appearance is.
 
 ## Bot appearance
 

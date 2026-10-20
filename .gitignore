@@ -11,9 +11,14 @@ coverage/
 
 # AL AI runtime artifacts
 .al-ai-bot.lock
+# Bootstrapper state and service logs (scripts/dev.ps1): state, the running pids,
+# and per-service stdout/stderr. Regenerated on every start; never a source of
+# truth. Distinct from the database cluster at %USERPROFILE%\.al-ai\pgdata,
+# which is deliberately outside the repository.
+.al-ai/
 
-# Database dumps. They are a point-in-time copy of live rows — including the
-# encrypted OAuth tokens in `oauth_sessions` — and belong next to the data
+# Database dumps. They are a point-in-time copy of live rows â€” including the
+# encrypted OAuth tokens in `oauth_sessions` â€” and belong next to the data
 # directory, not in history where they can never be removed.
 .workbuddy-ai/backups/
 
@@ -25,3 +30,10 @@ coverage/
 # (`.workbuddy-ai/verify/browser-check.mjs`). The harness itself is source and
 # stays tracked; its output is regenerated on every run.
 .workbuddy-ai/verify/*.png
+
+# Local convenience links: on this machine .claude/skills and
+# .zcode/skills are directory junctions onto .agents/skills. Git cannot
+# track a junction as a link, so committing them would add two more copies of
+# the same twenty-one files. The canonical set lives in .agents/skills.
+.claude/skills/
+.zcode/skills/

@@ -1,5 +1,5 @@
 # AL AI bot image. Runs the long-lived Gateway client under the supervisor.
-FROM node:22-bookworm-slim
+FROM node:24.22.0-bookworm-slim
 WORKDIR /app
 
 COPY package*.json ./
@@ -16,5 +16,8 @@ RUN npm ci
 COPY packages/core packages/core
 COPY apps/bot apps/bot
 
-# exec form so SIGTERM reaches the supervisor for a graceful shutdown
-CMD ["npx", "tsx", "apps/bot/src/index.ts"]
+# The local `tsx` binary, not `npx`: `npx` adds a wrapper process, so the
+# SIGTERM an orchestrator sends reaches the wrapper instead of the supervisor
+# and the graceful shutdown never runs. exec form, one process, the signal
+# lands on the program that has to handle it.
+CMD ["node_modules/.bin/tsx", "apps/bot/src/index.ts"]

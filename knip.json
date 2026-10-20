@@ -1,0 +1,28 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "project": ["scripts/**/*.mjs", "scripts/**/*.mts"],
+      "ignoreDependencies": ["pg"]
+    },
+    "apps/bot": {
+      "entry": ["test/fixtures/*.ts"],
+      "project": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
+    },
+    "apps/dashboard": {
+      "project": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.css", "server/**/*.ts", "test/**/*.ts", "test/**/*.tsx"],
+      "ignore": ["src/components/ui/**"]
+    },
+    "packages/core": {
+      "project": ["src/**/*.ts", "test/**/*.ts"]
+    }
+  },
+  "ignoreDependencies": [
+    "pgsql-ast-parser"
+  ],
+  "ignoreBinaries": [
+    "tasklist"
+  ],
+  "ignoreExportsUsedInFile": true,
+  "includeEntryExports": false
+}

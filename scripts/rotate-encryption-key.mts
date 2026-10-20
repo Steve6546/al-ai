@@ -19,8 +19,14 @@
  * Never prints a plaintext value or a ciphertext. Run while the services are
  * STOPPED, then update ENCRYPTION_KEY in .env and start them.
  */
-import { Client } from "pg";
+import { createRequire } from "node:module";
 import { decryptSecret, encryptSecret } from "@al-ai/core";
+
+// `pg` belongs to the dashboard workspace, which declares it. Borrowing that
+// copy keeps the root package from depending on a driver it never declares -
+// and keeps this script on the same driver version the services use.
+const require = createRequire(new URL("../apps/dashboard/package.json", import.meta.url));
+const { Client } = require("pg") as typeof import("pg");
 
 // Trim is load-bearing: .env values extracted through shell tools can carry a
 // trailing \r from CRLF line endings, and a 65-character "64 hex" key fails

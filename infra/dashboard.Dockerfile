@@ -1,5 +1,5 @@
 # AL AI dashboard image: builds the RTL dashboard, then serves it from the BFF.
-FROM node:22-bookworm-slim AS build
+FROM node:24.22.0-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json ./
 COPY apps/dashboard/package.json apps/dashboard/package.json
@@ -12,7 +12,7 @@ COPY packages/core packages/core
 COPY apps/dashboard apps/dashboard
 RUN npm run build --workspace=@al-ai/dashboard
 
-FROM node:22-bookworm-slim
+FROM node:24.22.0-bookworm-slim
 WORKDIR /app
 COPY package*.json ./
 COPY apps/dashboard/package.json apps/dashboard/package.json
@@ -27,4 +27,6 @@ COPY apps/dashboard/package.json apps/dashboard/package.json
 COPY --from=build /app/apps/dashboard/dist apps/dashboard/dist
 WORKDIR /app/apps/dashboard
 EXPOSE 3000
-CMD ["npx", "tsx", "server/index.ts"]
+# The local `tsx` binary, not `npx` - the same reason as the bot image: `npx`
+# wraps the program, and the wrapper is what receives the stop signal.
+CMD ["../../node_modules/.bin/tsx", "server/index.ts"]

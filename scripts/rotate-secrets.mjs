@@ -10,7 +10,13 @@
 // back rather than left half-applied, which would lock every service out.
 import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { Client } from "pg";
+import { createRequire } from "node:module";
+
+// `pg` belongs to the dashboard workspace, which declares it. Borrowing that
+// copy keeps the root package from depending on a driver it never declares -
+// and keeps this script on the same driver version the services use.
+const require = createRequire(new URL("../apps/dashboard/package.json", import.meta.url));
+const { Client } = require("pg");
 
 const path = ".env";
 const keys = ["SESSION_SECRET", "EVENT_HMAC_SECRET", "ENCRYPTION_KEY"];
