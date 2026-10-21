@@ -8,6 +8,7 @@ import {
   TEXT_MIN_FONT_SIZE,
   clampBox,
   clampTextAnchor,
+  maxFontSizeForWidth,
   renderWelcomeMessage,
   sizeFromDrag,
   textAscentRatio,
@@ -232,16 +233,31 @@ export function WelcomeImageCanvas({
           startPointer: drag.startPointer,
           pointer,
           min: TEXT_MIN_FONT_SIZE,
-          max: TEXT_MAX_FONT_SIZE
+          // **The line must stay inside the card.** The old ceiling was the
+          // global maximum (512px), so a 400px-tall card could be given a
+          // font twice its height: the text left the card while the pointer
+          // was still down. The ceiling is now the size that still fits the
+          // card's width - measured from the line the drag began with.
+          max: Math.min(
+            TEXT_MAX_FONT_SIZE,
+            config.height,
+            maxFontSizeForWidth(drag.startSize, drag.startBoxWidth, config.width)
+          )
         })
       : layer.fontSize;
     // The text grows with its font, so the box's width follows.
     const boxWidth =
       layer.fontSize > 0 ? (drag.startBoxWidth * fontSize) / Math.max(1, drag.startSize) : drag.startBoxWidth;
+    // **A resize does not move the layer.** The box grows from the corner it
+    // was anchored to, so the anchor stays exactly where the operator put it
+    // and only the size changes - otherwise enlarging a layer dragged it to
+    // the pointer, and a big layer slid off the card while the pointer was
+    // still down.
+    const anchorPoint = drag.resizing ? drag.origin : moved;
     // A text layer is anchored at its baseline origin, and the anchor stays
     // inside the card - with the text's own width in the clamp, so the text
     // does not hang off the edge.
-    const anchor = clampTextAnchor(moved, config, {
+    const anchor = clampTextAnchor(anchorPoint, config, {
       width: boxWidth,
       ascent: textAscentRatio(fontSize),
       align: layer.align
@@ -314,10 +330,7 @@ export function WelcomeImageCanvas({
       // A hair of slack, so a text that exactly fills the card is not shrunk
       // for a pixel.
       if (width <= config.width * 1.02) return;
-      const fontSize = Math.max(
-        TEXT_MIN_FONT_SIZE,
-        Math.floor((entry.layer.fontSize * config.width * 0.98) / width)
-      );
+      const fontSize = maxFontSizeForWidth(entry.layer.fontSize, width, config.width);
       if (fontSize >= entry.layer.fontSize) return;
       changed = true;
       if (entry.id === config.username.id) next.username = { ...entry.layer, fontSize };

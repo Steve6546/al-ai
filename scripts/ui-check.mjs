@@ -1200,8 +1200,8 @@ async function main() {
           const options = { bubbles: true, cancelable: true, button: 0, pointerId: 2, pointerType: "mouse", isPrimary: true };
           handle.dispatchEvent(new PointerEvent("pointerdown", { ...options, clientX: x, clientY: y }));
           const canvasEl = document.querySelector('[aria-label="لوحة تصميم صورة الترحيب"]');
-          canvasEl?.dispatchEvent(new PointerEvent("pointermove", { ...options, clientX: x + 40, clientY: y + 40 }));
-          canvasEl?.dispatchEvent(new PointerEvent("pointerup", { ...options, clientX: x + 40, clientY: y + 40 }));
+          canvasEl?.dispatchEvent(new PointerEvent("pointermove", { ...options, clientX: x + 900, clientY: y + 900 }));
+          canvasEl?.dispatchEvent(new PointerEvent("pointerup", { ...options, clientX: x + 900, clientY: y + 900 }));
           return "dragged";
         })()`,
         returnByValue: true
@@ -1266,7 +1266,7 @@ async function main() {
     if (!fit.found) failures.push("the designer did not render the text layer");
     else if (!inside) failures.push(`the text layer leaves the card (${fit.boxWidth}px in a ${fit.cardWidth}px card)`);
     console.log(
-      `${inside ? "PASS" : "FAIL"}  designer fit   text ${fit.boxWidth}px in a ${fit.cardWidth}px card (left=${fit.boxLeft}, right=${fit.boxRight})`
+      `${inside ? "PASS" : "FAIL"}  designer fit   text ${fit.boxWidth}px in a ${fit.cardWidth}px card (left=${fit.boxLeft}, right=${fit.boxRight}, top=${fit.boxTop}, bottom=${fit.boxBottom})`
     );
 
     // The accessibility scan, on the screens that matter, in both palettes.

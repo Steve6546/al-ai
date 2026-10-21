@@ -8,6 +8,7 @@ import {
   clampAnchor,
   clampBox,
   clampTextAnchor,
+  maxFontSizeForWidth,
   sizeFromDrag,
   textAscentRatio,
   toCardPoint
@@ -136,8 +137,20 @@ test("a drag can never shrink a layer below its minimum or grow it past its maxi
   );
 });
 
-test("a pointer is read against the canvas's real rendered box", () => {
-  // The card is 1024 wide and is displayed at 512: a move of 50 screen pixels
+test("the largest font that still fits the card is measured, not guessed", () => {
+  // A 48px line that measures 600px on an 800px card: the font may grow to
+  // 48 * (800 * 0.98) / 600 = 62 before the line leaves the card.
+  const max = maxFontSizeForWidth(48, 600, 800);
+  assert.equal(max, 62);
+  // A line that already fills the card may not grow at all.
+  assert.equal(maxFontSizeForWidth(48, 800, 800), 47);
+  // A line that is not measured yet is left alone.
+  assert.equal(maxFontSizeForWidth(48, 0, 800), 48);
+  // And the answer is never below the smallest readable font.
+  assert.equal(maxFontSizeForWidth(48, 100_000, 800), TEXT_MIN_FONT_SIZE);
+});
+
+test("a pointer is read against the canvas's real rendered box", () => {  // The card is 1024 wide and is displayed at 512: a move of 50 screen pixels
   // is 100 card pixels.
   const half = toCardPoint(
     { x: 150, y: 150 },

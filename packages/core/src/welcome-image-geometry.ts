@@ -135,7 +135,27 @@ export function sizeFromDrag(params: {
 }
 
 /**
- * The pointer's position in card pixels.
+ * The largest font that still fits the card's width.
+ *
+ * The width of a line is not a number anybody can predict - the browser
+ * measures it - so the rule takes a *measured* line and the font that drew
+ * it, and says how big the font may grow before the line leaves the card.
+ * The editor measures with the DOM, the renderer with `measureText`, and
+ * both use this rule: **the line fits the card.**
+ */
+export function maxFontSizeForWidth(
+  fontSize: number,
+  measuredWidth: number,
+  cardWidth: number
+): number {
+  if (measuredWidth <= 0 || cardWidth <= 0) return fontSize;
+  return Math.max(
+    TEXT_MIN_FONT_SIZE,
+    Math.floor((fontSize * cardWidth * 0.98) / measuredWidth)
+  );
+}
+
+/** The pointer's position in card pixels.
  *
  * The scale is read from the canvas's **real** rendered box - its client width
  * against the card's own width - so a card that is displayed at half size
