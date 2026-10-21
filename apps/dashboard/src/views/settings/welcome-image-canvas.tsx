@@ -285,6 +285,56 @@ export function WelcomeImageCanvas({
         ? selected?.kind === "username"
         : selected?.kind === "custom" && selected.id === target.id;
 
+  /**
+   * **Every text layer must fit the card.**
+   *
+   * A font size that is bigger than the card is a mistake, not a design: the
+   * card shows a fragment of a word, and the operator cannot drag the handle
+   * back because the handle is off the card. The editor therefore shrinks the
+   * font until the text fits - measured in the browser, because only the
+   * browser knows how wide the text is.
+   *
+   * The renderer draws the size the operator sees, so the two agree: the
+   * editor never shows a text the exported card would cut.
+   */
+  const fitRef = useRef(false);
+  useEffect(() => {
+    const boxes = canvasRef.current?.querySelectorAll<HTMLElement>('[data-layer-box="text"]');
+    if (!boxes || boxes.length === 0) return;
+    const layerBoxes = [
+      { layer: config.username, id: config.username.id },
+      ...config.customTexts.map(layer => ({ layer, id: layer.id }))
+    ];
+    let changed = false;
+    const next = { ...config };
+    layerBoxes.forEach((entry, index) => {
+      const box = boxes[index];
+      if (!box) return;
+      const width = box.getBoundingClientRect().width / (scale || 1);
+      // A hair of slack, so a text that exactly fills the card is not shrunk
+      // for a pixel.
+      if (width <= config.width * 1.02) return;
+      const fontSize = Math.max(
+        TEXT_MIN_FONT_SIZE,
+        Math.floor((entry.layer.fontSize * config.width * 0.98) / width)
+      );
+      if (fontSize >= entry.layer.fontSize) return;
+      changed = true;
+      if (entry.id === config.username.id) next.username = { ...entry.layer, fontSize };
+      else {
+        next.customTexts = next.customTexts.map(layer =>
+          layer.id === entry.id ? { ...layer, fontSize } : layer
+        );
+      }
+    });
+    // The guard keeps the effect from looping: the fit is applied once, and
+    // the next run measures the new size and finds it fits.
+    if (changed && !fitRef.current) {
+      fitRef.current = true;
+      onConfigChange(next);
+    }
+  }, [config, scale, onConfigChange]);
+
   /** The SVG anchor of a text layer: the baseline, exactly where the renderer draws it. */
   const textAnchor = (layer: { x: number; y: number; align: "start" | "center" | "end" }) => ({
     x: layer.x * scale,

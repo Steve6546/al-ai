@@ -1229,6 +1229,46 @@ async function main() {
     else if (!grew) failures.push(`the resize handle did not grow the text (${fontBefore}px → ${fontAfter}px)`);
     console.log(`${grew ? "PASS" : "FAIL"}  designer resize   font ${fontBefore}px → ${fontAfter}px`);
 
+    // A text layer must **fit the card**: a font bigger than the card shows a
+    // fragment of a word, and the handle that could undo it is off the card.
+    // The editor shrinks it, and the check measures the result.
+    const fits = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const card = document.querySelector('[aria-label="لوحة تصميم صورة الترحيب"]');
+          const box = document.querySelector('[data-layer-box="text"]');
+          if (!card || !box) return JSON.stringify({ found: false });
+          const cardRect = card.getBoundingClientRect();
+          const boxRect = box.getBoundingClientRect();
+          return JSON.stringify({
+            found: true,
+            cardWidth: Math.round(cardRect.width),
+            boxWidth: Math.round(boxRect.width),
+            boxLeft: Math.round(boxRect.left - cardRect.left),
+            boxRight: Math.round(boxRect.right - cardRect.right),
+            boxTop: Math.round(boxRect.top - cardRect.top),
+            boxBottom: Math.round(boxRect.bottom - cardRect.bottom)
+          });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const fit = JSON.parse(fits.result.value);
+    const inside =
+      fit.found &&
+      fit.boxWidth <= fit.cardWidth + 2 &&
+      fit.boxLeft >= -2 &&
+      fit.boxRight <= 2 &&
+      fit.boxTop >= -2 &&
+      fit.boxBottom <= 2;
+    if (!fit.found) failures.push("the designer did not render the text layer");
+    else if (!inside) failures.push(`the text layer leaves the card (${fit.boxWidth}px in a ${fit.cardWidth}px card)`);
+    console.log(
+      `${inside ? "PASS" : "FAIL"}  designer fit   text ${fit.boxWidth}px in a ${fit.cardWidth}px card (left=${fit.boxLeft}, right=${fit.boxRight})`
+    );
+
     // The accessibility scan, on the screens that matter, in both palettes.
     const axeReports = [];
     for (const palette of PALETTES) {

@@ -444,7 +444,11 @@ export function clampWelcomeImageConfig(config: WelcomeImageConfig): WelcomeImag
   const clampText = (layer: WelcomeTextLayer): WelcomeTextLayer => ({
     ...layer,
     x: Math.min(layer.x, config.width),
-    y: Math.min(layer.y, config.height)
+    y: Math.min(layer.y, config.height),
+    // A font taller than the card is not a design, it is a mistake: the card
+    // would show a fragment of a word and the handle that could undo it would
+    // be off the card. The editor shrinks the rest to the card's width.
+    fontSize: Math.min(layer.fontSize, Math.max(8, config.height))
   });
   return {
     ...config,
