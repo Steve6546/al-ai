@@ -297,7 +297,7 @@ export function WelcomeImageCanvas({
    * The renderer draws the size the operator sees, so the two agree: the
    * editor never shows a text the exported card would cut.
    */
-  const fitRef = useRef(false);
+  const fitRef = useRef<string>("");
   useEffect(() => {
     const boxes = canvasRef.current?.querySelectorAll<HTMLElement>('[data-layer-box="text"]');
     if (!boxes || boxes.length === 0) return;
@@ -327,12 +327,20 @@ export function WelcomeImageCanvas({
         );
       }
     });
-    // The guard keeps the effect from looping: the fit is applied once, and
-    // the next run measures the new size and finds it fits.
-    if (changed && !fitRef.current) {
-      fitRef.current = true;
-      onConfigChange(next);
-    }
+    // The fit is applied **every time the text does not fit** - not once per
+    // session. A guard that allowed one fit blocked the second one, and the
+    // second one is the one that matters: the saved settings arrive after the
+    // first render, and they are the ones that carry the oversized font.
+    // The loop cannot happen: a shrunken text measures as fitting, so the
+    // next run changes nothing.
+    if (!changed) return;
+    const signature = [
+      next.username.fontSize,
+      ...next.customTexts.map(layer => `${layer.id}:${layer.fontSize}`)
+    ].join("|");
+    if (fitRef.current === signature) return;
+    fitRef.current = signature;
+    onConfigChange(next);
   }, [config, scale, onConfigChange]);
 
   /** The SVG anchor of a text layer: the baseline, exactly where the renderer draws it. */

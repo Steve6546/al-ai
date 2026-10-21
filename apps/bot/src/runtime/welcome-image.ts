@@ -247,7 +247,19 @@ export function executeDrawOp(ctx: SKRSContext2D, canvas: Canvas, op: DrawOp, im
   // anchor, matching how the canvas editor positions its boxes.
   ctx.save();
   ctx.fillStyle = op.color;
-  ctx.font = `${op.weight === "bold" ? "bold " : ""}${op.fontSize}px "${op.fontFamily}"`;
+  let fontSize = op.fontSize;
+  const font = (size: number) => `${op.weight === "bold" ? "bold " : ""}${size}px "${op.fontFamily}"`;
+  ctx.font = font(fontSize);
+  // **The text must fit the card.** The renderer measures the line it is
+  // about to draw and shrinks the font until it fits the card's width, so a
+  // layer that was saved oversized is drawn whole instead of as a fragment.
+  // The editor does the same measurement in the browser, and the two agree
+  // on the rule: the line fits.
+  const measured = ctx.measureText(op.text).width;
+  if (measured > canvas.width && measured > 0) {
+    fontSize = Math.max(8, Math.floor(fontSize * ((canvas.width * 0.98) / measured)));
+    ctx.font = font(fontSize);
+  }
   ctx.textAlign = op.align === "start" ? "left" : op.align;
   ctx.textBaseline = "alphabetic";
   // The letter spacing, the same property the SVG preview uses, so the two

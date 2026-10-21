@@ -127,3 +127,18 @@ test("a card with effects still renders", async () => {
   assert.ok(result, "the card draws with its effects");
   assert.ok(result.buffer.length > 0);
 });
+
+test("a text too wide for the card is drawn whole, not as a fragment", async () => {
+  // A layer saved at an oversized font is shrunk to the card's width, the
+  // same rule the editor applies in the browser: the line fits.
+  const config = normaliseWelcomeImageConfig({
+    width: 400,
+    height: 200,
+    background: { type: "color", color: "#0b1020" },
+    avatar: { enabled: false },
+    username: { text: "اسم_المستخدم الطويل جداً", x: 20, y: 120, fontSize: 400, align: "start" }
+  });
+  const result = await renderWelcomeImage(config, { values: VALUES, avatarBuffer: null, backgroundBuffer: null });
+  assert.ok(result, "the card still draws");
+  assert.ok(result.buffer.length > 0);
+});
