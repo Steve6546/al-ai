@@ -34,7 +34,8 @@ export type WelcomeImageResult = {
  * carries the rendered name" without bitmap comparison.
  */
 export type DrawOp =
-  | { kind: "fill"; color: string }
+  | { kind: "fill"; color: string; opacity?: number }
+  | { kind: "gradient"; from: string; to: string; opacity?: number }
   | { kind: "image"; source: Buffer; x: number; y: number; width: number; height: number }
   | {
       kind: "avatar";
@@ -45,6 +46,8 @@ export type DrawOp =
       circular: boolean;
       strokeColor: string | null;
       strokeWidth: number;
+      glowColor: string | null;
+      glowSize: number;
     }
   | {
       kind: "text";
@@ -56,6 +59,10 @@ export type DrawOp =
       color: string;
       weight: "normal" | "bold";
       align: "start" | "center" | "end";
+      strokeColor: string | null;
+      strokeWidth: number;
+      shadowColor: string | null;
+      shadowSize: number;
     };
 
 /**
@@ -70,7 +77,14 @@ export async function planWelcomeImageDraw(
 ): Promise<DrawOp[]> {
   const ops: DrawOp[] = [];
   if (config.background.type === "color" && config.background.color) {
-    ops.push({ kind: "fill", color: config.background.color });
+    ops.push({ kind: "fill", color: config.background.color, opacity: config.background.opacity ?? 1 });
+  } else if (config.background.type === "gradient" && config.background.gradientFrom && config.background.gradientTo) {
+    ops.push({
+      kind: "gradient",
+      from: config.background.gradientFrom,
+      to: config.background.gradientTo,
+      opacity: config.background.opacity ?? 1
+    });
   } else if (config.background.type === "image" && facts.backgroundBuffer) {
     ops.push({
       kind: "image",
@@ -90,7 +104,9 @@ export async function planWelcomeImageDraw(
       size: config.avatar.size,
       circular: config.avatar.circular,
       strokeColor: config.avatar.strokeColor,
-      strokeWidth: config.avatar.strokeWidth
+      strokeWidth: config.avatar.strokeWidth,
+      glowColor: config.avatar.glowColor ?? null,
+      glowSize: config.avatar.glowSize ?? 0
     });
   }
   if (config.username.text.trim()) {
@@ -103,7 +119,11 @@ export async function planWelcomeImageDraw(
       fontSize: config.username.fontSize,
       color: config.username.color,
       weight: config.username.weight,
-      align: config.username.align
+      align: config.username.align,
+      strokeColor: config.username.strokeColor ?? null,
+      strokeWidth: config.username.strokeWidth ?? 0,
+      shadowColor: config.username.shadowColor ?? null,
+      shadowSize: config.username.shadowSize ?? 0
     });
   }
   for (const layer of config.customTexts) {
@@ -117,7 +137,11 @@ export async function planWelcomeImageDraw(
       fontSize: layer.fontSize,
       color: layer.color,
       weight: layer.weight,
-      align: layer.align
+      align: layer.align,
+      strokeColor: layer.strokeColor ?? null,
+      strokeWidth: layer.strokeWidth ?? 0,
+      shadowColor: layer.shadowColor ?? null,
+      shadowSize: layer.shadowSize ?? 0
     });
   }
   return ops;
@@ -158,8 +182,22 @@ export async function fetchImageBytes(url: string | null): Promise<Buffer | null
 /** One canvas op, executed. Exported for the tests to drive directly. */
 export function executeDrawOp(ctx: SKRSContext2D, canvas: Canvas, op: DrawOp, images: Map<Buffer, unknown>): void {
   if (op.kind === "fill") {
+    ctx.save();
+    ctx.globalAlpha = op.opacity ?? 1;
     ctx.fillStyle = op.color;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+    return;
+  }
+  if (op.kind === "gradient") {
+    ctx.save();
+    ctx.globalAlpha = op.opacity ?? 1;
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, op.from);
+    gradient.addColorStop(1, op.to);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
     return;
   }
   if (op.kind === "image" || op.kind === "avatar") {
@@ -177,6 +215,12 @@ export function executeDrawOp(ctx: SKRSContext2D, canvas: Canvas, op: DrawOp, im
       return;
     }
     ctx.save();
+    // The glow: a soft light around the avatar, drawn as the same picture with
+    // a shadow and nothing else painted.
+    if (op.glowColor && op.glowSize > 0) {
+      ctx.shadowColor = op.glowColor;
+      ctx.shadowBlur = op.glowSize;
+    }
     if (op.circular) {
       ctx.beginPath();
       ctx.arc(op.x + op.size / 2, op.y + op.size / 2, op.size / 2, 0, Math.PI * 2);
@@ -203,6 +247,18 @@ export function executeDrawOp(ctx: SKRSContext2D, canvas: Canvas, op: DrawOp, im
   ctx.font = `${op.weight === "bold" ? "bold " : ""}${op.fontSize}px "${op.fontFamily}"`;
   ctx.textAlign = op.align === "start" ? "left" : op.align;
   ctx.textBaseline = "alphabetic";
+  if (op.shadowColor && op.shadowSize > 0) {
+    ctx.shadowColor = op.shadowColor;
+    ctx.shadowBlur = op.shadowSize;
+  }
+  // The outline is drawn first, under the fill: a stroke painted afterwards
+  // would cover the glyphs.
+  if (op.strokeColor && op.strokeWidth > 0) {
+    ctx.strokeStyle = op.strokeColor;
+    ctx.lineWidth = op.strokeWidth;
+    ctx.lineJoin = "round";
+    ctx.strokeText(op.text, op.x, op.y);
+  }
   ctx.fillText(op.text, op.x, op.y);
   ctx.restore();
 }

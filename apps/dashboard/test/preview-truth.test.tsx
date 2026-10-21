@@ -6,8 +6,9 @@ import { createRoot } from "react-dom/client";
 import { dom } from "./dom-env.js";
 import { BotLivePreview } from "@/views/settings/bot-preview";
 import { WelcomeMessagePreview } from "@/components/welcome-message-preview";
+import { WelcomeImageCanvas } from "@/views/settings/welcome-image-canvas";
 import type { PreviewProfile } from "@/views/settings/bot-preview";
-import type { WelcomeMessageSettings } from "@al-ai/core/browser";
+import type { WelcomeImageConfig, WelcomeMessageSettings } from "@al-ai/core/browser";
 
 /**
  * The two previews, and the promise they make.
@@ -180,6 +181,81 @@ test("a message with no text says so instead of drawing an empty bubble", () => 
     const text = container.textContent ?? "";
     assert.equal(text.includes("لا يوجد نص"), true);
     assert.equal(text.includes("لم تُختر القناة بعد"), true, "and the missing channel is named");
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});
+
+/**
+ * The designer's canvas is the operator's preview of the exported image. If it
+ * does not draw an effect, the operator is editing a card the bot will never
+ * produce - so the canvas has to show the gradient, the glow and the outline.
+ */
+const CANVAS_CONFIG: WelcomeImageConfig = {
+  width: 800,
+  height: 400,
+  quality: 0.9,
+  background: { type: "gradient", color: null, gradientFrom: "#1d4ed8", gradientTo: "#7c3aed", opacity: 0.5, imageDataUrl: null },
+  avatar: {
+    x: 40,
+    y: 40,
+    size: 160,
+    circular: true,
+    strokeColor: null,
+    strokeWidth: 0,
+    enabled: true,
+    glowColor: "#3b82f6",
+    glowSize: 24
+  },
+  username: {
+    id: "username",
+    text: "{user}",
+    x: 240,
+    y: 200,
+    fontFamily: "IBM Plex Sans Arabic",
+    fontSize: 48,
+    color: "#ffffff",
+    weight: "bold",
+    align: "start",
+    strokeColor: "#000000",
+    strokeWidth: 4,
+    shadowColor: "#000000",
+    shadowSize: 6
+  },
+  customTexts: []
+};
+
+test("the designer's canvas draws the effects it was given", () => {
+  const { container, root } = render(
+    <WelcomeImageCanvas
+      config={CANVAS_CONFIG}
+      values={{
+        userMention: "@العضو",
+        username: "عضو",
+        server: "سيرفر",
+        memberCount: 12,
+        inviterMention: "@الداعي",
+        joinDate: "اليوم"
+      }}
+      avatarUrl="https://cdn.discordapp.com/avatars/1/bot.png"
+      selected={null}
+      onSelect={() => {}}
+      onConfigChange={() => {}}
+    />
+  );
+  try {
+    const html = container.innerHTML;
+    // The browser normalises a hex colour into rgb() in an inline style, so
+    // the gradient is matched on its shape and its two stops.
+    assert.equal(html.includes("linear-gradient(135deg"), true, "the gradient is drawn");
+    assert.equal(html.includes("rgb(29, 78, 216)"), true, "with its first stop");
+    assert.equal(html.includes("rgb(124, 58, 237)"), true, "and its second stop");
+    assert.equal(html.includes("opacity: 0.5"), true, "the background's opacity is applied");
+    assert.equal(html.includes("0 0 24px #3b82f6"), true, "the avatar's glow is drawn");
+    assert.equal(html.includes('stroke="#000000"'), true, "the text's outline is drawn");
+    assert.equal(html.includes('paint-order="stroke"'), true, "and under the fill, the way the renderer draws it");
+    assert.equal(html.includes("bot.png"), true, "the bot's own picture is drawn");
   } finally {
     act(() => root.unmount());
     container.remove();

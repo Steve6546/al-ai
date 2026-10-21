@@ -241,6 +241,19 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
 
   return (
     <div className="space-y-4">
+      {dirty && (
+        <SaveBar
+          message="لديك تغييرات غير محفوظة"
+          saveLabel="حفظ التغييرات"
+          cancelLabel="تجاهل"
+          onCancel={reset}
+          onSave={async () => {
+            const result = await api.saveWelcomeMessages(guild.id, draft);
+            commit(result.settings);
+            push({ title: "حُفظت رسائل الترحيب — تُطبَّق على البوت خلال نصف دقيقة.", tone: "success" });
+          }}
+        />
+      )}
       <input
         ref={fileInputRef}
         type="file"
@@ -508,6 +521,7 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
               <WelcomeImageCanvas
                 config={draft.image}
                 values={sampleValues}
+                avatarUrl={profile?.avatarUrl ?? null}
                 selected={selection}
                 onSelect={setSelection}
                 onConfigChange={patchImage}
@@ -559,9 +573,10 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="transparent">شفافة</SelectItem>
-                        <SelectItem value="color">لون</SelectItem>
-                        <SelectItem value="image">صورة مرفوعة</SelectItem>
+                        <SelectItem value="transparent">شفاف</SelectItem>
+                        <SelectItem value="color">لون صلب</SelectItem>
+                        <SelectItem value="gradient">تدرّج لوني</SelectItem>
+                        <SelectItem value="image">صورة مخصّصة</SelectItem>
                       </SelectContent>
                     </Select>
                   </FieldRow>
@@ -573,6 +588,56 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
                       className="h-9 w-full cursor-pointer rounded-md border border-input bg-background"
                       aria-label="لون الخلفية"
                     />
+                  )}
+                  {draft.image.background.type === "gradient" && (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <FieldRow label="من لون">
+                        <input
+                          type="color"
+                          value={draft.image.background.gradientFrom ?? "#1d4ed8"}
+                          onChange={event =>
+                            patchImage({
+                              ...draft.image,
+                              background: { ...draft.image.background, gradientFrom: event.target.value }
+                            })
+                          }
+                          className="h-9 w-full cursor-pointer rounded-md border border-input bg-background"
+                          aria-label="لون التدرّج الأول"
+                        />
+                      </FieldRow>
+                      <FieldRow label="إلى لون">
+                        <input
+                          type="color"
+                          value={draft.image.background.gradientTo ?? "#7c3aed"}
+                          onChange={event =>
+                            patchImage({
+                              ...draft.image,
+                              background: { ...draft.image.background, gradientTo: event.target.value }
+                            })
+                          }
+                          className="h-9 w-full cursor-pointer rounded-md border border-input bg-background"
+                          aria-label="لون التدرّج الثاني"
+                        />
+                      </FieldRow>
+                    </div>
+                  )}
+                  {draft.image.background.type !== "transparent" && (
+                    <FieldRow label={`الشفافية: ${Math.round((draft.image.background.opacity ?? 1) * 100)}%`}>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={Math.round((draft.image.background.opacity ?? 1) * 100)}
+                        onChange={event =>
+                          patchImage({
+                            ...draft.image,
+                            background: { ...draft.image.background, opacity: Number(event.target.value) / 100 }
+                          })
+                        }
+                        className="w-full accent-primary"
+                        aria-label="شفافية الخلفية"
+                      />
+                    </FieldRow>
                   )}
                   {draft.image.background.type === "image" && (
                     draft.image.background.imageDataUrl ? (
@@ -663,6 +728,32 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
                         value={draft.image.avatar.strokeWidth}
                         onChange={event => patchImage({ ...draft.image, avatar: { ...draft.image.avatar, strokeWidth: Number(event.target.value) } })}
                         className="w-full accent-primary"
+                      />
+                    </FieldRow>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FieldRow label="لون التوهّج">
+                      <input
+                        type="color"
+                        value={draft.image.avatar.glowColor ?? "#3b82f6"}
+                        onChange={event =>
+                          patchImage({ ...draft.image, avatar: { ...draft.image.avatar, glowColor: event.target.value } })
+                        }
+                        className="h-9 w-full cursor-pointer rounded-md border border-input bg-background"
+                        aria-label="لون توهّج الصورة"
+                      />
+                    </FieldRow>
+                    <FieldRow label={`حجم التوهّج: ${draft.image.avatar.glowSize ?? 0}px`}>
+                      <input
+                        type="range"
+                        min={0}
+                        max={128}
+                        value={draft.image.avatar.glowSize ?? 0}
+                        onChange={event =>
+                          patchImage({ ...draft.image, avatar: { ...draft.image.avatar, glowSize: Number(event.target.value) } })
+                        }
+                        className="w-full accent-primary"
+                        aria-label="حجم توهّج الصورة"
                       />
                     </FieldRow>
                   </div>
@@ -769,19 +860,6 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
       )}
 
       {/* Bottom floating unsaved-changes bar — the shared contract. */}
-      {dirty && (
-        <SaveBar
-          message="لديك تغييرات غير محفوظة"
-          saveLabel="حفظ التغييرات"
-          cancelLabel="تجاهل"
-          onCancel={reset}
-          onSave={async () => {
-            const result = await api.saveWelcomeMessages(guild.id, draft);
-            commit(result.settings);
-            push({ title: "حُفظت رسائل الترحيب — تُطبَّق على البوت خلال نصف دقيقة.", tone: "success" });
-          }}
-        />
-      )}
 
       <Toaster toasts={toasts} onDismiss={dismiss} />
     </div>
@@ -875,6 +953,46 @@ function TextStyleFields({
           <Input type="number" min={0} max={canvas.width} value={layer.x} onChange={event => onPatch({ x: Number(event.target.value) })} aria-label="الموضع الأفقي" />
           <Input type="number" min={0} max={canvas.height} value={layer.y} onChange={event => onPatch({ y: Number(event.target.value) })} aria-label="الموضع الرأسي" />
         </div>
+      </FieldRow>
+      <FieldRow label="لون حدّ النص">
+        <input
+          type="color"
+          value={layer.strokeColor ?? "#000000"}
+          onChange={event => onPatch({ strokeColor: event.target.value })}
+          className="h-9 w-full cursor-pointer rounded-md border border-input bg-background"
+          aria-label="لون حدّ النص"
+        />
+      </FieldRow>
+      <FieldRow label={`سماكة الحدّ: ${layer.strokeWidth ?? 0}px`}>
+        <input
+          type="range"
+          min={0}
+          max={16}
+          value={layer.strokeWidth ?? 0}
+          onChange={event => onPatch({ strokeWidth: Number(event.target.value) })}
+          className="w-full accent-primary"
+          aria-label="سماكة حدّ النص"
+        />
+      </FieldRow>
+      <FieldRow label="لون الظل">
+        <input
+          type="color"
+          value={layer.shadowColor ?? "#000000"}
+          onChange={event => onPatch({ shadowColor: event.target.value })}
+          className="h-9 w-full cursor-pointer rounded-md border border-input bg-background"
+          aria-label="لون ظلّ النص"
+        />
+      </FieldRow>
+      <FieldRow label={`حجم الظل: ${layer.shadowSize ?? 0}px`}>
+        <input
+          type="range"
+          min={0}
+          max={64}
+          value={layer.shadowSize ?? 0}
+          onChange={event => onPatch({ shadowSize: Number(event.target.value) })}
+          className="w-full accent-primary"
+          aria-label="حجم ظلّ النص"
+        />
       </FieldRow>
     </div>
   );

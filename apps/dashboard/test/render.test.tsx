@@ -704,11 +704,11 @@ test("the save bar warns about unsaved changes and offers both actions", () => {
     createElement(SaveBar, { onSave: async () => {}, onCancel: () => {} })
   ).replace(/<!-- -->/g, "");
 
-  assert.match(html, /حذارِ/, "the warning is present the moment there is a change");
+  assert.match(html, /لديك تغييرات غير محفوظة/, "the warning is present the moment there is a change");
   assert.match(html, /تغييرات غير محفوظة/, "the warning says what the problem is");
   assert.match(html, /حفظ التغييرات/, "the save action is offered");
-  assert.match(html, /إعادة ضبط/, "the revert action is offered");
-  assert.match(html, /fixed/, "the bar floats rather than pushing the layout");
+  assert.match(html, /تجاهل/, "the revert action is offered");
+  assert.match(html, /sticky/, "the bar sticks to the top rather than floating over the content");
 });
 
 test("the save bar's labels are overridable per screen", () => {

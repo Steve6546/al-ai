@@ -1423,13 +1423,13 @@ test("the unsaved-changes bar is absent over an untouched form and appears on a 
   assert.match(html, /حفظ التغييرات/, "turning the switch off shows the bar");
 });
 
-test("«إعادة ضبط» clears the bar at once and puts the control back", async () => {
+test("«تجاهل» clears the bar at once and puts the control back", async () => {
   stubFetchWithSave();
   const { html, errors } = await mount(`/dashboard/${GUILD_ID}/logs`, async doc => {
     await toggleLogging(doc);
     // The bar's own button, not a keyboard shortcut or a second switch: the
     // label is the contract, and the bar keeps no copy of the data by design.
-    const reset = [...doc.querySelectorAll("button")].find(element => /إعادة ضبط/.test(element.textContent ?? ""));
+    const reset = [...doc.querySelectorAll("button")].find(element => /تجاهل/.test(element.textContent ?? ""));
     assert.ok(reset, "the bar is offering its reset button");
     reset!.click();
   });

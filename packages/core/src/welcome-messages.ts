@@ -50,9 +50,15 @@ export type WelcomeEmbed = {
 
 /** Background behind the generated welcome image. */
 export type WelcomeImageBackground = {
-  type: "transparent" | "color" | "image";
+  type: "transparent" | "color" | "image" | "gradient";
   /** For "color". */
   color: string | null;
+  /** For "gradient": the first stop, top-left to bottom-right. */
+  gradientFrom?: string | null;
+  /** For "gradient": the second stop. */
+  gradientTo?: string | null;
+  /** 0-1: how strongly the background is painted over the card. */
+  opacity?: number;
   /** For "image", as a base64 data URL, capped like every image. */
   imageDataUrl: string | null;
 };
@@ -67,6 +73,9 @@ export type WelcomeImageAvatarLayer = {
   /** Ring colour, or null for no ring. */
   strokeColor: string | null;
   strokeWidth: number;
+  /** A soft light around the avatar, as a colour and a radius in pixels. */
+  glowColor?: string | null;
+  glowSize?: number;
 };
 
 export type WelcomeTextLayer = {
@@ -80,6 +89,12 @@ export type WelcomeTextLayer = {
   color: string;
   weight: "normal" | "bold";
   align: "start" | "center" | "end";
+  /** A line around the glyphs, as a colour and a width in pixels. */
+  strokeColor?: string | null;
+  strokeWidth?: number;
+  /** A soft shadow under the text, as a colour and a radius in pixels. */
+  shadowColor?: string | null;
+  shadowSize?: number;
 };
 
 /** The whole canvas the bot renders per join. */
@@ -179,6 +194,13 @@ function clampString(value: unknown, max: number, fallback = ""): string {
   return value.slice(0, max);
 }
 
+/** A [0, 1] fraction - the background's opacity, kept as a real fraction. */
+function clampFraction(value: unknown, fallback: number): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(1, Math.max(0, numeric));
+}
+
 function normaliseHexColorField(value: unknown, fallback: string | null): string | null {
   if (value === null) return null;
   if (typeof value !== "string") return fallback;
@@ -241,7 +263,11 @@ function normaliseTextLayer(value: unknown, fallback: WelcomeTextLayer): Welcome
     fontSize: clampInt(source.fontSize, 8, 512, fallback.fontSize),
     color: normaliseHexColorField(source.color, fallback.color) ?? fallback.color,
     weight,
-    align
+    align,
+    strokeColor: normaliseHexColorField(source.strokeColor, null),
+    strokeWidth: clampInt(source.strokeWidth, 0, 16, 0),
+    shadowColor: normaliseHexColorField(source.shadowColor, null),
+    shadowSize: clampInt(source.shadowSize, 0, 64, 0)
   };
 }
 
@@ -256,7 +282,7 @@ export function normaliseWelcomeImageConfig(value: unknown): WelcomeImageConfig 
   const source = (value ?? {}) as Partial<WelcomeImageConfig>;
   const backgroundSource = (source.background ?? {}) as Partial<WelcomeImageBackground>;
   const bgType =
-    backgroundSource.type === "color" || backgroundSource.type === "image" ? backgroundSource.type : "transparent";
+    backgroundSource.type === "color" || backgroundSource.type === "image" || backgroundSource.type === "gradient" ? backgroundSource.type : "transparent";
   const width = clampInt(source.width, MIN_WELCOME_CANVAS_EDGE, MAX_WELCOME_CANVAS_EDGE, 800);
   const height = clampInt(source.height, MIN_WELCOME_CANVAS_EDGE, MAX_WELCOME_CANVAS_EDGE, 400);
   const avatarSource = (source.avatar ?? {}) as Partial<WelcomeImageAvatarLayer>;
@@ -277,6 +303,9 @@ export function normaliseWelcomeImageConfig(value: unknown): WelcomeImageConfig 
     background: {
       type: bgType,
       color: bgType === "color" ? normaliseHexColorField(backgroundSource.color, "#0b1020") : null,
+      gradientFrom: bgType === "gradient" ? normaliseHexColorField(backgroundSource.gradientFrom, "#1d4ed8") : null,
+      gradientTo: bgType === "gradient" ? normaliseHexColorField(backgroundSource.gradientTo, "#7c3aed") : null,
+      opacity: clampFraction(backgroundSource.opacity, 1),
       imageDataUrl: bgType === "image" ? normaliseWelcomeImageDataUrl(backgroundSource.imageDataUrl, MAX_IMAGE_BYTES) : null
     },
     avatar: {
@@ -286,7 +315,9 @@ export function normaliseWelcomeImageConfig(value: unknown): WelcomeImageConfig 
       size: Math.min(clampInt(avatarSource.size, 16, 512, fallbackAvatar.size), maxAvatarSize),
       circular: avatarSource.circular !== false,
       strokeColor: normaliseHexColorField(avatarSource.strokeColor, null),
-      strokeWidth: clampInt(avatarSource.strokeWidth, 0, 32, fallbackAvatar.strokeWidth)
+      strokeWidth: clampInt(avatarSource.strokeWidth, 0, 32, fallbackAvatar.strokeWidth),
+      glowColor: normaliseHexColorField(avatarSource.glowColor, null),
+      glowSize: clampInt(avatarSource.glowSize, 0, 128, 0)
     },
     username: normaliseTextLayer(source.username, {
       id: "username",

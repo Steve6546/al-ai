@@ -90,7 +90,16 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
   };
 
   return (
-    <div className="space-y-4 pb-24">
+    <div className="space-y-4">
+      {dirty ? (
+        <SaveBar
+          message="لديك تغييرات غير محفوظة"
+          saveLabel="حفظ الحالة"
+          cancelLabel="تجاهل"
+          onCancel={reset}
+          onSave={onSave}
+        />
+      ) : null}
       <Toaster toasts={toasts} onDismiss={dismiss} />
 
       <div className="space-y-1 pt-1">
@@ -187,15 +196,6 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
         </p>
       </div>
 
-      {dirty ? (
-        <SaveBar
-          message="لديك تغييرات غير محفوظة"
-          saveLabel="حفظ الحالة"
-          cancelLabel="تجاهل"
-          onCancel={reset}
-          onSave={onSave}
-        />
-      ) : null}
     </div>
   );
 }

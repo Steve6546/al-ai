@@ -690,6 +690,20 @@ export function LogsView({ guild }: { guild: Guild }) {
 
   return (
     <div className="space-y-4">
+      {/*
+        The unsaved-changes bar, at the top of the screen: a bar that floats
+        at the bottom sits *over* the open dropdown menus and swallows the
+        click that should have chosen an option.
+      */}
+      {dirty && (
+        <SaveBar
+          onCancel={reset}
+          onSave={async () => {
+            const result = await api.saveLogging(guild.id, draft);
+            commit(result.settings);
+          }}
+        />
+      )}
       {/* The stats banner: one card, the section's identity on one side and the
           four counters as pills on the other. They are derived from the draft,
           so they move with the operator's edits and never disagree with the
@@ -1024,17 +1038,7 @@ export function LogsView({ guild }: { guild: Guild }) {
         </DialogContent>
       </Dialog>
 
-      {dirty && (
-        <SaveBar
-          onCancel={reset}
-          onSave={async () => {
-            const result = await api.saveLogging(guild.id, draft);
-            commit(result.settings);
-          }}
-        />
-      )}
-
-      <Toaster toasts={toasts} onDismiss={dismiss} />
+        <Toaster toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }

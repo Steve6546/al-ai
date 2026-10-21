@@ -80,6 +80,16 @@ export function RolesView({ guild }: { guild: Guild }) {
 
   return (
     <div className="space-y-4">
+      {dirty && (
+        <SaveBar
+          onCancel={reset}
+          onSave={async () => {
+            const result = await api.saveTiers(guild.id, draft);
+            commit(result.configured);
+            await load();
+          }}
+        />
+      )}
       {/* The automatic tier is stated plainly, because "where do I configure the
           owner?" is the first question this screen used to raise. */}
       <Alert>
@@ -129,16 +139,6 @@ export function RolesView({ guild }: { guild: Guild }) {
         التي تعلو رتبة البوت لا يمكن منحها، وتظهر هنا بعلامة تحذير.
       </p>
 
-      {dirty && (
-        <SaveBar
-          onCancel={reset}
-          onSave={async () => {
-            const result = await api.saveTiers(guild.id, draft);
-            commit(result.configured);
-            await load();
-          }}
-        />
-      )}
     </div>
   );
 }
