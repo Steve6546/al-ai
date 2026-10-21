@@ -350,36 +350,15 @@ export function CommandsBoard({
   const activeSection = section === "all" ? null : categories.find(category => category.id === section) ?? null;
 
   return (
-    <div className="grid min-h-0 gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
-      {/*
-        The unsaved-changes bar, at the top of the screen: a bar that floats at
-        the bottom sits *over* the open dropdown menus - the font picker, the
-        channel picker - and swallows the click that should have chosen an
-        option. At the top it covers nothing, and it sticks while the screen
-        scrolls.
-      */}
-      {dirty && (
-        <div className="lg:col-span-2">
-          <SaveBar
-            message={`${changes.length} تغيير غير محفوظ`}
-            onCancel={reset}
-            onSave={async () => {
-              await onSave(changes);
-              // Rebased on what the server stored, not on the local draft: the
-              // server normalises every change, so the two can legitimately differ.
-              const fresh = await onSaved();
-              commit(fresh);
-            }}
-          />
-        </div>
-      )}
-      {/* ---------------------------------------------------------------- *
-       * Sections
-       *
-       * Sticky, and `self-start` because a grid item stretches to the row
-       * height by default — without it there is nothing for `sticky` to
-       * travel inside and the nav would scroll away with the cards.
-       * ---------------------------------------------------------------- */}
+    <>
+      <div className="grid min-h-0 gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
+        {/* ---------------------------------------------------------------- *
+         * Sections
+         *
+         * Sticky, and `self-start` because a grid item stretches to the row
+         * height by default — without it there is nothing for `sticky` to
+         * travel inside and the nav would scroll away with the cards.
+         * ---------------------------------------------------------------- */}
       <nav aria-label="أقسام الأوامر" className="lg:sticky lg:top-6 lg:self-start">
         <div className="scrollbar-none flex gap-1 overflow-x-auto pb-2 lg:flex-col lg:overflow-visible lg:pb-0">
           <SectionButton
@@ -509,6 +488,27 @@ export function CommandsBoard({
         </p>
       </div>
     </div>
+
+      {/*
+        The unsaved-changes bar, at the **end** of the screen: it floats above
+        the content while the screen scrolls, and it is **below** an open
+        dropdown menu (the menus are portalled at z-50, the bar is at z-40), so
+        it never swallows the click that should have chosen an option.
+      */}
+      {dirty && (
+        <SaveBar
+          message={`${changes.length} تغيير غير محفوظ`}
+          onCancel={reset}
+          onSave={async () => {
+            await onSave(changes);
+            // Rebased on what the server stored, not on the local draft: the
+            // server normalises every change, so the two can legitimately differ.
+            const fresh = await onSaved();
+            commit(fresh);
+          }}
+        />
+      )}
+    </>
   );
 }
 

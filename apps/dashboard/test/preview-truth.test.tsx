@@ -221,7 +221,8 @@ const CANVAS_CONFIG: WelcomeImageConfig = {
     strokeColor: "#000000",
     strokeWidth: 4,
     shadowColor: "#000000",
-    shadowSize: 6
+    shadowSize: 6,
+    letterSpacing: 3
   },
   customTexts: []
 };
@@ -238,7 +239,6 @@ test("the designer's canvas draws the effects it was given", () => {
         inviterMention: "@الداعي",
         joinDate: "اليوم"
       }}
-      avatarUrl="https://cdn.discordapp.com/avatars/1/bot.png"
       selected={null}
       onSelect={() => {}}
       onConfigChange={() => {}}
@@ -255,7 +255,7 @@ test("the designer's canvas draws the effects it was given", () => {
     assert.equal(html.includes("0 0 24px #3b82f6"), true, "the avatar's glow is drawn");
     assert.equal(html.includes('stroke="#000000"'), true, "the text's outline is drawn");
     assert.equal(html.includes('paint-order="stroke"'), true, "and under the fill, the way the renderer draws it");
-    assert.equal(html.includes("bot.png"), true, "the bot's own picture is drawn");
+    assert.equal(html.includes('letter-spacing="3"'), true, "the letter spacing is drawn");
   } finally {
     act(() => root.unmount());
     container.remove();

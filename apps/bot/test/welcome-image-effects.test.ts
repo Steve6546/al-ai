@@ -60,12 +60,26 @@ test("the normaliser clamps the new fields to sane bounds", () => {
     height: 200,
     background: { opacity: 900 },
     avatar: { glowSize: 9999 },
-    username: { strokeWidth: 900, shadowSize: -5 }
+    username: { strokeWidth: 900, shadowSize: -5, letterSpacing: 900 }
   });
   assert.equal(clamped.background.opacity, 1, "the opacity is a fraction, never above one");
   assert.equal(clamped.avatar.glowSize, 128);
   assert.equal(clamped.username.strokeWidth, 16);
   assert.equal(clamped.username.shadowSize, 0);
+  assert.equal(clamped.username.letterSpacing, 100);
+});
+
+test("the letter spacing reaches the draw plan", async () => {
+  const config = normaliseWelcomeImageConfig({
+    width: 400,
+    height: 200,
+    background: { type: "color", color: "#0b1020" },
+    username: { text: "{username}", letterSpacing: 4 }
+  });
+  const ops = await planWelcomeImageDraw(config, { values: VALUES, avatarBuffer: null, backgroundBuffer: null });
+  const text = ops.find(op => op.kind === "text");
+  assert.ok(text);
+  assert.equal(text.letterSpacing, 4);
 });
 
 test("a gradient background plans a gradient op with its opacity", async () => {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, IdCard, Image as ImageIcon, Loader2, Lock, Palette, Pencil, TriangleAlert, Upload, X } from "lucide-react";
-import {
+import {
+
   DEFAULT_CUSTOMIZATION,
   MAX_BIO_LENGTH,
   MAX_IMAGE_DATA_URL_LENGTH,
@@ -519,15 +520,6 @@ export function CustomizationView({ guild }: { guild: Guild }) {
 
   return (
     <div className="space-y-4 pb-24">
-      {anyDirty ? (
-        <SaveBar
-          message="لديك تغييرات غير محفوظة"
-          saveLabel="حفظ التغييرات"
-          cancelLabel="تجاهل"
-          onCancel={resetAll}
-          onSave={onSave}
-        />
-      ) : null}
       <Toaster toasts={toasts} onDismiss={dismiss} />
 
       <input
@@ -827,6 +819,16 @@ export function CustomizationView({ guild }: { guild: Guild }) {
         </div>
       </div>
 
+
+      {anyDirty ? (
+        <SaveBar
+          message="لديك تغييرات غير محفوظة"
+          saveLabel="حفظ التغييرات"
+          cancelLabel="تجاهل"
+          onCancel={resetAll}
+          onSave={onSave}
+        />
+      ) : null}
     </div>
   );
 }

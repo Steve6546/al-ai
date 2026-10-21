@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Eye, EyeOff, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   AVATAR_MAX_SIZE,
   AVATAR_MIN_SIZE,
   TEXT_MAX_FONT_SIZE,
   TEXT_MIN_FONT_SIZE,
-  clampAnchor,
   clampBox,
-  fontSizeFromHandle,
+  clampTextAnchor,
   renderWelcomeMessage,
-  sizeFromHandle,
+  sizeFromDrag,
   textAscentRatio,
-  toCardSpace,
+  toCardPoint,
   type WelcomeImageConfig,
   type WelcomeTemplateValues
 } from "@al-ai/core/browser";
@@ -50,30 +50,62 @@ export function WelcomeImageCanvas({
   values,
   selected,
   onSelect,
-  onConfigChange,
-  avatarUrl
+  onConfigChange
 }: {
   config: WelcomeImageConfig;
   values: WelcomeTemplateValues;
   selected: Selection;
   onSelect: (selection: Selection) => void;
   onConfigChange: (next: WelcomeImageConfig) => void;
-  /** The bot's own picture, drawn in the avatar layer as a stand-in. */
-  avatarUrl?: string | null;
 }) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
+  /** The clean look: the card as the members will see it, with no editing. */
+  const [preview, setPreview] = useState(false);
   const dragState = useRef<{
     pointerId: number;
-    startX: number;
-    startY: number;
+    /** The pointer, in card pixels, when the drag began. */
+    startPointer: { x: number; y: number };
+    /** The layer's own origin when the drag began. */
     origin: LayerBox;
+    /** The size (avatar) or the font size (text) when the drag began. */
+    startSize: number;
+    /** The text box's width in card pixels, when the drag began. */
+    startBoxWidth: number;
     target: Exclude<Selection, null>;
     resizing: boolean;
   } | null>(null);
   /** Set when a drag ends, so the click that follows it does not deselect. */
   const draggedRef = useRef(false);
   const [scale, setScale] = useState(1);
+
+  /**
+   * The pointer's position in card pixels, read against the canvas's **real**
+   * rendered box: its client width against the card's own width. This is the
+   * ratio that matters - the card may be shown at half size, and a movement of
+   * ten screen pixels is then twenty card pixels. The border is not part of
+   * the content box, and the content box starts at the border's inner edge.
+   */
+  const cardPoint = useCallback(
+    (clientX: number, clientY: number): { x: number; y: number } => {
+      const node = canvasRef.current;
+      if (!node) return { x: clientX, y: clientY };
+      const rect = node.getBoundingClientRect();
+      return toCardPoint(
+        { x: clientX, y: clientY },
+        {
+          left: rect.left,
+          top: rect.top,
+          clientWidth: node.clientWidth,
+          clientHeight: node.clientHeight,
+          borderLeft: node.clientLeft,
+          borderTop: node.clientTop
+        },
+        config
+      );
+    },
+    [config]
+  );
 
   // The preview fits the available width; the canvas itself keeps the real
   // dimensions, so a 1024-wide card reads exactly like the file the bot sends.
@@ -103,22 +135,47 @@ export function WelcomeImageCanvas({
     return { x: layer?.x ?? 0, y: layer?.y ?? 0 };
   };
 
+  /** The layer's size at the moment the drag begins: the avatar's edge, the text's font. */
+  const layerSize = (target: Exclude<Selection, null>): number => {
+    if (target.kind === "avatar") return config.avatar.size;
+    if (target.kind === "username") return config.username.fontSize;
+    const layer = config.customTexts.find(entry => entry.id === target.id);
+    return layer?.fontSize ?? TEXT_MIN_FONT_SIZE;
+  };
+
   const beginDrag = (event: React.PointerEvent, target: Exclude<Selection, null>, resizing: boolean) => {
     event.stopPropagation();
     onSelect(target);
+    // The box's own width, in card pixels: the text's anchor is clamped by
+    // it, so the text never hangs off the edge of the card. The handle lives
+    // *inside* the box, so the box is found by its marker, not by the event's
+    // own target.
+    const holder =
+      event.currentTarget instanceof HTMLElement
+        ? event.currentTarget.closest("[data-layer-box]")
+        : null;
+    const boxWidth =
+      holder instanceof HTMLElement ? holder.getBoundingClientRect().width / (scale || 1) : 0;
     dragState.current = {
       pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
+      startPointer: cardPoint(event.clientX, event.clientY),
       origin: layerOrigin(target),
+      startSize: layerSize(target),
+      startBoxWidth: boxWidth,
       target,
       resizing
     };
     draggedRef.current = false;
     // The capture goes to the canvas, not to the element: a handle that
     // captures the pointer would stop delivering the moves to the canvas, and
-    // the drag would die the moment the pointer left the handle.
-    canvasRef.current?.setPointerCapture(event.pointerId);
+    // the drag would die the moment the pointer left the handle. A browser may
+    // refuse the capture (the pointer is already gone), and a refused capture
+    // must not kill the drag.
+    try {
+      canvasRef.current?.setPointerCapture(event.pointerId);
+    } catch {
+      /* the pointer was already released */
+    }
   };
 
   const onPointerMove = (event: React.PointerEvent) => {
@@ -127,19 +184,35 @@ export function WelcomeImageCanvas({
     draggedRef.current = true;
 
     // The pointer, in card pixels - the same units the config uses.
-    const pointer = toCardSpace({ x: event.clientX, y: event.clientY }, { x: drag.startX, y: drag.startY }, scale);
-    const dx = pointer.x - drag.origin.x;
-    const dy = pointer.y - drag.origin.y;
+    const pointer = cardPoint(event.clientX, event.clientY);
+    // **The movement is the difference between where the pointer is now and
+    // where it was when the drag began.** Reading the pointer's absolute
+    // position and calling it the layer's position is how the layer refused to
+    // move at all: the pointer was somewhere on the card and the layer jumped
+    // to it, or - worse - stayed exactly where it was.
+    const moved = {
+      x: drag.origin.x + (pointer.x - drag.startPointer.x),
+      y: drag.origin.y + (pointer.y - drag.startPointer.y)
+    };
 
     if (drag.target.kind === "avatar") {
+      // **The size is the size at the start of the drag plus the pointer's
+      // travel.** Measuring the distance from the box's corner to the pointer
+      // - as the editor used to - inflated the avatar by 41% before the mouse
+      // moved at all, and then grew it faster than the pointer travelled.
       const size = drag.resizing
-        ? sizeFromHandle(drag.origin, pointer, {
+        ? sizeFromDrag({
+            start: drag.startSize,
+            startPointer: drag.startPointer,
+            pointer,
             min: AVATAR_MIN_SIZE,
             max: Math.min(AVATAR_MAX_SIZE, config.width, config.height)
           })
         : config.avatar.size;
       // The box's top-left corner is the anchor, and it never leaves the card.
-      const box = clampBox({ x: drag.origin.x, y: drag.origin.y, width: size, height: size }, config);
+      // The width and the height are the same number: the avatar's aspect
+      // ratio is locked to 1:1, so it can never be squashed.
+      const box = clampBox({ x: moved.x, y: moved.y, width: size, height: size }, config);
       onConfigChange({
         ...config,
         avatar: { ...config.avatar, x: box.x, y: box.y, size: box.width }
@@ -154,11 +227,25 @@ export function WelcomeImageCanvas({
     if (!layer) return;
 
     const fontSize = drag.resizing
-      ? fontSizeFromHandle(drag.origin, pointer, { min: TEXT_MIN_FONT_SIZE, max: TEXT_MAX_FONT_SIZE })
+      ? sizeFromDrag({
+          start: drag.startSize,
+          startPointer: drag.startPointer,
+          pointer,
+          min: TEXT_MIN_FONT_SIZE,
+          max: TEXT_MAX_FONT_SIZE
+        })
       : layer.fontSize;
+    // The text grows with its font, so the box's width follows.
+    const boxWidth =
+      layer.fontSize > 0 ? (drag.startBoxWidth * fontSize) / Math.max(1, drag.startSize) : drag.startBoxWidth;
     // A text layer is anchored at its baseline origin, and the anchor stays
-    // inside the card.
-    const anchor = clampAnchor(drag.origin, config);
+    // inside the card - with the text's own width in the clamp, so the text
+    // does not hang off the edge.
+    const anchor = clampTextAnchor(moved, config, {
+      width: boxWidth,
+      ascent: textAscentRatio(fontSize),
+      align: layer.align
+    });
     const next = { ...layer, x: anchor.x, y: anchor.y, fontSize };
     onConfigChange(
       isUsername
@@ -233,6 +320,21 @@ export function WelcomeImageCanvas({
 
   return (
     <div ref={frameRef} className="w-full min-w-0">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">
+          {preview ? "المعاينة: كما ستراها الأعضاء." : "اسحب العناصر لتحريكها، واسحب المقبض لتغيير الحجم."}
+        </span>
+        <button
+          type="button"
+          onClick={() => setPreview(current => !current)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted"
+          aria-pressed={preview}
+          aria-label={preview ? "العودة إلى وضع التحرير" : "معاينة الصورة كما ستراها الأعضاء"}
+        >
+          {preview ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+          {preview ? "تحرير" : "معاينة"}
+        </button>
+      </div>
       <div
         ref={node => {
           canvasRef.current = node;
@@ -258,9 +360,11 @@ export function WelcomeImageCanvas({
         {backgroundLayer ? (
           <div className="absolute inset-0" style={{ ...backgroundLayer, opacity: backgroundOpacity }} aria-hidden />
         ) : null}
-        <span className="absolute top-2 start-2 z-10 rounded-md bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground backdrop-blur-sm">
-          اسحب العناصر لتحريكها
-        </span>
+        {!preview ? (
+          <span className="absolute top-2 start-2 z-10 rounded-md bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground backdrop-blur-sm">
+            اسحب العناصر لتحريكها
+          </span>
+        ) : null}
 
         {/*
           The avatar layer is drawn *before* the text, exactly as the renderer
@@ -268,7 +372,12 @@ export function WelcomeImageCanvas({
         */}
         {config.avatar.enabled ? (
           <div
-            className={cn("absolute cursor-move", isSelected({ kind: "avatar" }) && "outline outline-2 outline-primary")}
+            data-layer-box="avatar"
+            className={cn(
+              "absolute",
+              !preview && "cursor-move",
+              isSelected({ kind: "avatar" }) && "outline outline-2 outline-primary"
+            )}
             style={{
               left: config.avatar.x * scale,
               top: config.avatar.y * scale,
@@ -282,7 +391,7 @@ export function WelcomeImageCanvas({
             }}
           >
             <span
-              className="grid size-full place-items-center overflow-hidden bg-muted text-xs"
+              className="grid size-full place-items-center overflow-hidden bg-muted text-muted-foreground"
               style={{
                 borderRadius: config.avatar.circular ? "50%" : "0.5rem",
                 border:
@@ -297,15 +406,16 @@ export function WelcomeImageCanvas({
                     : undefined
               }}
             >
-              {avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={avatarUrl} alt="" className="size-full object-cover" />
-              ) : (
-                "AI"
-              )}
+              {/*
+                The layer is the **member's** picture - the one the card draws
+                for whoever joins. The operator cannot know it, so the designer
+                shows a neutral silhouette; the bot's own picture belongs to
+                the message preview, not here.
+              */}
+              <User className="size-1/2" aria-hidden />
             </span>
             <span
-              className={handle(isSelected({ kind: "avatar" }))}
+              className={cn(handle(isSelected({ kind: "avatar" })), preview && "hidden")}
               onPointerDown={event => beginDrag(event, { kind: "avatar" }, true)}
               aria-hidden
             />
@@ -337,6 +447,7 @@ export function WelcomeImageCanvas({
             fontWeight={config.username.weight === "bold" ? 700 : 400}
             dominantBaseline="alphabetic"
             textAnchor={config.username.align === "center" ? "middle" : config.username.align === "end" ? "end" : "start"}
+            letterSpacing={config.username.letterSpacing ?? 0}
             stroke={config.username.strokeColor ?? undefined}
             strokeWidth={config.username.strokeWidth ?? 0}
             strokeLinejoin="round"
@@ -362,6 +473,7 @@ export function WelcomeImageCanvas({
               fontWeight={layer.weight === "bold" ? 700 : 400}
               dominantBaseline="alphabetic"
               textAnchor={layer.align === "center" ? "middle" : layer.align === "end" ? "end" : "start"}
+              letterSpacing={layer.letterSpacing ?? 0}
               stroke={layer.strokeColor ?? undefined}
               strokeWidth={layer.strokeWidth ?? 0}
               strokeLinejoin="round"
@@ -390,9 +502,11 @@ export function WelcomeImageCanvas({
           const anchor = textAnchor(entry.layer);
           const ascent = textAscentRatio(entry.layer.fontSize) * scale;
           const target = entry.kind === "custom" ? { kind: "custom" as const, id: entry.id } : { kind: "username" as const };
+          if (preview) return null;
           return (
             <div
               key={entry.kind === "custom" ? entry.id : "username"}
+              data-layer-box="text"
               className={cn("absolute w-max cursor-move", isSelected(target) && "outline outline-2 outline-primary")}
               style={{
                 left: anchor.x,
@@ -407,7 +521,24 @@ export function WelcomeImageCanvas({
                 onSelect(target);
               }}
             >
-              <span className="invisible whitespace-nowrap">{renderWelcomeMessage(entry.layer.text, values)}</span>
+              {/*
+                The box measures the text **in the text's own font**: a span in
+                the interface's font is a fraction of the layer's size, so the
+                box was a small rectangle in the middle of a large word and the
+                handle sat nowhere near the glyphs.
+              */}
+              <span
+                className="invisible whitespace-nowrap"
+                style={{
+                  fontFamily: `"${entry.layer.fontFamily}", sans-serif`,
+                  fontSize: entry.layer.fontSize * scale,
+                  fontWeight: entry.layer.weight === "bold" ? 700 : 400,
+                  letterSpacing: (entry.layer.letterSpacing ?? 0) * scale,
+                  lineHeight: 1
+                }}
+              >
+                {renderWelcomeMessage(entry.layer.text, values)}
+              </span>
               <span
                 className={handle(isSelected(target))}
                 onPointerDown={event => beginDrag(event, target, true)}

@@ -252,6 +252,73 @@ const API_STUB = `
       members: { total: 42, online: 7, onlineNote: null },
       punishments24h: { total: 0, byAction: {} },
       recentActivity: []
+    },
+    // The welcome screen, so the designer can be measured for real: the card,
+    // its layers and the controls that move them.
+    "/api/guilds/111111111111111111/welcome-messages": {
+      settings: {
+        enabled: true,
+        imageEnabled: true,
+        imageMode: "with_message",
+        imageChannelId: null,
+        channelId: null,
+        mode: "embed",
+        text: "أهلاً {user} في {server}",
+        embed: {
+          content: "",
+          title: "",
+          titleUrl: null,
+          description: "",
+          color: null,
+          thumbnailMode: "none",
+          thumbnailUrl: null,
+          imageMode: "none",
+          imageDataUrl: null,
+          imageUrl: null,
+          footer: "",
+          footerIconUrl: null,
+          timestamp: false,
+          fields: []
+        },
+        image: {
+          width: 800,
+          height: 400,
+          quality: 0.9,
+          background: { type: "color", color: "#0b1020", gradientFrom: null, gradientTo: null, opacity: 1, imageDataUrl: null },
+          avatar: { enabled: true, x: 40, y: 40, size: 128, circular: true, strokeColor: "#3b82f6", strokeWidth: 4, glowColor: null, glowSize: 0 },
+          username: {
+            id: "username",
+            text: "{username}",
+            x: 400,
+            y: 300,
+            fontFamily: "IBM Plex Sans Arabic",
+            fontSize: 48,
+            color: "#ffffff",
+            weight: "bold",
+            align: "center",
+            strokeColor: null,
+            strokeWidth: 0,
+            shadowColor: null,
+            shadowSize: 0,
+            letterSpacing: 0
+          },
+          customTexts: []
+        }
+      },
+      channels: []
+    },
+    "/api/guilds/111111111111111111/customization": {
+      profile: {
+        username: "AL AI",
+        nickname: "AL AI",
+        avatarUrl: null,
+        bannerUrl: null,
+        accountAvatarUrl: "https://cdn.discordapp.com/avatars/1/account.png",
+        accountBannerUrl: null,
+        bio: null,
+        roleColor: null,
+        roleIconUrl: null
+      }
     }
   };
   const original = window.fetch.bind(window);
@@ -647,6 +714,130 @@ async function main() {
         );
       }
       await writeFile(join(outDir, "axe-live.json"), JSON.stringify(liveReports, null, 2));
+
+      // The unsaved-changes bar, for real: a change is made on the welcome
+      // screen, and the bar that appears must be **pinned to the bottom of the
+      // window**, **inside the content column** (it may not stretch over the
+      // sidebar), and **below an open dropdown menu** - a bar that swallowed the
+      // click that chooses an option would make the font picker unusable.
+      await cdp.send(
+        "Emulation.setDeviceMetricsOverride",
+        { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false },
+        sessionId
+      );
+      // The guild the session may actually manage is the one the sidebar
+      // offers - the database cannot say which guilds the session's user
+      // holds, because the permissions come from Discord.
+      await cdp.send("Page.navigate", { url: `${origin}/` }, sessionId);
+      await waitForApp(cdp, sessionId);
+      await sleep(2_000);
+      await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `(() => {
+            // The guild list offers each guild as a button that opens it; the
+            // first one is the guild this session may manage.
+            const button = [...document.querySelectorAll("button")].find(node =>
+              (node.textContent ?? "").includes("إدارة")
+            );
+            if (!button) return "no button";
+            button.click();
+            return "opened";
+          })()`,
+          returnByValue: true
+        },
+        sessionId
+      );
+      await sleep(1_500);
+      const guildPath = await cdp.send(
+        "Runtime.evaluate",
+        { expression: "location.pathname", returnByValue: true },
+        sessionId
+      );
+      await cdp.send(
+        "Page.navigate",
+        { url: `${origin}${guildPath.result.value.replace(/\/$/, "")}/welcome-messages` },
+        sessionId
+      );
+      await waitForApp(cdp, sessionId);
+      await sleep(2_000);
+      const barToggled = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `(() => {
+            // The first switch on the screen is the welcome message's own
+            // master switch: turning it on is a pending change, so the bar
+            // appears.
+            const toggle = document.querySelector('button[role="switch"]');
+            if (!toggle) return JSON.stringify({ toggled: false });
+            const options = { bubbles: true, cancelable: true, button: 0, pointerType: "mouse", isPrimary: true };
+            toggle.dispatchEvent(new PointerEvent("pointerdown", options));
+            toggle.dispatchEvent(new PointerEvent("pointerup", options));
+            toggle.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+            return JSON.stringify({ toggled: true });
+          })()`,
+          returnByValue: true
+        },
+        sessionId
+      );
+      await sleep(800);
+      const barProbe = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `(() => {
+            const bar = document.querySelector('[role="status"]');
+            if (!bar) return JSON.stringify({ found: false });
+            const rect = bar.getBoundingClientRect();
+            const style = getComputedStyle(bar);
+            const sidebar = document.querySelector("aside");
+            return JSON.stringify({
+              found: true,
+              position: style.position,
+              zIndex: style.zIndex,
+              bottomGap: Math.round(window.innerHeight - rect.bottom),
+              left: Math.round(rect.left),
+              right: Math.round(rect.right),
+              sidebarRight: sidebar ? Math.round(sidebar.getBoundingClientRect().right) : null,
+              viewportWidth: window.innerWidth
+            });
+          })()`,
+          returnByValue: true
+        },
+        sessionId
+      );
+      if (!JSON.parse(barProbe.result.value).found) {
+        const debug = await cdp.send(
+          "Runtime.evaluate",
+          {
+            expression: `JSON.stringify({
+              switches: document.querySelectorAll('button[role="switch"]').length,
+              statuses: document.querySelectorAll('[role="status"]').length,
+              text: (document.querySelector("#root")?.textContent ?? "").trim().slice(0, 200)
+            })`,
+            returnByValue: true
+          },
+          sessionId
+        );
+        console.log(`  debug  ${debug.result.value}`);
+      }
+      const bar = JSON.parse(barProbe.result.value);
+      const barShot = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
+      await writeFile(join(outDir, "save-bar.png"), Buffer.from(barShot.data, "base64"));
+      // The bar is pinned to the bottom of the window, it starts at the
+      // sidebar's edge (16.5rem on the desktop) instead of stretching over it,
+      // and it is below the dropdown portals, which are portalled at z-50.
+      const barPinned = bar.found && bar.position === "fixed" && bar.bottomGap <= 24;
+      const barInsideColumn =
+        bar.found && bar.left >= 200 && bar.left <= 300 && bar.right <= bar.viewportWidth;
+      const barBelowMenus = bar.found && Number(bar.zIndex) < 50;
+      if (!bar.found) failures.push("the unsaved-changes bar did not appear after a change");
+      if (!barPinned) failures.push(`the unsaved-changes bar is not pinned to the bottom (position=${bar.position}, gap=${bar.bottomGap}px)`);
+      if (!barInsideColumn) failures.push(`the unsaved-changes bar is not inside the content column (left=${bar.left}, right=${bar.right}, viewport=${bar.viewportWidth})`);
+      if (!barBelowMenus) failures.push(`the unsaved-changes bar is above the dropdown portals (z-index=${bar.zIndex})`);
+      console.log(
+        `${bar.found && barPinned && barInsideColumn && barBelowMenus ? "PASS" : "FAIL"}  floating save bar   position=${bar.position} gap=${bar.bottomGap}px left=${bar.left} right=${bar.right} z=${bar.zIndex}`
+      );
+
     }
     // The stub-driven pass: the shell, the account menu, the appearance panel and
     // the broken-payload scenario. In live mode the API answers with the real
@@ -851,6 +1042,192 @@ async function main() {
     console.log(
       `${switched ? "PASS" : "FAIL"}  appearance panel   pick=${pickResult} theme=${themeResult.theme} stored=${themeResult.stored}`
     );
+
+    // The designer's canvas, measured for real: the selection box must hug
+    // the text it belongs to (a box in the interface's font is a fraction of
+    // the layer's size, so the handle sat nowhere near the glyphs), and a
+    // drag must actually move the layer.
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false },
+      sessionId
+    );
+    await cdp.send(
+      "Page.navigate",
+      { url: `${origin}/dashboard/111111111111111111/welcome-messages` },
+      sessionId
+    );
+    await sleep(2_000);
+    // The designer lives behind the third tab of the screen.
+    const designerTab = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const tab = [...document.querySelectorAll("main button")].find(node =>
+            (node.textContent ?? "").trim() === "الصورة"
+          );
+          if (!tab) return "no tab";
+          tab.click();
+          return "opened";
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    await sleep(1_200);
+    const canvasProbe = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const box = document.querySelector('[data-layer-box="text"]');
+          const text = document.querySelector("svg text");
+          if (!box || !text) return JSON.stringify({ found: false, tab: ${JSON.stringify(designerTab.result.value)} });
+          const boxRect = box.getBoundingClientRect();
+          const textRect = text.getBoundingClientRect();
+          return JSON.stringify({
+            found: true,
+            boxWidth: Math.round(boxRect.width),
+            textWidth: Math.round(textRect.width),
+            boxHeight: Math.round(boxRect.height),
+            textHeight: Math.round(textRect.height)
+          });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const canvas = JSON.parse(canvasProbe.result.value);
+    if (!canvas.found) {
+      const debug = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `JSON.stringify({
+            tab: ${JSON.stringify(designerTab.result.value)},
+            path: location.pathname,
+            buttons: [...document.querySelectorAll("main button")].map(node => (node.textContent ?? "").trim()).filter(Boolean).slice(0, 12),
+            text: (document.querySelector("main")?.textContent ?? "").trim().slice(0, 200)
+          })`,
+          returnByValue: true
+        },
+        sessionId
+      );
+      console.log(`  debug  ${debug.result.value}`);
+    }
+    // The box is allowed to be a little wider than the glyphs - the font
+    // metrics of the interface and of the canvas are not the same - but it may
+    // not be a fraction of the text: that was the bug.
+    const boxHugs =
+      canvas.found && canvas.textWidth > 0 && canvas.boxWidth >= canvas.textWidth * 0.85 && canvas.boxWidth <= canvas.textWidth * 1.6;
+    if (!canvas.found) failures.push("the designer canvas did not render its layers");
+    else if (!boxHugs) failures.push(`the selection box does not hug the text (box=${canvas.boxWidth}px, text=${canvas.textWidth}px)`);
+    console.log(
+      `${boxHugs ? "PASS" : "FAIL"}  designer box   box=${canvas.boxWidth}px text=${canvas.textWidth}px height=${canvas.boxHeight}`
+    );
+
+    // A drag must move the layer: the pointer goes down on the text, moves to
+    // the right, and the layer's anchor has to follow it.
+    const dragProbe = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const box = document.querySelector('[data-layer-box="text"]');
+          if (!box) return JSON.stringify({ moved: false });
+          const rect = box.getBoundingClientRect();
+          const startX = rect.left + rect.width / 2;
+          const startY = rect.top + rect.height / 2;
+          const options = { bubbles: true, cancelable: true, button: 0, pointerId: 1, pointerType: "mouse", isPrimary: true };
+          const target = document.elementFromPoint(startX, startY) ?? box;
+          target?.dispatchEvent(new PointerEvent("pointerdown", { ...options, clientX: startX, clientY: startY }));
+          const canvasEl = document.querySelector('[aria-label="لوحة تصميم صورة الترحيب"]');
+          canvasEl?.dispatchEvent(new PointerEvent("pointermove", { ...options, clientX: startX + 120, clientY: startY }));
+          canvasEl?.dispatchEvent(new PointerEvent("pointerup", { ...options, clientX: startX + 120, clientY: startY }));
+          return JSON.stringify({ before: Math.round(rect.left) });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    // The state lands in a re-render, so the box is measured *after* the
+    // events - measuring in the same tick measures the old tree.
+    await sleep(600);
+    const dragAfter = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const box = document.querySelector('[data-layer-box="text"]');
+          return JSON.stringify({ after: box ? Math.round(box.getBoundingClientRect().left) : null });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const before = JSON.parse(dragProbe.result.value).before;
+    const after = JSON.parse(dragAfter.result.value).after;
+    const drag = { moved: typeof after === "number" && typeof before === "number" ? after - before : null };
+    const dragMoved = typeof drag.moved === "number" && Math.abs(drag.moved) > 20;
+    if (!dragMoved) failures.push(`a drag did not move the layer (moved=${drag.moved}px)`);
+    console.log(`${dragMoved ? "PASS" : "FAIL"}  designer drag   moved=${drag.moved}px`);
+
+    // The resize handle: pressing it and moving the pointer must make the
+    // text bigger (or smaller) **by the pointer's travel** - the bug was a
+    // size measured from the box's corner, which inflated the layer by 41%
+    // before the mouse moved at all.
+    const resizeBefore = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const box = document.querySelector('[data-layer-box="text"]');
+          const handle = box?.querySelector(".cursor-nwse-resize");
+          if (!box || !handle) return JSON.stringify({ found: false });
+          const rect = handle.getBoundingClientRect();
+          return JSON.stringify({ found: true, fontSize: Math.round(box.getBoundingClientRect().height) });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const resizeStart = JSON.parse(resizeBefore.result.value);
+    await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const box = document.querySelector('[data-layer-box="text"]');
+          const handle = box?.querySelector(".cursor-nwse-resize");
+          if (!box || !handle) return "no handle";
+          const rect = handle.getBoundingClientRect();
+          const x = rect.left + rect.width / 2;
+          const y = rect.top + rect.height / 2;
+          const options = { bubbles: true, cancelable: true, button: 0, pointerId: 2, pointerType: "mouse", isPrimary: true };
+          handle.dispatchEvent(new PointerEvent("pointerdown", { ...options, clientX: x, clientY: y }));
+          const canvasEl = document.querySelector('[aria-label="لوحة تصميم صورة الترحيب"]');
+          canvasEl?.dispatchEvent(new PointerEvent("pointermove", { ...options, clientX: x + 40, clientY: y + 40 }));
+          canvasEl?.dispatchEvent(new PointerEvent("pointerup", { ...options, clientX: x + 40, clientY: y + 40 }));
+          return "dragged";
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    await sleep(600);
+    const resizeAfter = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const box = document.querySelector('[data-layer-box="text"]');
+          return JSON.stringify({ fontSize: box ? Math.round(box.getBoundingClientRect().height) : null });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const fontBefore = resizeStart.fontSize;
+    const fontAfter = JSON.parse(resizeAfter.result.value).fontSize;
+    // A 40px diagonal drag grows the text by 40 card pixels; the card is
+    // shown at half size, so 20 screen pixels.
+    const grew = typeof fontAfter === "number" && fontAfter > fontBefore + 8;
+    if (!resizeStart.found) failures.push("the designer has no resize handle");
+    else if (!grew) failures.push(`the resize handle did not grow the text (${fontBefore}px → ${fontAfter}px)`);
+    console.log(`${grew ? "PASS" : "FAIL"}  designer resize   font ${fontBefore}px → ${fontAfter}px`);
 
     // The accessibility scan, on the screens that matter, in both palettes.
     const axeReports = [];

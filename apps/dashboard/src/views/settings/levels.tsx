@@ -1589,23 +1589,11 @@ export function LevelsView({ guild }: { guild: Guild }) {
   return (
     <div className="space-y-5">
       {/*
-        The unsaved-changes bar, at the top of the screen: a bar that floats at
-        the bottom sits *over* the open dropdown menus and swallows the click
-        that should have chosen an option.
+        The unsaved-changes bar lives at the **end** of the screen, floating
+        above the content while the screen scrolls. It is *below* an open
+        dropdown menu (the menus are portalled at z-50, the bar is at z-40), so
+        it never swallows the click that should have chosen an option.
       */}
-      {dirty && (
-        <SaveBar
-          message="لديك تعديلات غير محفوظة على النظام"
-          saveLabel="حفظ التعديلات"
-          cancelLabel="إلغاء"
-          onCancel={reset}
-          onSave={async () => {
-            const result = await api.saveLevelsSettings(guild.id, draft);
-            commit(result.settings);
-            push({ title: "حُفظت إعدادات المستويات.", tone: "success" });
-          }}
-        />
-      )}
       {/* The engine's own state and the master switch. The page's title and
           one line of context come from the frame, so this row carries only
           what is *not* already said elsewhere: whether the engine is armed,
@@ -1700,6 +1688,20 @@ export function LevelsView({ guild }: { guild: Guild }) {
       </>)}
 
       <Toaster toasts={toasts} onDismiss={dismiss} />
+
+      {dirty && (
+        <SaveBar
+          message="لديك تعديلات غير محفوظة على النظام"
+          saveLabel="حفظ التعديلات"
+          cancelLabel="إلغاء"
+          onCancel={reset}
+          onSave={async () => {
+            const result = await api.saveLevelsSettings(guild.id, draft);
+            commit(result.settings);
+            push({ title: "حُفظت إعدادات المستويات.", tone: "success" });
+          }}
+        />
+      )}
     </div>
   );
 }

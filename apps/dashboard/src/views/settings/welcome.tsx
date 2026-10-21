@@ -77,18 +77,6 @@ export function WelcomeView({ guild }: { guild: Guild }) {
 
   return (
     <div data-heroui className="space-y-4">
-      {dirty && (
-        <SaveBar
-          message="لديك تعديلات غير محفوظة"
-          saveLabel="حفظ التعديلات"
-          cancelLabel="إلغاء"
-          onCancel={reset}
-          onSave={async () => {
-            const result = await api.saveWelcome(guild.id, draft);
-            commit(result.settings);
-          }}
-        />
-      )}
       <HeroCard>
         <div className="flex flex-row items-center justify-between gap-3 p-6">
           <div className="flex min-w-0 items-center gap-3">
@@ -241,6 +229,19 @@ export function WelcomeView({ guild }: { guild: Guild }) {
 
 
       <Toaster toasts={toasts} onDismiss={dismiss} />
+
+      {dirty && (
+        <SaveBar
+          message="لديك تعديلات غير محفوظة"
+          saveLabel="حفظ التعديلات"
+          cancelLabel="إلغاء"
+          onCancel={reset}
+          onSave={async () => {
+            const result = await api.saveWelcome(guild.id, draft);
+            commit(result.settings);
+          }}
+        />
+      )}
     </div>
   );
 }

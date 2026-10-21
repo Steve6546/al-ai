@@ -95,6 +95,8 @@ export type WelcomeTextLayer = {
   /** A soft shadow under the text, as a colour and a radius in pixels. */
   shadowColor?: string | null;
   shadowSize?: number;
+  /** The extra space between the letters, in pixels; negative tightens them. */
+  letterSpacing?: number;
 };
 
 /** The whole canvas the bot renders per join. */
@@ -267,7 +269,8 @@ function normaliseTextLayer(value: unknown, fallback: WelcomeTextLayer): Welcome
     strokeColor: normaliseHexColorField(source.strokeColor, null),
     strokeWidth: clampInt(source.strokeWidth, 0, 16, 0),
     shadowColor: normaliseHexColorField(source.shadowColor, null),
-    shadowSize: clampInt(source.shadowSize, 0, 64, 0)
+    shadowSize: clampInt(source.shadowSize, 0, 64, 0),
+    letterSpacing: clampInt(source.letterSpacing, -20, 100, 0)
   };
 }
 

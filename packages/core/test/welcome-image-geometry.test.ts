@@ -7,10 +7,10 @@ import {
   TEXT_MIN_FONT_SIZE,
   clampAnchor,
   clampBox,
-  fontSizeFromHandle,
-  sizeFromHandle,
+  clampTextAnchor,
+  sizeFromDrag,
   textAscentRatio,
-  toCardSpace
+  toCardPoint
 } from "../src/welcome-image-geometry.js";
 
 /**
@@ -53,45 +53,110 @@ test("an anchor stays inside the card", () => {
   assert.deepEqual(clampAnchor({ x: 100, y: 200 }, CARD), { x: 100, y: 200 });
 });
 
-test("a corner handle sizes the box by the distance to the pointer, not by one axis", () => {
-  // The scenario from the bug report: a small element is scaled up, and the
-  // handle must follow the pointer instead of running away from it.
-  const origin = { x: 100, y: 100 };
-  const pointer = { x: 200, y: 200 };
-  const size = sizeFromHandle(origin, pointer, { min: AVATAR_MIN_SIZE, max: AVATAR_MAX_SIZE });
-  // The pointer is 100px away on each axis, so the diagonal distance is ~141.
-  assert.equal(size, 141);
-  // The horizontal movement alone would have given 100 - a different answer,
-  // and the one that made the box grow away from the pointer.
-  assert.notEqual(size, 100);
+test("a text anchor is clamped by the text's own width, not only by the card", () => {
+  // A left-aligned text may not hang off the right edge: its anchor stops
+  // where the text ends.
+  const start = clampTextAnchor({ x: 1000, y: 200 }, CARD, { width: 300, ascent: 40, align: "start" });
+  assert.equal(start.x, CARD.width - 300);
+  assert.equal(start.x + 300, CARD.width);
 
-  // Straight up: the distance is the movement.
-  assert.equal(sizeFromHandle(origin, { x: 100, y: 180 }, { min: 16, max: 512 }), 80);
+  // A centred text is bounded by its own half-width on each side.
+  const centre = clampTextAnchor({ x: 0, y: 200 }, CARD, { width: 300, ascent: 40, align: "center" });
+  assert.equal(centre.x, 150);
+  const centreRight = clampTextAnchor({ x: 5000, y: 200 }, CARD, { width: 300, ascent: 40, align: "center" });
+  assert.equal(centreRight.x, CARD.width - 150);
+
+  // An end-aligned text grows to the left, so its anchor has room on its right.
+  const end = clampTextAnchor({ x: 5000, y: 200 }, CARD, { width: 300, ascent: 40, align: "end" });
+  assert.equal(end.x, CARD.width);
+
+  // The baseline cannot be above the card: the text would hang out of the top.
+  const high = clampTextAnchor({ x: 100, y: 0 }, CARD, { width: 300, ascent: 40, align: "start" });
+  assert.equal(high.y, 40);
+
+  // A text wider than the card is pinned to its alignment's own position
+  // rather than left out of the card.
+  const wide = clampTextAnchor({ x: 0, y: 200 }, CARD, { width: 4000, ascent: 40, align: "start" });
+  assert.equal(wide.x, 0);
+  const wideCentre = clampTextAnchor({ x: 0, y: 200 }, CARD, { width: 4000, ascent: 40, align: "center" });
+  assert.equal(wideCentre.x, CARD.width / 2);
 });
 
-test("a size is never zero, negative or above the ceiling", () => {
+test("the size is the size at the start of the drag plus the pointer's travel", () => {
   const bounds = { min: AVATAR_MIN_SIZE, max: AVATAR_MAX_SIZE };
-  assert.equal(sizeFromHandle({ x: 50, y: 50 }, { x: 50, y: 50 }, bounds), AVATAR_MIN_SIZE);
-  assert.equal(sizeFromHandle({ x: 0, y: 0 }, { x: 5000, y: 5000 }, bounds), AVATAR_MAX_SIZE);
-  assert.ok(sizeFromHandle({ x: 0, y: 0 }, { x: -100, y: -100 }, bounds) >= AVATAR_MIN_SIZE);
+  // The bug: the size used to be the distance from the box's origin corner to
+  // the pointer, so grabbing the bottom-right handle inflated the box by 41%
+  // before the mouse moved at all. Now the travel is measured from where the
+  // drag began.
+  const startPointer = { x: 200, y: 200 };
+  const size = sizeFromDrag({ start: 100, startPointer, pointer: { x: 200, y: 200 }, ...bounds });
+  assert.equal(size, 100, "an unmoved pointer keeps the size it had");
+
+  // A diagonal drag of 60px grows the box by 60px: the handle stays under the
+  // finger, and the box grows at the pointer's speed.
+  const diagonal = sizeFromDrag({ start: 100, startPointer, pointer: { x: 260, y: 260 }, ...bounds });
+  assert.equal(diagonal, 160);
+
+  // Pulling back shrinks it again, symmetrically.
+  const back = sizeFromDrag({ start: 100, startPointer, pointer: { x: 140, y: 140 }, ...bounds });
+  assert.equal(back, 40);
 });
 
-test("a text handle sizes the font by the distance from the anchor", () => {
-  const bounds = { min: TEXT_MIN_FONT_SIZE, max: TEXT_MAX_FONT_SIZE };
-  assert.equal(fontSizeFromHandle({ x: 100, y: 100 }, { x: 100, y: 140 }, bounds), 40);
-  assert.equal(fontSizeFromHandle({ x: 100, y: 100 }, { x: 100, y: 100 }, bounds), TEXT_MIN_FONT_SIZE);
-  assert.equal(fontSizeFromHandle({ x: 0, y: 0 }, { x: 9999, y: 9999 }, bounds), TEXT_MAX_FONT_SIZE);
+test("a drag can never shrink a layer below its minimum or grow it past its maximum", () => {
+  const bounds = { min: AVATAR_MIN_SIZE, max: AVATAR_MAX_SIZE };
+  const startPointer = { x: 0, y: 0 };
+  assert.equal(
+    sizeFromDrag({ start: 100, startPointer, pointer: { x: -5000, y: -5000 }, ...bounds }),
+    AVATAR_MIN_SIZE
+  );
+  assert.equal(
+    sizeFromDrag({ start: 100, startPointer, pointer: { x: 5000, y: 5000 }, ...bounds }),
+    AVATAR_MAX_SIZE
+  );
+  // A font has its own bounds.
+  assert.equal(
+    sizeFromDrag({
+      start: 40,
+      startPointer,
+      pointer: { x: -500, y: -500 },
+      min: TEXT_MIN_FONT_SIZE,
+      max: TEXT_MAX_FONT_SIZE
+    }),
+    TEXT_MIN_FONT_SIZE
+  );
+  assert.equal(
+    sizeFromDrag({
+      start: 40,
+      startPointer,
+      pointer: { x: 9999, y: 9999 },
+      min: TEXT_MIN_FONT_SIZE,
+      max: TEXT_MAX_FONT_SIZE
+    }),
+    TEXT_MAX_FONT_SIZE
+  );
 });
 
-test("a pointer is converted into card pixels", () => {
-  // The card is drawn at half size on the screen: a move of 50 screen pixels
+test("a pointer is read against the canvas's real rendered box", () => {
+  // The card is 1024 wide and is displayed at 512: a move of 50 screen pixels
   // is 100 card pixels.
-  const card = toCardSpace({ x: 150, y: 150 }, { x: 100, y: 100 }, 0.5);
-  assert.deepEqual(card, { x: 200, y: 200 });
+  const half = toCardPoint(
+    { x: 150, y: 150 },
+    { left: 100, top: 100, clientWidth: 512, clientHeight: 256 },
+    CARD
+  );
+  assert.deepEqual(half, { x: 100, y: 100 });
 
-  // A scale of zero would divide by zero; the conversion must survive it.
-  const safe = toCardSpace({ x: 150, y: 150 }, { x: 100, y: 100 }, 0);
-  assert.deepEqual(safe, { x: 150, y: 150 });
+  // The border is not part of the content box: the origin is its inner edge.
+  const bordered = toCardPoint(
+    { x: 101, y: 101 },
+    { left: 100, top: 100, clientWidth: 512, clientHeight: 256, borderLeft: 1, borderTop: 1 },
+    CARD
+  );
+  assert.deepEqual(bordered, { x: 0, y: 0 });
+
+  // A canvas that has not been laid out yet must not divide by zero.
+  const unlaid = toCardPoint({ x: 150, y: 150 }, { left: 0, top: 0, clientWidth: 0, clientHeight: 0 }, CARD);
+  assert.deepEqual(unlaid, { x: 150, y: 150 });
 });
 
 test("the text ascent is a share of the font size", () => {

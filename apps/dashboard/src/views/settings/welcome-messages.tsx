@@ -140,6 +140,16 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
     return channels.find(channel => channel.id === id)?.name ?? null;
   }, [channels, draft?.channelId]);
 
+  /**
+   * The bot's own picture, the one the members of this server see.
+   *
+   * Discord's own rule: a server that sets no picture of its own shows the
+   * account's. So the guild picture comes first and the account's is the
+   * fallback - a bot with a perfectly good face must not render as a blank
+   * circle in the preview.
+   */
+  const botAvatarUrl = profile?.avatarUrl ?? profile?.accountAvatarUrl ?? null;
+
   if (error) return <LoadError message={error} />;
   if (!settings || !draft) return <LoadingRow />;
 
@@ -241,19 +251,6 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
 
   return (
     <div className="space-y-4">
-      {dirty && (
-        <SaveBar
-          message="لديك تغييرات غير محفوظة"
-          saveLabel="حفظ التغييرات"
-          cancelLabel="تجاهل"
-          onCancel={reset}
-          onSave={async () => {
-            const result = await api.saveWelcomeMessages(guild.id, draft);
-            commit(result.settings);
-            push({ title: "حُفظت رسائل الترحيب — تُطبَّق على البوت خلال نصف دقيقة.", tone: "success" });
-          }}
-        />
-      )}
       <input
         ref={fileInputRef}
         type="file"
@@ -440,7 +437,7 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
               <WelcomeMessagePreview
                 settings={draft}
                 values={sampleValues}
-                avatarUrl={profile?.avatarUrl ?? null}
+                avatarUrl={botAvatarUrl}
                 botName={profile?.nickname || profile?.username || null}
                 channelName={channelName}
                 className="lg:sticky lg:top-6 lg:self-start"
@@ -457,9 +454,9 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="rounded-lg bg-[#2b2d31] p-4">
-                  <EmbedEditor
-                    botName="AL AI"
-                    botAvatarUrl={null}
+                <EmbedEditor
+                  botName={profile?.nickname || profile?.username || "AL AI"}
+                  botAvatarUrl={botAvatarUrl}
                     embed={draft.embed}
                     onEmbedChange={patchEmbed}
                     values={sampleValues}
@@ -521,7 +518,6 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
               <WelcomeImageCanvas
                 config={draft.image}
                 values={sampleValues}
-                avatarUrl={profile?.avatarUrl ?? null}
                 selected={selection}
                 onSelect={setSelection}
                 onConfigChange={patchImage}
@@ -743,19 +739,28 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
                         aria-label="لون توهّج الصورة"
                       />
                     </FieldRow>
-                    <FieldRow label={`حجم التوهّج: ${draft.image.avatar.glowSize ?? 0}px`}>
-                      <input
-                        type="range"
-                        min={0}
-                        max={128}
-                        value={draft.image.avatar.glowSize ?? 0}
-                        onChange={event =>
-                          patchImage({ ...draft.image, avatar: { ...draft.image.avatar, glowSize: Number(event.target.value) } })
-                        }
-                        className="w-full accent-primary"
-                        aria-label="حجم توهّج الصورة"
-                      />
-                    </FieldRow>
+      <FieldRow label={`حجم التوهّج: ${draft.image.avatar.glowSize ?? 0}px`}>
+                        <input
+                          type="range"
+                          min={0}
+                          max={128}
+                          value={draft.image.avatar.glowSize ?? 0}
+                          // The size comes with a colour: a glow without a
+                          // colour is not drawn at all.
+                          onChange={event =>
+                            patchImage({
+                              ...draft.image,
+                              avatar: {
+                                ...draft.image.avatar,
+                                glowSize: Number(event.target.value),
+                                glowColor: draft.image.avatar.glowColor ?? "#3b82f6"
+                              }
+                            })
+                          }
+                          className="w-full accent-primary"
+                          aria-label="حجم توهّج الصورة"
+                        />
+                      </FieldRow>
                   </div>
                 </>
               )}
@@ -862,6 +867,20 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
       {/* Bottom floating unsaved-changes bar — the shared contract. */}
 
       <Toaster toasts={toasts} onDismiss={dismiss} />
+
+      {dirty && (
+        <SaveBar
+          message="لديك تغييرات غير محفوظة"
+          saveLabel="حفظ التغييرات"
+          cancelLabel="تجاهل"
+          onCancel={reset}
+          onSave={async () => {
+            const result = await api.saveWelcomeMessages(guild.id, draft);
+            commit(result.settings);
+            push({ title: "حُفظت رسائل الترحيب — تُطبَّق على البوت خلال نصف دقيقة.", tone: "success" });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -969,7 +988,14 @@ function TextStyleFields({
           min={0}
           max={16}
           value={layer.strokeWidth ?? 0}
-          onChange={event => onPatch({ strokeWidth: Number(event.target.value) })}
+          // The size comes with a colour: a stroke without a colour is not
+          // drawn at all, so moving the slider alone did nothing.
+          onChange={event =>
+            onPatch({
+              strokeWidth: Number(event.target.value),
+              strokeColor: layer.strokeColor ?? "#000000"
+            })
+          }
           className="w-full accent-primary"
           aria-label="سماكة حدّ النص"
         />
@@ -989,9 +1015,25 @@ function TextStyleFields({
           min={0}
           max={64}
           value={layer.shadowSize ?? 0}
-          onChange={event => onPatch({ shadowSize: Number(event.target.value) })}
+          onChange={event =>
+            onPatch({
+              shadowSize: Number(event.target.value),
+              shadowColor: layer.shadowColor ?? "#000000"
+            })
+          }
           className="w-full accent-primary"
           aria-label="حجم ظلّ النص"
+        />
+      </FieldRow>
+      <FieldRow label={`تباعد الحروف: ${layer.letterSpacing ?? 0}px`}>
+        <input
+          type="range"
+          min={-20}
+          max={40}
+          value={layer.letterSpacing ?? 0}
+          onChange={event => onPatch({ letterSpacing: Number(event.target.value) })}
+          className="w-full accent-primary"
+          aria-label="تباعد الحروف"
         />
       </FieldRow>
     </div>

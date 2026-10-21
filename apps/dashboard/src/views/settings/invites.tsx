@@ -84,19 +84,6 @@ export function InvitesView({ guild }: { guild: Guild }) {
 
   return (
     <div className="space-y-4">
-      {dirty && (
-        <SaveBar
-          message="لديك تعديلات غير محفوظة على موديول الإحالات"
-          saveLabel="حفظ التعديلات"
-          cancelLabel="إلغاء"
-          onCancel={reset}
-          onSave={async () => {
-            const result = await api.saveInvitesSettings(guild.id, draft);
-            commit(result.settings);
-            push({ title: "حُفظت إعدادات الإحالات — تُطبَّق على البوت خلال نصف دقيقة.", tone: "success" });
-          }}
-        />
-      )}
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-lg font-semibold">
@@ -325,6 +312,20 @@ export function InvitesView({ guild }: { guild: Guild }) {
 
 
       <Toaster toasts={toasts} onDismiss={dismiss} />
+
+      {dirty && (
+        <SaveBar
+          message="لديك تعديلات غير محفوظة على موديول الإحالات"
+          saveLabel="حفظ التعديلات"
+          cancelLabel="إلغاء"
+          onCancel={reset}
+          onSave={async () => {
+            const result = await api.saveInvitesSettings(guild.id, draft);
+            commit(result.settings);
+            push({ title: "حُفظت إعدادات الإحالات — تُطبَّق على البوت خلال نصف دقيقة.", tone: "success" });
+          }}
+        />
+      )}
     </div>
   );
 }

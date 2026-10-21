@@ -63,6 +63,7 @@ export type DrawOp =
       strokeWidth: number;
       shadowColor: string | null;
       shadowSize: number;
+      letterSpacing: number;
     };
 
 /**
@@ -123,7 +124,8 @@ export async function planWelcomeImageDraw(
       strokeColor: config.username.strokeColor ?? null,
       strokeWidth: config.username.strokeWidth ?? 0,
       shadowColor: config.username.shadowColor ?? null,
-      shadowSize: config.username.shadowSize ?? 0
+      shadowSize: config.username.shadowSize ?? 0,
+      letterSpacing: config.username.letterSpacing ?? 0
     });
   }
   for (const layer of config.customTexts) {
@@ -141,7 +143,8 @@ export async function planWelcomeImageDraw(
       strokeColor: layer.strokeColor ?? null,
       strokeWidth: layer.strokeWidth ?? 0,
       shadowColor: layer.shadowColor ?? null,
-      shadowSize: layer.shadowSize ?? 0
+      shadowSize: layer.shadowSize ?? 0,
+      letterSpacing: layer.letterSpacing ?? 0
     });
   }
   return ops;
@@ -247,6 +250,9 @@ export function executeDrawOp(ctx: SKRSContext2D, canvas: Canvas, op: DrawOp, im
   ctx.font = `${op.weight === "bold" ? "bold " : ""}${op.fontSize}px "${op.fontFamily}"`;
   ctx.textAlign = op.align === "start" ? "left" : op.align;
   ctx.textBaseline = "alphabetic";
+  // The letter spacing, the same property the SVG preview uses, so the two
+  // agree on how wide the line is.
+  ctx.letterSpacing = `${op.letterSpacing}px`;
   if (op.shadowColor && op.shadowSize > 0) {
     ctx.shadowColor = op.shadowColor;
     ctx.shadowBlur = op.shadowSize;

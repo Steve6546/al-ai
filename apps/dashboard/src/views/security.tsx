@@ -172,19 +172,11 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
   return (
     <Card>
       {/*
-        The unsaved-changes bar, at the top of the panel: a bar that floats at
-        the bottom sits *over* the open dropdown menus and swallows the click
-        that should have chosen an option.
+        The unsaved-changes bar lives at the **end** of the screen, floating
+        above the content while the screen scrolls. It is *below* an open
+        dropdown menu (the menus are portalled at z-50, the bar is at z-40), so
+        it never swallows the click that should have chosen an option.
       */}
-      {dirty && (
-        <SaveBar
-          onCancel={reset}
-          onSave={async () => {
-            const result = await api.saveSecurityConfig(guild.id, draft);
-            commit(result.config);
-          }}
-        />
-      )}
       <CardHeader className="flex-row items-start justify-between space-y-0">
         <div className="space-y-1">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -283,6 +275,16 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
           </>
         )}
       </CardContent>
+
+      {dirty && (
+        <SaveBar
+          onCancel={reset}
+          onSave={async () => {
+            const result = await api.saveSecurityConfig(guild.id, draft);
+            commit(result.config);
+          }}
+        />
+      )}
     </Card>
   );
 }

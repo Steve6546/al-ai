@@ -5,18 +5,26 @@ import { useState } from "react";
 /**
  * The unsaved-changes bar.
  *
- * It sits at the **top** of the screen, not at the bottom. A bar pinned to the
- * bottom sits *over* the last control of every long form and - worse - over the
- * open dropdown menus (the font picker, the channel picker), because a floating
- * element with a high z-index swallows the click that should have chosen an
- * option. At the top it can never cover a menu that opens downwards, and the
- * thing it reports is the thing the reader is looking at.
+ * It floats at the **bottom** of the window, the way a "you have unsaved
+ * changes" bar is meant to be read: it is the last thing on the screen, and
+ * the eye finds it there. Two things have to be true for a floating bar to be
+ * usable, and both are enforced here:
+ *
+ * - **It must not cover the content.** The bar is out of the flow, so the
+ *   screen's own bottom padding (the `pb-*` on the screen's root, and the
+ *   `<main>`'s `pb-24`) is what keeps the last field of a long form clear of
+ *   it.
+ * - **It must not cover an open menu.** The dropdowns, the font picker and the
+ *   colour menus are rendered in a **portal** at `z-50`; the bar sits at
+ *   `z-40`, *below* them, so the option the operator is reaching for is never
+ *   swallowed by the bar - the click lands on the menu, not on the bar.
  *
  * The rules the bar keeps:
  *
- * - It is **fixed** at the top, so it stays where it says it is while the
- *   screen scrolls, and it is *not* a modal: it never traps focus and never
- *   blocks the content underneath.
+ * - It is **fixed to the bottom of the window**, inside the content column -
+ *   the shell publishes the sidebar's width as `--sidebar-width`, so the bar
+ *   never stretches over the sidebar - and it is *not* a modal: it never traps
+ *   focus and never blocks the content underneath.
  * - It keeps **no copy** of the form data: it only calls `onCancel`, so the
  *   revert is performed by the screen that owns the state and the bar can
  *   never disagree with what is on screen.
@@ -44,14 +52,25 @@ export function SaveBar({
       role="status"
       aria-live="polite"
       /*
-       * Fixed at the top, across the width of the frame, above the content but
-       * below an open menu: a dropdown portal renders at z-50, and the bar at
-       * z-40 stays behind it - so a menu that opens *downwards* from a control
-       * under the bar is reachable, and the bar never covers a choice.
+       * **Fixed at the bottom of the window, inside the content column.**
+       *
+       * The column's left edge is the sidebar's width, and the shell publishes
+       * it as `--sidebar-width` - so the bar spans the content, never the
+       * sidebar, and it is pinned to the bottom of the window even on a short
+       * screen where the content does not reach it.
+       *
+       * `z-40` puts it **above** the page content and **below** an open
+       * menu: the dropdowns, the font picker and the colour menus are
+       * rendered in a portal at `z-50`, so the option the operator is
+       * reaching for is never swallowed by the bar.
+       *
+       * The bar is out of the flow, so it covers whatever is behind it; the
+       * screen's own bottom padding is what keeps the last field of a long
+       * form clear of it.
        */
-      className="sticky top-0 z-40 -mx-4 mb-4 border-b border-warning/40 bg-warning/10 px-4 py-2.5 backdrop-blur-md lg:-mx-6 lg:px-6"
+      className="fixed inset-x-0 bottom-0 z-40 px-4 pb-4 lg:left-[var(--sidebar-width)]"
     >
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-3 gap-y-2">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-2xl border border-warning/40 bg-card/95 px-4 py-2.5 shadow-lg backdrop-blur-md">
         <span className="flex min-w-0 flex-1 items-center gap-2 text-sm">
           {error ? (
             <>

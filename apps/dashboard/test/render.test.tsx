@@ -708,9 +708,15 @@ test("the save bar warns about unsaved changes and offers both actions", () => {
   assert.match(html, /تغييرات غير محفوظة/, "the warning says what the problem is");
   assert.match(html, /حفظ التغييرات/, "the save action is offered");
   assert.match(html, /تجاهل/, "the revert action is offered");
-  assert.match(html, /sticky/, "the bar sticks to the top rather than floating over the content");
+  assert.match(html, /fixed/, "the bar is fixed to the bottom of the window");
+  assert.match(html, /bottom-0/, "at the bottom");
+  assert.match(html, /z-40/, "and it sits below an open menu, which is portalled at z-50");
+  assert.match(
+    html,
+    /var\(--sidebar-width\)/,
+    "and it stops at the sidebar's edge instead of stretching over it"
+  );
 });
-
 test("the save bar's labels are overridable per screen", () => {
   // The wording belongs to the screen, not the component: a form that uses
   // "إلغاء" must be able to say so without forking the bar.

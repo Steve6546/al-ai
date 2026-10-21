@@ -380,6 +380,13 @@ export function AppShell({
      * instead of pushing the frame taller.
      */
     <div
+      /*
+       * `--sidebar-width` is published here so that the floating save bar can
+       * span the content column and stop at the sidebar's edge: a `fixed`
+       * element with `inset-x-0` would otherwise stretch over the sidebar.
+       * The value is the same width the grid's column uses.
+       */
+      style={{ "--sidebar-width": collapsed ? "4.75rem" : "16.5rem" } as React.CSSProperties}
       className={cn(
         "grid h-full grid-cols-1 grid-rows-[minmax(0,1fr)] transition-ui",
         collapsed ? "lg:grid-cols-[4.75rem_1fr]" : "lg:grid-cols-[16.5rem_1fr]"

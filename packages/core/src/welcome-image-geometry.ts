@@ -10,9 +10,13 @@
  *   while the editor placed the text's *top* at `y`. The two are a whole
  *   line-height apart, and the gap grows with the font size - which is why a
  *   large text sat lower in the editor than in the exported image.
- * - **The resize.** The editor changed the size by the *horizontal* movement
- *   of a corner handle while the box grew from its top-left, so the handle
- *   ran away from the pointer and the element appeared to jump.
+ * - **The resize.** The editor measured the new size as the distance from the
+ *   box's *origin corner* to the pointer. The handle sits at the bottom-right,
+ *   so that distance is already `size x 1.41` before the operator moves the
+ *   mouse at all: the element inflated by 41% on the first pixel of the drag,
+ *   then grew 1.41 times faster than the pointer travelled - which is how a
+ *   small movement filled the card. **The size is the size at the start of the
+ *   drag plus the pointer's travel.** Nothing else.
  * - **The bounds.** A resize was not clamped at all, so a layer could grow
  *   out of the card, and a dragged text was clamped by its anchor only.
  *
@@ -67,47 +71,97 @@ export function clampAnchor(point: Point, canvas: { width: number; height: numbe
 }
 
 /**
- * The size a corner handle asks for.
+ * Where a text layer's anchor may sit, so the **whole text** stays in the card.
  *
- * The handle sits at the bottom-right, so the size is the distance from the
- * box's *fixed* corner to the pointer - not the horizontal movement alone.
- * That is what makes the handle follow the pointer: the box grows away from
- * the corner that does not move, and the corner the operator holds stays
- * under their finger.
+ * The anchor alone is not enough: a left-aligned text at `x = card.width` sits
+ * inside the card and hangs off its right edge. The box's width is what makes
+ * the difference, and the alignment decides which side the text grows towards.
  */
-export function sizeFromHandle(
-  origin: Point,
-  pointer: Point,
-  bounds: { min: number; max: number }
-): number {
-  const distance = Math.hypot(pointer.x - origin.x, pointer.y - origin.y);
-  return Math.round(Math.min(Math.max(bounds.min, distance), bounds.max));
+export function clampTextAnchor(
+  point: Point,
+  canvas: { width: number; height: number },
+  box: { width: number; ascent: number; align: "start" | "center" | "end" }
+): Point {
+  const half = Math.max(0, box.width) / 2;
+  const left =
+    box.align === "center" ? half : box.align === "end" ? Math.max(0, box.width) : 0;
+  const right =
+    box.align === "center"
+      ? canvas.width - half
+      : box.align === "end"
+        ? canvas.width
+        : canvas.width - Math.max(0, box.width);
+  // A text wider than the card has no room: it is pinned to the position its
+  // alignment asks for, and it overflows rather than being pulled inside.
+  const inverted = left > right;
+  const pinned =
+    box.align === "center" ? canvas.width / 2 : box.align === "end" ? canvas.width : 0;
+  const minX = inverted ? pinned : left;
+  const maxX = inverted ? pinned : right;
+  const ascent = Math.max(0, box.ascent);
+  return {
+    x: Math.min(Math.max(minX, point.x), maxX),
+    // The baseline cannot be above the card's top: the text would hang out of
+    // it. One ascent is the height of the line above the baseline.
+    y: Math.min(Math.max(Math.min(ascent, canvas.height), point.y), canvas.height)
+  };
 }
 
 /**
- * The size a text handle asks for.
+ * The size a drag asks for.
  *
- * A text layer has no box to grow: it grows around its anchor, so the size
- * follows the pointer's distance from that anchor.
+ * **The size at the start of the drag, plus the pointer's travel.** The
+ * pointer's travel is projected on the handle's diagonal - the average of the
+ * two axes - so a diagonal drag (the natural one) grows the box by exactly
+ * the distance the pointer moved, and the corner the operator holds stays
+ * under their finger. The bounds are explicit: a layer never shrinks below
+ * its minimum nor grows past its maximum, whatever the pointer does.
  */
-export function fontSizeFromHandle(
-  anchor: Point,
-  pointer: Point,
-  bounds: { min: number; max: number }
-): number {
-  const distance = Math.hypot(pointer.x - anchor.x, pointer.y - anchor.y);
-  return Math.round(Math.min(Math.max(bounds.min, distance), bounds.max));
+export function sizeFromDrag(params: {
+  /** The size when the drag began. */
+  start: number;
+  /** The pointer, in card pixels, when the drag began. */
+  startPointer: Point;
+  /** The pointer now, in card pixels. */
+  pointer: Point;
+  min: number;
+  max: number;
+}): number {
+  const dx = params.pointer.x - params.startPointer.x;
+  const dy = params.pointer.y - params.startPointer.y;
+  const travelled = (dx + dy) / 2;
+  const size = params.start + travelled;
+  return Math.round(Math.min(Math.max(params.min, size), params.max));
 }
 
-/** The pointer's position in card pixels, given the canvas's scale. */
-export function toCardSpace(
-  pointer: Point,
-  origin: Point,
-  scale: number
+/**
+ * The pointer's position in card pixels.
+ *
+ * The scale is read from the canvas's **real** rendered box - its client width
+ * against the card's own width - so a card that is displayed at half size
+ * turns a 10-pixel screen movement into 20 card pixels, whatever the frame
+ * happens to measure. The border is excluded (`clientWidth` is the content
+ * box), and the content box's origin is the border's inner edge, so the
+ * pointer lands where it visually does.
+ */
+export function toCardPoint(
+  screen: Point,
+  box: {
+    left: number;
+    top: number;
+    clientWidth: number;
+    clientHeight: number;
+    borderLeft?: number;
+    borderTop?: number;
+  },
+  canvas: { width: number; height: number }
 ): Point {
-  const safeScale = scale > 0 ? scale : 1;
+  const scaleX = box.clientWidth > 0 ? box.clientWidth / canvas.width : 1;
+  const scaleY = box.clientHeight > 0 ? box.clientHeight / canvas.height : 1;
+  const originX = box.left + (box.borderLeft ?? 0);
+  const originY = box.top + (box.borderTop ?? 0);
   return {
-    x: origin.x + (pointer.x - origin.x) / safeScale,
-    y: origin.y + (pointer.y - origin.y) / safeScale
+    x: (screen.x - originX) / scaleX,
+    y: (screen.y - originY) / scaleY
   };
 }
