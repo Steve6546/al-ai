@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, RotateCcw } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 /**
  * The unsaved-changes bar.
@@ -36,16 +36,34 @@ export function SaveBar({
   onCancel,
   message = "لديك تغييرات غير محفوظة",
   saveLabel = "حفظ التغييرات",
-  cancelLabel = "تجاهل"
+  cancelLabel = "تجاهل",
+  canSave = true,
+  blockedMessage = null
 }: {
   onSave: () => Promise<void>;
   onCancel: () => void;
   message?: string;
   saveLabel?: string;
   cancelLabel?: string;
+  /**
+   * The screen knows a prerequisite the request would fail on - a channel that
+   * was never chosen. Saying it in the bar, before the click, is the whole
+   * point: the operator reads the reason instead of a rejection from a server
+   * that already knew it.
+   */
+  canSave?: boolean;
+  blockedMessage?: string | null;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /*
+   * The re-entry guard is a ref, not `saving`. `setSaving(true)` only paints on
+   * the next render, so a burst of clicks could pass the disabled check before
+   * it lands - and each pass was another request. The ref flips in the same
+   * tick the click arrives, so one press is one request.
+   */
+  const inFlight = useRef(false);
+  const blocked = canSave ? null : blockedMessage;
 
   return (
     <div
@@ -77,6 +95,11 @@ export function SaveBar({
               <AlertTriangle className="size-4 shrink-0 text-destructive" />
               <span className="min-w-0 text-destructive">{error}</span>
             </>
+          ) : blocked ? (
+            <>
+              <AlertTriangle className="size-4 shrink-0 text-warning" />
+              <span className="min-w-0 text-warning">{blocked}</span>
+            </>
           ) : (
             <>
               <span className="relative flex size-2 shrink-0" aria-hidden>
@@ -102,7 +125,10 @@ export function SaveBar({
             size="sm"
             className="rounded-full"
             loading={saving}
+            disabled={!canSave}
             onClick={async () => {
+              if (inFlight.current) return;
+              inFlight.current = true;
               setSaving(true);
               setError(null);
               try {
@@ -110,6 +136,7 @@ export function SaveBar({
               } catch (cause) {
                 setError(cause instanceof Error ? cause.message : "تعذّر الحفظ.");
               } finally {
+                inFlight.current = false;
                 setSaving(false);
               }
             }}

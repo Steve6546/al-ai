@@ -156,6 +156,39 @@ async function waitForApp(cdp, sessionId, timeoutMs = 15_000) {
   return false;
 }
 
+/**
+ * The signed-in shell, not just "something rendered".
+ *
+ * A page that lost its session renders the login card, which is also "not
+ * loading and not empty" - so `waitForApp` is satisfied by a signed-out screen.
+ * The axe scan then reports a page with no `main` and no heading, which reads
+ * as an accessibility regression in the dashboard when it is really a session
+ * that did not arrive. Waiting for the shell names that difference.
+ */
+async function waitForShell(cdp, sessionId, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  let state = "none";
+  while (Date.now() < deadline) {
+    const probe = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          if (document.querySelector("main")) return "shell";
+          const text = (document.querySelector("#root")?.textContent ?? "").trim();
+          if (text.includes("تسجيل الدخول عبر Discord")) return "login";
+          return text.length > 0 ? "other" : "none";
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    state = probe.result.value;
+    if (state === "shell") return state;
+    await sleep(300);
+  }
+  return state;
+}
+
 async function runAxe(cdp, sessionId, url, label, palette) {
   const source = await readFile(AXE_SOURCE, "utf8");
   await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source }, sessionId);
@@ -507,7 +540,7 @@ async function main() {
     // The live pass signs the browser in with the session the database holds,
     // so the pages answer with the real data. The cookie is never printed.
     if (live) {
-      await cdp.send(
+      const { success } = await cdp.send(
         "Network.setCookie",
         {
           name: "__Host-al_ai_session",
@@ -519,6 +552,34 @@ async function main() {
         },
         sessionId
       );
+      // The browser can silently drop a cookie (a `__Host-` cookie needs
+      // `Secure`, `Path=/` and no domain, and an unusual profile policy can
+      // still refuse it). Without this, a refused cookie turned the whole live
+      // sweep into a tour of the login screen - every screen shorter than the
+      // last, no `main`, and axe complaining about a page that had no content
+      // to judge. Two lines here save an hour of guessing further down.
+      if (!success) {
+        throw new Error("the browser refused the live session cookie - the live pass would render the login screen");
+      }
+      await cdp.send("Page.navigate", { url: `${origin}/` }, sessionId);
+      await sleep(800);
+      const auth = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `fetch("/api/session", { credentials: "same-origin" })
+            .then(response => response.json())
+            .then(body => body.authenticated === true)
+            .catch(() => false)`,
+          awaitPromise: true,
+          returnByValue: true
+        },
+        sessionId
+      );
+      if (auth.result?.value !== true) {
+        throw new Error(
+          "the live pass is not signed in - /api/session says the cookie did not arrive, so every screen checked below would be the login card"
+        );
+      }
     }
     if (!LIVE) await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: API_STUB }, sessionId);
 
@@ -627,6 +688,15 @@ async function main() {
             const path = `/dashboard/${guild}${page.view ? `/${page.view}` : ""}`;
             await cdp.send("Page.navigate", { url: `${origin}${path}` }, sessionId);
             await waitForApp(cdp, sessionId);
+            // A page that lost its session renders the login card, which is
+            // also "rendered" - the overflow numbers would then describe a
+            // card, and pass. The shell is the thing this sweep measures.
+            const shell = await waitForShell(cdp, sessionId);
+            if (shell !== "shell") {
+              failures.push(`live ${palette.name}/${width}px ${page.label}: the signed-in shell did not render (${shell})`);
+              console.log(`FAIL  live ${palette.name.padEnd(5)} ${String(width).padStart(4)}px ${page.label.padEnd(17)} shell=${shell}`);
+              continue;
+            }
             // The dashboard throttles a session to 120 requests a minute, and a
             // page load spends five or six of them. The sweep therefore paces
             // itself: running it flat out would measure the throttle answering 429
@@ -691,6 +761,12 @@ async function main() {
           const path = `/dashboard/${live.guild}${page.view ? `/${page.view}` : ""}`;
           await cdp.send("Page.navigate", { url: `${origin}${path}` }, sessionId);
           await waitForApp(cdp, sessionId);
+          const shell = await waitForShell(cdp, sessionId);
+          if (shell !== "shell") {
+            failures.push(`live ${palette.name}px ${page.label}: the signed-in shell did not render (${shell})`);
+            console.log(`FAIL  live ${palette.name.padEnd(5)} ${String(1440).padStart(4)}px ${page.label.padEnd(17)} shell=${shell}`);
+            continue;
+          }
           await sleep(3_500);
           liveReports.push(await runAxe(cdp, sessionId, `${origin}${path}`, page.label, palette.name));
         }
@@ -837,6 +913,181 @@ async function main() {
       console.log(
         `${bar.found && barPinned && barInsideColumn && barBelowMenus ? "PASS" : "FAIL"}  floating save bar   position=${bar.position} gap=${bar.bottomGap}px left=${bar.left} right=${bar.right} z=${bar.zIndex}`
       );
+
+      /*
+       * The pre-click refusal, on the real data.
+       *
+       * The server rejects a save when the welcome message is enabled but no
+       * channel is chosen (CHANNEL_NOT_FOUND). The screen has to say that
+       * *before* the click. The state is driven through the screen rather than
+       * assumed from the database: the requirement is unmet by choosing the
+       * "no channel" sentinel while the module is on, which is deterministic
+       * on any guild - a stored channel would otherwise decide whether this
+       * check can run at all.
+       *
+       * Every click here is a real mouse event. Radix's menu does not act on a
+       * synthesised `click`: the trigger opened and the option was found, but
+       * the form never changed, so the check read "clean form" while claiming
+       * the operator could save. `Input.dispatchMouseEvent` is the same input
+       * path a person uses, so what is measured is what the operator gets.
+       */
+      const evaluate = expression => cdp.send("Runtime.evaluate", { expression, returnByValue: true }, sessionId);
+
+      const clickElement = async (expression, label) => {
+        const found = await evaluate(`(() => {
+          const element = ${expression};
+          if (!element) return null;
+          element.scrollIntoView({ block: "center" });
+          const rect = element.getBoundingClientRect();
+          return JSON.stringify({
+            x: Math.round(rect.left + rect.width / 2),
+            y: Math.round(rect.top + rect.height / 2),
+            text: (element.textContent ?? "").trim().slice(0, 40)
+          });
+        })()`);
+        if (!found.result.value) return { clicked: false, text: `${label} not found` };
+        const point = JSON.parse(found.result.value);
+        await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y }, sessionId);
+        await cdp.send(
+          "Input.dispatchMouseEvent",
+          { type: "mousePressed", x: point.x, y: point.y, button: "left", clickCount: 1, buttons: 1 },
+          sessionId
+        );
+        await cdp.send(
+          "Input.dispatchMouseEvent",
+          { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1, buttons: 0 },
+          sessionId
+        );
+        return { clicked: true, text: point.text };
+      };
+
+      const channelTrigger = `document.querySelector('[aria-describedby="welcome-channel-hint"]')`;
+      const readSwitch = () =>
+        evaluate(`(() => {
+          const toggle = [...document.querySelectorAll('button[role="switch"]')].find(node =>
+            node.getAttribute("aria-label") === "تفعيل رسالة الترحيب"
+          );
+          return toggle ? toggle.getAttribute("aria-checked") : "missing";
+        })()`);
+
+      // The master switch, found by what it announces: the first switch on the
+      // screen is not a stable identity, the label is.
+      let armedState = (await readSwitch()).result.value;
+      if (armedState !== "true") {
+        await clickElement(
+          `[...document.querySelectorAll('button[role="switch"]')].find(node =>
+            node.getAttribute("aria-label") === "تفعيل رسالة الترحيب"
+          )`,
+          "welcome switch"
+        );
+        await sleep(500);
+        armedState = (await readSwitch()).result.value;
+      }
+
+      const pickChannel = async label => {
+        const opened = await clickElement(channelTrigger, "channel trigger");
+        await sleep(650);
+        const chosen = await clickElement(
+          `[...document.querySelectorAll('[role="option"]')].find(node =>
+            (node.textContent ?? "").trim() === ${JSON.stringify(label)}
+          )`,
+          `option ${label}`
+        );
+        await sleep(650);
+        return { opened: opened.clicked ? "opened" : opened.text, chosen: chosen.clicked ? "chosen" : chosen.text };
+      };
+
+      const readBar = async () => {
+        const probe = await evaluate(`(() => {
+          const bar = document.querySelector('[role="status"]');
+          if (!bar) return JSON.stringify({ found: false });
+          // The warning colour is on the icon as well as on the sentence: the
+          // first match is the icon, whose text is empty. The reason is the
+          // element that has something to read.
+          const reason = [...bar.querySelectorAll('[class*="text-warning"]')].find(node =>
+            (node.textContent ?? "").trim().length > 0
+          );
+          const save = [...bar.querySelectorAll("button")].find(node =>
+            (node.textContent ?? "").includes("حفظ")
+          );
+          return JSON.stringify({
+            found: true,
+            reason: reason ? reason.textContent.trim() : null,
+            saveDisabled: save ? save.disabled : null,
+            hint: document.querySelector("#welcome-channel-hint")?.textContent.trim() ?? null
+          });
+        })()`);
+        return JSON.parse(probe.result.value);
+      };
+
+      // The channel the form already had, so the check can put it back (and so
+      // the label proves the picker is not the blank box it used to be).
+      const originalChannel = (await evaluate(`(() => {
+        const trigger = document.querySelector('[aria-describedby="welcome-channel-hint"]');
+        return trigger ? trigger.textContent.trim() : "";
+      })()`)).result.value || "";
+
+      // The sentinel has a visible label - this is the blank box the operator
+      // was looking at, and choosing it is what puts the form in the state the
+      // server refuses.
+      const noChannel = await pickChannel("بدون قناة");
+      await sleep(400);
+      const blockedBar = await readBar();
+      const refusalShown =
+        armedState === "true" &&
+        blockedBar.found === true &&
+        Boolean(blockedBar.reason) &&
+        blockedBar.saveDisabled === true &&
+        Boolean(blockedBar.hint);
+      if (!refusalShown) {
+        failures.push(
+          `saving with no channel chosen was not blocked (armed=${armedState}, picked=${noChannel.opened}/${noChannel.chosen}, reason=${blockedBar.reason ?? "none"}, disabled=${blockedBar.saveDisabled}, hint=${blockedBar.hint ?? "none"})`
+        );
+      }
+      console.log(
+        `${refusalShown ? "PASS" : "FAIL"}  save blocked        reason="${blockedBar.reason ?? ""}" hint=${blockedBar.hint ? "shown" : "missing"} disabled=${blockedBar.saveDisabled}`
+      );
+
+      // ...and choosing a channel lifts it, without saving anything. A
+      // *different* channel is chosen, not the stored one: restoring the stored
+      // value would leave the form clean, and a clean form has no bar to read -
+      // the check would report "no save button" as if the refusal had not
+      // lifted. A guild with only one channel has nothing else to choose, so
+      // that case is reported as a skip.
+      await clickElement(channelTrigger, "channel trigger (second pass)");
+      await sleep(650);
+      const candidate = (await evaluate(`(() => {
+        const labels = [...document.querySelectorAll('[role="option"]')].map(node => (node.textContent ?? "").trim());
+        const other = labels.find(label => label && label !== "بدون قناة" && label !== ${JSON.stringify(originalChannel)});
+        return other ?? "";
+      })()`)).result.value;
+
+      if (!candidate) {
+        console.log("SKIP  save unblocked      the guild offers only one channel");
+      } else {
+        const restored = await clickElement(
+          `[...document.querySelectorAll('[role="option"]')].find(node =>
+            (node.textContent ?? "").trim() === ${JSON.stringify(candidate)}
+          )`,
+          "alternate channel"
+        );
+        await sleep(650);
+        const unblockedBar = await readBar();
+        const unblocked =
+          restored.clicked &&
+          unblockedBar.found === true &&
+          !unblockedBar.reason &&
+          unblockedBar.saveDisabled === false &&
+          !unblockedBar.hint;
+        if (!unblocked) {
+          failures.push(
+            `choosing a channel did not lift the refusal (picked=${candidate}, clicked=${restored.clicked}, reason=${unblockedBar.reason ?? "none"}, disabled=${unblockedBar.saveDisabled})`
+          );
+        }
+        console.log(
+          `${unblocked ? "PASS" : "FAIL"}  save unblocked      picked=${candidate} reason=${unblockedBar.reason ?? "none"} hint=${unblockedBar.hint ? "shown" : "none"}`
+        );
+      }
 
     }
     // The stub-driven pass: the shell, the account menu, the appearance panel and

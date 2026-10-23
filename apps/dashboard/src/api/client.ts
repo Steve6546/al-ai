@@ -389,7 +389,9 @@ export const saveInvitesSettings = (guildId: string, settings: InviteSettings) =
  * Welcome messages (رسائل الترحيب)
  * ------------------------------------------------------------------ */
 export const welcomeMessages = (guildId: string) =>
-  call<{ settings: WelcomeMessageSettings; channels: ChannelOption[] }>(`/api/guilds/${guildId}/welcome-messages`);
+  call<{ settings: WelcomeMessageSettings; channels: ChannelOption[]; channelsError?: boolean }>(
+    `/api/guilds/${guildId}/welcome-messages`
+  );
 export const saveWelcomeMessages = (guildId: string, settings: WelcomeMessageSettings) =>
   call<{ settings: WelcomeMessageSettings; savedAt: string }>(`/api/guilds/${guildId}/welcome-messages`, {
     method: "PUT",

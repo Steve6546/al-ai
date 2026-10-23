@@ -63,3 +63,32 @@ for (const name of [
 }
 
 Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", { value: true, configurable: true, writable: true });
+
+/**
+ * jsdom has no layout, so `scrollIntoView` is missing - and Radix Select calls
+ * it the moment a panel opens, to bring the chosen option into view. The call
+ * is cosmetic (there is nothing to scroll in a document with no layout), but a
+ * missing method throws inside a React effect and takes the whole panel down,
+ * which reads as "the select cannot be opened" rather than "the test DOM is
+ * smaller than the browser's".
+ */
+if (typeof dom.window.Element.prototype.scrollIntoView !== "function") {
+  dom.window.Element.prototype.scrollIntoView = () => {};
+}
+
+/**
+ * Pointer capture, for the same reason: Radix records the pointer on a
+ * `pointerdown` and asks the target whether it still holds it. jsdom has no
+ * capture at all, so the call throws "hasPointerCapture is not a function"
+ * inside an event handler - the selection still works, but every run prints a
+ * stack trace that looks like a real failure.
+ */
+for (const name of ["hasPointerCapture", "setPointerCapture", "releasePointerCapture"] as const) {
+  if (typeof (dom.window.Element.prototype as unknown as Record<string, unknown>)[name] !== "function") {
+    Object.defineProperty(dom.window.Element.prototype, name, {
+      value: name === "hasPointerCapture" ? () => false : () => undefined,
+      configurable: true,
+      writable: true
+    });
+  }
+}

@@ -717,6 +717,24 @@ test("the save bar warns about unsaved changes and offers both actions", () => {
     "and it stops at the sidebar's edge instead of stretching over it"
   );
 });
+test("the save bar states a blocked reason instead of pretending the form can be sent", () => {
+  // A screen that already knows the request would fail - the welcome message is
+  // armed with no channel - says so *before* the click, and disables the action
+  // rather than sending the operator into a rejection from the server.
+  const html = renderToString(
+    createElement(SaveBar, {
+      onSave: async () => {},
+      onCancel: () => {},
+      canSave: false,
+      blockedMessage: "اختر قناة الترحيب أولاً"
+    })
+  ).replace(/<!-- -->/g, "");
+
+  assert.match(html, /اختر قناة الترحيب أولاً/, "the reason is on screen");
+  assert.doesNotMatch(html, /لديك تغييرات غير محفوظة/, "the reason replaces the generic warning rather than hiding behind it");
+  assert.match(html, /<button[^>]*disabled/, "and the action cannot be pressed");
+});
+
 test("the save bar's labels are overridable per screen", () => {
   // The wording belongs to the screen, not the component: a form that uses
   // "إلغاء" must be able to say so without forking the bar.

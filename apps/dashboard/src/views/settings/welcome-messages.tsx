@@ -74,6 +74,10 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
   const [tab, setTab] = useState<Tab>("settings");
   const [settings, setSettings] = useState<WelcomeMessageSettings | null>(null);
   const [channels, setChannels] = useState<ChannelOption[]>([]);
+  /* The channel list could not be read from Discord. The screen must say that
+     rather than draw an empty picker: "there are no channels" and "we could not
+     ask" are different answers, and only one of them is the operator's to fix. */
+  const [channelsError, setChannelsError] = useState(false);
   /* The bot's picture and name in THIS guild, for the preview. The same read the
      identity screen uses, so the preview shows the bot the members see. */
   const [profile, setProfile] = useState<GuildProfileSnapshot | null>(null);
@@ -106,6 +110,7 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
         if (cancelled) return;
         setSettings(result.settings);
         setChannels(result.channels);
+        setChannelsError(result.channelsError === true);
       })
       .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
     // The bot's own picture and name in this guild, for the preview. The same
@@ -154,6 +159,36 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
   if (!settings || !draft) return <LoadingRow />;
 
   const channelSelect = (value: string) => (value === NONE ? null : value);
+
+  /*
+   * **The channel a greeting is sent to is the one thing the bot cannot
+   * guess.** The server refuses to arm the module without one - a welcome
+   * pointing nowhere is a silent module, not a working one - and it answers
+   * that refusal with 409. Until now the screen learned about it only *after*
+   * the round trip: the picker looked empty, the operator pressed save, and
+   * the bar answered with a rejection for a field that had not said it was
+   * required.
+   *
+   * The empty picker had its own cause. The "no channel" choice was the
+   * sentinel `__none__`, but no option carried that value, so Radix had no
+   * label to render and drew a blank box - which reads as a broken control,
+   * not as "nothing selected yet". The sentinel now has an option, a saved
+   * channel that Discord no longer has is named instead of hidden, and the
+   * requirement is stated at the field and in the save bar before the click.
+   */
+  const knows = (id: string | null) => id === null || channels.some(channel => channel.id === id);
+  const welcomeChannelMissing = !knows(draft.channelId);
+  const imageChannelMissing = !knows(draft.imageChannelId);
+  const channelRequired = draft.enabled && !draft.channelId;
+  const imageChannelRequired =
+    draft.enabled && draft.imageEnabled && draft.imageMode === "separate_channel" && !draft.imageChannelId;
+  const blockedReason = channelRequired
+    ? "اختر قناة الترحيب أولاً، ثم احفظ — لا تُرسَل رسالة بلا قناة."
+    : imageChannelRequired
+      ? "اختر قناة الصورة أولاً، ثم احفظ."
+      : channelsError
+        ? "تعذّر جلب قنوات السيرفر من ديسكورد — أعد المحاولة قبل الحفظ."
+        : null;
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "settings", label: "الإعدادات" },
@@ -344,35 +379,70 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
                       value={draft.imageChannelId ?? NONE}
                       onValueChange={value => patch({ imageChannelId: channelSelect(value) })}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="w-full" aria-invalid={imageChannelRequired || imageChannelMissing}>
                         <SelectValue placeholder="اختر قناة..." />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value={NONE}>بدون قناة</SelectItem>
                         {channels.map(channel => (
                           <SelectItem key={channel.id} value={channel.id}>
                             #{channel.name}
                           </SelectItem>
                         ))}
+                        {imageChannelMissing && draft.imageChannelId && (
+                          <SelectItem value={draft.imageChannelId}>
+                            {`#${draft.imageChannelId} — لم تعد موجودة`}
+                          </SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
+                    {imageChannelRequired && (
+                      <p className="text-[11px] text-destructive">اختر قناة الصورة، أو اجعل الصورة داخل الرسالة نفسها.</p>
+                    )}
+                    {imageChannelMissing && !imageChannelRequired && (
+                      <p className="text-[11px] text-destructive">
+                        القناة المحفوظة لم تعد موجودة في السيرفر. اختر قناة أخرى.
+                      </p>
+                    )}
                   </FieldRow>
                 )}
               </>
             )}
 
-            <FieldRow label="قناة الترحيب">
+            <FieldRow label={draft.enabled ? "قناة الترحيب (مطلوبة)" : "قناة الترحيب"}>
               <Select value={draft.channelId ?? NONE} onValueChange={value => patch({ channelId: channelSelect(value) })}>
-                <SelectTrigger className="w-full">
+                <SelectTrigger
+                  className="w-full"
+                  aria-invalid={channelRequired || welcomeChannelMissing}
+                  aria-describedby="welcome-channel-hint"
+                >
                   <SelectValue placeholder="اختر قناة..." />
                 </SelectTrigger>
                 <SelectContent>
+                  {/* The sentinel needs an option of its own: a value with no
+                      item has no label, and Radix then draws an empty box. */}
+                  <SelectItem value={NONE}>بدون قناة</SelectItem>
                   {channels.map(channel => (
                     <SelectItem key={channel.id} value={channel.id}>
                       #{channel.name}
                     </SelectItem>
                   ))}
+                  {welcomeChannelMissing && draft.channelId && (
+                    <SelectItem value={draft.channelId}>{`#${draft.channelId} — لم تعد موجودة`}</SelectItem>
+                  )}
                 </SelectContent>
               </Select>
+              {/* One hint line, announced with the field: whichever sentence is
+                  true wins - the missing channel is the thing to fix first. */}
+              {(channelRequired || welcomeChannelMissing || channelsError) && (
+                <p id="welcome-channel-hint" className="text-[11px] text-destructive">
+                  {channelRequired
+                    ? "الترحيب مفعَّل بلا قناة: اختر القناة التي تُرسَل إليها الرسالة."
+                    : welcomeChannelMissing
+                      ? "القناة المحفوظة لم تعد موجودة في السيرفر. اختر قناة أخرى."
+                      : "تعذّر جلب قنوات السيرفر من ديسكورد. أعد المحاولة، أو أعد تحميل الصفحة."}
+                </p>
+              )}
             </FieldRow>
           </CardContent>
         </Card>
@@ -873,11 +943,13 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
           message="لديك تغييرات غير محفوظة"
           saveLabel="حفظ التغييرات"
           cancelLabel="تجاهل"
+          canSave={blockedReason === null}
+          blockedMessage={blockedReason}
           onCancel={reset}
           onSave={async () => {
             const result = await api.saveWelcomeMessages(guild.id, draft);
             commit(result.settings);
-            push({ title: "حُفظت رسائل الترحيب — تُطبَّق على البوت خلال نصف دقيقة.", tone: "success" });
+            push({ title: "تم حفظ إعدادات الترحيب — الرسالة جاهزة عند وصول عضو جديد.", tone: "success" });
           }}
         />
       )}

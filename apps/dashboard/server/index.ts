@@ -126,6 +126,7 @@ import {
 } from "./discord.js";
 import { clientKey, RequestThrottle } from "./cache.js";
 import { describeGuildAccess, isAdministrable } from "./guild-access.js";
+import { checkWelcomeChannels } from "./welcome-channels.js";
 import {
   createNetworkManager,
   isLoopbackOrigin,
@@ -1632,10 +1633,17 @@ app.get("/api/guilds/:guildId/welcome-messages", async (request, reply) => {
   if (!context) return;
 
   const settings = await db.getWelcomeMessages(guildId);
+  // "There are no channels" and "we could not ask" are different answers, and
+  // the screen draws a different sentence for each: an empty picker with no
+  // explanation reads as a broken screen, not as a Discord outage.
+  let channelsReadable = Boolean(env.botToken);
   const channels = env.botToken
-    ? await fetchGuildChannels(env.botToken, guildId).catch(() => [] as ChannelOption[])
+    ? await fetchGuildChannels(env.botToken, guildId).catch(() => {
+        channelsReadable = false;
+        return [] as ChannelOption[];
+      })
     : ([] as ChannelOption[]);
-  return { settings, channels };
+  return { settings, channels, channelsError: !channelsReadable };
 });
 
 app.put("/api/guilds/:guildId/welcome-messages", async (request, reply) => {
@@ -1650,23 +1658,25 @@ app.put("/api/guilds/:guildId/welcome-messages", async (request, reply) => {
   const settings = normaliseWelcomeMessageSettings(body);
 
   // Every named channel must be a real channel the bot can see — a deleted
-  // welcome channel would silently swallow every greeting.
+  // welcome channel would silently swallow every greeting. The rule itself
+  // lives in `welcome-channels.ts`, because the *reason* a list came back empty
+  // decides the answer: a Discord read that failed is 503 ("we could not
+  // check"), not 409 ("your channel is gone").
+  let channelsReadable = Boolean(env.botToken);
   const channels = env.botToken
-    ? await fetchGuildChannels(env.botToken, guildId).catch(() => [] as ChannelOption[])
+    ? await fetchGuildChannels(env.botToken, guildId).catch(() => {
+        channelsReadable = false;
+        return [] as ChannelOption[];
+      })
     : ([] as ChannelOption[]);
-  const channelIds = new Set(channels.map(channel => channel.id));
-  const requiresChannel = (id: string | null, label: string) => {
-    if (!id) return `${label}: اختر قناة أولاً.`;
-    if (!channelIds.has(id)) return `${label}: القناة محذوفة أو غير ظاهرة للبوت — اختر قناة أخرى.`;
-    return null;
-  };
-  if (settings.enabled) {
-    const channelError = requiresChannel(settings.channelId, "قناة الترحيب");
-    if (channelError) return reply.code(409).send({ error: "CHANNEL_NOT_FOUND", message: channelError });
-    if (settings.imageEnabled && settings.imageMode === "separate_channel") {
-      const imageError = requiresChannel(settings.imageChannelId, "قناة الصورة");
-      if (imageError) return reply.code(409).send({ error: "CHANNEL_NOT_FOUND", message: imageError });
+  const verdict = checkWelcomeChannels(settings, new Set(channels.map(channel => channel.id)), {
+    listReadable: channelsReadable
+  });
+  if (!verdict.ok) {
+    if (verdict.code === "CHANNEL_LIST_UNAVAILABLE") {
+      return reply.code(503).send({ error: verdict.code, message: verdict.message });
     }
+    return reply.code(409).send({ error: verdict.code, field: verdict.field, message: verdict.message });
   }
 
   await db.saveWelcomeMessages(guildId, settings);
