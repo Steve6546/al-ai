@@ -94,18 +94,15 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
       <Toaster toasts={toasts} onDismiss={dismiss} />
 
       <div className="space-y-1 pt-1">
-        <h1 className="text-lg font-semibold">حالة البوت والنشاط</h1>
         <p className="text-xs text-muted-foreground">
-          كيف يظهر AL AI في قائمة الأعضاء: حالته، والنشاط المكتوب تحتها. هذه القيم تخصّ البوت كله — تظهر في كل سيرفر، بما فيه{" "}
-          <span className="font-medium text-foreground">{guild.name}</span>.
+          الحالة والنشاط يظهران في كل السيرفرات — بما فيها {guild.name}.
         </p>
       </div>
 
       <Alert>
         <Globe2 className="size-4" />
         <AlertDescription>
-          الحالة تُكتب على اتصال البوت الحي (gateway)، وليس لكل سيرفر حالة خاصة. ما تُغيِّره هنا يظهر في كل السيرفرات التي يعمل فيها AL
-          AI، ولا يمكن قصره على سيرفر واحد — لأن Discord لا يوفّر ذلك أصلاً.
+          الحالة تُكتب على اتصال البوت (gateway) وتظهر في كل السيرفرات.
         </AlertDescription>
       </Alert>
 
@@ -163,7 +160,7 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
                 />
               </div>
               <p className="text-[11px] text-muted-foreground">
-                اترك النص فارغاً ليظهر النشاط الافتراضي بدل نوع بلا نص — النوع وحده لا يعرض شيئاً في Discord.
+                اتركه فارغاً ليظهر النشاط الافتراضي.
               </p>
             </div>
           </div>
@@ -190,7 +187,7 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
 
       {dirty ? (
         <SaveBar
-          message="لديك تغييرات غير محفوظة"
+          message="تغييرات غير محفوظة"
           saveLabel="حفظ الحالة"
           cancelLabel="تجاهل"
           onCancel={reset}

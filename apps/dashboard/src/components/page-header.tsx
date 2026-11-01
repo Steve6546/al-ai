@@ -27,13 +27,13 @@ export function PageHeader({
       <div className="min-w-0">
         {/* The page's own heading, so every screen has exactly one `h1` - the
             frame's breadcrumb is a path, not a title. */}
-        <h1 className="text-lg font-semibold leading-tight tracking-tight">{title}</h1>
+        <h1 className="break-words text-xl font-semibold leading-tight tracking-tight sm:text-lg">{title}</h1>
         {description ? (
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
         ) : null}
       </div>
       {actions ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
+        <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto">{actions}</div>
       ) : null}
     </header>
   );

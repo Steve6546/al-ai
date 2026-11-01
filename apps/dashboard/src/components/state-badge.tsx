@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 export function StateBadge({
   enabled,
   enabledLabel = "مُفعّل",
-  disabledLabel = "مُعطل"
+  disabledLabel = "مُعطّل"
 }: {
   enabled: boolean;
   enabledLabel?: string;

@@ -21,7 +21,11 @@ const Card = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <HeroCard
     ref={ref}
-    className={cn("border border-border bg-card shadow-sm", className)}
+    // `p-0` is deliberate: HeroUI's card ships with its own 16px padding, and
+    // this app's CardHeader/CardContent already own that space. Keeping both
+    // cost 32px of every card's width - enough to squeeze a phone card into a
+    // column a few characters wide. The gap HeroUI adds between blocks stays.
+    className={cn("border border-border bg-card p-0 shadow-sm", className)}
     {...props}
   />
 ))
@@ -33,7 +37,7 @@ const CardHeader = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("flex flex-col space-y-1.5 px-5 pb-3 pt-4", className)}
+    className={cn("flex flex-col space-y-1.5 px-4 pb-3 pt-4 sm:px-5", className)}
     {...props}
   />
 ))
@@ -45,7 +49,10 @@ const CardTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("font-semibold leading-none tracking-tight", className)}
+    // `leading-snug` and no negative tracking: Arabic titles have descenders
+    // and joined letters, and `leading-none` / `tracking-tight` clip and cram
+    // them. This is the one title style every card shares.
+    className={cn("font-semibold leading-snug tracking-normal", className)}
     {...props}
   />
 ))
@@ -67,7 +74,7 @@ const CardContent = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
 >(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("px-5 pb-5", className)} {...props} />
+  <div ref={ref} className={cn("px-4 pb-4 sm:px-5 sm:pb-5", className)} {...props} />
 ))
 CardContent.displayName = "CardContent"
 
@@ -75,7 +82,7 @@ const CardFooter = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
 >(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("flex items-center px-5 pb-5", className)} {...props} />
+  <div ref={ref} className={cn("flex items-center px-4 pb-4 sm:px-5 sm:pb-5", className)} {...props} />
 ))
 CardFooter.displayName = "CardFooter"
 

@@ -10,8 +10,9 @@
  * Discord's actual 403 wording knows the bot is missing a permission.
  */
 
-import { Loader2 } from "lucide-react";
+import { Loader2, RotateCw } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 
 /** One labelled spinner, for the moment between the fetch and the answer. */
 export function LoadingRow({ label = "جارٍ التحميل" }: { label?: string }) {
@@ -24,15 +25,26 @@ export function LoadingRow({ label = "جارٍ التحميل" }: { label?: stri
 }
 
 /**
- * The fetch failed. Shows the message rather than a generic wording.
+ * The fetch failed. Shows the message rather than a generic wording, and offers
+ * the one action that can fix a transient failure.
  *
  * The message is already in the operator's language or is Discord's own error
  * text; either is more useful than anything this component could substitute.
+ *
+ * `onRetry` defaults to a reload: the router is driven by the address bar, so a
+ * reload re-bootstraps the session and lands on the same screen. Every view
+ * loads inside its own `useEffect`, so without a default the alternative was a
+ * message telling the operator to try again with no control that does it — and
+ * an error screen has no unsaved state to lose.
  */
-export function LoadError({ message }: { message: string }) {
+export function LoadError({ message, onRetry = () => window.location.reload() }: { message: string; onRetry?: () => void }) {
   return (
-    <Alert variant="destructive">
+    <Alert variant="destructive" className="flex flex-wrap items-center justify-between gap-3">
       <AlertDescription>{message}</AlertDescription>
+      <Button size="sm" variant="outline" onClick={onRetry} className="shrink-0">
+        <RotateCw />
+        أعد المحاولة
+      </Button>
     </Alert>
   );
 }

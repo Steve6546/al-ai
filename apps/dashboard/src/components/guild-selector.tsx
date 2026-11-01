@@ -3,6 +3,7 @@ import {
   Activity,
   Bot,
   Crown,
+  Info,
   Loader2,
   RefreshCw,
   Search,
@@ -114,7 +115,13 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
 
         <StatusPill health={health} />
 
-        <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onRefresh}
+          disabled={refreshing}
+          aria-label="تحديث قائمة السيرفرات"
+        >
           <RefreshCw className={cn(refreshing && "animate-spin")} />
           <span className="hidden sm:inline">تحديث</span>
         </Button>
@@ -149,7 +156,13 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
           </div>
 
           {notice && (
-            <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">{notice}</div>
+            <p
+              aria-live="polite"
+              className="-mb-4 flex items-center gap-2 text-sm text-muted-foreground"
+            >
+              <Info className="size-4 shrink-0" />
+              {notice}
+            </p>
           )}
           {error && (
             <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">

@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -34,7 +35,7 @@ import { useRef, useState } from "react";
 export function SaveBar({
   onSave,
   onCancel,
-  message = "لديك تغييرات غير محفوظة",
+  message = "تغييرات غير محفوظة",
   saveLabel = "حفظ التغييرات",
   cancelLabel = "تجاهل",
   canSave = true,
@@ -72,10 +73,10 @@ export function SaveBar({
       /*
        * **Fixed at the bottom of the window, inside the content column.**
        *
-       * The column's left edge is the sidebar's width, and the shell publishes
-       * it as `--sidebar-width` - so the bar spans the content, never the
-       * sidebar, and it is pinned to the bottom of the window even on a short
-       * screen where the content does not reach it.
+       * The column's inline-start edge is the sidebar's width. In this RTL
+       * layout the sidebar sits on the right, so the offset is expressed with
+       * the logical `start` utility - a physical `left` pushed the bar over the
+       * sidebar and left the content's own edge uncovered.
        *
        * `z-40` puts it **above** the page content and **below** an open
        * menu: the dropdowns, the font picker and the colour menus are
@@ -86,10 +87,22 @@ export function SaveBar({
        * screen's own bottom padding is what keeps the last field of a long
        * form clear of it.
        */
-      className="fixed inset-x-0 bottom-0 z-40 px-4 pb-4 lg:left-[var(--sidebar-width)]"
+      className="fixed inset-x-0 bottom-0 z-40 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4 sm:pb-3 lg:start-[var(--sidebar-width)]"
     >
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-2xl border border-warning/40 bg-card/95 px-4 py-2.5 shadow-lg backdrop-blur-md">
-        <span className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+      <div
+        className={cn(
+          // Compact on every screen: a short status plus two controls does not
+          // need a full-width bar. The accent border is the unsaved state; the
+          // warning and destructive borders keep their meaning.
+          "mx-auto flex max-w-2xl flex-wrap items-center justify-between gap-x-2 gap-y-2 rounded-xl border bg-card/95 px-3 py-2 shadow-lg backdrop-blur-md",
+          error
+            ? "border-destructive/40"
+            : blocked
+              ? "border-warning/40"
+              : "border-primary/35 shadow-primary/10"
+        )}
+      >
+        <span className="flex min-w-0 flex-1 items-center gap-2 text-sm sm:text-[13px]">
           {error ? (
             <>
               <AlertTriangle className="size-4 shrink-0 text-destructive" />
@@ -102,9 +115,9 @@ export function SaveBar({
             </>
           ) : (
             <>
-              <span className="relative flex size-2 shrink-0" aria-hidden>
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-60" />
-                <span className="relative inline-flex size-2 rounded-full bg-warning" />
+              <span className="relative flex size-1.5 shrink-0" aria-hidden>
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
+                <span className="relative inline-flex size-1.5 rounded-full bg-primary" />
               </span>
               {/* The message may wrap on a narrow screen; only the pointer's
                   layout is fixed. Nothing is truncated, because "there are
@@ -115,7 +128,7 @@ export function SaveBar({
           )}
         </span>
         <div className="flex shrink-0 items-center gap-1.5">
-          <Button variant="ghost" size="sm" className="rounded-full hover:text-destructive" onClick={onCancel} disabled={saving}>
+          <Button variant="ghost" size="sm" className="rounded-full hover:bg-primary/10 hover:text-primary" onClick={onCancel} disabled={saving}>
             <RotateCcw />
             {cancelLabel}
           </Button>

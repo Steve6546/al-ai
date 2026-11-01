@@ -1,16 +1,15 @@
 import { useEffect, useState } from "react";
 import { Shield } from "lucide-react";
-import { Card as HeroCard, ListBox, Select, Switch } from "@heroui/react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ListBox, Select } from "@heroui/react";
 import { api } from "@/api";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { LoadError, LoadingRow } from "@/components/view-states";
+import { ModuleStatusCard } from "@/components/module-status-card";
 import { SaveBar } from "@/components/save-bar";
 import { Toaster, useToasts } from "@/components/toaster";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { StateBadge } from "@/components/state-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DiscordRole, Guild, WelcomeSettings } from "@/types";
 
@@ -35,7 +34,7 @@ export function WelcomeView({ guild }: { guild: Guild }) {
   const [roles, setRoles] = useState<DiscordRole[]>([]);
   const [error, setError] = useState<string | null>(null);
   const { saved, draft, dirty, patch, reset, commit } = useDraftForm(settings);
-  const { toasts, push, dismiss } = useToasts();
+  const { toasts, dismiss } = useToasts();
 
   useEffect(() => {
     let cancelled = false;
@@ -77,41 +76,16 @@ export function WelcomeView({ guild }: { guild: Guild }) {
 
   return (
     <div data-heroui className="space-y-4">
-      <HeroCard>
-        <div className="flex flex-row items-center justify-between gap-3 p-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-warning/15 text-warning">
-              <Shield className="size-5" aria-hidden />
-            </span>
-            <div className="min-w-0">
-              <HeroCard.Title className="truncate">رتبة تلقائية</HeroCard.Title>
-              <HeroCard.Description>{draft.enabled ? "مفعّل" : "معطّل"}</HeroCard.Description>
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <StateBadge enabled={draft.enabled} />
-            {/* HeroUI v3's Switch is a React-Aria SwitchField: the hidden
-                checkbox that makes it clickable lives inside Switch.Content
-                (SwitchButton). A bare Switch.Control under the root renders a
-                span with nothing to press — which is exactly why this toggle
-                read as dead. The Content wrapper restores the input, and with
-                it the click, the keyboard and the screen-reader announcement. */}
-            <Switch isSelected={draft.enabled} onChange={enabled => patch({ enabled })} aria-label="تفعيل الرتبة التلقائية">
-              <Switch.Content>
-                <Switch.Control
-                  style={
-                    draft.enabled
-                      ? { backgroundColor: "#10b981", borderColor: "#34d399" }
-                      : undefined
-                  }
-                >
-                  <Switch.Thumb />
-                </Switch.Control>
-              </Switch.Content>
-            </Switch>
-          </div>
-        </div>
-      </HeroCard>
+      <ModuleStatusCard
+        icon={Shield}
+        title="منح الرتب تلقائياً"
+        description="تُمنح عند الانضمام."
+        enabled={draft.enabled}
+        onToggle={enabled => patch({ enabled })}
+        toggleLabel="تفعيل الرتبة التلقائية"
+        disabledHint="الوحدة متوقفة. فعّلها لبدء منح الرتب — إعداداتك المحفوظة تبقى كما هي."
+        enableLabel="تفعيل الوحدة"
+      />
 
       {draft.enabled ? (
         <>
@@ -119,12 +93,12 @@ export function WelcomeView({ guild }: { guild: Guild }) {
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="flex flex-col">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">رتب الأعضاء الجدد</CardTitle>
-            <CardDescription>تُمنح لكل عضو بشري ينضم للسيرفر.</CardDescription>
+            <CardTitle className="text-base">رتبة العضو الجديد</CardTitle>
+            <CardDescription>تُمنح عند انضمام عضو.</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 space-y-1.5">
             <Label className="text-xs text-muted-foreground" htmlFor="welcome-member-role">
-              رتبة الأعضاء الجدد
+              الرتبة
             </Label>
             <Select
               className="w-full"
@@ -146,18 +120,17 @@ export function WelcomeView({ guild }: { guild: Guild }) {
                 </ListBox>
               </Select.Popover>
             </Select>
-            <p className="text-xs text-muted-foreground">الرتبة التي تُعطى للأعضاء الجدد عند الانضمام.</p>
           </CardContent>
         </Card>
 
         <Card className="flex flex-col">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">رتب البوتات الجديدة</CardTitle>
-            <CardDescription>تُمنح لكل بوت يُضاف للسيرفر.</CardDescription>
+            <CardTitle className="text-base">رتبة البوت الجديد</CardTitle>
+            <CardDescription>تُمنح عند إضافة بوت.</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 space-y-1.5">
             <Label className="text-xs text-muted-foreground" htmlFor="welcome-bot-role">
-              رتبة البوتات الجديدة
+              الرتبة
             </Label>
             <Select
               className="w-full"
@@ -179,7 +152,6 @@ export function WelcomeView({ guild }: { guild: Guild }) {
                 </ListBox>
               </Select.Popover>
             </Select>
-            <p className="text-xs text-muted-foreground">الرتبة التي تُعطى للبوتات عند إضافتها للسيرفر.</p>
           </CardContent>
         </Card>
       </div>
@@ -187,12 +159,12 @@ export function WelcomeView({ guild }: { guild: Guild }) {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">التوقيت</CardTitle>
-          <CardDescription>متى تُمنح الرتبة بعد الانضمام.</CardDescription>
+          <CardDescription>0 يعني فوراً؛ والتأخير يمنح العضو وقتاً للاستقرار.</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground" htmlFor="welcome-delay">
-              تأخير منح الرتبة (0 = فوري)
+              التأخير بالثواني
             </Label>
             <div className="flex items-center gap-2" dir="ltr">
               <Input
@@ -207,32 +179,21 @@ export function WelcomeView({ guild }: { guild: Guild }) {
               <Badge variant="secondary">ثانية</Badge>
             </div>
           </div>
-          <p className="self-center text-xs text-muted-foreground">
-            التأخير مفيد لترك العضو يستقر — أو لتفادي الموجة الأولى من أي محاولة — قبل أن تحصل على الرتبة.
-          </p>
         </CardContent>
       </Card>
 
           <p className="text-xs text-muted-foreground">
-            تُمنح الرتبة فقط إذا كانت تحت أعلى رتبة للبوت — ديسكورد يرفض ما فوقها، والبوت يعيد الفحص عند الانضمام.
+            الرتب فوق رتبة البوت لا يمكن منحها — يتحقق البوت عند كل انضمام.
           </p>
         </>
-      ) : (
-        <Alert>
-          <Shield aria-hidden />
-          <AlertDescription>
-            رتبة التلقائية <strong>مُعطّلة</strong> — فعّلها من المفتاح أعلى الصفحة لتظهر بطاقتا الأعضاء والبوتات
-            والتوقيت.
-          </AlertDescription>
-        </Alert>
-      )}
+      ) : null}
 
 
       <Toaster toasts={toasts} onDismiss={dismiss} />
 
       {dirty && (
         <SaveBar
-          message="لديك تعديلات غير محفوظة"
+          message="تغييرات غير محفوظة"
           saveLabel="حفظ التعديلات"
           cancelLabel="إلغاء"
           onCancel={reset}

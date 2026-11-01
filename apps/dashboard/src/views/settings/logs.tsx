@@ -40,7 +40,6 @@ import {
   Image,
   ImageOff,
   KeyRound,
-  LayoutGrid,
   Link,
   Lock,
   LockOpen,
@@ -68,7 +67,6 @@ import {
   RadioOff,
   Repeat,
   Rocket,
-  ScrollText,
   Search,
   Scale,
   Send,
@@ -85,7 +83,6 @@ import {
   SquarePen,
   Sticker,
   Tag,
-  Target,
   Timer,
   TimerReset,
   Trash2,
@@ -108,7 +105,6 @@ import { api } from "@/api";
 import { setOrDeleteKey } from "@/lib/records";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { ColorPicker } from "@/components/color-picker";
-import { RoleSwatch } from "@/components/role-swatch";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { SaveBar } from "@/components/save-bar";
 import { Toaster, useToasts } from "@/components/toaster";
@@ -118,12 +114,10 @@ import { StateBadge } from "@/components/state-badge";
 import { SearchableMultiSelect } from "@/components/searchable-multi-select";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -412,9 +406,9 @@ export const eventHints: Record<string, string> = {
   "server.invite-create": "عند إنشاء رابط دعوة.",
   "invite.delete": "عند حذف رابط دعوة.",
   "invite.use": "عند استخدام رابط دعوة للانضمام.",
-  "invites.member-join": "عند انضمام عضو عبر دعوة مُحسوبة لموديول الإحالات: الداعي والتصنيف (عادي/وهمي/عودة) وصافي الدعوات.",
-  "invites.member-leave": "عند مغادرة عضو كان قد دُعي عبر الإحالات، مع خصم النقطة من الداعي إن كانت محسوبة.",
-  "invites.milestone": "عند بلوغ داعٍ عتبة إحالات ومنحه البوت رتبة الإنجاز — أو سحبها عند نزول الصافي.",
+  "invites.member-join": "عند انضمام عضو عبر دعوة محسوبة (الداعي والتصنيف).",
+  "invites.member-leave": "عند مغادرة عضو مدعو، مع خصم النقطة إن كانت محسوبة.",
+  "invites.milestone": "عند بلوغ عتبة إحالات ومنح رتبة الإنجاز أو سحبها.",
   "invites.admin-adjust": "عند تعديل يدوي على نقاط إحالات عضو عبر أمر الإدارة.",
   /* expression-log */
   "server.expression-create": "عند إضافة إيموجي للسيرفر.",
@@ -567,12 +561,6 @@ export function LogsView({ guild }: { guild: Guild }) {
   // object in a test must not crash the pickers.
   const categoryColors = draft.categoryColors ?? {};
   const eventColors = draft.eventColors ?? {};
-
-  /** The colour one record is drawn in when it has none of its own. */
-  const inheritedColor = (categoryId: LogDestination) => categoryColors[categoryId] ?? draft.embedColor;
-  /** The channel one record is sent to when it has none of its own. */
-  const inheritedChannel = (categoryId: LogDestination) =>
-    draft.categoryChannels[categoryId] ?? draft.globalChannelId ?? null;
 
   const isEnabled = (categoryId: LogDestination, eventId: string) =>
     isEventEnabled(draft.eventFlags, categoryId, eventId);
@@ -729,18 +717,18 @@ export function LogsView({ guild }: { guild: Guild }) {
       */}
       <Card>
         <CardContent className="space-y-3 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-3">
               <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
                 <Settings className="size-5" aria-hidden />
               </span>
-              <div>
+              <div className="min-w-0">
                 <p className="text-base font-bold">إعداد تلقائي للقنوات</p>
-                <p className="text-xs text-muted-foreground">إنشاء قنوات السجلات تلقائياً لجميع الأقسام بضغطة واحدة</p>
+                <p className="text-xs text-muted-foreground">إنشاء قنوات السجلات لكل الأقسام بضغطة.</p>
               </div>
             </div>
             {coolingDown && (
-              <Badge variant="outline" className="gap-1.5 border-warning/40 text-warning" dir="ltr">
+              <Badge variant="outline" className="shrink-0 gap-1.5 border-warning/40 text-warning" dir="ltr">
                 <Hourglass className="size-3.5" aria-hidden />
                 {formatCooldown(cooldownRemaining)}
               </Badge>
@@ -780,10 +768,10 @@ export function LogsView({ guild }: { guild: Guild }) {
             icon and its enabled/total count, so an operator can see at a glance
             which sections are doing work. */}
         <nav aria-label="أقسام السجلات" className="lg:w-60 lg:shrink-0">
-          <Card className="p-1">
+          <Card className="overflow-hidden">
             <NavButton active={selection === GENERAL} onClick={() => setSelection(GENERAL)}>
               <span className="flex items-center gap-2">
-                <Settings className="size-4 text-muted-foreground" aria-hidden />
+                <Settings className="size-4" aria-hidden />
                 <span className="text-sm font-medium">إعدادات عامة</span>
               </span>
             </NavButton>
@@ -796,7 +784,7 @@ export function LogsView({ guild }: { guild: Guild }) {
                   onClick={() => setSelection(category.id)}
                 >
                   <span className="flex min-w-0 items-center gap-2">
-                    <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <Icon className="size-4 shrink-0" aria-hidden />
                     <span className="truncate text-sm">{category.label}</span>
                   </span>
                   <Badge variant="secondary" className="shrink-0 tabular-nums" dir="ltr">
@@ -892,7 +880,7 @@ export function LogsView({ guild }: { guild: Guild }) {
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    «عادية» تضع كل قسم في قناة واحدة؛ «مفصلة» تتيح لكل سجل قناة ولوناً مستقلين.
+                    «عادية»: قناة لكل قسم. «مفصلة»: قناة لكل سجل.
                   </p>
                 </div>
 
@@ -945,7 +933,7 @@ export function LogsView({ guild }: { guild: Guild }) {
                     id="logs-ignored-roles"
                     label="الرتب المستثناة"
                     kind="role"
-                    hint="من يحمل إحدى هذه الرتب لا يظهر في السجلات — سواء كان الفاعل أو الطرف المتأثر. مفيد لاستثناء البوتات."
+                    hint="الرتب التي لا تظهر في السجلات (الفاعل أو المتأثر)."
                     options={roles}
                     selected={draft.ignoredRoleIds}
                     onChange={ignoredRoleIds => patch({ ignoredRoleIds })}
@@ -955,7 +943,7 @@ export function LogsView({ guild }: { guild: Guild }) {
               ) : (
                 <CardContent className="pt-0">
                   <p className="py-4 text-center text-sm text-muted-foreground">
-                    السجلات <strong>مُعطّلة</strong> — فعّلها من المفتاح أعلى البطاقة لتظهر خيارات التوزيع والاستثناءات.
+                    السجلات مُعطّلة — فعّلها من المفتاح أعلى البطاقة.
                   </p>
                 </CardContent>
               )}
@@ -1004,7 +992,7 @@ export function LogsView({ guild }: { guild: Guild }) {
 
           <Alert>
             <AlertDescription className="text-xs">
-              سجلات البوت الداخلية وأحداث الأمان لا تظهر هنا: تُرسَل مباشرة إلى Webhook المطوّر ولا يمكن إسكاتها من اللوحة.
+              سجلات البوت الداخلية وأحداث الأمان تُرسَل إلى Webhook المطوّر ولا تُسكت.
             </AlertDescription>
           </Alert>
         </div>
@@ -1015,8 +1003,7 @@ export function LogsView({ guild }: { guild: Guild }) {
           <DialogHeader>
             <DialogTitle>حذف قنوات السجلات</DialogTitle>
             <DialogDescription>
-              سيتم حذف {boundChannelCount} {boundChannelCount === 1 ? "قناة" : "قنوات"} مربوطة، وكل قناة داخل فئة
-              السجلات، ثم تُحذف الفئة ويُعطَّل التسجيل. لا يمكن التراجع عن هذا الإجراء.
+              سيُحذف {boundChannelCount} {boundChannelCount === 1 ? "قناة" : "قنوات"} وفئة السجلات، ويُعطَّل التسجيل. لا رجوع.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1058,9 +1045,9 @@ function NavButton({
     <button
       type="button"
       onClick={onClick}
-      aria-current={active}
-      className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-start transition-colors ${
-        active ? "bg-accent" : "hover:bg-accent/50"
+      aria-current={active ? "page" : undefined}
+      className={`flex w-full items-center justify-between gap-2 border-b border-border/60 px-3 py-2.5 text-start transition-colors last:border-b-0 ${
+        active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent/50"
       }`}
     >
       {children}
@@ -1297,7 +1284,7 @@ function RecordCard({
             )}
           </div>
         </div>
-        <Switch checked={enabled} aria-label={label} onCheckedChange={onToggle} />
+        <Switch checked={enabled} aria-label={label} onCheckedChange={onToggle} className="shrink-0" />
       </div>
 
       <AnimatePresence initial={false}>
@@ -1479,20 +1466,25 @@ function SectionCard({
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0">
-        <div className="flex min-w-40 flex-1 items-center gap-3">
+      <CardHeader className="flex-col gap-2 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
             <Icon className="size-5" aria-hidden />
           </span>
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base">
+          <div className="min-w-0">
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
               {category.label}
               {muted > 0 && <Badge variant="secondary">{`${muted} مكتوم`}</Badge>}
             </CardTitle>
             <p className="text-xs text-muted-foreground">{category.description}</p>
           </div>
         </div>
-        <Switch checked={isCategoryEnabled(eventFlags, category.id)} aria-label={category.label} onCheckedChange={onToggleCategory} />
+        <Switch
+          checked={isCategoryEnabled(eventFlags, category.id)}
+          aria-label={category.label}
+          onCheckedChange={onToggleCategory}
+          className="shrink-0 self-start sm:self-auto"
+        />
       </CardHeader>
 
       <CardContent className="space-y-4">

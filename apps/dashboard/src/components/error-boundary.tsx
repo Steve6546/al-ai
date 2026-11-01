@@ -34,6 +34,8 @@ type Props = {
   resetKey?: string;
   /** What was being rendered, for the message. */
   scope?: string;
+  /** The root boundary: the whole shell failed, not one screen. */
+  fullPage?: boolean;
 };
 
 type State = { error: Error | null };
@@ -63,20 +65,24 @@ export class ErrorBoundary extends Component<Props, State> {
     if (!error) return this.props.children;
 
     const scope = this.props.scope ? `شاشة «${this.props.scope}»` : "هذه الشاشة";
+    const fullPage = this.props.fullPage === true;
+    const title = fullPage ? "تعذّر تشغيل لوحة التحكم" : `تعذّر عرض ${scope}`;
+    const description = fullPage
+      ? "حدث خطأ غير متوقع أثناء تشغيل اللوحة. أعد المحاولة، وإن استمر حدّث الصفحة. التفاصيل التقنية في وحدة تحكّم المتصفّح (Console)."
+      : "حدث خطأ غير متوقع أثناء بناء الواجهة. بقية الصفحة تعمل — تنقّل إلى شاشة أخرى أو أعد المحاولة. التفاصيل التقنية في وحدة تحكّم المتصفّح (Console).";
 
     return (
       <div
         role="alert"
-        className="space-y-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4"
+        className={`space-y-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4 ${
+          fullPage ? "mx-auto my-16 max-w-2xl" : ""
+        }`}
       >
         <div className="flex items-start gap-2.5">
           <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
           <div className="space-y-1">
-            <p className="text-sm font-medium">تعذّر عرض {scope}</p>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              حدث خطأ غير متوقع أثناء بناء الواجهة. بقية الصفحة تعمل — تنقّل إلى شاشة أخرى أو أعد
-              المحاولة. التفاصيل التقنية في وحدة تحكّم المتصفّح (Console).
-            </p>
+            <p className="text-sm font-medium">{title}</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>
             <p dir="ltr" className="pt-1 text-start font-mono text-[11px] break-all text-muted-foreground">
               {error.message}
             </p>

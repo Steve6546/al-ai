@@ -88,10 +88,11 @@ export function AuditView({ guild }: { guild: Guild }) {
             <EmptyState
               icon={FileClock}
               title="لا توجد سجلات بعد"
-              description="يُكتب هنا كل حدث بخطورة warning أو critical. فعّل السجلات من قسم «السجلات» ثم نفّذ إجراءً ليظهر أول سجل."
+              description="تُكتب هنا أحداث warning وcritical. فعّل السجلات ثم نفّذ إجراءً."
             />
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            <div className="hidden overflow-x-auto sm:block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -144,6 +145,41 @@ export function AuditView({ guild }: { guild: Guild }) {
                 </TableBody>
               </Table>
             </div>
+
+            {/* Phones get one card per event rather than a six-column table:
+                at 390px the last columns sat behind a horizontal scroll, which
+                reads as missing data instead of as a wide table. */}
+            <ul className="space-y-2 sm:hidden">
+              {entries.map(entry => (
+                <li key={entry.id} className="rounded-xl border border-border/80 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="min-w-0 break-all font-mono text-xs" dir="ltr">
+                      {entry.eventId}
+                    </span>
+                    <Badge variant={severityVariant[entry.severity] ?? "outline"} className="shrink-0">
+                      {entry.severity}
+                    </Badge>
+                  </div>
+                  <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                    <div className="flex min-w-0 items-center gap-1">
+                      <dt className="shrink-0">الطبقة:</dt>
+                      <dd className="truncate">{entry.sourceLayer}</dd>
+                    </div>
+                    <div className="flex min-w-0 items-center gap-1">
+                      <dt className="shrink-0">الجهة:</dt>
+                      <dd className="truncate font-mono" dir="ltr" title={entry.actorHash}>
+                        {shortId(entry.actorHash, 6)}
+                      </dd>
+                    </div>
+                    <div className="col-span-2 flex items-center gap-1">
+                      <dt className="shrink-0">الوقت:</dt>
+                      <dd className="tabular">{formatDateTime(entry.createdAt)}</dd>
+                    </div>
+                  </dl>
+                </li>
+              ))}
+            </ul>
+            </>
           )}
         </CardContent>
       </Card>

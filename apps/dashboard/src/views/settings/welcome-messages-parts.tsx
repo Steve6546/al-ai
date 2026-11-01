@@ -1,6 +1,6 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { SmilePlus } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { WELCOME_MESSAGE_TOKENS, WELCOME_TOKEN_LABELS_AR } from "@al-ai/core/browser";
 
 /**
@@ -10,7 +10,7 @@ import { WELCOME_MESSAGE_TOKENS, WELCOME_TOKEN_LABELS_AR } from "@al-ai/core/bro
  */
 
 /** A common, hand-picked emoji set — enough for a greeting, no dependency. */
-const EMOJI_SET = [
+export const EMOJI_SET = [
   "👋", "🎉", "✨", "🌟", "💫", "🔥", "❤️", "💚", "💙", "🧡",
   "🙏", "👏", "🙌", "🤝", "😎", "🥳", "😄", "😊", "🙂", "😉",
   "👑", "🎮", "🎧", "🚀", "⚡", "🍀", "🌹", "🕊️", "☕", "🍕"
@@ -38,14 +38,7 @@ export function insertAtCursor(
 }
 
 /** The variable strip: every token, labelled, one click to insert. */
-export function TokenStrip({
-  onInsert,
-  activeRef
-}: {
-  onInsert: (token: string) => void;
-  /** The textarea the caret belongs to — tokens insert where it points. */
-  activeRef: React.RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
-}) {
+export function TokenStrip({ onInsert }: { onInsert: (token: string) => void }) {
   return (
     <div className="flex flex-wrap gap-1.5" role="group" aria-label="المتغيرات المتاحة">
       {WELCOME_MESSAGE_TOKENS.map(token => (
@@ -54,15 +47,17 @@ export function TokenStrip({
           type="button"
           dir="ltr"
           title={WELCOME_TOKEN_LABELS_AR[token as keyof typeof WELCOME_TOKEN_LABELS_AR]}
-          className="rounded-md border border-border/80 bg-muted/40 px-2 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+          className="rounded-md border border-border/80 bg-muted/40 px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary sm:px-2 sm:py-0.5"
           onClick={() => onInsert(token)}
         >
           {token}
         </button>
       ))}
-      {/* The hidden anchor keeps the API simple: the caller passes the field
-          whose caret the token targets. */}
-      <span className="hidden" ref={activeRef as never} />
+      {/* No ref is mounted here on purpose. An earlier version took an
+          `activeRef` and attached it to a hidden span rendered after the
+          textarea, so React's commit order pointed the caller's ref at the
+          span: `selectionStart` read as undefined and every token landed at the
+          end of the text instead of at the caret. */}
     </div>
   );
 }
@@ -70,43 +65,38 @@ export function TokenStrip({
 /** The emoji popover: one grid, insert-on-click, closes on outside press. */
 export function EmojiPicker({ onPick, label }: { onPick: (emoji: string) => void; label: string }) {
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
   return (
-    <div ref={containerRef} className="relative inline-block">
-      <button
-        type="button"
-        aria-label={label}
-        aria-expanded={open}
-        className="grid size-8 place-items-center rounded-md border border-border/80 text-muted-foreground transition-colors hover:text-foreground"
-        onClick={() => setOpen(value => !value)}
-      >
-        <SmilePlus className="size-4" />
-      </button>
-      {open && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setOpen(false)}
-            aria-hidden
-          />
-          <div className="absolute bottom-full z-50 mb-1 grid w-72 grid-cols-10 gap-0.5 rounded-xl border border-border bg-popover p-2 shadow-xl start-0">
-            {EMOJI_SET.map(emoji => (
-              <button
-                key={emoji}
-                type="button"
-                className="grid size-6 place-items-center rounded hover:bg-accent"
-                onClick={() => {
-                  onPick(emoji);
-                  setOpen(false);
-                }}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          className="grid size-9 place-items-center rounded-md border border-border/80 text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <SmilePlus className="size-4" />
+        </button>
+      </PopoverTrigger>
+      {/* Portalled: the editor lives inside cards with `overflow-hidden`, and
+          an in-flow panel was clipped at the card edge on a phone. Collision
+          padding keeps it inside the viewport in both directions. */}
+      <PopoverContent side="top" align="start" collisionPadding={12} className="w-[min(18rem,calc(100vw-2rem))] p-2">
+        <div className="grid grid-cols-8 gap-0.5 sm:grid-cols-10">
+          {EMOJI_SET.map(emoji => (
+            <button
+              key={emoji}
+              type="button"
+              className="grid size-6 place-items-center rounded hover:bg-accent"
+              onClick={() => {
+                onPick(emoji);
+                setOpen(false);
+              }}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

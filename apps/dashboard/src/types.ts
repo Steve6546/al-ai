@@ -15,7 +15,6 @@ import {
   type AntiNukeConfig,
   type DiscordRoleWire,
   type GuildSummary,
-  type LevelConfigProblem,
   type LevelRewardKind,
   type LogDestination,
   type NukeAction,
@@ -241,7 +240,12 @@ export type SessionInfo = {
 /** What `GET /api/network` answers with — the deployment's current reach. */
 export type NetworkSnapshot = {
   mode: RemoteAccessMode;
+  tunnelProvider: "ngrok";
   tunnelUrl: string | null;
+  /** The configured ngrok hostname, when one is set. */
+  tunnelDomain: string | null;
+  /** True when the live URL is the configured domain, not a random one. */
+  tunnelStable: boolean;
   tunnelStatus: "off" | "starting" | "running" | "error";
   tunnelError: string | null;
   /** The machine's own non-loopback addresses, each with the interface it belongs to. */
@@ -275,9 +279,9 @@ export const remoteAccessLabels: Record<RemoteAccessMode, string> = {
 };
 
 export const remoteAccessDescriptions: Record<RemoteAccessMode, string> = {
-  off: "الوضع الافتراضي: اللوحة تُفتح من هذا الجهاز فقط (localhost).",
-  lan: "أي جهاز موصول بنفس شبكة الراوتر يفتح اللوحة، ويتحوّل تسجيل دخوله تلقائياً إلى النفق عند تشغيله.",
-  tunnel: "أي جهاز على الإنترنت يفتح اللوحة عبر نفق مشفّر (Cloudflare) — يشمل الشبكة المحلية، بدون فتح أي منفذ في الراوتر."
+  off: "اللوحة من هذا الجهاز فقط (localhost).",
+  lan: "أي جهاز على نفس الشبكة يفتح اللوحة.",
+  tunnel: "أي جهاز عبر نفق ngrok مشفّر — بلا فتح منفذ."
 };
 
 /**

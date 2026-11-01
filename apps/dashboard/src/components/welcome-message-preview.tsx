@@ -1,4 +1,4 @@
-import { renderWelcomeMessage, type WelcomeEmbed, type WelcomeImageConfig, type WelcomeMessageSettings, type WelcomeTemplateValues } from "@al-ai/core/browser";
+import { renderWelcomeMessage, type WelcomeImageConfig, type WelcomeMessageSettings, type WelcomeTemplateValues } from "@al-ai/core/browser";
 import { cn } from "@/lib/utils";
 import { initials } from "@/lib/format";
 
@@ -46,12 +46,12 @@ export function WelcomeMessagePreview({
   return (
     <div className={cn("overflow-hidden rounded-xl border border-border bg-card", className)}>
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
-        <span className="text-[11px] font-medium text-muted-foreground">معاينة الرسالة</span>
-        <span className="truncate text-[11px] text-muted-foreground">
+        <span className="shrink-0 text-[11px] font-medium text-muted-foreground">معاينة الرسالة</span>
+        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
           {channelName ? `إلى #${channelName}` : "لم تُختر القناة بعد"}
         </span>
         {settings.imageEnabled ? (
-          <span className="ms-auto shrink-0 rounded-md bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary">صورة الترحيب مفعّلة</span>
+          <span className="shrink-0 rounded-md bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary">صورة الترحيب مفعّلة</span>
         ) : null}
       </div>
 
@@ -73,7 +73,7 @@ export function WelcomeMessagePreview({
             </p>
 
             {text ? (
-              <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap text-foreground">{text}</p>
+              <p className="mt-1 break-words text-sm leading-relaxed whitespace-pre-wrap text-foreground">{text}</p>
             ) : (
               <p className="mt-1 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
                 لا يوجد نص — سيصل عضو جديد بلا رسالة.

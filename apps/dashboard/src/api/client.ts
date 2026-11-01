@@ -162,7 +162,7 @@ function assertCommandShape(commands: CommandFlag[]) {
       if (!Array.isArray(fields[field])) {
         throw new ApiError(
           "STALE_SERVER",
-          `الخادم لم يُرسل الحقل «${field}» للأمر «${command.name}». الأرجح أن اللوحة تعمل بكود أقدم من الحزمة المعروضة — أعد تشغيل خادم اللوحة.`,
+          `الخادم لم يُرسل الحقل «${field}» للأمر «${command.name}» — أعد تشغيل خادم اللوحة.`,
           200
         );
       }
@@ -245,7 +245,7 @@ export const customization = async (guildId: string) => {
     if (!settings || !(field in settings)) {
       throw new ApiError(
         "STALE_SERVER",
-        `الخادم لم يُرسل الحقل «${field}» مع إعدادات السيرفر، فالنموذج لن يعرضه. الأرجح أن اللوحة تعمل بكود أقدم من الحزمة المعروضة — أعد تشغيل خادم اللوحة.`,
+        `الخادم لم يُرسل الحقل «${field}» — أعد تشغيل خادم اللوحة.`,
         200
       );
     }
@@ -439,5 +439,8 @@ export const levelsLeaderboard = (guildId: string, track: "text" | "voice", page
  * System: network reach (instance-wide, not per guild)
  * ------------------------------------------------------------------ */
 export const network = () => call<NetworkSnapshot>("/api/network");
-export const saveNetwork = (mode: RemoteAccessMode) =>
-  call<NetworkSnapshot>("/api/network", { method: "PUT", body: JSON.stringify({ mode }) });
+export const saveNetwork = (mode: RemoteAccessMode, domain?: string | null) =>
+  call<NetworkSnapshot>("/api/network", {
+    method: "PUT",
+    body: JSON.stringify(domain === undefined ? { mode } : { mode, domain })
+  });

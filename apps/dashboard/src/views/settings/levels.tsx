@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity,
   Award,
   Eye,
   EyeOff,
@@ -27,8 +26,8 @@ import { LoadError, LoadingRow } from "@/components/view-states";
 import { SaveBar } from "@/components/save-bar";
 import { Toaster, useToasts } from "@/components/toaster";
 import { RoleSwatch } from "@/components/role-swatch";
+import { ModuleStatusCard } from "@/components/module-status-card";
 import { SearchableMultiSelect } from "@/components/searchable-multi-select";
-import { StateBadge } from "@/components/state-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   DropdownMenu,
@@ -267,9 +266,9 @@ function SettingsTab({
       {/* Two columns: the text track on one side, the voice track opposite. */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="flex flex-col">
-          <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <PenLine className="size-4 text-primary" aria-hidden />
+          <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 pb-3">
+            <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+              <PenLine className="size-4 shrink-0 text-primary" aria-hidden />
               الخبرة الكتابية
             </CardTitle>
             <Switch
@@ -277,6 +276,7 @@ function SettingsTab({
               checked={draft.textXpEnabled}
               onCheckedChange={textXpEnabled => patch({ textXpEnabled })}
               aria-label="تفعيل الخبرة الكتابية"
+              className="shrink-0"
             />
           </CardHeader>
           <CardContent className="flex flex-1 flex-col justify-between gap-4">
@@ -307,16 +307,15 @@ function SettingsTab({
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              كل رسالة مؤهلة تمنح العضو نقاطاً عشوائية بين الحدين — والقنوات والرتب المستثناة تُضبط في بطاقة
-              الاستثناءات.
+              كل رسالة تمنح نقاطاً عشوائية بين الحدين. القنوات والرتب المستثناة في البطاقة التالية.
             </p>
           </CardContent>
         </Card>
 
         <Card className="flex flex-col">
-          <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Mic className="size-4 text-primary" aria-hidden />
+          <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 pb-3">
+            <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+              <Mic className="size-4 shrink-0 text-primary" aria-hidden />
               الخبرة الصوتية
             </CardTitle>
             <Switch
@@ -324,6 +323,7 @@ function SettingsTab({
               checked={draft.voiceXpEnabled}
               onCheckedChange={voiceXpEnabled => patch({ voiceXpEnabled })}
               aria-label="تفعيل الخبرة الصوتية"
+              className="shrink-0"
             />
           </CardHeader>
           <CardContent className="flex flex-1 flex-col gap-4">
@@ -807,8 +807,7 @@ function RewardRulesTab({
               كيف تعمل الرتب المشتركة؟
             </CardTitle>
             <CardDescription>
-              تُمنح الرتبة فقط عند استيفاء الشرطين معاً — كتابي ≥ X و صوتي ≥ Y — وتُسحب تلقائياً عند فقد أي شرط، وتبقى
-              طالما بقي أي مصدر استحقاق آخر.
+              تُمنح الرتبة عند تحقق الشرطين، وتُسحب عند فقد أحدهما.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -831,7 +830,7 @@ function RewardRulesTab({
       )}
 
       <Card>
-        <CardHeader className="flex-row items-start justify-between space-y-0 pb-3">
+        <CardHeader className="flex-col gap-3 space-y-0 pb-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 space-y-1">
             <CardTitle className="text-base">
               {kind === "dual" ? "قواعد الشرط المزدوج" : "رتب المستويات"}
@@ -842,8 +841,8 @@ function RewardRulesTab({
                 : "أضف رتبة لكل مستوى تستهدفه، وقرر لكل قاعدة سلوكها."}
             </CardDescription>
           </div>
-          <div className="flex flex-col items-end gap-2">
-            <div className="flex items-center gap-2">
+          <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
                 onClick={() => {
@@ -856,9 +855,9 @@ function RewardRulesTab({
               </Button>
               <SyncButton sync={sync} syncing={syncing} onSync={onSync} />
             </div>
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Switch checked={stacking} onCheckedChange={onStackingChange} aria-label="أدوار تراكمية" />
-              أدوار تراكمية (الاحتفاظ بجميع الرتب السابقة)
+            <label className="flex items-start gap-2 text-xs text-muted-foreground">
+              <Switch checked={stacking} onCheckedChange={onStackingChange} aria-label="أدوار تراكمية" className="mt-0.5 shrink-0" />
+              <span className="min-w-0 text-start leading-relaxed">أدوار تراكمية (الاحتفاظ بجميع الرتب السابقة)</span>
             </label>
           </div>
         </CardHeader>
@@ -1290,12 +1289,12 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
       </div>
 
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
+        <CardHeader className="flex-col gap-2 space-y-0 pb-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="flex min-w-0 items-center gap-2 text-base">
             <ListOrdered aria-hidden />
             المتصدرين
           </CardTitle>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select value={track} onValueChange={value => setTrack(value as "text" | "voice")}>
               <SelectTrigger className="w-36">
                 <SelectValue />
@@ -1424,7 +1423,7 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
           <DialogHeader>
             <DialogTitle>تعديل نقاط {xpEditor?.displayName}</DialogTitle>
             <DialogDescription>
-              يُعدَّل المسار المعروض فقط — المستوى يُشتق من المعادلة نفسها، والمسار الآخر يبقى كما هو.
+              يُعدّل المسار المعروض فقط؛ المستوى من المعادلة.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
@@ -1457,7 +1456,7 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
           <DialogHeader>
             <DialogTitle>إعادة تعيين نقاط {resetTarget?.displayName}؟</DialogTitle>
             <DialogDescription>
-              سيُصفّر الـ XP الكتابي والصوتي معاً، وتُسحب رتب المكافآت التي لم تعد مستحقة في أول مزامنة تلقائية.
+              سيُصفّر XP الكتابي والصوتي وتُسحب رتب المكافآت غير المستحقة.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
@@ -1598,17 +1597,16 @@ export function LevelsView({ guild }: { guild: Guild }) {
           one line of context come from the frame, so this row carries only
           what is *not* already said elsewhere: whether the engine is armed,
           and the technical heartbeat behind the info button. */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-            <Trophy className="size-4" aria-hidden />
-          </span>
-          <StateBadge enabled={armed} />
-          <span className="truncate text-sm text-muted-foreground">
-            {armed ? "المحرّك يعمل" : "المحرّك متوقف"}
-          </span>
-        </div>
-        <div className="flex shrink-0 items-center gap-3">
+      <ModuleStatusCard
+        icon={Trophy}
+        title="حساب النقاط والرتب"
+        description="XP تلقائي ورتب تُمنح حسب النشاط."
+        enabled={armed}
+        onToggle={enabled => patch({ enabled })}
+        toggleLabel="تفعيل نظام المستويات"
+        disabledHint="المستويات متوقفة. فعّلها لحساب XP ومنح الرتب."
+        enableLabel="تفعيل المستويات"
+        extra={
           <Tooltip>
             <TooltipTrigger asChild>
               <Button size="icon" variant="ghost" aria-label="حالة المحرّك التقنية">
@@ -1627,13 +1625,8 @@ export function LevelsView({ guild }: { guild: Guild }) {
               )}
             </TooltipContent>
           </Tooltip>
-          <Switch
-            checked={draft.enabled}
-            aria-label="تفعيل نظام المستويات"
-            onCheckedChange={enabled => patch({ enabled })}
-          />
-        </div>
-      </div>
+        }
+      />
 
       {armed && (
       <>
@@ -1691,7 +1684,7 @@ export function LevelsView({ guild }: { guild: Guild }) {
 
       {dirty && (
         <SaveBar
-          message="لديك تعديلات غير محفوظة على النظام"
+          message="تغييرات غير محفوظة"
           saveLabel="حفظ التعديلات"
           cancelLabel="إلغاء"
           onCancel={reset}

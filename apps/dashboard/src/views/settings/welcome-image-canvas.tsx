@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Eye, EyeOff, User } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Eye, EyeOff, Maximize2, Minimize2, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   AVATAR_MAX_SIZE,
@@ -63,6 +64,23 @@ export function WelcomeImageCanvas({
   const frameRef = useRef<HTMLDivElement>(null);
   /** The clean look: the card as the members will see it, with no editing. */
   const [preview, setPreview] = useState(false);
+  /**
+   * The card fills the viewport while expanded. On a phone the inline card is
+   * only as wide as the content column, which makes a 1024px design too small
+   * to place a layer precisely; the expanded mode fits the same card to both
+   * axes and keeps every gesture working.
+   */
+  const [expanded, setExpanded] = useState(false);
+  const shellRef = useRef<HTMLDivElement>(null);
+  /**
+   * The inline height reserved while the card is in the portal.
+   *
+   * Portalling the canvas removed it from the card's flow, the card collapsed,
+   * and the page's scroll container clamped to the top - the "it goes down
+   * when I expand it" report. The placeholder keeps the page exactly as tall
+   * as it was, so opening and closing neither scrolls nor jumps.
+   */
+  const [inlineHeight, setInlineHeight] = useState(0);
   const dragState = useRef<{
     pointerId: number;
     /** The pointer, in card pixels, when the drag began. */
@@ -116,10 +134,11 @@ export function WelcomeImageCanvas({
   const measure = useCallback(() => {
     const frame = frameRef.current;
     if (!frame) return;
-    const available = frame.clientWidth;
-    if (available <= 0) return;
-    setScale(Math.min(1, available / config.width));
-  }, [config.width]);
+    const availableWidth = frame.clientWidth;
+    if (availableWidth <= 0) return;
+    const availableHeight = expanded ? frame.clientHeight : Number.POSITIVE_INFINITY;
+    setScale(Math.min(1, availableWidth / config.width, availableHeight / config.height));
+  }, [config.width, config.height, expanded]);
 
   useEffect(() => {
     measure();
@@ -128,6 +147,16 @@ export function WelcomeImageCanvas({
     if (frameRef.current) observer.observe(frameRef.current);
     return () => observer.disconnect();
   }, [measure]);
+
+  // Escape leaves the expanded card, matching every other overlay in the app.
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExpanded(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expanded]);
 
   const layerOrigin = (target: Exclude<Selection, null>): LayerBox => {
     if (target.kind === "avatar") return { x: config.avatar.x, y: config.avatar.y };
@@ -211,9 +240,12 @@ export function WelcomeImageCanvas({
           })
         : config.avatar.size;
       // The box's top-left corner is the anchor, and it never leaves the card.
-      // The width and the height are the same number: the avatar's aspect
-      // ratio is locked to 1:1, so it can never be squashed.
-      const box = clampBox({ x: moved.x, y: moved.y, width: size, height: size }, config);
+      // **Only a move drag follows the pointer's travel.** A resize follows the
+      // corner the operator grabbed; using `moved` here dragged the avatar down
+      // and to the side while it grew, which is what made "تكبير/تصغير" feel
+      // like the layer was sliding away under the finger.
+      const origin = drag.resizing ? drag.origin : moved;
+      const box = clampBox({ x: origin.x, y: origin.y, width: size, height: size }, config);
       onConfigChange({
         ...config,
         avatar: { ...config.avatar, x: box.x, y: box.y, size: box.width }
@@ -389,28 +421,72 @@ export function WelcomeImageCanvas({
           ? { backgroundImage: `url(${config.background.imageDataUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
           : null;
 
-  return (
-    <div ref={frameRef} className="w-full min-w-0">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs text-muted-foreground">
-          {preview ? "المعاينة: كما ستراها الأعضاء." : "اسحب العناصر لتحريكها، واسحب المقبض لتغيير الحجم."}
-        </span>
-        <button
-          type="button"
-          onClick={() => setPreview(current => !current)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted"
-          aria-pressed={preview}
-          aria-label={preview ? "العودة إلى وضع التحرير" : "معاينة الصورة كما ستراها الأعضاء"}
-        >
-          {preview ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-          {preview ? "تحرير" : "معاينة"}
-        </button>
+  const selectedLayer =
+    selected?.kind === "custom" ? config.customTexts.find(layer => layer.id === selected.id) ?? null : null;
+  const selectedInfo = selected
+    ? selected.kind === "avatar"
+      ? { label: "الصورة الرمزية", size: `${config.avatar.size}px` }
+      : selected.kind === "username"
+        ? { label: "اسم المستخدم", size: `${config.username.fontSize}px` }
+        : selectedLayer
+          ? { label: "نص مخصص", size: `${selectedLayer.fontSize}px` }
+          : null
+    : null;
+
+  const shell = (
+    <div
+      ref={shellRef}
+      className={
+        expanded
+          ? "fixed inset-0 z-[60] flex flex-col bg-background/95 p-3 backdrop-blur sm:p-5"
+          : "w-full min-w-0"
+      }
+    >
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs text-muted-foreground">
+            {preview
+              ? "معاينة نظيفة — كما ستراها الأعضاء."
+              : selectedInfo
+                ? `المحدد: ${selectedInfo.label} · ${selectedInfo.size}`
+                : "اختر طبقة من اللوحة أو التبويبات."}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPreview(current => !current)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted"
+            aria-pressed={preview}
+            aria-label={preview ? "العودة إلى وضع التحرير" : "معاينة الصورة كما ستراها الأعضاء"}
+          >
+            {preview ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+            {preview ? "تحرير" : "معاينة"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!expanded) setInlineHeight(shellRef.current?.getBoundingClientRect().height ?? 0);
+              setExpanded(value => !value);
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted"
+            aria-pressed={expanded}
+            aria-label={expanded ? "إغلاق المعاينة المكبّرة" : "تكبير المعاينة لملء الشاشة"}
+          >
+            {expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+            {expanded ? "إغلاق" : "تكبير"}
+          </button>
+        </div>
       </div>
       <div
-        ref={node => {
-          canvasRef.current = node;
-        }}
-        className="relative mx-auto overflow-hidden rounded-lg border border-border shadow-inner select-none touch-none"
+        ref={frameRef}
+        className={expanded ? "flex min-h-0 flex-1 items-center justify-center overflow-hidden" : "w-full min-w-0"}
+      >
+        <div
+          ref={node => {
+            canvasRef.current = node;
+          }}
+          className="relative mx-auto shrink-0 overflow-hidden rounded-lg border border-border shadow-inner select-none touch-none"
         style={{
           width: config.width * scale,
           height: config.height * scale,
@@ -433,7 +509,7 @@ export function WelcomeImageCanvas({
         ) : null}
         {!preview ? (
           <span className="absolute top-2 start-2 z-10 rounded-md bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground backdrop-blur-sm">
-            اسحب العناصر لتحريكها
+            اسحب لتحريك الطبقة
           </span>
         ) : null}
 
@@ -618,7 +694,21 @@ export function WelcomeImageCanvas({
             </div>
           );
         })}
+        </div>
       </div>
     </div>
+  );
+
+  // The expanded card is portalled to <body>: one of this component's own
+  // ancestors has `backdrop-blur`, and a filtered ancestor becomes the
+  // containing block for `position: fixed`, which would pin the overlay inside
+  // the card instead of the viewport.
+  if (!expanded) return shell;
+
+  return (
+    <>
+      <div aria-hidden style={{ height: inlineHeight }} />
+      {createPortal(shell, document.body)}
+    </>
   );
 }

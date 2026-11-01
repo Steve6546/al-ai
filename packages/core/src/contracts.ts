@@ -671,12 +671,6 @@ export function describeAppearanceResult(result: AppearanceSaveResult): { ok: bo
  * shape, so two copies of these numbers would be two chances to send the wrong
  * one.
  */
-export const IMAGE_TARGET_SIZES = {
-  avatar: { width: 256, height: 256 },
-  banner: { width: 600, height: 240 },
-  roleIcon: { width: 128, height: 128 }
-} as const;
-
 /**
  * How the operator wants the rooms laid out.
  *

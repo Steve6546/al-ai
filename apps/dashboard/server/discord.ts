@@ -264,6 +264,7 @@ export async function exchangeCode(input: { clientId: string; clientSecret: stri
   });
   const response = await fetch(`${API}/oauth2/token`, {
     method: "POST",
+    signal: AbortSignal.timeout(DISCORD_CALL_TIMEOUT_MS),
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body
   });
@@ -991,7 +992,8 @@ export type WidgetPresence = { online: number } | { online: null; reason: "widge
 export async function fetchWidgetPresence(guildId: string): Promise<WidgetPresence> {
   try {
     const response = await fetch(`https://discord.com/api/v10/guilds/${guildId}/widget.json`, {
-      headers: { "User-Agent": "AL-AI-Dashboard" }
+      headers: { "User-Agent": "AL-AI-Dashboard" },
+      signal: AbortSignal.timeout(DISCORD_CALL_TIMEOUT_MS)
     });
     // 403 is Discord's answer when the Server Widget is switched off.
     if (response.status === 403) return { online: null, reason: "widget-disabled" };

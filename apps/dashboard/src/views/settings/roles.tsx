@@ -11,7 +11,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { RoleSwatch } from "@/components/role-swatch";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { tierDescriptions, tierLabels, type DiscordRole, type Guild, type TierConfig, type TierRoles } from "@/types";
 import { EMPTY_TIER_ROLES } from "@al-ai/core/browser";
 
@@ -52,7 +51,7 @@ export function RolesView({ guild }: { guild: Guild }) {
   }, [load]);
 
   if (error) {
-    return <LoadError message={error} />;
+    return <LoadError message={error} onRetry={load} />;
   }
 
   if (!config || !draft) {
@@ -79,15 +78,27 @@ export function RolesView({ guild }: { guild: Guild }) {
   const unassignable = new Set(config.unassignable ?? []);
 
   return (
-    <div className="space-y-4">
-      {/* The automatic tier is stated plainly, because "where do I configure the
-          owner?" is the first question this screen used to raise. */}
-      <Alert>
-        <ShieldCheck />
-        <AlertDescription>
-          <span className="font-medium">{tierLabels.owner}</span> — {tierDescriptions.owner}
-        </AlertDescription>
-      </Alert>
+    <div className="space-y-3">
+      {/* The automatic tier is a card like the two pickers below, not a
+          full-width alert: it answers "where do I configure the owner?" with a
+          title, a state, and one line, in the same visual grammar as the rest. */}
+      <Card className="overflow-hidden">
+        <div className="flex items-start gap-3 p-4 sm:p-5">
+          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+            <ShieldCheck className="size-4" aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-base font-semibold leading-snug">رتبة المالك</p>
+              <Badge variant="secondary" className="text-[10px]">تلقائي</Badge>
+            </div>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+              تحكم كامل. تُمنح تلقائياً لمالك السيرفر وأي عضو يملك صلاحية{" "}
+              <span dir="ltr" className="font-medium text-foreground">Administrator</span>.
+            </p>
+          </div>
+        </div>
+      </Card>
 
       {config.warning && (
         <Alert variant="destructive">
@@ -103,7 +114,7 @@ export function RolesView({ guild }: { guild: Guild }) {
           </AlertDescription>
         </Alert>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-3 lg:grid-cols-2">
           <RolePicker
             title={tierLabels.admin}
             description={tierDescriptions.admin}
@@ -125,8 +136,7 @@ export function RolesView({ guild }: { guild: Guild }) {
 
       <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
         <Info className="mt-0.5 size-3.5 shrink-0" />
-        تُقرأ هذه الرتب من Discord مباشرة، وتُفحص على الخادم عند كل إجراء — لا تعتمد الواجهة على نفسها في المصادقة. الرتبة
-        التي تعلو رتبة البوت لا يمكن منحها، وتظهر هنا بعلامة تحذير.
+        الرتب تُقرأ من Discord وتُفحص على الخادم. ما يعلو رتبة البوت لا يُمنح.
       </p>
 
 
@@ -182,21 +192,23 @@ function RolePicker({
   const chosen = new Set(selected);
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <UserCog className="size-4" />
-            {title}
-          </CardTitle>
-          <Badge variant={chosen.size ? "secondary" : "outline"} className="tabular">
-            {chosen.size}
-          </Badge>
+    <Card className="overflow-hidden">
+      <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-3 pt-4 sm:px-5">
+        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+          <UserCog className="size-4" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle className="text-base">{title}</CardTitle>
+            <Badge variant={chosen.size ? "secondary" : "outline"} className="tabular">
+              {chosen.size}
+            </Badge>
+          </div>
+          <CardDescription className="mt-0.5 text-xs">{description}</CardDescription>
         </div>
-        <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent>
-        <ScrollArea className="h-72 rounded-md border border-border p-2">
+      <CardContent className="pb-3 sm:pb-4">
+        <ScrollArea className="h-60 rounded-md border border-border p-2 sm:h-72">
           <div className="space-y-0.5">
             {roles.map(role => {
               const blocked = unassignable.has(role.id);
@@ -222,8 +234,6 @@ function RolePicker({
             })}
           </div>
         </ScrollArea>
-        <Separator className="my-3" />
-        <p className="text-xs text-muted-foreground">{chosen.size === 0 ? "لا رتب مختارة." : `${chosen.size} رتبة مختارة.`}</p>
       </CardContent>
     </Card>
   );

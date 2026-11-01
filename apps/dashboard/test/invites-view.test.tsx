@@ -101,11 +101,11 @@ async function toggle(container: HTMLElement) {
 test("a disabled module shows the hero and nothing else — no dimmed look-alike form", async () => {
   const { container, root } = await mountScreen();
   try {
-    assert.equal(container.textContent.includes("موديول الإحالات"), true, "the hero card is present");
-    assert.equal(container.textContent.includes("تُمنح تلقائياً"), false, "milestones card hidden");
+    assert.equal(container.textContent.includes("تتبّع الدعوات"), true, "the hero card is present");
+    assert.equal(container.textContent.includes("رتب الإنجاز"), false, "milestones card hidden");
     assert.equal(container.textContent.includes("قوالب السجلات"), false, "templates card hidden");
     assert.equal(container.textContent.includes("عتبة الحساب الوهمي"), false, "policy details hidden");
-    assert.equal(container.textContent.includes("معطّل"), true, "the alert names the state");
+    assert.equal(container.textContent.includes("مُعطّل"), true, "the badge names the state");
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -116,7 +116,7 @@ test("arming the module reveals every section, and the stored template survives 
   const { container, root } = await mountScreen();
   try {
     await toggle(container);
-    assert.equal(container.textContent.includes("تُمنح تلقائياً"), true, "milestones card appears");
+    assert.equal(container.textContent.includes("رتب الإنجاز"), true, "milestones card appears");
     assert.equal(container.textContent.includes("قوالب السجلات"), true, "templates card appears");
     assert.equal(container.textContent.includes("عتبة الحساب الوهمي"), true, "policy details appear");
     // The textarea holds the value fetched from storage — hiding never wiped it.

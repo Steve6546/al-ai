@@ -116,7 +116,7 @@ function clickButton(container: HTMLElement, text: string): HTMLElement {
   return button;
 }
 
-async function press(container: HTMLElement, element: HTMLElement) {
+async function press(_container: HTMLElement, element: HTMLElement) {
   await act(async () => {
     element.click();
     await Promise.resolve();
@@ -188,7 +188,7 @@ test("the image tab shows the canvas, the sub-tab strip, and the drag hint", asy
   const { container, root } = await mountScreen();
   try {
     await press(container, clickButton(container, "الصورة"));
-    assert.equal(container.textContent.includes("اسحب العناصر لتحريكها"), true);
+    assert.equal(container.textContent.includes("اسحب لتحريك الطبقة"), true);
     assert.equal(container.textContent.includes("اسم_المستخدِم"), true, "the username layer previews its rendered token");
     assert.equal(container.textContent.includes("الخلفية"), true, "the sub-tabs render");
     assert.equal(container.textContent.includes("الإعدادات"), true);

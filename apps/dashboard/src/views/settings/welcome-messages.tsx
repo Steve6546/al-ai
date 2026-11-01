@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, Image as ImageIcon, Info, Plus, Trash2, Upload, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, Image as ImageIcon, Info, Plus, Trash2, X } from "lucide-react";
 import { api } from "@/api";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { LoadError, LoadingRow } from "@/components/view-states";
@@ -10,7 +10,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -90,9 +89,6 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
   // Caret targets: every text field that accepts tokens keeps a ref so the
   // strip inserts where the operator's cursor is, not at the end.
   const textRef = useRef<HTMLTextAreaElement>(null);
-  const contentRef = useRef<HTMLTextAreaElement>(null);
-  const titleRef = useRef<HTMLInputElement>(null);
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputTarget = useRef<"background" | "embed-image">("background");
   // Display-only: the real file name of the last upload, so the attachment bar
@@ -183,7 +179,7 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
   const imageChannelRequired =
     draft.enabled && draft.imageEnabled && draft.imageMode === "separate_channel" && !draft.imageChannelId;
   const blockedReason = channelRequired
-    ? "اختر قناة الترحيب أولاً، ثم احفظ — لا تُرسَل رسالة بلا قناة."
+    ? "اختر قناة الترحيب أولاً."
     : imageChannelRequired
       ? "اختر قناة الصورة أولاً، ثم احفظ."
       : channelsError
@@ -274,7 +270,6 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
   };
 
   const selectedCustom = selection?.kind === "custom" ? draft.image.customTexts.find(layer => layer.id === selection.id) ?? null : null;
-  const usernameSelected = selection?.kind === "username";
 
   const canvasPanels: { key: CanvasPanel; label: string }[] = [
     { key: "background", label: "الخلفية" },
@@ -304,8 +299,10 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
           content itself - a second title here would say the same thing twice
           and push the tabs below the fold on a phone. */}
 
-      {/* Tab strip — the horizontal scroll contract from the commands screen. */}
-      <div role="tablist" aria-label="أقسام رسائل الترحيب" className="scrollbar-none flex gap-1 overflow-x-auto rounded-xl border border-border/80 bg-card/70 p-1.5">
+      {/* Tab strip. Five tabs wrap instead of scrolling: a hidden-scrollbar
+          scroller gave no affordance and read as cut-off on a phone, and two
+          wrapped rows cost less than a swipe the operator cannot see. */}
+      <div role="tablist" aria-label="أقسام رسائل الترحيب" className="flex flex-wrap gap-1 rounded-xl border border-border/80 bg-card/70 p-1.5">
         {tabs.map(entry => (
           <button
             key={entry.key}
@@ -348,19 +345,24 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
               <Alert>
                 <Info className="size-4" />
                 <AlertDescription>
-                  يمكن إرسال صورة الترحيب مع الإيمبد في الرسالة نفسها. تفعيل الصورة لم يعد يخفي الإيمبد أو يعطله.
+                  الصورة تُرسل مع الإيمبد.
                 </AlertDescription>
               </Alert>
             )}
 
             {draft.imageEnabled && (
               <>
+                {/* `FieldRow` prints its label as a plain span, so nothing
+                    associates it with the control beneath it — and a Radix
+                    trigger is a `<button role="combobox">`, which axe then
+                    reads as a nameless button. Each picker on this tab carries
+                    its own `aria-label`, worded as its visible label. */}
                 <FieldRow label="إرسال الصورة:">
                   <Select
                     value={draft.imageMode}
                     onValueChange={value => patch({ imageMode: value as WelcomeMessageSettings["imageMode"], imageChannelId: value === "separate_channel" ? draft.imageChannelId : null })}
                   >
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger className="w-full" aria-label="إرسال الصورة">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -379,7 +381,11 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
                       value={draft.imageChannelId ?? NONE}
                       onValueChange={value => patch({ imageChannelId: channelSelect(value) })}
                     >
-                      <SelectTrigger className="w-full" aria-invalid={imageChannelRequired || imageChannelMissing}>
+                      <SelectTrigger
+                        className="w-full"
+                        aria-label="اختر قناة الصورة"
+                        aria-invalid={imageChannelRequired || imageChannelMissing}
+                      >
                         <SelectValue placeholder="اختر قناة..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -413,6 +419,7 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
               <Select value={draft.channelId ?? NONE} onValueChange={value => patch({ channelId: channelSelect(value) })}>
                 <SelectTrigger
                   className="w-full"
+                  aria-label="قناة الترحيب"
                   aria-invalid={channelRequired || welcomeChannelMissing}
                   aria-describedby="welcome-channel-hint"
                 >
@@ -481,24 +488,29 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">نص الرسالة</CardTitle>
-                  <CardDescription>ما يصل العضو الجديد، والمتغيرات تُدرج عند المؤشر.</CardDescription>
+                  <CardDescription>ما يصل العضو الجديد. المتغيرات تُدرج عند المؤشر.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <div className="relative">
-                    <Textarea
-                      ref={textRef}
-                      rows={4}
-                      value={draft.text}
-                      onChange={event => patch({ text: event.target.value })}
-                      className="rounded-xl text-sm"
-                    />
-                    <span className="absolute top-2 start-2">
-                      <EmojiPicker label="إدراج إيموجي" onPick={emoji => patch({ text: insertAtCursor(textRef.current, draft.text, emoji) })} />
+                  {/* The emoji trigger sits in its own row above the field.
+                      Overlaying it on the textarea made the first line run
+                      underneath it on a phone, which read as clipped text. */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 text-[11px] text-muted-foreground">
+                      الإيموجي والمتغيرات تُدرج عند موضع المؤشر.
                     </span>
+                    <EmojiPicker label="إدراج إيموجي" onPick={emoji => patch({ text: insertAtCursor(textRef.current, draft.text, emoji) })} />
                   </div>
+                  <Textarea
+                    ref={textRef}
+                    rows={4}
+                    dir="auto"
+                    value={draft.text}
+                    onChange={event => patch({ text: event.target.value })}
+                    className="min-h-24 rounded-xl text-sm [overflow-wrap:anywhere]"
+                  />
                   <div className="space-y-1">
                     <span className="text-[11px] text-muted-foreground">المتغيرات المتاحة:</span>
-                    <TokenStrip onInsert={token => patch({ text: insertAtCursor(textRef.current, draft.text, token) })} activeRef={textRef} />
+                    <TokenStrip onInsert={token => patch({ text: insertAtCursor(textRef.current, draft.text, token) })} />
                   </div>
                 </CardContent>
               </Card>
@@ -518,18 +530,16 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">المعاينة الحية — محرر موضعي</CardTitle>
                 <CardDescription>
-                  كل عنصر يُحرَّر مباشرة على البطاقة كما سيراه العضو. زر العين يجعلها معاينة نظيفة، وشريط المتغيرات يُدرج عند
-                  مؤشر آخر حقل لمسته.
+                  حرّر البطاقة كما سيراها العضو. زر العين للمعاينة النظيفة.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="rounded-lg bg-[#2b2d31] p-4">
+                <div className="rounded-lg bg-[#2b2d31] p-2 sm:p-4">
                 <EmbedEditor
                   botName={profile?.nickname || profile?.username || "AL AI"}
                   botAvatarUrl={botAvatarUrl}
                     embed={draft.embed}
                     onEmbedChange={patchEmbed}
-                    values={sampleValues}
                     imageUpload={{
                       imageDataUrl: draft.embed.imageDataUrl,
                       fileName: fileNames.embed ?? "welcome-image.png",
@@ -571,7 +581,7 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
             <Alert>
               <Info className="size-4" />
               <AlertDescription>
-                صورة الترحيب معطّلة في تبويب «الإعدادات» — فعّلها ليراها البوت. التصميم هنا يُحفظ ويُطبَّق لحظة التفعيل.
+                الصورة معطّلة — التصميم يُحفظ ويُطبّق عند التفعيل.
               </AlertDescription>
             </Alert>
           )}
@@ -580,11 +590,10 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
             <CardHeader className="pb-3">
               <CardTitle className="text-base">مصمم صورة الترحيب</CardTitle>
               <CardDescription>
-                معاينة حية بالأبعاد الحقيقية — اسحب الطبقات لتحريكها، والمقبض الدائري لتغيير حجمها حول
-                الزاوية الثابتة (فلا يقفز العنصر). ما تراه هنا هو ما يرسمه البوت.
+                اسحب الطبقات، والمقبض لتغيير الحجم. ما تراه هنا هو ما يُرسل.
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-2 pb-4 pt-0 sm:px-5 sm:pb-5">
               <WelcomeImageCanvas
                 config={draft.image}
                 values={sampleValues}
@@ -595,8 +604,10 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
             </CardContent>
           </Card>
 
-          {/* Element control sub-tabs */}
-          <div className="scrollbar-none flex gap-1 overflow-x-auto rounded-xl border border-border/80 bg-card/70 p-1.5">
+          {/* Element control sub-tabs. Wrapped rather than scrolled: a
+              hidden-scrollbar strip read as cut off on a phone, and the five
+              short labels fit on two rows. */}
+          <div className="flex flex-wrap gap-1 rounded-xl border border-border/80 bg-card/70 p-1.5">
             {canvasPanels.map(entry => (
               <button
                 key={entry.key}
@@ -940,7 +951,7 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
 
       {dirty && (
         <SaveBar
-          message="لديك تغييرات غير محفوظة"
+          message="تغييرات غير محفوظة"
           saveLabel="حفظ التغييرات"
           cancelLabel="تجاهل"
           canSave={blockedReason === null}

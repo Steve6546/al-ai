@@ -1,7 +1,7 @@
 # AL AI - the one command that brings the local stack up.
 #
 #   npm run dev                 start database + dashboard + bot, then supervise
-#   npm run dev -- -Tunnel      the same, but bring the Cloudflare tunnel up
+#   npm run dev -- -Tunnel      the same, with the dashboard's ngrok tunnel on
 #   npm run dev -- -Detach      start and return to the prompt (fire and forget)
 #   npm run dev -- -NoBot       dashboard only
 #   npm run dev:stop            graceful stop
@@ -20,19 +20,17 @@
 #     its pool - with a forced kill only as the last resort. Nothing is orphaned
 #     because every child is named (by port owner, command line, and remembered
 #     pid) rather than assumed to have died with us;
-#   * a quick tunnel *this run started* is ended too. The dashboard deliberately
-#     leaves its tunnel up across a restart, which is what keeps a named tunnel's
-#     OAuth callback alive - but for a dev quick tunnel that is pure leftover.
-#     Ownership is decided by birth time, not by the port: a cloudflared serving
-#     the same port that predates this run belongs to someone else and is left
-#     alone, and a named (token) tunnel never matches the quick-tunnel pattern.
+#   * the ngrok tunnel is owned by the dashboard, not by this script. It is
+#     deliberately left up across a restart so a registered OAuth callback
+#     survives; end it from the network screen's mode switch, or stop the whole
+#     stack with `npm run dev:stop`.
 [CmdletBinding()]
 param(
   [ValidateSet("start", "stop", "restart", "status")]
   [string]$Action = "start",
-  # Bring the Cloudflare tunnel up for this run. Off by default: a quick tunnel
-  # mints a new public URL every boot, which is neither wanted nor fast for
-  # ordinary local work.
+  # Bring the dashboard's ngrok tunnel up for this run. Off by default: ordinary
+  # local work does not need a public URL, and the saved mode is honoured when
+  # this flag is absent.
   [switch]$Tunnel,
   # Start and return instead of supervising. A detached stack is stopped later
   # with `npm run dev:stop`.
@@ -123,11 +121,39 @@ function Start-ManagedService {
 
 # Whom to name as "the dashboard" / "the bot": the process holding the port,
 # falling back to a repository-owned node process running that entry point.
+#
+# A port owner is adopted only when its command line names this repository and
+# the service's entry point. A foreign process that happens to hold the port
+# (another checkout's service, a developer's scratch server) is never adopted:
+# `start` must refuse rather than bless it into the state file, and `stop` must
+# leave it alone. Ownership by port alone is how `dev:stop` once killed a
+# process this script never started. When the command line cannot be read at
+# all (CIM unavailable), the process is treated as foreign: for a *kill* path
+# the safe direction is to leave what cannot be identified alone.
+$script:ForeignPortOwner = $null
+
+function Test-AlAiServiceProcess {
+  param([int]$Id, [string]$EntrySuffix)
+
+  try {
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$Id" -ErrorAction Stop
+  } catch {
+    return $false
+  }
+  if (-not $proc -or -not $proc.CommandLine) { return $false }
+  return $proc.CommandLine.Contains($repoRoot) -and $proc.CommandLine.Contains($EntrySuffix)
+}
+
 function Get-ServiceOwnerPid {
   param([int]$Port, [string]$EntrySuffix)
 
+  $script:ForeignPortOwner = $null
   $owner = Get-PortOwnerPid -Port $Port
-  if ($owner) { return $owner }
+  if ($owner) {
+    if (Test-AlAiServiceProcess -Id $owner -EntrySuffix $EntrySuffix) { return $owner }
+    $script:ForeignPortOwner = $owner
+    return $null
+  }
   $match = Find-AlAiProcesses -RepoRoot $repoRoot |
     Where-Object { $_.CommandLine -like "*$EntrySuffix*" } | Select-Object -First 1
   if ($match) { return $match.Id }
@@ -141,7 +167,8 @@ function Get-LiveServicePids {
   $found = New-Object System.Collections.Generic.List[int]
   foreach ($servicePort in @($dashboardPort, $botAdapterPort)) {
     $owner = Get-PortOwnerPid -Port $servicePort
-    if ($owner) { [void]$found.Add($owner) }
+    if ($owner -and (Test-AlAiServiceProcess -Id $owner -EntrySuffix "server/index.ts")) { [void]$found.Add($owner) }
+    elseif ($owner -and (Test-AlAiServiceProcess -Id $owner -EntrySuffix "src/index.ts")) { [void]$found.Add($owner) }
   }
   $state = Read-State
   foreach ($name in @("dashboardPid", "botPid")) {
@@ -176,6 +203,9 @@ function Invoke-Start {
     $dashboardPid = Get-ServiceOwnerPid -Port $dashboardPort -EntrySuffix "server/index.ts"
     if ($dashboardPid) {
       Write-Host "dashboard already running (pid $dashboardPid)"
+    } elseif ($script:ForeignPortOwner) {
+      throw ("port $dashboardPort is held by pid $($script:ForeignPortOwner), which is not an AL AI dashboard " +
+        "- refusing to start over it and refusing to manage that process. Free the port or stop the other service first.")
     } else {
       Start-ManagedService -Entry "server/index.ts" -WorkingDirectory $dashboardDir `
         -OutLog $dashboardLog.out -ErrLog $dashboardLog.err
@@ -191,6 +221,8 @@ function Invoke-Start {
     $botPid = Get-ServiceOwnerPid -Port $botAdapterPort -EntrySuffix "src/index.ts"
     if ($botPid) {
       Write-Host "bot already running (pid $botPid)"
+    } elseif ($script:ForeignPortOwner) {
+      Write-Host "port $botAdapterPort is held by pid $($script:ForeignPortOwner), which is not an AL AI bot - the bot was NOT started."
     } else {
       Start-ManagedService -Entry "src/index.ts" -WorkingDirectory $botDir `
         -OutLog $botLog.out -ErrLog $botLog.err
@@ -220,10 +252,18 @@ function Invoke-Stop {
 
   # Every way we can name one of our services, most reliable first: the port
   # owner, then a repository-owned node process for the entry point, then the
-  # pid remembered from the last start.
+  # pid remembered from the last start. The port owner and the remembered pid
+  # are adopted only when the process identifies itself as this repository's
+  # service — a foreign process squatting the port, or a pid a stale state file
+  # remembered for someone else, is never killed. The command-line pattern path
+  # is identity-checked by construction (Find-AlAiProcesses).
   foreach ($servicePort in @($dashboardPort, $botAdapterPort)) {
     $owner = Get-PortOwnerPid -Port $servicePort
-    if ($owner) { [void]$targets.Add($owner) }
+    if (-not $owner) { continue }
+    if ((Test-AlAiServiceProcess -Id $owner -EntrySuffix "server/index.ts") -or
+        (Test-AlAiServiceProcess -Id $owner -EntrySuffix "src/index.ts")) {
+      [void]$targets.Add($owner)
+    }
   }
   foreach ($process in Find-AlAiProcesses -RepoRoot $repoRoot) {
     if ($process.CommandLine -like "*server/index.ts*" -or $process.CommandLine -like "*src/index.ts*") {
@@ -232,12 +272,13 @@ function Invoke-Stop {
   }
   foreach ($name in @("dashboardPid", "botPid")) {
     $candidate = Get-StatePid -State $state -Name $name
-    if ($candidate -and (Test-ProcessAlive -Id $candidate)) { [void]$targets.Add($candidate) }
+    if (-not ($candidate -and (Test-ProcessAlive -Id $candidate))) { continue }
+    $suffix = if ($name -eq "dashboardPid") { "server/index.ts" } else { "src/index.ts" }
+    if (Test-AlAiServiceProcess -Id $candidate -EntrySuffix $suffix) { [void]$targets.Add($candidate) }
   }
 
   if ($targets.Count -eq 0) {
     Write-Host "No AL AI services are running."
-    Remove-OwnedCloudflared -State $state
     if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath -Force }
     return
   }
@@ -251,74 +292,7 @@ function Invoke-Stop {
     }
   }
 
-  # The dashboard's own shutdown leaves its tunnel running (see scripts/common.ps1
-  # - a named tunnel must survive so the OAuth callback does). This ends the one
-  # *this run* created, after the services are gone and cannot re-adopt it.
-  Remove-OwnedCloudflared -State $state
-
   if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath -Force }
-}
-
-# End the quick tunnel this run created, and nothing else.
-#
-# The port is not ownership: another checkout can run a quick tunnel pointed at
-# the same local port. The state file's `startedAt` is the evidence - a tunnel
-# that was born before this run began belongs to whoever started it, and stop
-# must not end it. A tunnel started while the run is active is our dashboard's
-# (nothing else can own the dashboard's own port bind) and is cleaned up.
-# The state file's `startedAt`, or $null when it is absent or unreadable.
-function Get-RunStart {
-  param($State)
-
-  if (-not $State -or -not $State.startedAt) { return $null }
-  try {
-    return [datetime]::Parse(
-      [string]$State.startedAt,
-      [System.Globalization.CultureInfo]::InvariantCulture,
-      [System.Globalization.DateTimeStyles]::RoundtripKind
-    )
-  } catch {
-    return $null
-  }
-}
-
-function Remove-OwnedCloudflared {
-  param($State)
-
-  $runStart = Get-RunStart -State $State
-  if ($null -eq $runStart) {
-    if (@(Find-CloudflaredForPort -Port $dashboardPort).Count -gt 0) {
-      Write-Host "left any cloudflared alone: there is no run state to prove which one this stack started"
-    }
-    return
-  }
-
-  foreach ($tunnel in @(Find-CloudflaredForPort -Port $dashboardPort)) {
-    if (-not (Test-CloudflaredOwnedByRun -Tunnel $tunnel -RunStart $runStart)) {
-      Write-Host "left cloudflared pid $($tunnel.Id) alone: it predates this run"
-      continue
-    }
-
-    # Re-read immediately before acting: the number must still be the same
-    # cloudflared creation, not a recycled pid wearing the old command line.
-    $same = @(Find-CloudflaredForPort -Port $dashboardPort | Where-Object {
-      $_.Id -eq $tunnel.Id -and $_.CreationDate -eq $tunnel.CreationDate
-    })
-    if ($same.Count -eq 0) { continue }
-
-    # Forced by design on Windows, not a shortcut. Measured twice: a detached
-    # cloudflared has no console, and `taskkill` without /F refuses immediately
-    # ("can only be terminated forcefully"). Running it anyway was worse than
-    # dead code: its stderr became a NativeCommandError under
-    # $ErrorActionPreference = "Stop", which aborted this function *before* the
-    # forced kill. The stack reported "stopped" while its tunnel was still up.
-    Stop-ProcessTree -Id $tunnel.Id
-    if (Wait-ProcessGone -Id $tunnel.Id -Seconds 3) {
-      Write-Host "stopped cloudflared pid $($tunnel.Id) (forced, quick tunnel for port $dashboardPort)"
-    } else {
-      Write-Host "WARNING: cloudflared pid $($tunnel.Id) survived the stop request"
-    }
-  }
 }
 
 function Invoke-Status {
@@ -327,27 +301,28 @@ function Invoke-Status {
   Write-Host ("database:  " + $(if ($probe.Ready) { "up ($($probe.Method))" } else { "down" }) + " - $($target.Host):$($target.Port)")
 
   $dashboardPid = Get-ServiceOwnerPid -Port $dashboardPort -EntrySuffix "server/index.ts"
-  Write-Host ("dashboard: " + $(if ($dashboardPid) { "up (pid $dashboardPid)" } else { "down" }) + " - http://127.0.0.1:$dashboardPort")
+  $dashboardLine = if ($dashboardPid) { "up (pid $dashboardPid)" }
+    elseif ($script:ForeignPortOwner) { "PORT HELD BY pid $($script:ForeignPortOwner) - not an AL AI process" }
+    else { "down" }
+  Write-Host ("dashboard: " + $dashboardLine + " - http://127.0.0.1:$dashboardPort")
 
   $botPid = Get-ServiceOwnerPid -Port $botAdapterPort -EntrySuffix "src/index.ts"
-  Write-Host ("bot:       " + $(if ($botPid) { "up (pid $botPid)" } else { "down" }) + " - adapter http://127.0.0.1:$botAdapterPort")
+  $botLine = if ($botPid) { "up (pid $botPid)" }
+    elseif ($script:ForeignPortOwner) { "PORT HELD BY pid $($script:ForeignPortOwner) - not an AL AI process" }
+    else { "down" }
+  Write-Host ("bot:       " + $botLine + " - adapter http://127.0.0.1:$botAdapterPort")
 
-  # Report this run's tunnel, not whichever quick tunnel the machine happens to
-  # have. A second checkout pointed at the same port is not this stack's status.
-  $state = Read-State
-  $runStart = Get-RunStart -State $state
-  $tunnels = @(Find-CloudflaredForPort -Port $dashboardPort)
-  $owned = @()
-  if ($null -ne $runStart) {
-    $owned = @($tunnels | Where-Object { Test-CloudflaredOwnedByRun -Tunnel $_ -RunStart $runStart })
+  # The dashboard owns the ngrok process; this reports the agent forwarding the
+  # dashboard port and flags the one state that breaks a static domain: two
+  # agents on the same endpoint.
+  try {
+    $ngrok = @(Get-CimInstance Win32_Process -Filter "Name='ngrok.exe'" -ErrorAction SilentlyContinue |
+      Where-Object { $_.CommandLine -and [regex]::IsMatch([string]$_.CommandLine, "http\s+$dashboardPort\b") })
+  } catch {
+    $ngrok = @()
   }
-  $tunnelLine = if ($owned.Count) {
-    "up (pid $($owned[0].Id), quick tunnel)"
-  } elseif ($tunnels.Count) {
-    "none (pid $($tunnels[0].Id) is a quick tunnel this run did not start)"
-  } else {
-    "none"
-  }
+  $tunnelLine = if ($ngrok.Count -eq 0) { "off" } else { "up (pid $($ngrok[0].ProcessId), ngrok)" }
+  if ($ngrok.Count -gt 1) { $tunnelLine += " - WARNING: $($ngrok.Count) agents on port $dashboardPort" }
   Write-Host ("tunnel:    " + $tunnelLine)
 
   try {

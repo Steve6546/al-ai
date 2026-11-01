@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 import { promisify } from "node:util";
@@ -11,11 +11,11 @@ import { normaliseRemoteAccessMode, type RemoteAccessMode } from "@al-ai/core";
  * Three pieces live here:
  *
  * - **Pure functions** — the host allowlist, the OAuth state codec that carries
- *   the browser's origin through Discord's redirect, and the quick-tunnel URL
- *   parser. All unit-tested without a socket or a child process.
+ *   the browser's origin through Discord's redirect, and the ngrok URL parser.
+ *   All unit-tested without a socket or a child process.
  * - **The manager** — loads the mode from `instance_settings`, spawns and stops
- *   the `cloudflared` quick tunnel, and answers "is this Host header allowed?"
- *   for the request gate.
+ *   the `ngrok` tunnel, and answers "is this Host header allowed?" for the
+ *   request gate.
  *
  * The allowlist is deliberately exact rather than pattern-based. "Off" means
  * loopback, "lan" means the machine's own addresses, "tunnel" adds exactly one
@@ -40,7 +40,12 @@ export type MachineHostEntry = { host: string; label: string };
 
 export type NetworkSnapshot = {
   mode: RemoteAccessMode;
+  tunnelProvider: "ngrok";
   tunnelUrl: string | null;
+  /** The configured ngrok domain, stable across restarts. */
+  tunnelDomain: string | null;
+  /** True when the live URL is the configured domain, not a random one. */
+  tunnelStable: boolean;
   tunnelStatus: TunnelStatus;
   tunnelError: string | null;
   /** The machine's own non-loopback addresses, each with its interface name. */
@@ -132,8 +137,7 @@ export function isLoopbackPeer(remoteAddress: string | undefined): boolean {
  * tunnel-hostname branches — the ones that would otherwise let a *direct*
  * origin connection impersonate a trusted origin — are honored only for
  * requests whose peer is genuinely loopback: a browser on this machine, or the
- * `cloudflared` process, which targets `http://127.0.0.1:<port>` by
- * construction. A LAN peer may present the machine's real interface addresses;
+ * `ngrok` process, which targets `http://127.0.0.1:<port>` by construction. A LAN peer may present the machine's real interface addresses;
  * anything else is refused.
  */
 export function isHostAllowed(
@@ -185,26 +189,65 @@ export function unpackOAuthState(state: string | undefined | null): string | nul
   }
 }
 
-const QUICK_TUNNEL_URL = /https:\/\/[a-z0-9][a-z0-9-]*\.trycloudflare\.com/i;
+const NGROK_FREE_URL = /https:\/\/[a-z0-9][a-z0-9.-]*\.(?:ngrok-free\.app|ngrok-free\.dev|ngrok\.app|ngrok\.io)/i;
 
-/** The tunnel URL inside a `cloudflared` output line, lower-cased, or null. */
+/** The tunnel URL inside an ngrok log line, lower-cased, or null. */
 export function parseTunnelUrl(text: string): string | null {
-  const match = QUICK_TUNNEL_URL.exec(text);
+  // The JSON log line carries the authoritative URL, including a custom
+  // domain. `"url":"https://…"` is preferred over a hostname pattern.
+  const json = /"url"\s*:\s*"([^"]+)"/i.exec(text);
+  if (json) {
+    try {
+      const url = new URL(json[1]);
+      if (url.protocol === "https:" && !url.hostname.endsWith("ngrok.com")) return url.origin.toLowerCase();
+    } catch {
+      /* not a URL; fall through to the hostname pattern */
+    }
+  }
+  const match = NGROK_FREE_URL.exec(text);
   return match ? match[0].toLowerCase() : null;
 }
 
 /**
  * The *last* tunnel URL in the given text, lower-cased, or null.
  *
- * `parseTunnelUrl` finds the first — the right call for one cloudflared banner
- * line. A log file accumulates banners across runs, so the manager asks for the
- * newest one, and asks it of a slice of the file that starts where this run's
- * output began. Both read the same pattern rather than each keeping its own
- * copy of it, so the address shape cannot drift between the two.
+ * The log is appended across runs, so the newest URL is the one this run
+ * printed. Both readers share this one parser, so the address shape cannot
+ * drift between them.
  */
 export function lastTunnelUrlIn(text: string): string | null {
-  const matches = text.match(new RegExp(QUICK_TUNNEL_URL.source, "gi"));
+  const fromJson = [...text.matchAll(/"url"\s*:\s*"([^"]+)"/gi)]
+    .map(match => match[1])
+    .reverse()
+    .find(value => {
+      try {
+        const url = new URL(value);
+        return url.protocol === "https:" && !url.hostname.endsWith("ngrok.com");
+      } catch {
+        return false;
+      }
+    });
+  if (fromJson) return new URL(fromJson).origin.toLowerCase();
+  const matches = text.match(new RegExp(NGROK_FREE_URL.source, "gi"));
   return matches ? matches[matches.length - 1].toLowerCase() : null;
+}
+
+/**
+ * A configured ngrok hostname, normalised to a bare lower-case host.
+ * Accepts `https://name.ngrok-free.dev/` and returns `name.ngrok-free.dev`.
+ * A custom domain is allowed too (ngrok paid plans).
+ */
+export function normaliseNgrokDomain(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const host = value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/\.$/, "");
+  if (!host || host.length > 253) return null;
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(host)) return null;
+  return host;
 }
 
 /**
@@ -238,14 +281,13 @@ export function isLoopbackOrigin(origin: string): boolean {
 /**
  * Ask the tunnel's own public address whether it is really serving.
  *
- * A live `cloudflared` pid is not proof the URL works: a quick tunnel stays
- * alive while its edge connection is dead, because a VPN or a filtering proxy
- * on this machine breaks the mTLS handshake to `*.argotunnel.com` without
- * killing the process. The snapshot would then advertise "running" with a link
- * nothing on the internet can reach — worse than no answer, since the screen
- * offers it and gives no reason. So the read probes `/api/health` through the
- * public address, and a tunnel that does not answer becomes an error the
- * operator can act on.
+ * A live `ngrok` pid is not proof the URL works: the process can stay alive
+ * while its edge connection is dead, because a VPN or a filtering proxy on this
+ * machine can break the outbound session without killing the process. The
+ * snapshot would then advertise "running" with a link nothing on the internet
+ * can reach — worse than no answer, since the screen offers it and gives no
+ * reason. So the read probes `/api/health` through the public address, and a
+ * tunnel that does not answer becomes an error the operator can act on.
  *
  * Only `starting` and `running` are probeable: `off` has no address and
  * `error` already says what is wrong. `starting` is promoted to `running` by a
@@ -256,7 +298,7 @@ export function isLoopbackOrigin(origin: string): boolean {
  * stub and the manager keeps only the throttle and the race guard.
  */
 export const TUNNEL_UNREACHABLE_ERROR =
-  "النفق يعلن أنه يعمل لكن الرابط لا يستجيب. غالبًا السبب شبكة افتراضية (VPN) أو فلتر يعترض اتصال Cloudflare — أوقفها ثم أعد اختيار الوضع، أو استخدم شبكة محلية.";
+  "النفق يعلن أنه يعمل لكن الرابط لا يستجيب. تحقق من VPN أو جدار الحماية، أو أعد اختيار الوضع.";
 
 export const PROBE_TIMEOUT_MS = 5_000;
 
@@ -268,7 +310,12 @@ export async function probeTunnelReachability(
   timeoutMs: number = PROBE_TIMEOUT_MS
 ): Promise<ProbeVerdict> {
   if (state.mode !== "tunnel" || !state.url) return { status: state.status, error: null };
-  if (state.status !== "running" && state.status !== "starting") return { status: state.status, error: null };
+  // An `error` is probed too: a transient failed probe (ngrok edge reconnect,
+  // a VPN blip) must recover on its own, or the screen keeps calling a working
+  // URL broken until the operator toggles the mode.
+  if (state.status !== "running" && state.status !== "starting" && state.status !== "error") {
+    return { status: state.status, error: null };
+  }
   try {
     const response = await fetchImpl(`${state.url}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) throw new Error(`health check returned ${response.status}`);
@@ -319,44 +366,25 @@ function statSize(path: string): number {
   }
 }
 
-/** Known install locations, checked in order; null when cloudflared is absent. */
-function resolveCloudflaredPath(): string | null {
-  const candidates = [
-    process.env.CLOUDFLARED_PATH,
-    "C:\\Program Files (x86)\\cloudflared\\cloudflared.exe",
-    "C:\\Program Files\\cloudflared\\cloudflared.exe"
-  ].filter((path): path is string => Boolean(path));
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return null;
+/**
+ * The ngrok CLI. Its own config file carries the account authtoken, so this
+ * app never stores a second copy of the secret. `NGROK_PATH` is only for a
+ * non-standard install.
+ */
+function resolveNgrokPath(): string {
+  return process.env.NGROK_PATH?.trim() || "ngrok";
 }
 
-/**
- * Production tunnel configuration, from the environment.
- *
- * A quick tunnel (trycloudflare.com) is a *testing* facility: the URL is
- * random per run and Cloudflare gives it no SLA. A production deployment
- * should create a remotely-managed tunnel in the Cloudflare dashboard and set:
- *
- * - `CLOUDFLARED_TUNNEL_TOKEN` — the tunnel's run token, so the manager starts
- *   `cloudflared tunnel run --token …` instead of a quick tunnel.
- * - `CLOUDFLARED_HOSTNAME` — the fixed hostname routed to that tunnel, which
- *   is what the OAuth callback and the reach gate use. The Developer Portal
- *   redirect is then registered once and never changes.
- */
-function productionTunnel(): { token: string; hostname: string | null } | null {
-  const token = process.env.CLOUDFLARED_TUNNEL_TOKEN?.trim();
-  if (!token) return null;
-  return { token, hostname: process.env.CLOUDFLARED_HOSTNAME?.trim() || null };
+/** A fixed ngrok hostname from the environment, when one is configured. */
+function envNgrokDomain(): string | null {
+  return normaliseNgrokDomain(process.env.NGROK_DOMAIN);
 }
 
 /**
  * A boot-time override for the reach mode, from `AL_AI_REMOTE_ACCESS`.
  *
- * A quick tunnel is a rotating, best-effort address, and a machine that once
- * turned the tunnel on would otherwise mint a fresh trycloudflare URL on every
- * local boot — a public endpoint nobody asked for and a slower start. The
+ * A random ngrok address is best-effort, and a machine that once turned the
+ * tunnel on would otherwise mint a fresh URL on every local boot. The
  * bootstrapper therefore passes `off` for a plain local run and `on` only when
  * `--tunnel` was requested. Neither value is written to the operator's saved
  * setting: the switch in the dashboard remains the only thing that persists a
@@ -380,6 +408,8 @@ type NetworkLog = { info: (object: object, message: string) => void; warn: (obje
 export const REMOTE_ACCESS_MODE_KEY = "remote_access_mode";
 export const TUNNEL_PID_KEY = "remote_access_tunnel_pid";
 export const TUNNEL_URL_KEY = "remote_access_tunnel_url";
+/** The operator's fixed ngrok hostname; empty means a random tunnel URL. */
+export const NGROK_DOMAIN_KEY = "remote_access_ngrok_domain";
 /**
  * The origin a completed sign-in travelled through. Discord offers no API to
  * read an application's registered redirect URIs, so the round trip *is* the
@@ -397,11 +427,11 @@ function tunnelLogPath(): string {
 }
 
 /**
- * Is `pid` a live `cloudflared` process? The image-name check matters: PIDs
- * are recycled, and adopting an unrelated process by number alone would make
- * the gate trust a tunnel that does not exist.
+ * Is `pid` a live `ngrok` process? The image-name check matters: PIDs are
+ * recycled, and adopting an unrelated process by number alone would make the
+ * gate trust a tunnel that does not exist.
  */
-async function isCloudflaredPid(pid: number): Promise<boolean> {
+async function isNgrokPid(pid: number): Promise<boolean> {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     const { stdout } = await execFileAsync(
@@ -409,14 +439,33 @@ async function isCloudflaredPid(pid: number): Promise<boolean> {
       ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"],
       { timeout: 5_000 }
     );
-    return stdout.toLowerCase().includes("cloudflared");
+    return stdout.toLowerCase().includes("ngrok");
   } catch {
     return false;
   }
 }
 
-function killTree(pid: number): void {
-  execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"], { timeout: 5_000 }).catch(() => undefined);
+async function killTree(pid: number): Promise<void> {
+  try {
+    await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"], { timeout: 5_000 });
+  } catch {
+    // Already gone, or not ours to kill. The caller verifies with waitForGone.
+  }
+}
+
+/**
+ * Wait until the pid is no longer a live ngrok process.
+ *
+ * Starting the replacement before the old agent has released the endpoint is
+ * what produced two agents on one static domain (`ERR_NGROK_6030`). A pid check
+ * after the kill closes that window instead of trusting `taskkill`'s exit.
+ */
+async function waitForGone(pid: number, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await isNgrokPid(pid))) return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
 }
 
 export function createNetworkManager(input: {
@@ -429,8 +478,10 @@ export function createNetworkManager(input: {
   let tunnelUrl: string | null = null;
   let tunnelStatus: TunnelStatus = "off";
   let tunnelError: string | null = null;
-  // `child` is set only when THIS process spawned cloudflared; an adopted
-  // tunnel from a previous dashboard life is tracked by pid alone.
+  /** The fixed ngrok hostname, or null for a random tunnel URL. */
+  let domain: string | null = null;
+  // `child` is set only when THIS process spawned ngrok; an adopted tunnel
+  // from a previous dashboard life is tracked by pid alone.
   let child: ChildProcess | null = null;
   let tunnelPid: number | null = null;
   let verifiedOrigin: string | null = null;
@@ -438,7 +489,7 @@ export function createNetworkManager(input: {
   const machineHosts = () => lanHostsFrom(networkInterfaces());
   const machineHostEntries = () => lanHostEntriesFrom(networkInterfaces());
 
-  const cloudflaredPath = resolveCloudflaredPath();
+  const ngrokPath = resolveNgrokPath();
 
   function isOriginAllowed(origin: string): boolean {
     let host: string;
@@ -451,7 +502,7 @@ export function createNetworkManager(input: {
     // because the Host header is forgeable from a foreign socket. An origin
     // question has no socket: the login leg only asks which hosts this
     // deployment serves, and the callback it produces always arrives through
-    // `cloudflared`, whose upstream target is loopback by construction. So the
+    // `ngrok`, whose upstream target is loopback by construction. So the
     // live tunnel host is accepted here directly — delegating would run the
     // peer check with no peer and refuse, handing every remote sign-in a
     // localhost redirect URI that lands the member on their own machine.
@@ -490,9 +541,32 @@ export function createNetworkManager(input: {
    * kept a link that no longer existed. Reading from the byte offset the spawn
    * started at means only *this* tunnel's URL can be accepted.
    */
+  /**
+   * Only a URL this deployment can actually be serving is trusted from the log.
+   * A JSON log parser that accepted any https URL could be steered by a future
+   * log line (or a planted file) into advertising a foreign host; the fixed
+   * domain, or an ngrok hostname, is the only shape this manager starts.
+   */
+  function isExpectedTunnelUrl(value: string | null): boolean {
+    if (!value) return false;
+    try {
+      const hostname = new URL(value).hostname.toLowerCase();
+      if (domain) return hostname === domain;
+      return (
+        hostname.endsWith(".ngrok-free.app") ||
+        hostname.endsWith(".ngrok-free.dev") ||
+        hostname.endsWith(".ngrok.app") ||
+        hostname.endsWith(".ngrok.io")
+      );
+    } catch {
+      return false;
+    }
+  }
+
   function readTunnelUrlFromLog(since = 0): string | null {
     try {
-      return lastTunnelUrlIn(readFileSync(tunnelLogPath(), "utf8").slice(since));
+      const candidate = lastTunnelUrlIn(readFileSync(tunnelLogPath(), "utf8").slice(since));
+      return isExpectedTunnelUrl(candidate) ? candidate : null;
     } catch {
       return null;
     }
@@ -519,7 +593,7 @@ export function createNetworkManager(input: {
     if (child || tunnelStatus === "running" || tunnelStatus === "starting") return;
     const savedPid = Number((await input.getSetting(TUNNEL_PID_KEY)) ?? 0);
     const savedUrl = await input.getSetting(TUNNEL_URL_KEY);
-    if (savedPid > 0 && savedUrl && (await isCloudflaredPid(savedPid))) {
+    if (savedPid > 0 && savedUrl && isExpectedTunnelUrl(savedUrl) && (await isNgrokPid(savedPid))) {
       const replacement = await replacementTunnelUrl(savedUrl);
       const liveUrl = replacement ?? (await urlAnswers(savedUrl) ? savedUrl : null);
       if (liveUrl) {
@@ -530,7 +604,7 @@ export function createNetworkManager(input: {
           input.log.info({ from: savedUrl, to: liveUrl }, "Adopted the tunnel's replacement URL");
           void input.setSetting(TUNNEL_URL_KEY, liveUrl).catch(() => undefined);
         } else {
-          input.log.info({ tunnelUrl: liveUrl, pid: savedPid }, "Adopted the cloudflared tunnel from a previous run");
+          input.log.info({ tunnelUrl: liveUrl, pid: savedPid }, "Adopted the ngrok tunnel from a previous run");
         }
         return;
       }
@@ -538,7 +612,8 @@ export function createNetworkManager(input: {
       // no replacement: the tunnel is wedged, not adopted. Starting a fresh one
       // is the only way to have a working address again.
       input.log.warn({ pid: savedPid, url: savedUrl }, "The saved tunnel process is live but its URL does not answer; restarting it");
-      killTree(savedPid);
+      await killTree(savedPid);
+      await waitForGone(savedPid);
       void input.setSetting(TUNNEL_PID_KEY, "").catch(() => undefined);
       void input.setSetting(TUNNEL_URL_KEY, "").catch(() => undefined);
     }
@@ -556,10 +631,10 @@ export function createNetworkManager(input: {
   }
 
   /**
-   * A newer quick-tunnel URL in the log than `stale`, when the persisted one no
-   * longer answers. cloudflared asks for a replacement on reconnect and prints
-   * it after the original, so the newest URL in the file is the candidate —
-   * provided it answers, since a log line alone does not prove the edge is up.
+   * A newer tunnel URL in the log than `stale`, when the persisted one no
+   * longer answers. ngrok prints a replacement after a reconnect, so the newest
+   * URL in the file is the candidate — provided it answers, since a log line
+   * alone does not prove the edge is up.
    */
   async function replacementTunnelUrl(stale: string): Promise<string | null> {
     const candidate = readTunnelUrlFromLog();
@@ -569,32 +644,14 @@ export function createNetworkManager(input: {
 
   function startTunnel() {
     if (child) return;
-    const managed = productionTunnel();
-    if (!cloudflaredPath && !managed) {
-      tunnelStatus = "error";
-      tunnelError = "cloudflared غير مثبّت على هذا الجهاز — ثبّته أو اضبط CLOUDFLARED_PATH.";
-      return;
-    }
     tunnelStatus = "starting";
     tunnelError = null;
-    // A fresh quick tunnel has no address yet, and the one a previous run left
-    // in this manager — or in the log — is not this tunnel's. Drop it now so
-    // nothing between here and the new URL's appearance offers the old one:
-    // the gate, the OAuth origin handoff, and the screen all read `tunnelUrl`.
+    // A previous run's address is not this tunnel's. Drop it now so the gate,
+    // the OAuth handoff and the screen never offer the old one.
     tunnelUrl = null;
-    // Where the log currently ends: cloudflared writes its new URL after this
-    // point, so the poll below can be held to this tunnel's address only.
     const logOffset = statSize(tunnelLogPath());
-    // A managed tunnel's hostname is configuration, not discovery: it is known
-    // before the process answers, so the gate and the OAuth origin can use it
-    // immediately.
-    if (managed?.hostname) {
-      tunnelUrl = `https://${managed.hostname}`;
-      tunnelStatus = "running";
-    }
     // Detached, with the log file as stdout/stderr: the child outlives this
-    // process (a restart keeps the URL) and no pipe can fill up and stall it —
-    // cloudflared is chatty, and a blocked pipe would freeze the tunnel.
+    // process (a restart keeps the URL) and a blocked pipe cannot stall it.
     let logFd: number;
     try {
       logFd = openSync(tunnelLogPath(), "a");
@@ -604,20 +661,20 @@ export function createNetworkManager(input: {
       return;
     }
     try {
-      child = spawn(
-        cloudflaredPath!,
-        managed
-          ? ["tunnel", "run", "--token", managed.token]
-          : ["tunnel", "--url", `http://127.0.0.1:${input.port}`, "--no-autoupdate"],
-        { stdio: ["ignore", logFd, logFd], detached: true, windowsHide: true }
-      );
+      const args = ["http", String(input.port), "--log=stdout", "--log-format=json"];
+      if (domain) args.push(`--url=https://${domain}`);
+      child = spawn(ngrokPath, args, {
+        stdio: ["ignore", logFd, logFd],
+        detached: true,
+        windowsHide: true
+      });
       child.unref();
       tunnelPid = child.pid ?? null;
     } catch (error) {
       child = null;
       tunnelPid = null;
-      tunnelStatus = managed?.hostname ? "running" : "error";
-      tunnelError = error instanceof Error ? error.message : "تعذّر تشغيل النفق.";
+      tunnelStatus = "error";
+      tunnelError = error instanceof Error ? error.message : "تعذّر تشغيل ngrok. تأكد من تثبيته أو اضبط NGROK_PATH.";
       return;
     } finally {
       closeSync(logFd);
@@ -625,7 +682,10 @@ export function createNetworkManager(input: {
     void input.setSetting(TUNNEL_PID_KEY, String(tunnelPid)).catch(() => undefined);
     child.on("error", error => {
       tunnelStatus = "error";
-      tunnelError = error.message;
+      tunnelError =
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+          ? "ngrok غير مثبّت أو غير موجود في PATH — ثبّته أو اضبط NGROK_PATH."
+          : error.message;
       child = null;
     });
     // An unplanned exit of OUR child is surfaced, not hidden. An adopted
@@ -639,9 +699,9 @@ export function createNetworkManager(input: {
         tunnelStatus = "error";
         tunnelError = `انتهت عملية النفق بالرمز ${code ?? "غير معروف"}. أعد اختيار الوضع لإعادة التشغيل.`;
       }
-      input.log.warn({ code }, "Cloudflare quick tunnel exited");
+      input.log.warn({ code }, "ngrok tunnel exited");
     });
-    // cloudflared prints the URL once; poll the log rather than hold pipes.
+    // ngrok prints the public URL once; poll the log rather than hold pipes.
     const startedAt = Date.now();
     const poll = setInterval(() => {
       if (tunnelStatus !== "starting") {
@@ -654,39 +714,52 @@ export function createNetworkManager(input: {
         tunnelUrl = found;
         tunnelStatus = "running";
         void input.setSetting(TUNNEL_URL_KEY, found).catch(() => undefined);
-        input.log.info({ tunnelUrl: found }, "Cloudflare quick tunnel is up");
+        input.log.info({ tunnelUrl: found }, "ngrok tunnel is up");
         return;
       }
       if (Date.now() - startedAt > TUNNEL_START_TIMEOUT_MS) {
         clearInterval(poll);
         tunnelStatus = "error";
-        tunnelError = "لم يظهر رابط النفق خلال 20 ثانية — راجع ملف .al-tunnel.log.";
+        tunnelError = domain
+          ? `لم يظهر رابط النفق للنطاق ${domain} خلال 20 ثانية. تأكد أن النطاق محجوز في ngrok.`
+          : "لم يظهر رابط النفق خلال 20 ثانية — راجع ملف .al-tunnel.log.";
       }
     }, 500);
   }
 
   async function stopTunnel(): Promise<void> {
     const dyingChild = child;
-    const dyingPid = tunnelPid;
+    const dyingPid = tunnelPid ?? dyingChild?.pid ?? null;
     child = null;
     tunnelPid = null;
     tunnelStatus = "off";
     tunnelUrl = null;
     tunnelError = null;
-    if (dyingChild) dyingChild.kill();
-    else if (dyingPid) killTree(dyingPid);
+
+    if (dyingChild && dyingChild.exitCode === null && dyingChild.signalCode === null) {
+      const exited = new Promise<void>(resolve => dyingChild.once("exit", () => resolve()));
+      dyingChild.kill();
+      await Promise.race([exited, new Promise<void>(resolve => setTimeout(resolve, 2_000))]);
+    }
+    // A detached ngrok ignores a polite kill often enough that the replacement
+    // used to start while the old agent still held the endpoint. Verify the
+    // process is actually gone before releasing the pid to the caller.
+    if (dyingPid && (await isNgrokPid(dyingPid))) {
+      await killTree(dyingPid);
+      await waitForGone(dyingPid);
+    }
     await input.setSetting(TUNNEL_PID_KEY, "").catch(() => undefined);
     await input.setSetting(TUNNEL_URL_KEY, "").catch(() => undefined);
   }
 
   /**
    * Verify the tunnel actually answers, instead of trusting that a live
-   * `cloudflared` pid means a working URL.
+   * `ngrok` pid means a working URL.
    *
    * An adopted tunnel from a previous boot is believed on pid alone, and a
    * quick tunnel can stay alive while its edge connection is dead — a VPN or
-   * a filtering proxy on this machine breaks the mTLS handshake to
-   * `*.argotunnel.com` without killing the process. The URL then stays in the
+   * a filtering proxy on this machine breaks the handshake to ngrok's edge
+   * without killing the process. The URL then stays in the
    * snapshot as "running" while nothing on the internet can reach it, which is
    * worse than no answer at all: the screen offers a link that cannot work and
    * gives no reason. So the read probes its own public address.
@@ -714,9 +787,13 @@ export function createNetworkManager(input: {
   }
 
   function snapshot(): NetworkSnapshot {
+    const stable = Boolean(domain && tunnelUrl && new URL(tunnelUrl).hostname === domain);
     return {
       mode,
+      tunnelProvider: "ngrok",
       tunnelUrl,
+      tunnelDomain: domain,
+      tunnelStable: stable,
       tunnelStatus,
       tunnelError,
       machineHosts: machineHostEntries(),
@@ -751,28 +828,60 @@ export function createNetworkManager(input: {
     mode = normaliseRemoteAccessMode(await input.getSetting(REMOTE_ACCESS_MODE_KEY));
     const override = remoteAccessOverride();
     if (override) mode = override;
+    domain = normaliseNgrokDomain(await input.getSetting(NGROK_DOMAIN_KEY)) ?? envNgrokDomain();
     verifiedOrigin = normaliseOrigin(await input.getSetting(VERIFIED_ORIGIN_KEY));
     if (mode === "tunnel") await adoptOrStartTunnel();
-    input.log.info({ mode, ...(override ? { overrideFrom: "AL_AI_REMOTE_ACCESS" } : {}) }, "AL AI network access loaded");
+    input.log.info({ mode, domain, ...(override ? { overrideFrom: "AL_AI_REMOTE_ACCESS" } : {}) }, "AL AI network access loaded");
   }
 
-  async function setMode(next: unknown): Promise<NetworkSnapshot> {
-    const value = normaliseRemoteAccessMode(next);
-    mode = value;
-    await input.setSetting(REMOTE_ACCESS_MODE_KEY, value);
-    if (value === "tunnel") {
-      await adoptOrStartTunnel();
-    } else {
+  /**
+   * Apply the reach settings in one step.
+   *
+   * Mode and domain used to be two calls, and a request that carried both made
+   * two agents start on one endpoint — the second found the first still alive
+   * and started a replacement, leaving `ERR_NGROK_6030` behind. Deciding both
+   * here means at most one stop and one start, whatever the request changed.
+   * Clearing the domain falls back to a random ngrok URL; the domain is
+   * configuration, so stopping the tunnel does not clear it.
+   */
+  async function applyReach(change: { mode: unknown; hasDomain: boolean; domain: string | null }): Promise<NetworkSnapshot> {
+    const nextMode = normaliseRemoteAccessMode(change.mode);
+    const nextDomain = change.hasDomain
+      ? change.domain === null
+        ? null
+        : normaliseNgrokDomain(change.domain)
+      : domain;
+    if (change.hasDomain && change.domain !== null && !nextDomain) {
+      throw new Error("النطاق غير صالح. استخدم اسماً مثل name.ngrok-free.dev.");
+    }
+
+    const modeChanged = nextMode !== mode;
+    const domainChanged = change.hasDomain && nextDomain !== domain;
+    mode = nextMode;
+    domain = nextDomain;
+
+    await input.setSetting(REMOTE_ACCESS_MODE_KEY, mode);
+    if (change.hasDomain) await input.setSetting(NGROK_DOMAIN_KEY, domain ?? "");
+
+    if (mode === "tunnel") {
+      if (modeChanged || domainChanged) {
+        await stopTunnel();
+        startTunnel();
+      } else if (tunnelStatus !== "running" && tunnelStatus !== "starting") {
+        await adoptOrStartTunnel();
+      }
+    } else if (modeChanged) {
       await stopTunnel();
     }
-    input.log.info({ mode: value }, "AL AI network access changed");
+
+    input.log.info({ mode, domain, modeChanged, domainChanged }, "AL AI network access changed");
     return snapshot();
   }
 
   /**
    * Shutdown intentionally leaves the tunnel running: a dashboard restart then
    * re-adopts it and the registered OAuth callback survives. Only the mode
-   * toggle ends the process (setMode → stopTunnel).
+   * toggle ends the process (applyReach → stopTunnel).
    */
   function stop(): void {}
 
@@ -785,6 +894,6 @@ export function createNetworkManager(input: {
     return mode === "tunnel" && tunnelUrl ? tunnelUrl : null;
   }
 
-  return { boot, setMode, snapshot, probe: probeTunnel, markOriginVerified, isHostAllowed: isHostAllowedNow, isOriginAllowed, tunnelOrigin, stop };
+  return { boot, applyReach, snapshot, probe: probeTunnel, markOriginVerified, isHostAllowed: isHostAllowedNow, isOriginAllowed, tunnelOrigin, stop };
 }
 

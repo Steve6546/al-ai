@@ -135,7 +135,7 @@ export function CommandsView({ guild }: { guild: Guild }) {
       <EmptyState
         icon={SquareTerminal}
         title="لا توجد أوامر مسجّلة"
-        description="تُبنى هذه القائمة من سجل الأوامر المشترك. أضف الأمر إلى السجل ثم أعد تشغيل البوت ليظهر هنا."
+        description="من سجل الأوامر. أعد تشغيل البوت بعد الإضافة."
       />
     );
   }
@@ -351,7 +351,12 @@ export function CommandsBoard({
 
   return (
     <>
-      <div className="grid min-h-0 gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
+      {/* grid-cols-1 (minmax(0,1fr)) is not cosmetic: without an explicit
+          track the mobile grid sizes its single column to min-content, and the
+          section rail — a row of shrink-0 buttons — then forces the whole page
+          2.4k px wide. min-w-0 on the nav lets the rail shrink inside the
+          track, so its own overflow-x-auto becomes the scroller. */}
+      <div className="grid min-h-0 grid-cols-1 gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
         {/* ---------------------------------------------------------------- *
          * Sections
          *
@@ -359,8 +364,8 @@ export function CommandsBoard({
          * height by default — without it there is nothing for `sticky` to
          * travel inside and the nav would scroll away with the cards.
          * ---------------------------------------------------------------- */}
-      <nav aria-label="أقسام الأوامر" className="lg:sticky lg:top-6 lg:self-start">
-        <div className="scrollbar-none flex gap-1 overflow-x-auto pb-2 lg:flex-col lg:overflow-visible lg:pb-0">
+      <nav aria-label="أقسام الأوامر" className="min-w-0 lg:sticky lg:top-6 lg:self-start">
+        <div className="flex flex-wrap gap-1 pb-2 lg:flex-col lg:flex-nowrap lg:overflow-visible lg:pb-0">
           <SectionButton
             label="كل الأوامر"
             icon={SquareTerminal}
@@ -445,7 +450,7 @@ export function CommandsBoard({
         {visible.length === 0 && (
           <p className="rounded-md border border-border px-3 py-6 text-center text-sm text-muted-foreground">
             {activeSection && !query.trim() && status === "all"
-              ? "لا توجد أوامر مضافة في هذا القسم حالياً، سيتم توفيرها في التحديثات القادمة."
+              ? "لا توجد أوامر في هذا القسم."
               : `لا يوجد أمر يطابق عوامل التصفية الحالية${query.trim() ? ` «${query.trim()}»` : ""}.`}
           </p>
         )}
@@ -484,7 +489,7 @@ export function CommandsBoard({
         })}
 
         <p className="text-xs text-muted-foreground">
-          إيقاف أمر يمنع تنفيذه فوراً، وكل القيود هنا تُفحص على الخادم عند كل تنفيذ لا في الواجهة فقط.
+          إيقاف الأمر يمنع تنفيذه فوراً؛ القيود تُفحص على الخادم.
         </p>
       </div>
     </div>
@@ -767,7 +772,7 @@ function CommandCard({
               <MemberScopeSelector
                 label="الأشخاص المصرحين"
                 emptyLabel="الكل مسموح"
-                hint="استثناء ضيّق لشخص بعينه حين لا تكفي رتبة: مساعد واحد، أو حساب ثانٍ للمالك."
+                hint="استثناء شخصي حين لا تكفي رتبة."
                 selected={command.allowedUserIds}
                 memberById={memberById}
                 onChange={ids => onPatch({ allowedUserIds: ids })}
@@ -775,7 +780,7 @@ function CommandCard({
               <MemberScopeSelector
                 label="الأشخاص الممنوعين"
                 emptyLabel="بدون"
-                hint="الحظر يتقدّم على كل سماح: من أُدرج هنا لا ينفّذ الأمر حتى لو منحته رتبة أو رتبة أساسية."
+                hint="الحظر يتقدم على السماح."
                 selected={command.deniedUserIds}
                 memberById={memberById}
                 onChange={ids => onPatch({ deniedUserIds: ids })}
@@ -783,7 +788,7 @@ function CommandCard({
               <ScopeSelector
                 label="القنوات المسموحة"
                 emptyLabel="الكل مسموح"
-                hint="اتركها فارغة للسماح في كل القنوات. عند تحديد أي قناة يعمل الأمر فيها فقط."
+                hint="الفراغ = كل القنوات."
                 items={channels.map(channel => ({ id: channel.id, name: channel.name, type: channel.type }))}
                 selected={command.allowedChannelIds}
                 noneLabel="لا توجد قنوات"
@@ -903,7 +908,7 @@ function CommandCard({
                   <ToggleField
                     id={`require-reason-${command.name}`}
                     label="السبب مطلوب"
-                    hint="يُرفض تنفيذ الأمر بدون سبب مسجّل. الفحص يتم على الخادم، فلا يمكن تجاوزه من الواجهة."
+                    hint="يُرفض الأمر بدون سبب مسجل (فحص على الخادم)."
                     checked={command.requireReason}
                     onChange={requireReason => onPatch({ requireReason })}
                   />
@@ -914,7 +919,7 @@ function CommandCard({
                     <ToggleField
                       id={`custom-reason-${command.name}`}
                       label="السماح بكتابة سبب مخصص"
-                      hint="عند إيقافه تُقبل الأسباب الجاهزة وحدها، وهو ما يعطي مجموعة أسباب نظيفة قابلة للعدّ."
+                      hint="عند الإيقاف تُقبل الأسباب الجاهزة فقط."
                       checked={command.allowCustomReason}
                       onChange={allowCustomReason => onPatch({ allowCustomReason })}
                     />
@@ -939,8 +944,7 @@ function CommandCard({
                         </SelectContent>
                       </Select>
                       <p className="text-xs text-muted-foreground">
-                        تُطبَّق عندما لا يحدّد المشرف مدة. «دائم» يطلب كتابة المدة صراحةً، و«مخصص» يطلبها دائماً حتى لو حمل
-                        السبب الجاهز مدة مقترنة.
+                        تُطبَّق عندما لا يحدّد المشرف مدة.
                       </p>
                     </div>
                   )}
@@ -969,7 +973,7 @@ function CommandCard({
                       id={`muted-role-${command.name}`}
                       label="رتبة المكتوم"
                       noneLabel="بلا رتبة — الأمر لا ينفّذ"
-                      hint="الرتبة التي يمنحها /mute. أنشئها في ديسكورد بصلاحياتها بنفسك؛ البوت لا يُنشئ رتبة، لأن رتبة بلا تجاوزات تُكتم بصمت ولا تُسكِت أحداً."
+                      hint="رتبة /mute. أنشئها في Discord بصلاحياتها — البوت لا ينشئ رتباً."
                       items={roles.map(role => ({ id: role.id, name: role.name }))}
                       value={command.mutedRoleId}
                       onChange={mutedRoleId => onPatch({ mutedRoleId })}
@@ -981,7 +985,7 @@ function CommandCard({
                       id={`prison-role-${command.name}`}
                       label="رتبة السجن"
                       noneLabel="بلا رتبة — الأمر لا ينفّذ"
-                      hint="الرتبة التي يمنحها /prison. يحفظ البوت رتب العضو قبل السجن ويعيدها عند /unprison، فتأكّد أن رتبة السجن أدنى من رتبة البوت."
+                      hint="رتبة /prison. يحفظ البوت الرتب السابقة ويعيدها عند /unprison."
                       items={roles.map(role => ({ id: role.id, name: role.name }))}
                       value={command.prisonRoleId}
                       onChange={prisonRoleId => onPatch({ prisonRoleId })}
@@ -993,7 +997,7 @@ function CommandCard({
                       id={`prison-channel-${command.name}`}
                       label="قناة السجن الصوتية"
                       noneLabel="بلا قناة — لا نقل"
-                      hint="قناة صوتية يُنقل إليها العضو عند السجن. اختيارية: بلا قناة يبقى السجن رتبة فقط، وهو ما يكفي للقنوات النصية."
+                      hint="قناة السجن الصوتية. بدونها يبقى السجن رتبة فقط."
                       items={channels.filter(channel => channel.type === "voice").map(channel => ({ id: channel.id, name: channel.name }))}
                       value={command.prisonChannelId}
                       onChange={prisonChannelId => onPatch({ prisonChannelId })}
@@ -1004,7 +1008,7 @@ function CommandCard({
                     <ScopeSelector
                       label="رتب البلاك ليست"
                       emptyLabel="بدون"
-                      hint="الرتب التي يمنحها /blacklist ويسحبها /unblacklist. لا بد من رتبة واحدة على الأقل، وإلا رُفض الأمر بدل أن يُبلَّغ بنجاح لم يقع."
+                      hint="الرتب التي يمنحها /blacklist ويسحبها /unblacklist — واحدة على الأقل."
                       items={roles.map(role => ({ id: role.id, name: role.name, color: role.color }))}
                       selected={command.blacklistRoleIds}
                       noneLabel="لا توجد رتب"
@@ -1017,7 +1021,7 @@ function CommandCard({
                     <ScopeSelector
                       label="الرتب الإدارية"
                       emptyLabel="كل رتبة ذات صلاحيات"
-                      hint="الرتب التي يسحبها /down. اتركها فارغة لسحب كل الرتب ذات الصلاحيات تلقائياً، وهي الحالة الافتراضية. الاستعادة تعيد ما سُحب فعلاً لا ما تسرده هذه القائمة."
+                      hint="الرتب التي يسحبها /down. الفراغ = كل الرتب الإدارية. الاستعادة تعيد ما سُحب فعلاً."
                       items={roles.map(role => ({ id: role.id, name: role.name, color: role.color }))}
                       selected={command.adminRoleIdsToStrip}
                       noneLabel="لا توجد رتب"
@@ -1030,7 +1034,7 @@ function CommandCard({
                     <ScopeSelector
                       label="رتب البلوك"
                       emptyLabel="بدون"
-                      hint="الرتب التي يقبلها /block. منتقي ديسكورد يعرض كل الرتب، وهذه القائمة هي ما يقرّر فعلاً: رتبة خارجها يرفضها البوت."
+                      hint="الرتب التي يقبلها /block. خارجها يُرفض."
                       items={roles.map(role => ({ id: role.id, name: role.name, color: role.color }))}
                       selected={command.blockableRoleIds}
                       noneLabel="لا توجد رتب"
@@ -1521,7 +1525,7 @@ function AliasEditor({
   const problem = !candidate
     ? null
     : !isUsableAlias(candidate)
-      ? "الاختصار يقبل الحروف والأرقام و - و _ فقط، بحروف صغيرة، وبحد أقصى 32 حرفاً."
+      ? "أحرف وأرقام و - و _ فقط، بحروف صغيرة، حتى 32 حرفاً."
       : taken.has(candidate)
         ? "هذا اسم أمر منشور في AL AI، فلا يمكن استخدامه كاختصار."
         : owner === command.name
@@ -1591,7 +1595,7 @@ function AliasEditor({
       )}
 
       <p className="text-xs text-muted-foreground">
-        يُنشَر الاختصار كأمر حقيقي في ديسكورد يحمل خيارات الأمر الأصلي نفسها، ويحتاج نشراً للسيرفر عبر أمر
+        يُنشَر كأمر حقيقي ويحتاج نشراً للسيرفر عبر
         <span className="mx-1 font-mono text-[11px]" dir="ltr">
           deploy-commands --guild &lt;id&gt;
         </span>

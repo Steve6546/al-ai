@@ -6,7 +6,7 @@
  * - **off** — loopback only. The default for anyone who takes the project.
  * - **lan** — loopback plus the machine's own private addresses, which is the
  *   router's network.
- * - **tunnel** — lan plus one Cloudflare quick-tunnel hostname, which is how
+ * - **tunnel** — lan plus one stable ngrok hostname, which is how
  *   the dashboard becomes reachable from the open internet without forwarding
  *   a port on the router.
  */

@@ -494,7 +494,7 @@ const loadedMarkers: Record<string, RegExp> = {
   // read has landed — a null profile leaves the preview drawing initials — so
   // it still means "the data arrived" rather than "something was drawn".
   customization: /cdn\.discordapp\.com/,
-  welcome: /رتبة تلقائية/,
+  welcome: /منح الرتب تلقائياً/,
   // The settings tab's text-XP card only renders once `settings` arrived; the
   // armed header above it is static and would satisfy any skeleton.
   levels: /الخبرة الكتابية/,
@@ -550,7 +550,7 @@ test("the identity screen renders its fields, not just a spinner", async () => {
   // The shell header already prints the nav label «هوية البوت», so the marker
   // is the screen's own subtitle — a string only this view produces. Asserting
   // on the label would pass on a shell with an empty content area.
-  assert.match(html, /كل ما يظهر به AL AI/, "the screen's own header renders");
+  assert.match(html, /لقب ونبذة وصورة وغلاف/, "the screen's own header renders");
   assert.match(html, /اللقب/, "the nickname field renders");
   // The one scope, named on the screen itself.
   assert.match(html, /هذا السيرفر/, "the per-guild scope is named");
@@ -637,7 +637,7 @@ test("the identity screen carries nothing account-wide", async () => {
   // …and the note that points at the screen that does own them. Asserted on the
   // sentence rather than on the phrase «حالة البوت», which the shell's own nav
   // label would satisfy on an empty content area.
-  assert.match(html, /الحالة والنشاط لا يظهران هنا/, "the screen says the status is not its business");
+  assert.match(html, /الحالة والنشاط عامّان للبوت/, "the screen says the status is not its business");
   assert.match(html, /شاشة «حالة البوت»/, "…and names where it went");
 });
 
@@ -734,7 +734,7 @@ test("the presence screen says out loud that its reach is every server", async (
   const { html, errors } = await mount(`/dashboard/${GUILD_ID}/presence`);
 
   assert.deepEqual(fatal(errors), []);
-  assert.match(html, /اتصال البوت الحي/, "the screen names where the status actually lives");
+  assert.match(html, /اتصال البوت/, "the screen names where the status actually lives");
   assert.match(html, /كل السيرفرات/, "…and states that it applies to all of them");
   // The stored row, not the defaults — otherwise the screen could be correct
   // about its scope and still be showing the operator somebody else's status.
@@ -1101,7 +1101,7 @@ function panelFor(doc: Document, label: string): HTMLElement | null {
 }
 
 /** Replaces an input's value the way React notices, then fires the event. */
-function typeInto(doc: Document, input: HTMLInputElement, value: string) {
+function typeInto(_doc: Document, input: HTMLInputElement, value: string) {
   const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")?.set;
   setValue?.call(input, value);
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
@@ -1518,7 +1518,7 @@ function sectionCard(doc: Document, description: string): Element | null {
 function activeNavLabel(html: string): string | null {
   const probe = document.createElement("div");
   probe.innerHTML = html;
-  return probe.querySelector('nav[aria-label="أقسام السجلات"] button[aria-current="true"]')?.textContent?.trim() ?? null;
+  return probe.querySelector('nav[aria-label="أقسام السجلات"] button[aria-current="page"]')?.textContent?.trim() ?? null;
 }
 
 test("the logs sidebar lists every section and swaps one card in for another", async () => {
@@ -1849,8 +1849,8 @@ test("deleting the log channels asks first, names the count, and only then acts"
     await settle();
     const dialog = doc.querySelector('[role="dialog"]');
     assert.ok(dialog, "a confirmation dialog opened");
-    assert.match(dialog!.textContent ?? "", /سيتم حذف 1 قناة/, "it names the channel count, not a generic warning");
-    assert.match(dialog!.textContent ?? "", /لا يمكن التراجع/, "and says the move is irreversible");
+    assert.match(dialog!.textContent ?? "", /سيُحذف 1 قناة/, "it names the channel count, not a generic warning");
+    assert.match(dialog!.textContent ?? "", /لا رجوع/, "and says the move is irreversible");
 
     // Cancel has to leave everything exactly as it was — no request, no state.
     const cancel = [...dialog!.querySelectorAll("button")].find(element => /إلغاء/.test(element.textContent ?? ""));

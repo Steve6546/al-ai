@@ -67,7 +67,6 @@ import {
   type CustomizationSettings,
   type GuildMetrics,
   type InviteSettings,
-  type LevelRewardKind,
   type WelcomeMessageSettings,
   type LevelRoleReward,
   type LevelSettings,
@@ -131,6 +130,7 @@ import {
   createNetworkManager,
   isLoopbackOrigin,
   isOAuthCapableOrigin,
+  normaliseNgrokDomain,
   packOAuthState,
   unpackOAuthState
 } from "./network.js";
@@ -151,7 +151,7 @@ const db = createDatabase(pool);
 
 /**
  * Trust forwarded headers only from the peer that actually proxies to us —
- * the `cloudflared` process on loopback. `trustProxy: true` let any *direct*
+ * the `ngrok` process on loopback. `trustProxy: true` let any *direct*
  * client flip its own protocol via `x-forwarded-proto`, which fed the OAuth
  * origin logic; loopback-gating keeps the tunnel's https signal while making
  * the header dead weight everywhere else.
@@ -180,7 +180,23 @@ const REQUEST_BODY_LIMIT = 1_200_000;
 const UPSTREAM_RETRY_AFTER_SECONDS = 3;
 
 const app = Fastify({
-  logger: true,
+  logger: {
+    // Never write an OAuth authorization code (or any /auth/ query value) to
+    // the log: request URLs are logged by default, and a code is a one-use
+    // credential that has no business in a text file.
+    serializers: {
+      req(request) {
+        const path = request.url.startsWith("/auth/") ? request.url.split("?")[0] : request.url;
+        return {
+          method: request.method,
+          url: path,
+          host: request.headers.host,
+          remoteAddress: request.ip,
+          remotePort: request.socket?.remotePort
+        };
+      }
+    }
+  },
   bodyLimit: REQUEST_BODY_LIMIT,
   trustProxy: trustProxyOnlyLoopback
 });
@@ -188,7 +204,7 @@ const app = Fastify({
 /**
  * The deployment's network reach. Loaded from `instance_settings` at boot, so
  * the mode the operator chose survives a restart and a tunnel mode adopts (or
- * resumes) its `cloudflared` process on its own. The gate hook below consults
+ * resumes) its `ngrok` process on its own. The gate hook below consults
  * this on every request.
  */
 const network = createNetworkManager({
@@ -226,6 +242,26 @@ await network.boot();
 const API_THROTTLE_WINDOW_MS = 60_000;
 const API_THROTTLE_MAX = 120;
 const throttle = new RequestThrottle(API_THROTTLE_WINDOW_MS, API_THROTTLE_MAX);
+/**
+ * A per-peer ceiling that does not depend on the session cookie.
+ *
+ * The session bucket below is keyed by a UUID-shaped cookie, which a client can
+ * rotate at will. Without this second bucket, rotating it bought an empty
+ * bucket every time and the rate limit was decorative. 600/min is generous for
+ * a dashboard and still bounds a flood; legitimate signed-in sessions keep
+ * their tighter 120/min bucket on top.
+ */
+const IP_THROTTLE_MAX = 600;
+const ipThrottle = new RequestThrottle(API_THROTTLE_WINDOW_MS, IP_THROTTLE_MAX);
+
+// Forged cookies mint a session key per request until the window expires;
+// sweeping keeps that map bounded instead of growing for the process's life.
+const throttleSweep = setInterval(() => {
+  const now = Date.now();
+  throttle.sweep(now);
+  ipThrottle.sweep(now);
+}, API_THROTTLE_WINDOW_MS);
+throttleSweep.unref();
 
 /**
  * Security headers on every response, refusals included.
@@ -233,24 +269,36 @@ const throttle = new RequestThrottle(API_THROTTLE_WINDOW_MS, API_THROTTLE_MAX);
  * Now that the deployment reaches beyond loopback, these are the baseline the
  * browser enforces for us: the page must not be framed (clickjacking), MIME-
  * sniffed, or leaked through referrers, and the CSP pins what the SPA may
- * load — its own bundle and styles, Discord's CDN for avatars, Google Fonts —
- * so an injected script has nowhere to phone home to. Kept as headers rather
- * than a helmet dependency: five lines the whole surface depends on, with the
- * font and image exceptions stated where they can be read.
+ * load — its own bundle, styles and self-hosted fonts, Discord's CDN for
+ * avatars — so an injected script has nowhere to phone home to. Kept as headers
+ * rather than a helmet dependency: five lines the whole surface depends on,
+ * with the image exception stated where it can be read.
  */
-app.addHook("onRequest", async (_request, reply) => {
+app.addHook("onRequest", async (request, reply) => {
   reply.header("X-Content-Type-Options", "nosniff");
   reply.header("X-Frame-Options", "DENY");
   reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
   reply.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  // Browsers only honour HSTS over HTTPS; the tunnel terminates TLS before
+  // the loopback hop, so `request.protocol` is the signal, not the socket.
+  if (request.protocol === "https") {
+    reply.header("Strict-Transport-Security", "max-age=31536000");
+  }
+  // Guild data, sessions and audit rows are per-request views of private
+  // state; a shared cache must not keep a copy.
+  if (request.url.startsWith("/api/") || request.url.startsWith("/auth/")) {
+    reply.header("Cache-Control", "no-store");
+  }
   reply.header(
     "Content-Security-Policy",
     [
       "default-src 'self'",
       "script-src 'self'",
       // Style attributes are how React and framer-motion write inline styles.
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "font-src 'self' https://fonts.gstatic.com",
+      "style-src 'self' 'unsafe-inline'",
+      // The IBM Plex files are served from /fonts by this same origin, so a
+      // blocked Google Fonts request can no longer hold the first paint.
+      "font-src 'self'",
       // `blob:` is required by the image cropper: a picked file becomes an
       // object URL and is previewed in an <img> before any bytes reach the
       // server. A blob URL can only be minted by this same origin, so the
@@ -359,22 +407,29 @@ app.addHook("onRequest", async (request, reply) => {
   const url = request.url;
   // Static assets are not throttled: a single page load legitimately fetches a
   // handful of them, and none of them touch Discord.
-  if (!url.startsWith("/api/") && !url.startsWith("/auth/")) return;
-  if (url.startsWith("/internal/")) return;
-  // A request carrying a well-formed session id gets its OWN bucket keyed by
-  // that id rather than the shared per-IP one. Behind the tunnel every visitor
-  // arrives from cloudflared's loopback socket, so one flooding stranger could
-  // otherwise 429-lock the signed-in operator out of their own dashboard. The
-  // id is validated by shape only — a forged one just buys its own empty
-  // bucket, which is exactly the isolation we want; the session it claims is
-  // still verified per-route.
+  if (!url.startsWith("/api/") && !url.startsWith("/auth/") && !url.startsWith("/internal/")) return;
+
+  // The IP ceiling is the anti-forgery layer: it applies before the cookie is
+  // trusted for anything, so rotating a fake session id cannot mint a fresh
+  // bucket. Behind the tunnel every visitor shares ngrok's loopback address,
+  // so the ceiling is deliberately generous (600/min), while a signed-in
+  // session still gets its own tighter 120/min bucket below.
+  const now = Date.now();
+  const ipVerdict = ipThrottle.check(clientKey(request.socket.remoteAddress), now);
+  if (!ipVerdict.allowed) {
+    return reply
+      .code(429)
+      .header("retry-after", String(ipVerdict.retryAfterSeconds))
+      .send({
+        error: "TOO_MANY_REQUESTS",
+        message: `عدد كبير من الطلبات. أعد المحاولة بعد ${ipVerdict.retryAfterSeconds} ثانية.`
+      });
+  }
+
   const cookies = parseCookies(request.headers.cookie);
   const sessionKey = cookies[SESSION_COOKIE_NAME];
-  const key =
-    sessionKey && /^[0-9a-f-]{36}$/i.test(sessionKey)
-      ? `sess:${sessionKey}`
-      : clientKey(request.socket.remoteAddress);
-  const verdict = throttle.check(key, Date.now());
+  if (!sessionKey || !/^[0-9a-f-]{36}$/i.test(sessionKey)) return;
+  const verdict = throttle.check(`sess:${sessionKey}`, now);
   if (verdict.allowed) return;
 
   return reply
@@ -634,6 +689,14 @@ async function verifyLayerCall(request: FastifyRequest, reply: FastifyReply) {
 /* ------------------------------------------------------------------ *
  * Health
  * ------------------------------------------------------------------ */
+/**
+ * Browsers ask for /favicon.ico no matter what the markup links, so a 404 there
+ * is a red line in the operators devtools for a file this app does not ship.
+ * The real icon is the SVG, and it is already served from this origin.
+ */
+app.get("/favicon.ico", (request, reply) => reply.redirect("/favicon.svg", 302));
+
+
 app.get("/api/health", async (request): Promise<HealthSnapshot | Omit<HealthSnapshot, "verification">> => {
   let database: "reachable" | "unreachable" = "reachable";
   let guildCount = 0;
@@ -729,7 +792,7 @@ function newOAuthState() {
 /**
  * The origin this request's browser believes it is on, e.g.
  * `http://192.168.1.195:3000`. `trustProxy` is on, so behind the tunnel
- * `request.protocol` reads the `x-forwarded-proto` Cloudflare sets rather than
+ * `request.protocol` reads the `x-forwarded-proto` ngrok sets rather than
  * the tunnel's own cleartext hop.
  */
 function requestOrigin(request: FastifyRequest): string {
@@ -855,7 +918,7 @@ app.get("/api/network", async (request, reply) => {
 /**
  * A floor on how often the reach switch may move.
  *
- * Each switch spawns or kills a `cloudflared` process; a second switch while
+ * Each switch spawns or kills an `ngrok` process; a second switch while
  * the first is still settling races it — two tunnels could be started before
  * either registered its URL, and the manager's "already starting" guard would
  * then trust a status that no longer matched the process tree. The browser
@@ -870,10 +933,26 @@ app.put("/api/network", async (request, reply) => {
   const session = await requirePlatformOwner(request, reply);
   if (!session) return;
 
+  const body = request.body as { mode?: unknown; domain?: unknown } | undefined;
+  const hasDomain = Boolean(body && Object.prototype.hasOwnProperty.call(body, "domain"));
+  const rawDomain = body?.domain;
+  const nextDomain =
+    hasDomain && rawDomain !== null && rawDomain !== "" ? normaliseNgrokDomain(rawDomain) : null;
+  if (hasDomain && rawDomain !== null && rawDomain !== "" && !nextDomain) {
+    return reply.code(400).send({
+      error: "INVALID_DOMAIN",
+      message: "نطاق ngrok غير صالح. استخدم اسماً مثل name.ngrok-free.dev."
+    });
+  }
+
+  const current = network.snapshot();
+  const next = normaliseRemoteAccessMode(body?.mode);
   // A switch to the mode already active is a no-op and costs nothing, so it is
   // allowed through: a double-clicked confirmation should not read as a flood.
-  const next = normaliseRemoteAccessMode((request.body as { mode?: unknown } | undefined)?.mode);
-  if (next !== network.snapshot().mode) {
+  // A domain change restarts the tunnel, so it shares the same floor.
+  const modeChanging = next !== current.mode;
+  const domainChanging = hasDomain && nextDomain !== current.tunnelDomain;
+  if (modeChanging || domainChanging) {
     const elapsed = Date.now() - lastModeSwitchAt;
     if (elapsed < MODE_SWITCH_COOLDOWN_MS) {
       return reply.code(429).header("retry-after", String(Math.ceil((MODE_SWITCH_COOLDOWN_MS - elapsed) / 1000))).send({
@@ -884,14 +963,18 @@ app.put("/api/network", async (request, reply) => {
     lastModeSwitchAt = Date.now();
   }
 
-  const body = request.body as { mode?: unknown } | undefined;
-  const snapshot = await network.setMode(body?.mode);
+  const snapshot = await network.applyReach({ mode: body?.mode, hasDomain, domain: nextDomain });
 
   await appendAudit(db, env, {
     guildId: null,
     eventId: "bot.command-success",
     actorId: session.discordUserId,
-    payload: { action: "network.mode", mode: snapshot.mode, tunnelUrl: snapshot.tunnelUrl }
+    payload: {
+      action: "network.mode",
+      mode: snapshot.mode,
+      tunnelUrl: snapshot.tunnelUrl,
+      tunnelDomain: snapshot.tunnelDomain
+    }
   });
 
   return snapshot;
@@ -2715,11 +2798,41 @@ app.put("/api/guilds/:guildId/logging", async (request, reply) => {
     return reply.code(400).send({ error: "DUPLICATE_CHANNEL", message: (error as Error).message });
   }
 
-  const bindings = [...Object.values(settings.categoryChannels), ...Object.values(settings.eventChannels)];
+  const bindings = [settings.globalChannelId, ...Object.values(settings.categoryChannels), ...Object.values(settings.eventChannels)].filter(
+    (channelId): channelId is string => Boolean(channelId)
+  );
   const ignored = new Set(settings.ignoredChannelIds);
-  const conflict = bindings.find(channelId => channelId && ignored.has(channelId));
+  const conflict = bindings.find(channelId => ignored.has(channelId));
   if (conflict) {
     return reply.code(400).send({ error: "IGNORED_CHANNEL_CONFLICT", message: "قناة مستثناة لا يمكن أن تكون وجهة سجل." });
+  }
+
+  // Every destination must belong to THIS guild. Without this check, an
+  // administrator of one guild could save a channel id from another guild
+  // where the bot also sits, and the bot would post that guild's events into
+  // the other tenant's channel. The Discord read is the authority; a failed
+  // read refuses the save instead of trusting the client.
+  if (bindings.length > 0) {
+    if (!env.botToken) {
+      return reply.code(503).send({
+        error: "CHANNELS_UNAVAILABLE",
+        message: "تعذّر التحقق من قنوات السيرفر. أعد المحاولة."
+      });
+    }
+    const channels = await fetchGuildChannels(env.botToken, guildId).catch(() => null);
+    if (!channels) {
+      return reply.code(503).send({
+        error: "CHANNELS_UNAVAILABLE",
+        message: "تعذّر جلب قنوات السيرفر من Discord. أعد المحاولة."
+      });
+    }
+    const textChannels = new Set(channels.filter(channel => channel.type === "text").map(channel => channel.id));
+    if (bindings.some(channelId => !textChannels.has(channelId))) {
+      return reply.code(409).send({
+        error: "CHANNEL_NOT_IN_GUILD",
+        message: "قناة السجل لا تتبع هذا السيرفر. اختر قناة من القائمة."
+      });
+    }
   }
 
   await db.saveLogging(guildId, settings);
@@ -3023,9 +3136,37 @@ app.delete("/api/guilds/:guildId/logging/channels", async (request, reply) => {
 /* ------------------------------------------------------------------ *
  * Static dashboard + SPA fallback
  * ------------------------------------------------------------------ */
-await app.register(fastifyStatic, { root: join(process.cwd(), "dist") });
+await app.register(fastifyStatic, {
+  root: join(process.cwd(), "dist"),
+  /**
+   * `index.html` names the current hashed bundle, so it must never be reused
+   * from a cache: a cached shell pointing at a deleted hash is exactly the
+   * white screen a remote visitor saw. Hashed assets are the opposite — they
+   * can be cached for a year because a new build gives them a new name.
+   */
+  setHeaders(res, filePath) {
+    const name = filePath.replace(/\\/g, "/");
+    if (name.endsWith("/index.html")) {
+      res.header("Cache-Control", "no-store");
+    } else if (name.includes("/assets/")) {
+      res.header("Cache-Control", "public, max-age=31536000, immutable");
+    } else {
+      res.header("Cache-Control", "no-cache");
+    }
+  }
+});
 app.setNotFoundHandler((request, reply) => {
-  if (request.url.startsWith("/api/") || request.url.startsWith("/auth/") || request.url.startsWith("/internal/")) {
+  const pathname = request.url.split("?")[0] ?? "";
+  if (pathname.startsWith("/api/") || pathname.startsWith("/auth/") || pathname.startsWith("/internal/")) {
+    return reply.code(404).send({ error: "NOT_FOUND" });
+  }
+  // A missing asset must be a real 404, never the SPA shell. A module served
+  // as `text/html` is refused by the browser, and that is the white rectangle
+  // left behind when an old index meets a new deploy. Only navigation requests
+  // (no file extension, GET/HEAD) get the shell.
+  const reads = request.method === "GET" || request.method === "HEAD";
+  const looksLikeAsset = pathname.startsWith("/assets/") || /\.[a-z0-9]+$/i.test(pathname);
+  if (!reads || looksLikeAsset) {
     return reply.code(404).send({ error: "NOT_FOUND" });
   }
   return reply.sendFile("index.html");

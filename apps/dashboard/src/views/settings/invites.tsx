@@ -5,7 +5,7 @@ import { useDraftForm } from "@/lib/use-draft-form";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { SaveBar } from "@/components/save-bar";
 import { Toaster, useToasts } from "@/components/toaster";
-import { StateBadge } from "@/components/state-badge";
+import { ModuleStatusCard } from "@/components/module-status-card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -84,18 +84,6 @@ export function InvitesView({ guild }: { guild: Guild }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-lg font-semibold">
-            <Link2 className="size-5" /> الإحالات والدعوات
-          </h1>
-          <p className="text-xs text-muted-foreground">
-            تتبّع من دعا من عند دخول الأعضاء وخروجهم، عدّاد لكل داعٍ، ورتب إنجاز تلقائية — بجانب نظام السجلات.
-          </p>
-        </div>
-        <StateBadge enabled={draft.enabled} enabledLabel="مفعّل" disabledLabel="معطّل" />
-      </div>
-
       {problems.length > 0 && (
         <Alert>
           <Info className="size-4" />
@@ -109,30 +97,16 @@ export function InvitesView({ guild }: { guild: Guild }) {
         </Alert>
       )}
 
-      {/* The hero row carries the one switch that decides whether the rest of
-          the screen exists. Off, the policy/milestones/templates cards are
-          hidden — not dimmed — the same contract the welcome screen keeps: a
-          disabled-looking form implies its saves mean something, and they
-          would not. The values stay stored; nothing is wiped by hiding. */}
-      <Card>
-        <div className="flex flex-row items-center justify-between gap-3 p-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary">
-              <Link2 className="size-5" aria-hidden />
-            </span>
-            <div className="min-w-0">
-              <CardTitle className="truncate text-base">موديول الإحالات</CardTitle>
-              <p className="text-xs text-muted-foreground">
-                عند دخول عضو يقارن البوت قائمة الدعوات باللقطة السابقة ليعرف الرابط المستخدم وصاحبه.
-              </p>
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <StateBadge enabled={draft.enabled} enabledLabel="مفعّل" disabledLabel="معطّل" />
-            <Switch checked={draft.enabled} onCheckedChange={enabled => patch({ enabled })} aria-label="تفعيل موديول الإحالات" />
-          </div>
-        </div>
-      </Card>
+      <ModuleStatusCard
+        icon={Link2}
+        title="تتبّع الدعوات"
+        description="امنح رتباً عند بلوغ عدد الدعوات."
+        enabled={draft.enabled}
+        onToggle={enabled => patch({ enabled })}
+        toggleLabel="تفعيل موديول الإحالات"
+        disabledHint="الإحالات متوقفة. فعّلها لبدء التتبع ومنح الرتب."
+        enableLabel="تفعيل الإحالات"
+      />
 
       {draft.enabled ? (
         <>
@@ -140,7 +114,7 @@ export function InvitesView({ guild }: { guild: Guild }) {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">آلية التتبع</CardTitle>
           <CardDescription>
-            الرابط المخصص (Vanity) يُرصد لكنه لا يمنح نقطة لأحد، والدعوة الذاتية لا تحسب مهما كانت إعدادات السجل.
+            الرابط المخصص لا يمنح نقطة، والدعوة الذاتية لا تُحسب.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -154,9 +128,7 @@ export function InvitesView({ guild }: { guild: Guild }) {
                 value={draft.fakeAccountDays}
                 onChange={event => patch({ fakeAccountDays: Number(event.target.value) })}
               />
-              <p className="text-[10px] text-muted-foreground">
-                حساب أصغر من هذا العمر يُسجَّل «وهمياً» ولا يُحسب في الصافي. 0 = لا يُعد أي حساب وهمياً.
-              </p>
+              <p className="text-[10px] text-muted-foreground">0 = بلا حد للعمر.</p>
             </div>
             <div className="grid grid-cols-1 gap-2 self-end">
               <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-1.5">
@@ -185,7 +157,7 @@ export function InvitesView({ guild }: { guild: Guild }) {
             </label>
           </div>
           <p className="text-[10px] text-muted-foreground">
-            تُرسل السجلات إلى قناة «الدعوات» المضبوطة في شاشة السجلات، مع ربط لكل سجل على حدة كما في باقي الأقسام.
+            تُرسل إلى قناة «الدعوات» في السجلات.
           </p>
         </CardContent>
       </Card>
@@ -196,13 +168,13 @@ export function InvitesView({ guild }: { guild: Guild }) {
             <Users className="size-4" /> رتب الإنجاز (Milestones)
           </CardTitle>
           <CardDescription>
-            رتب تُمنح تلقائياً عندما يبلغ صافي إحالات الداعي العتبة، وتُسحب إن نزل عنها — إلا إذا اخترت إبقاءها أعلاه.
+            رتب تُمنح عند بلوغ عتبة الإحالات، وتُسحب عند النزول عنها.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {draft.milestoneRoles.length === 0 && (
             <p className="rounded-lg border border-dashed border-border/80 px-3 py-4 text-center text-xs text-muted-foreground">
-              لا توجد قواعد بعد. أضف أول عتبة — مثلاً 5 إحالات لرتبة «داعي نشط».
+              لا توجد قواعد. أضف أول عتبة.
             </p>
           )}
           {draft.milestoneRoles.length > 0 && (
@@ -258,7 +230,7 @@ export function InvitesView({ guild }: { guild: Guild }) {
           </div>
           {roles.length === 0 && (
             <p className="text-[10px] text-muted-foreground">
-              لا تظهر أي رتب هنا — تأكد أن البوت يعمل وأن رتباً قابلة للمنح موجودة أسفل رتبة البوت.
+              اختر رتبة أسفل رتبة البوت.
             </p>
           )}
         </CardContent>
@@ -268,8 +240,7 @@ export function InvitesView({ guild }: { guild: Guild }) {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">قوالب السجلات</CardTitle>
           <CardDescription>
-            نصوص سجلات الدخول والخروج ورتب الإنجاز. اضغط متغيراً لإدراجه، أو اكتبه يدوياً — المتغيرات غير المعروفة تبقى
-            كما كتبتها.
+            نصوص سجل الدخول والخروج ورتب الإنجاز. اضغط متغيراً لإدراجه.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -300,22 +271,14 @@ export function InvitesView({ guild }: { guild: Guild }) {
         </CardContent>
       </Card>
         </>
-      ) : (
-        <Alert>
-          <Info aria-hidden />
-          <AlertDescription>
-            موديول الإحالات <strong>معطّل</strong> — فعّله من المفتاح أعلى الصفحة لتظهر سياسة التتبع ورتب الإنجاز
-            والقوالب. القيم المحفوظة لا تُمسّ بالإخفاء.
-          </AlertDescription>
-        </Alert>
-      )}
+      ) : null}
 
 
       <Toaster toasts={toasts} onDismiss={dismiss} />
 
       {dirty && (
         <SaveBar
-          message="لديك تعديلات غير محفوظة على موديول الإحالات"
+          message="تغييرات غير محفوظة"
           saveLabel="حفظ التعديلات"
           cancelLabel="إلغاء"
           onCancel={reset}

@@ -95,20 +95,20 @@ test("the loopback and tunnel hostname branches need a loopback peer", () => {
   assert.equal(isHostAllowed("localhost:3000", { ...remote, mode: "off" as const }), false);
   assert.equal(isHostAllowed("127.0.0.1:3000", { ...remote, mode: "lan" as const }), false);
   // The tunnel hostname from a direct-origin connection: same impersonation.
-  const tunnel = { ...remote, mode: "tunnel" as const, tunnelHost: "quiet-river-1234.trycloudflare.com" };
-  assert.equal(isHostAllowed("quiet-river-1234.trycloudflare.com", tunnel), false);
-  // ...while cloudflared genuinely connects from loopback, so the real path
+  const tunnel = { ...remote, mode: "tunnel" as const, tunnelHost: "quiet-river-1234.ngrok-free.app" };
+  assert.equal(isHostAllowed("quiet-river-1234.ngrok-free.app", tunnel), false);
+  // ...while ngrok genuinely connects from loopback, so the real path
   // keeps working, and the machine's own addresses stay reachable from the LAN.
-  assert.equal(isHostAllowed("quiet-river-1234.trycloudflare.com", { ...local, mode: "tunnel" as const, tunnelHost: "quiet-river-1234.trycloudflare.com" }), true);
+  assert.equal(isHostAllowed("quiet-river-1234.ngrok-free.app", { ...local, mode: "tunnel" as const, tunnelHost: "quiet-river-1234.ngrok-free.app" }), true);
   assert.equal(isHostAllowed("192.0.2.10:3000", { ...remote, mode: "lan" as const }), true);
   // IPv4-mapped loopback peers are still loopback.
   assert.equal(isHostAllowed("localhost:3000", { ...base, remoteAddress: "::ffff:127.0.0.1", mode: "off" as const }), true);
 });
 
 test("tunnel adds exactly the one tunnel host", () => {
-  const options = { ...local, mode: "tunnel" as const, tunnelHost: "quiet-river-1234.trycloudflare.com" };
-  assert.equal(isHostAllowed("quiet-river-1234.trycloudflare.com", options), true);
-  assert.equal(isHostAllowed("other-tunnel-9999.trycloudflare.com", options), false);
+  const options = { ...local, mode: "tunnel" as const, tunnelHost: "quiet-river-1234.ngrok-free.app" };
+  assert.equal(isHostAllowed("quiet-river-1234.ngrok-free.app", options), true);
+  assert.equal(isHostAllowed("other-tunnel-9999.ngrok-free.app", options), false);
   assert.equal(isHostAllowed("evil.example.com", options), false);
 });
 
@@ -138,18 +138,29 @@ test("unpackOAuthState rejects payloads that are not origins", () => {
   assert.equal(unpackOAuthState(forged), "https://evil.example.com");
 });
 
-test("parseTunnelUrl finds the quick-tunnel URL in real cloudflared output", () => {
-  const line = "2026-09-30T10:00:00Z INF +-----------------------------------------------------------+\n" +
-    "|  Your quick Tunnel has been created! Visit it at (it may take some time to be reachable):  |\n" +
-    "|  https://quiet-river-1234.trycloudflare.com                                            |";
-  assert.equal(parseTunnelUrl(line), "https://quiet-river-1234.trycloudflare.com");
+test("parseTunnelUrl finds the tunnel URL in real ngrok output", () => {
+  const line = JSON.stringify({
+    lvl: "info",
+    msg: "started tunnel",
+    url: "https://quiet-river-1234.ngrok-free.app"
+  });
+  assert.equal(parseTunnelUrl(line), "https://quiet-river-1234.ngrok-free.app");
+  // The free plan's assigned dev domain uses `.ngrok-free.dev`; both the JSON
+  // field and the plain-text fallback must recognise it.
+  const devLine = JSON.stringify({
+    lvl: "info",
+    msg: "started tunnel",
+    url: "https://quiet-river-1234.ngrok-free.dev"
+  });
+  assert.equal(parseTunnelUrl(devLine), "https://quiet-river-1234.ngrok-free.dev");
+  assert.equal(parseTunnelUrl("started https://quiet-river-1234.ngrok-free.dev"), "https://quiet-river-1234.ngrok-free.dev");
   assert.equal(parseTunnelUrl("no url in here"), null);
   assert.equal(parseTunnelUrl("https://example.com"), null);
 });
 
 test("only https and loopback origins can hold a registered OAuth callback", () => {
   // Discord's rule: HTTPS, with loopback as the single development exception.
-  assert.equal(isOAuthCapableOrigin("https://quiet-river-1234.trycloudflare.com"), true);
+  assert.equal(isOAuthCapableOrigin("https://quiet-river-1234.ngrok-free.app"), true);
   assert.equal(isOAuthCapableOrigin("http://localhost:3000"), true);
   assert.equal(isOAuthCapableOrigin("http://127.0.0.1:3000"), true);
   // The LAN address that produced «Invalid OAuth2 redirect_uri».
@@ -162,16 +173,16 @@ test("loopback variants are recognised for the same-machine handoff", () => {
   assert.equal(isLoopbackOrigin("http://localhost:3000"), true);
   assert.equal(isLoopbackOrigin("http://[::1]:3000"), true);
   assert.equal(isLoopbackOrigin("http://192.168.1.195:3000"), false);
-  assert.equal(isLoopbackOrigin("https://quiet-river-1234.trycloudflare.com"), false);
+  assert.equal(isLoopbackOrigin("https://quiet-river-1234.ngrok-free.app"), false);
 });
 
 /**
- * A live cloudflared pid is not proof the URL answers. The probe is the only
+ * A live ngrok pid is not proof the URL answers. The probe is the only
  * thing standing between the screen and a "running" badge on a link nothing
  * can reach, so each verdict is pinned: probeable states are probed, the rest
  * pass through untouched, and every failure shape names the cause.
  */
-const tunnelUrl = "https://quiet-river-1234.trycloudflare.com";
+const tunnelUrl = "https://quiet-river-1234.ngrok-free.app";
 const ok = async () => new Response("ok", { status: 200 });
 
 test("a probeable tunnel that answers is confirmed running", async () => {
@@ -201,15 +212,12 @@ test("a live process with a dead edge becomes an actionable error", async () => 
 });
 
 test("states with nothing to probe are returned untouched", async () => {
-  // No address to ask, and an error already says what is wrong — probing again
-  // would only re-report it, and re-probing "off" must never mint an error.
-  for (const status of ["off", "error"] as const) {
-    assert.deepEqual(
-      await probeTunnelReachability({ mode: "tunnel", url: tunnelUrl, status }, ok),
-      { status, error: null },
-      `${status} is not probeable`
-    );
-  }
+  // No address to ask, and "off" must never mint an error.
+  assert.deepEqual(
+    await probeTunnelReachability({ mode: "tunnel", url: tunnelUrl, status: "off" }, ok),
+    { status: "off", error: null },
+    "off is not probeable"
+  );
   assert.deepEqual(
     await probeTunnelReachability({ mode: "lan", url: tunnelUrl, status: "running" }, ok),
     { status: "running", error: null },
@@ -222,6 +230,15 @@ test("states with nothing to probe are returned untouched", async () => {
   );
 });
 
+test("an error recovers on its own when the URL answers again", async () => {
+  // A transient failed probe (edge reconnect, VPN blip) must not latch the
+  // screen into "broken" until the operator toggles the mode.
+  assert.deepEqual(
+    await probeTunnelReachability({ mode: "tunnel", url: tunnelUrl, status: "error" }, ok),
+    { status: "running", error: null }
+  );
+});
+
 /**
  * The setup card must not ask for a step the operator has already taken, and
  * must come back when the address changes. Discord has no API to read an
@@ -230,14 +247,14 @@ test("states with nothing to probe are returned untouched", async () => {
  * raw string the operator pasted.
  */
 test("normaliseOrigin ignores the differences that do not matter", () => {
-  assert.equal(normaliseOrigin("https://Quiet-River-1234.trycloudflare.com/"), "https://quiet-river-1234.trycloudflare.com");
+  assert.equal(normaliseOrigin("https://Quiet-River-1234.ngrok-free.app/"), "https://quiet-river-1234.ngrok-free.app");
   assert.equal(normaliseOrigin("http://localhost:3000/auth/discord/callback"), "http://localhost:3000");
   assert.equal(normaliseOrigin(null), null);
   assert.equal(normaliseOrigin("not a url"), null);
 });
 
 test("an origin a login completed through counts as registered", () => {
-  const url = "https://quiet-river-1234.trycloudflare.com";
+  const url = "https://quiet-river-1234.ngrok-free.app";
   assert.equal(isCallbackRegisteredFor(url, url), true);
   // Trailing slashes and case differences are the same tunnel.
   assert.equal(isCallbackRegisteredFor(`${url}/`, url.toUpperCase()), true);
@@ -245,12 +262,12 @@ test("an origin a login completed through counts as registered", () => {
 
 test("a new tunnel address is not yet registered, and no tunnel needs nothing", () => {
   assert.equal(
-    isCallbackRegisteredFor("https://old-tunnel-0000.trycloudflare.com", "https://new-tunnel-9999.trycloudflare.com"),
+    isCallbackRegisteredFor("https://old-tunnel-0000.ngrok-free.app", "https://new-tunnel-9999.ngrok-free.app"),
     false,
     "a fresh quick-tunnel URL after a restart must be registered again"
   );
-  assert.equal(isCallbackRegisteredFor(null, "https://quiet-river-1234.trycloudflare.com"), false);
-  assert.equal(isCallbackRegisteredFor("https://quiet-river-1234.trycloudflare.com", null), false);
+  assert.equal(isCallbackRegisteredFor(null, "https://quiet-river-1234.ngrok-free.app"), false);
+  assert.equal(isCallbackRegisteredFor("https://quiet-river-1234.ngrok-free.app", null), false);
 });
 
 /**
@@ -260,15 +277,14 @@ test("a new tunnel address is not yet registered, and no tunnel needs nothing", 
  * this is the rule that keeps a restarted tunnel from inheriting its
  * predecessor's address as if it were still good.
  */
-const banner = (url: string) =>
-  `2026-09-30T10:00:00Z INF Your quick Tunnel has been created! Visit it at:\n${url}\n`;
+const banner = (url: string) => JSON.stringify({ lvl: "info", msg: "started tunnel", url });
 
 test("lastTunnelUrlIn returns the newest URL in the text it is given", () => {
-  const previous = banner("https://old-tunnel-0000.trycloudflare.com");
-  const fresh = banner("https://new-tunnel-9999.trycloudflare.com");
-  assert.equal(lastTunnelUrlIn(previous), "https://old-tunnel-0000.trycloudflare.com");
+  const previous = banner("https://old-tunnel-0000.ngrok-free.app");
+  const fresh = banner("https://new-tunnel-9999.ngrok-free.app");
+  assert.equal(lastTunnelUrlIn(previous), "https://old-tunnel-0000.ngrok-free.app");
   // A slice containing only this run's output cannot see the one before it.
-  assert.equal(lastTunnelUrlIn(fresh), "https://new-tunnel-9999.trycloudflare.com");
-  assert.equal(lastTunnelUrlIn(previous + fresh), "https://new-tunnel-9999.trycloudflare.com");
-  assert.equal(lastTunnelUrlIn("cloudflared is starting, no URL yet"), null);
+  assert.equal(lastTunnelUrlIn(fresh), "https://new-tunnel-9999.ngrok-free.app");
+  assert.equal(lastTunnelUrlIn(previous + fresh), "https://new-tunnel-9999.ngrok-free.app");
+  assert.equal(lastTunnelUrlIn("ngrok is starting, no URL yet"), null);
 });

@@ -85,7 +85,14 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     }
     return (
       <button
-        className={cn(buttonVariants({ variant, size, className }))}
+        className={cn(
+          buttonVariants({ variant, size }),
+          // `loading` prepends its own spinner, so the caller's leading icon —
+          // the svg right after it — is hidden rather than left to spin beside
+          // it. Hiding (not removing) keeps the label from shifting.
+          loading && "[&>svg+svg]:hidden",
+          className
+        )}
         ref={ref}
         disabled={disabled || loading}
         aria-busy={loading || undefined}

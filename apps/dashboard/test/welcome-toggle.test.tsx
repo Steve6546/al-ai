@@ -9,12 +9,10 @@ import type { DiscordRole, Guild, WelcomeSettings } from "@/types";
 /**
  * The auto-role toggle, exercised end to end against the real screen.
  *
- * This is the test that caught the bug: HeroUI v3's Switch renders its hidden
- * checkbox inside `Switch.Content` (the SwitchButton), and the welcome screen
- * used to place a bare `Switch.Control` under the root — a span with nothing
- * clickable inside, so the toggle never flipped and the two role cards never
- * appeared. The test mounts the actual view, presses the actual switch, and
- * asserts the cards and the save bar behave.
+ * The screen's master control is the shared Radix switch (`role="switch"`),
+ * which is a real button with an accessible state. The test mounts the actual
+ * view, presses the actual switch, and asserts the cards and the save bar
+ * behave.
  */
 
 const GUILD: Guild = {
@@ -83,22 +81,21 @@ async function mountScreen() {
   return { container, root };
 }
 
-function press(container: HTMLElement, root: Root) {
-  const control = container.querySelector("[data-hero-ui-switch], [role='switch'], label:has(input[type='checkbox'])");
+function press(container: HTMLElement, _root: Root) {
+  const control = container.querySelector<HTMLElement>("[role='switch']");
   assert.ok(control, "the switch renders a pressable control");
-  const input = container.querySelector<HTMLInputElement>("input[type='checkbox']");
-  assert.ok(input, "the switch renders its hidden checkbox input");
   act(() => {
-    input!.click();
+    control!.click();
   });
-  return input;
+  return control!;
 }
 
-test("the toggle renders a real checkbox — the thing that was missing", async () => {
+test("the toggle renders a real switch — not a dead span", async () => {
   const { container, root } = await mountScreen();
   try {
-    const input = container.querySelector<HTMLInputElement>("input[type='checkbox']");
-    assert.ok(input, "HeroUI's Switch.Content provides the hidden checkbox input");
+    const control = container.querySelector<HTMLElement>("[role='switch']");
+    assert.ok(control, "the master switch is an accessible control");
+    assert.equal(control!.getAttribute("aria-checked"), "false", "it starts off");
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -108,12 +105,12 @@ test("the toggle renders a real checkbox — the thing that was missing", async 
 test("pressing the toggle reveals the member and bot role cards immediately", async () => {
   const { container, root } = await mountScreen();
   try {
-    assert.equal(container.textContent.includes("رتب الأعضاء الجدد"), false, "cards are hidden while off");
+    assert.equal(container.textContent.includes("رتبة العضو الجديد"), false, "cards are hidden while off");
     press(container, root);
-    assert.equal(container.textContent.includes("رتب الأعضاء الجدد"), true, "member role card appears on toggle");
-    assert.equal(container.textContent.includes("رتب البوتات الجديدة"), true, "bot role card appears on toggle");
+    assert.equal(container.textContent.includes("رتبة العضو الجديد"), true, "member role card appears on toggle");
+    assert.equal(container.textContent.includes("رتبة البوت الجديد"), true, "bot role card appears on toggle");
     assert.equal(container.textContent.includes("التوقيت"), true, "timing card appears on toggle");
-    assert.equal(container.textContent.includes("لديك تعديلات غير محفوظة"), true, "the save bar appears for the pending change");
+    assert.equal(container.textContent.includes("تغييرات غير محفوظة"), true, "the save bar appears for the pending change");
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -125,7 +122,7 @@ test("pressing again hides the cards without losing the saved values", async () 
   try {
     press(container, root);
     press(container, root);
-    assert.equal(container.textContent.includes("رتب الأعضاء الجدد"), false, "cards hidden again");
+    assert.equal(container.textContent.includes("رتبة العضو الجديد"), false, "cards hidden again");
     assert.equal(container.textContent.includes("مُعطّل"), true, "state badge reads disabled");
   } finally {
     await act(async () => root.unmount());
@@ -147,7 +144,7 @@ test("saving a toggled-on state persists through the existing PUT and reads back
     assert.ok(put, "the save went through the welcome PUT");
     const body = JSON.parse(String(put!.init!.body)) as { enabled: boolean };
     assert.equal(body.enabled, true, "the PUT carried the toggled-on state");
-    assert.equal(container.textContent.includes("لديك تعديلات غير محفوظة"), false, "the bar clears after a confirmed save");
+    assert.equal(container.textContent.includes("تغييرات غير محفوظة"), false, "the bar clears after a confirmed save");
   } finally {
     await act(async () => root.unmount());
     container.remove();

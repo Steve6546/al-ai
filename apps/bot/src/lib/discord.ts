@@ -39,6 +39,7 @@ import {
   activityTypeNumbers,
   logVisualFor,
   renderValue as renderValueCore,
+  escapeEmbedText,
   twemojiThumbnailUrl,
   BOT_ROLE_NAME,
   commandRegistry,
@@ -224,7 +225,8 @@ function fieldValue(key: string, value: unknown): string {
     const mention = CHANNEL_KEYS.has(key) ? `<#${value}>` : key === "roleId" ? `<@&${value}>` : `<@${value}>`;
     return `${mention}\n\`${value}\``;
   }
-  return text;
+  // Member-authored text: a nickname or thread name must not become a link.
+  return escapeEmbedText(text);
 }
 
 /** One enriched, chunked field per payload key, in the emitter's own order. */
@@ -298,7 +300,10 @@ export function buildLogEmbeds(
  */
 export async function sendLogEmbed(client: Client, channelId: string, envelope: LogEnvelope, colorOverride?: string) {
   const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (!channel || !channel.isTextBased() || channel.isDMBased()) return false;
+  // A destination stored for one guild must never deliver into another. The
+  // dashboard validates on save; this is the last line at delivery time, when
+  // a stale row or a direct database write could still name a foreign channel.
+  if (!channel || !channel.isTextBased() || channel.isDMBased() || channel.guildId !== envelope.guildId) return false;
 
   // The author is the human (or bot) who actually did the thing, with their
   // own avatar — resolved cache-first so a burst of logs costs no REST calls
@@ -1296,7 +1301,9 @@ export async function dmGuildOwner(client: Client, guildId: string, content: str
   if (!guild) return false;
   const owner = await guild.fetchOwner().catch(() => null);
   if (!owner) return false;
-  return owner.send({ content }).then(() => true).catch(() => false);
+  // The content is generated, but it can carry a guild name or a reason an
+  // operator typed; a DM has no one to ping, so parse nothing.
+  return owner.send({ content, allowedMentions: { parse: [] } }).then(() => true).catch(() => false);
 }
 
 /**

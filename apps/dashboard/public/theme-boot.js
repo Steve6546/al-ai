@@ -36,3 +36,46 @@
     document.documentElement.dataset.theme = "light";
   }
 })();
+
+/**
+ * The white-screen guard.
+ *
+ * A missing or mis-served module leaves the static boot fallback in place: the
+ * title is there, but the app is a white rectangle. This turns that failure
+ * into a sentence, and names the one action that usually fixes it. It also
+ * covers a module that downloads but never mounts (a blocked font cannot do
+ * this any more, since the fonts are same-origin).
+ */
+(function () {
+  function showBootProblem(message) {
+    var fallback = document.getElementById("boot-fallback");
+    if (!fallback) return;
+    var title = fallback.querySelector("p");
+    var detail = document.getElementById("boot-fallback-detail");
+    if (title) title.textContent = "تعذّر تحميل لوحة التحكم";
+    if (detail) detail.textContent = message;
+  }
+
+  window.addEventListener(
+    "error",
+    function (event) {
+      var target = event.target;
+      if (target && (target.tagName === "SCRIPT" || target.tagName === "LINK")) {
+        showBootProblem("تعذّر تحميل أحد ملفات الواجهة. حدّث الصفحة، وإن استمر راجع سجل الخادم.");
+      }
+    },
+    true
+  );
+
+  window.addEventListener("unhandledrejection", function () {
+    showBootProblem("حدث خطأ أثناء تشغيل الواجهة. حدّث الصفحة.");
+  });
+
+  window.addEventListener("load", function () {
+    window.setTimeout(function () {
+      if (document.getElementById("boot-fallback")) {
+        showBootProblem("تعذّر تشغيل الواجهة خلال الوقت المتوقع. حدّث الصفحة، وإن استمر راجع سجل الخادم.");
+      }
+    }, 12000);
+  });
+})();

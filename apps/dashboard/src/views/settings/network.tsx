@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { motion } from "framer-motion";
 import { Check, Copy, ExternalLink, Globe, Loader2, ShieldAlert } from "lucide-react";
 import { REMOTE_ACCESS_MODES, type RemoteAccessMode } from "@al-ai/core/browser";
 import { api } from "@/api";
@@ -7,6 +8,8 @@ import { Toaster, useToasts } from "@/components/toaster";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import { remoteAccessDescriptions, remoteAccessLabels, type NetworkSnapshot } from "@/types";
@@ -16,12 +19,12 @@ import { remoteAccessDescriptions, remoteAccessLabels, type NetworkSnapshot } fr
  *
  * This is an instance-wide switch, not a per-guild setting: it decides whether
  * the dashboard answers this machine only, the router's network, or the open
- * internet through a Cloudflare quick tunnel. The write is gated server-side
- * to operators who administer a server this bot serves, so a screen anyone can
- * read is still a screen only its operator can change.
+ * internet through an ngrok tunnel. The write is gated server-side to the
+ * platform owner, so a screen anyone can read is still a screen only its owner
+ * can change.
  *
  * Choices apply immediately — this is process control, not a draft form — and
- * the tunnel URL appears the moment Cloudflare assigns it.
+ * the tunnel URL appears the moment ngrok assigns it.
  */
 
 const tunnelStatusCopy: Record<NetworkSnapshot["tunnelStatus"], { label: string; tone: "secondary" | "outline" | "destructive" } | null> = {
@@ -64,8 +67,14 @@ export function NetworkView() {
    * that outlives the request, not one that ends with it.
    */
   const [cooldown, setCooldown] = useState(false);
+  const [domainDraft, setDomainDraft] = useState("");
+  const [savingDomain, setSavingDomain] = useState(false);
   const { toasts, push, dismiss } = useToasts();
   const { copied, copy } = useCopy();
+
+  useEffect(() => {
+    setDomainDraft(snapshot?.tunnelDomain ?? "");
+  }, [snapshot?.tunnelDomain]);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,8 +98,8 @@ export function NetworkView() {
    *
    * - `starting`: the URL has not appeared yet, and the spinner must not outlive it.
    * - `running`: the server probes the tunnel's own address on each read, and a
-   *   live process with a dead edge (a VPN breaking the handshake to
-   *   `*.argotunnel.com`) is downgraded to an error asynchronously. Without
+   *   live process with a dead edge (a VPN breaking the handshake to ngrok's
+   *   edge) is downgraded to an error asynchronously. Without
    *   polling, that verdict would only appear on a manual reload, and the
    *   screen would keep offering a link that cannot work.
    */
@@ -134,6 +143,31 @@ export function NetworkView() {
     }
   };
 
+  const saveDomain = async (event: FormEvent) => {
+    event.preventDefault();
+    if (savingDomain || cooldown) return;
+    setSavingDomain(true);
+    setCooldown(true);
+    try {
+      const next = domainDraft.trim();
+      setSnapshot(await api.saveNetwork(snapshot.mode, next === "" ? null : next));
+      push({
+        title: next ? "حُفظ النطاق الثابت" : "أُلغي النطاق الثابت",
+        description: next ? "سيُستخدم بعد إعادة تشغيل النفق." : "سيعود النفق إلى رابط مؤقت.",
+        tone: "success"
+      });
+    } catch (cause) {
+      push({
+        title: "تعذّر حفظ النطاق",
+        description: cause instanceof Error ? cause.message : "حاول مرة أخرى.",
+        tone: "error"
+      });
+    } finally {
+      setSavingDomain(false);
+      setTimeout(() => setCooldown(false), MODE_SWITCH_LOCK_MS);
+    }
+  };
+
   // Each address is labelled by the interface it belongs to — a machine answers
   // on several adapters at once (Wi-Fi, a virtual host-only NIC, a VPN), and
   // naming every row «شبكة محلية» told the operator nothing about which was
@@ -155,21 +189,24 @@ export function NetworkView() {
   const needsCallbackSetup = Boolean(tunnelUrl) && !snapshot.tunnelCallbackVerified;
 
   const copyRow = (label: string, value: string, href = value) => (
-    <div className="flex h-9 items-center gap-2 rounded-md border border-input bg-background/50 px-3">
+    <div className="flex min-h-9 flex-wrap items-center gap-2 rounded-md border border-input bg-background/50 px-3 py-2">
       <span className="w-24 shrink-0 text-xs text-muted-foreground">{label}</span>
       {/* The link is the row's primary affordance: it opens the dashboard at
           that address in a new tab, so an operator verifies a LAN address works
           instead of only copying a string they cannot act on. `rel` keeps the
-          new tab unscriptable by the destination. */}
+          new tab unscriptable by the destination. The address itself wraps
+          instead of truncating: an IPv6 URL is long, and a clipped address is
+          a string the operator cannot read. */}
       <a
         href={href}
         target="_blank"
         rel="noreferrer"
-        className="flex min-w-0 flex-1 items-center gap-1.5 text-xs underline-offset-2 hover:underline"
+        title={value}
+        className="flex min-w-0 flex-1 items-start gap-1.5 text-xs underline-offset-2 hover:underline"
         dir="ltr"
       >
-        <code className="min-w-0 flex-1 truncate">{value}</code>
-        <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />
+        <code className="min-w-0 flex-1 break-all">{value}</code>
+        <ExternalLink className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
       </a>
       <Button
         variant="ghost"
@@ -186,12 +223,12 @@ export function NetworkView() {
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
-          <div className="flex items-center gap-3">
+        <CardHeader className="flex-col gap-2 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
             <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
               <Globe className="size-5" aria-hidden />
             </span>
-            <div>
+            <div className="min-w-0">
               {/* The mode itself is named by the selected option in the list
                   below, so this heading carries the *scope* instead: the one
                   fact that is not visible in the list. */}
@@ -241,13 +278,87 @@ export function NetworkView() {
         </CardContent>
       </Card>
 
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+        <Card>
+          <CardHeader className="flex-col gap-2 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+                <Globe className="size-5" aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <p className="text-base font-bold">النفق العام</p>
+                <p className="text-xs text-muted-foreground">رابط آمن من أي جهاز — عبر ngrok.</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={snapshot.tunnelStable ? "secondary" : "outline"}>
+                {snapshot.tunnelStable ? "رابط ثابت" : "رابط مؤقت"}
+              </Badge>
+              {status && <Badge variant={status.tone}>{status.label}</Badge>}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {snapshot.mode !== "tunnel" ? (
+              <p className="text-sm text-muted-foreground">اختر «عبر الإنترنت» أعلاه لتشغيل النفق.</p>
+            ) : null}
+            {tunnelUrl ? (
+              <div>{copyRow("الرابط العام", tunnelUrl)}</div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {snapshot.tunnelStatus === "starting" ? "جارٍ إنشاء الرابط…" : "لا يوجد رابط بعد."}
+              </p>
+            )}
+            {snapshot.tunnelStatus === "starting" ? (
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" /> ينشئ ngrok الرابط خلال ثوانٍ…
+              </p>
+            ) : null}
+            {snapshot.tunnelStatus === "error" && snapshot.tunnelError ? (
+              <p className="text-xs text-destructive">{snapshot.tunnelError}</p>
+            ) : null}
+
+            <form onSubmit={saveDomain} className="space-y-2 rounded-xl border border-border/80 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label htmlFor="ngrok-domain" className="text-xs">
+                  النطاق الثابت
+                </Label>
+                <a
+                  href="https://dashboard.ngrok.com/domains"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] text-primary underline-offset-2 hover:underline"
+                >
+                  لوحة ngrok
+                </a>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  id="ngrok-domain"
+                  dir="ltr"
+                  value={domainDraft}
+                  onChange={event => setDomainDraft(event.target.value)}
+                  placeholder="name.ngrok-free.dev"
+                  className="min-w-0 flex-1"
+                  disabled={savingDomain}
+                />
+                <Button type="submit" size="sm" loading={savingDomain} disabled={savingDomain || cooldown} className="shrink-0">
+                  حفظ النطاق
+                </Button>
+              </div>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                الثابت يبقى بعد إعادة التشغيل؛ المؤقت يتغير. احجز نطاقاً من لوحة ngrok ثم الصقه هنا.
+              </p>
+            </form>
+          </CardContent>
+        </Card>
+      </motion.div>
+
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
-          <div>
-            <p className="text-base font-bold">روابط اللوحة</p>
-            <p className="text-xs text-muted-foreground">شارك الرابط المناسب مع من تريد أن يفتح اللوحة.</p>
+        <CardHeader className="flex-col gap-2 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-base font-bold">روابط محلية</p>
+            <p className="text-xs text-muted-foreground">هذا الجهاز والشبكة المحلية.</p>
           </div>
-          {status && <Badge variant={status.tone}>{status.label}</Badge>}
         </CardHeader>
         <CardContent className="space-y-2">
           {copyRow("هذا الجهاز", `http://localhost:${snapshot.port}`)}
@@ -262,19 +373,9 @@ export function NetworkView() {
           {lanUrls.map(({ url, label }) => (
             <div key={url}>{copyRow(label, url)}</div>
           ))}
-          {tunnelUrl && <div>{copyRow("النفق", tunnelUrl)}</div>}
           <p className="text-xs text-muted-foreground">
-            من جهاز على الشبكة المحلية إن لم يفتح الرابط: سمّح بالمنفذ {snapshot.port} في جدار حماية ويندوز (أمر لمسؤول
-            الجهاز)، أو افتح رابط النفق مباشرة — يعمل من أي مكان.
+            إن لم يفتح من جهاز آخر: اسمح بالمنفذ {snapshot.port} في جدار الحماية أو استخدم النفق.
           </p>
-          {snapshot.tunnelStatus === "starting" && (
-            <p className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" /> يجري إنشاء النفق ويظهر رابطه خلال ثوانٍ…
-            </p>
-          )}
-          {snapshot.tunnelStatus === "error" && snapshot.tunnelError && (
-            <p className="text-xs text-destructive">{snapshot.tunnelError}</p>
-          )}
         </CardContent>
       </Card>
 
@@ -288,9 +389,7 @@ export function NetworkView() {
               <div>
                 <p className="text-base font-bold">خطوة واحدة في Discord</p>
                 <p className="text-xs text-muted-foreground">
-                  ديسكورد يقبل روابط الرجوع المشفّرة (HTTPS) فقط خارج هذا الجهاز — لذلك يُسجَّل رابط النفق أدناه في
-                  Developer Portal ← OAuth2 ← Redirects، ويصبح الدخول يعمل من أي جهاز على الإنترنت. من جهاز على الشبكة
-                  المحلية، اضغط «تسجيل الدخول» وسيُحوَّل تلقائياً إلى النفق.
+                  ديسكورد يقبل HTTPS فقط خارج هذا الجهاز — سجّل رابط النفق في Developer Portal ← OAuth2 ← Redirects.
                 </p>
               </div>
             </div>

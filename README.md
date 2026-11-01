@@ -112,7 +112,20 @@ shows up as a silent no-op rather than an error. Note that **Administrator
 permission checks test `0x8` first for exactly that reason, so a naive bitwise
 test does not report a missing permission for a bot that holds Administrator.
 
-**Redirect URI** must match `DISCORD_REDIRECT_URI` exactly, including the path.
+**OAuth2 → Redirects:** add both exact values (no trailing slash, no query):
+
+- `http://localhost:3000/auth/discord/callback` — sign-in on this machine
+- `https://<your-ngrok-dev-domain>/auth/discord/callback` — sign-in through the tunnel
+
+Discord accepts HTTPS redirect URIs and loopback HTTP only, and compares the
+`redirect_uri` exactly. The dashboard builds the public value from the origin
+the browser is on; a static ngrok dev domain keeps it stable across restarts.
+If the tunnel hostname changes, add the new URI before the next sign-in.
+
+Set `DASHBOARD_URL` to the public HTTPS origin so the bot's `/settings` and
+`/dashboard` replies link where members can reach them. `DASHBOARD_INTERNAL_URL`
+is optional and defaults to `DASHBOARD_URL`; point it at `http://127.0.0.1:3000`
+to keep signed health snapshots off the tunnel.
 
 ## 2. Run with Docker (recommended)
 
@@ -151,7 +164,7 @@ replace a file that is in use.
 
 ```bash
 npm run dev                # database (on demand) + dashboard + bot, then supervise
-npm run dev -- -Tunnel     # the same, plus the Cloudflare tunnel
+npm run dev -- -Tunnel     # the same, plus the ngrok tunnel
 npm run dev -- -Detach      # start and return to the prompt (fire and forget)
 npm run dev:status         # what is up, on which ports, and the health verdict
 npm run dev:restart        # stop, then start
@@ -166,11 +179,15 @@ turns the interrupt into a graceful stop, so the bot flushes its pipeline and
 releases its lock while the dashboard closes its pool. Nothing is orphaned: each
 child is named by port owner, command line, and remembered pid rather than
 assumed to have died with the shell. A forced kill is the fallback, not the norm.
-A quick tunnel the run served is ended as well; a **named** tunnel (started with
-`CLOUDFLARED_TUNNEL_TOKEN`) is never touched, so its public ingress and
-registered OAuth callback survive. Ownership is decided by the tunnel's birth
-time, not just by the port: a `cloudflared` serving the same port that was born
-before this run belongs to someone else and is left running.
+The tunnel is managed by the dashboard through ngrok. A fixed ngrok hostname
+set on the network screen (or in `NGROK_DOMAIN`) survives restarts and keeps the
+registered OAuth callback stable; a random ngrok URL does not, and is labelled
+«رابط مؤقت» in the screen. ngrok's own config file carries the account token, so
+the dashboard never stores a second copy of it. Stopping the stack leaves a
+running tunnel alone — use the network screen's «هذا الجهاز فقط» / «الشبكة
+المحلية» choice to end it. The free ngrok plan includes one dev domain and shows
+a one-time browser interstitial; its monthly request and bandwidth limits are
+listed at <https://ngrok.com/docs/pricing-limits/free-plan-limits>.
 `-Detach` skips supervision when you want the prompt back; `npm run dev:stop`
 then stops that stack later.
 Extra flags go after `--`: `-Tunnel`, `-Detach`, `-NoDb`, `-NoDashboard`, `-NoBot`.

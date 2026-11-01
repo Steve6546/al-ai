@@ -48,7 +48,7 @@ export function Toaster({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id
   if (toasts.length === 0) return null;
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 top-4 z-50 mx-auto flex w-[min(34rem,calc(100%-2rem))] flex-col gap-2">
+    <div className="pointer-events-none fixed inset-x-0 top-4 z-50 mx-auto flex w-[min(34rem,calc(100%_-_2rem))] flex-col gap-2">
       {toasts.map(toast => (
         <ToastRow key={toast.id} toast={toast} onDismiss={onDismiss} />
       ))}

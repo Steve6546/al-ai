@@ -279,63 +279,6 @@ function Find-AlAiProcesses {
   return $found
 }
 
-# The quick-tunnel processes serving a given dashboard port, if any.
-#
-# Deliberately narrow. A *quick* tunnel names its target on the command line
-# (`cloudflared tunnel --url http://127.0.0.1:3000`), so matching on that is both
-# precise and safe: it can never match a **named** production tunnel, whose
-# command line carries `tunnel run --token ...` and no loopback target. Ending
-# that one from a dev script would take the deployment's public ingress down.
-#
-# The port alone is not ownership, though. `CreationDate` is returned so the
-# caller can require that the process was born *during* the current run: a
-# tunnel that predates it belongs to someone else (another checkout on the same
-# port, a leftover) and is never killed by this script.
-function Find-CloudflaredForPort {
-  param([Parameter(Mandatory)][int]$Port)
-
-  $found = @()
-  try {
-    $procs = Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" -ErrorAction SilentlyContinue
-  } catch {
-    return $found
-  }
-  # The trailing \b keeps port 3000 from matching 30000.
-  $pattern = "--url\s+https?://(127\.0\.0\.1|localhost):$Port\b"
-  foreach ($proc in $procs) {
-    $commandLine = [string]$proc.CommandLine
-    if ($commandLine -and [regex]::IsMatch($commandLine, $pattern)) {
-      $found += [pscustomobject]@{
-        Id              = [int]$proc.ProcessId
-        CommandLine     = $commandLine
-        CreationDate    = $proc.CreationDate
-        ParentProcessId = [int]$proc.ParentProcessId
-      }
-    }
-  }
-  return $found
-}
-
-# Did this run start the tunnel?
-#
-# Only two facts are trusted: the process really is a quick tunnel for our
-# dashboard port (the caller got it from Find-CloudflaredForPort) and it was
-# created at or after the run began. The second is what makes the decision about
-# ownership rather than about a port number. The two-second allowance covers the
-# gap between the supervisor recording its start and CIM stamping the child.
-function Test-CloudflaredOwnedByRun {
-  param(
-    [Parameter(Mandatory)]$Tunnel,
-    [AllowNull()]$RunStart
-  )
-
-  if ($RunStart -isnot [datetime]) { return $false }
-  if ($null -eq $Tunnel.CreationDate) { return $false }
-  # Both sides are normalised to UTC before comparing: CIM reports local time
-  # with an unspecified kind, and the state file carries the supervisor's offset.
-  return (([datetime]$Tunnel.CreationDate).ToUniversalTime() -ge ([datetime]$RunStart).ToUniversalTime().AddSeconds(-2))
-}
-
 # Wait until a process has exited, up to a limit. Returns $true when it is gone.
 function Wait-ProcessGone {
   param([Parameter(Mandatory)][int]$Id, [int]$Seconds = 5)

@@ -58,7 +58,7 @@ export function DashboardView({ guild }: { guild: Guild }) {
   // render, which dropped the whole screen into the error boundary instead of
   // saying what was wrong with the answer.
   if (!bot || !members || !punishments24h || !Array.isArray(recentActivity)) {
-    return <LoadError message="استجابة المقاييس غير مكتملة. أعد المحاولة." />;
+    return <LoadError message="استجابة المقاييس غير مكتملة." />;
   }
 
   const ping = bot.pingMs;
@@ -295,9 +295,13 @@ function countOf(value: unknown): string {
 
 function Row({ label, value, badge }: { label: string; value: string; badge?: "default" | "destructive" }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-muted-foreground">{label}</span>
-      {badge ? <Badge variant={badge === "default" ? "secondary" : "destructive"}>{value}</Badge> : <span className="tabular">{value}</span>}
+    <div className="flex items-start justify-between gap-3">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      {badge ? (
+        <Badge variant={badge === "default" ? "secondary" : "destructive"} className="shrink-0">{value}</Badge>
+      ) : (
+        <span className="min-w-0 break-words text-end tabular">{value}</span>
+      )}
     </div>
   );
 }

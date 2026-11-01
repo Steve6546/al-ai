@@ -6,7 +6,6 @@ import { SaveBar } from "@/components/save-bar";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { StateBadge } from "@/components/state-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -59,7 +58,7 @@ export function SecurityView({ guild }: { guild: Guild }) {
             </div>
             <div>
               <p className="text-sm font-medium">لا توجد محاولات مرصودة</p>
-              <p className="text-xs text-muted-foreground">كل أحداث security.* تُكتب هنا وفي سجل التدقيق</p>
+              <p className="text-xs text-muted-foreground">تُكتب هنا وفي سجل التدقيق.</p>
             </div>
           </CardContent>
         </Card>
@@ -67,9 +66,9 @@ export function SecurityView({ guild }: { guild: Guild }) {
 
       {events && events.length > 0 && (
         <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">الأحداث المرصودة</CardTitle>
-            <Badge variant="destructive" className="tabular">
+          <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
+            <CardTitle className="min-w-0 text-base">الأحداث المرصودة</CardTitle>
+            <Badge variant="destructive" className="tabular shrink-0">
               {events.length}
             </Badge>
           </CardHeader>
@@ -177,22 +176,17 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
         dropdown menu (the menus are portalled at z-50, the bar is at z-40), so
         it never swallows the click that should have chosen an option.
       */}
-      <CardHeader className="flex-row items-start justify-between space-y-0">
-        <div className="space-y-1">
+      <CardHeader className="flex-col gap-3 space-y-0 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">
           <CardTitle className="flex items-center gap-2 text-base">
             {draft.enabled ? <ShieldCheck className="size-4 text-success" /> : <ShieldOff className="size-4" />}
             محرّك مضاد التخريب
           </CardTitle>
           <CardDescription>
-            يراقب الإجراءات التدميرية ويحتويها تلقائياً عند تجاوز الحد، قبل أن يتدخّل أحد.
+            يراقب الإجراءات التدميرية ويحتويها عند تجاوز الحد.
           </CardDescription>
         </div>
-        <div className="flex items-center gap-2">
-          {/*
-            The switch *is* the state. A badge beside it said the same thing in
-            a different colour, and the panel below repeats it in words - three
-            statements of one fact, of which the switch is the one that acts.
-          */}
+        <div className="flex shrink-0 items-center gap-2">
           <Switch
             checked={draft.enabled}
             disabled={!canEdit}
@@ -207,8 +201,7 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
           <Alert>
             <ShieldOff />
             <AlertDescription>
-              الحماية متوقفة. لن يُرصد أي تخريب ولن يُحتوى أي عضو حتى تعيد التفعيل — التفعيل هو الوضع الافتراضي، فإيقافه
-              قرار واعٍ.
+              الحماية متوقفة. لن يُرصد تخريب حتى تعيد التفعيل.
             </AlertDescription>
           </Alert>
         )}
@@ -268,8 +261,8 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
           </Select>
           <p className="text-xs text-muted-foreground">
             {draft.quarantineRoleId
-              ? "عند تجاوز الحد تُسحب كل رتب العضو وتوضع هذه الرتبة بدلاً منها، ويُبلَّغ مالك السيرفر فوراً."
-              : "بدون رتبة حجر: سيُبلَّغ المالك ويُسجَّل الحدث، لكن لن تُسحب أي رتبة."}
+              ? "عند تجاوز الحد تُسحب رتب العضو وتُمنح رتبة الحجر."
+              : "بدون رتبة حجر: يُبلَّغ المالك ويُسجَّل الحدث، دون سحب رتب."}
           </p>
         </div>
           </>

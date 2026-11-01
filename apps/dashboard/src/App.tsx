@@ -21,9 +21,15 @@ import type { Guild, HealthSnapshot, SessionInfo } from "@/types";
  * they cannot reach resolves to the selector rather than to an error page.
  */
 
-/** Messages the OAuth callback can hand back through `?auth=`. */
+/**
+ * Messages the OAuth callback can hand back through `?auth=`.
+ *
+ * There is no `ok` on purpose. The callback redirects to `/?auth=ok` on success
+ * and that key is absent here, so a signed-in operator reaches the guild list
+ * with nothing announced: the list of their own servers already says the sign-in
+ * worked, and a box above the search field read as a second, empty input.
+ */
 const authMessages: Record<string, string> = {
-  ok: "تم تسجيل الدخول.",
   bot_added: "تمت إضافة AL AI إلى السيرفر.",
   denied: "لا تملك رتبة إدارية في أي سيرفر مضاف.",
   state_mismatch: "فشل التحقق من حالة OAuth.",
@@ -251,8 +257,6 @@ export function App() {
             <NetworkView />
           ) : view === "presence" && session?.user?.isPlatformOwner ? (
             <BotPresenceView guild={guild} />
-          ) : !guild.botPresent ? (
-            <InviteBotPanel guild={guild} refreshing={refreshing} onRefresh={() => void refresh()} />
           ) : (
             <>
               {view === "dashboard" && <DashboardView guild={guild} />}

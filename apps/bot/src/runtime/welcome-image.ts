@@ -165,12 +165,53 @@ export function dataUrlToBuffer(dataUrl: string | null, maxBytes = MAX_IMAGE_BYT
   return bytes.length > 0 ? bytes : null;
 }
 
-async function loadRemoteImage(url: string): Promise<Buffer | null> {
+/**
+ * The only hosts an avatar or embed image can come from.
+ *
+ * Today every caller passes a URL minted by discord.js, so this names what is
+ * already true rather than restricting anyone. It is here because the card
+ * renderer is the one place the bot fetches a URL at all: the day a stored
+ * `imageUrl` or a background reaches this function, an unchecked `fetch` would
+ * let the bot be pointed at a private address, and the dashboard's vetted
+ * image layer (`server/appearance.ts`) does not cover this process.
+ */
+const ALLOWED_IMAGE_HOSTS = new Set(["cdn.discordapp.com", "media.discordapp.net"]);
+
+/** Avatars are small; this is a runaway-response ceiling, not a quality budget. */
+const MAX_REMOTE_IMAGE_BYTES = 4_000_000;
+
+function isAllowedImageUrl(url: string): boolean {
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
-    if (!response.ok) return null;
-    const bytes = Buffer.from(await response.arrayBuffer());
-    return bytes.length <= 4_000_000 ? bytes : null;
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "https:" &&
+      !parsed.username &&
+      !parsed.password &&
+      ALLOWED_IMAGE_HOSTS.has(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function loadRemoteImage(url: string): Promise<Buffer | null> {
+  if (!isAllowedImageUrl(url)) return null;
+  try {
+    // `redirect: "error"`: an allowed host that answers 302 to somewhere else
+    // would otherwise be followed, which is exactly the hole the host list is
+    // there to close.
+    const response = await fetch(url, { signal: AbortSignal.timeout(8_000), redirect: "error" });
+    if (!response.ok || !response.body) return null;
+    // Read as it arrives. Buffering the whole body first means a server that
+    // claims to send an image can make the bot hold as many bytes as it likes.
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      total += chunk.byteLength;
+      if (total > MAX_REMOTE_IMAGE_BYTES) return null;
+      chunks.push(Buffer.from(chunk));
+    }
+    return total > 0 ? Buffer.concat(chunks) : null;
   } catch {
     return null;
   }

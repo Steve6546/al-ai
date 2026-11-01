@@ -173,7 +173,10 @@ function ImageSlot({
 
       <div
         className={cn(
-          "flex items-start gap-3 rounded-xl border border-dashed border-border p-3 transition-colors",
+          // Stacks under sm: a 112px square preview plus paddings left ~80px
+          // for the text column on a 320px screen, which wrapped the hint
+          // one word per line. Side by side returns from sm up.
+          "flex flex-col items-stretch gap-3 rounded-xl border border-dashed border-border p-3 transition-colors sm:flex-row sm:items-start",
           !disabled && "hover:border-primary/50 hover:bg-primary/5"
         )}
         onDragOver={event => event.preventDefault()}
@@ -537,11 +540,9 @@ export function CustomizationView({ guild }: { guild: Guild }) {
 
       {/* ---------------- Header: title + the per-guild master switch ---------------- */}
       <div className="flex flex-wrap items-start justify-between gap-3 pt-1">
-        <div className="space-y-1">
-          <h1 className="text-lg font-semibold">هوية البوت</h1>
+        <div className="min-w-0 space-y-1">
           <p className="text-xs text-muted-foreground">
-            كل ما يظهر به AL AI في <span className="font-medium text-foreground">{guild.name}</span>: اللقب والنبذة والصورة والغلاف، ولون
-            الرتبة وأيقونتها. كل حقل هنا يخصّ هذا السيرفر وحده، ولا يظهر في سيرفر آخر.
+            لقب ونبذة وصورة وغلاف ولون رتبة — خاصة بهذا السيرفر.
           </p>
         </div>
         <label className="flex items-center gap-2">
@@ -554,8 +555,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
         <Alert>
           <IdCard className="size-4" />
           <AlertDescription>
-            التخصيص <strong>معطّل</strong> — سيظهر البوت باسمه وصورته الأساسيين في هذا السيرفر. عند الحفظ يُعاد اللقب والصورة والغلاف
-            والنبذة إلى الوضع الافتراضي تلقائياً، والقيم المحفوظة تبقى في النموذج.
+            التخصيص <strong>معطّل</strong> — سيظهر البوت بهويته الأساسية. القيم المحفوظة تبقى.
           </AlertDescription>
         </Alert>
       )}
@@ -564,8 +564,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
         <Alert variant="destructive">
           <Lock className="size-4" />
           <AlertDescription>
-            البوت لا يملك صلاحية «تغيير الاسم المستعار» (Change Nickname) في هذا السيرفر، وهي اللازمة للقب والصورة والغلاف والنبذة معاً —
-            فالحفظ سيرفضه Discord. امنح البوت الصلاحية ثم أعد المحاولة.
+            البوت لا يملك صلاحية «تغيير الاسم المستعار» — امنحه الصلاحية ثم أعد المحاولة.
           </AlertDescription>
         </Alert>
       )}
@@ -580,7 +579,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                 <IdCard className="size-4" />
                 الهوية
               </CardTitle>
-              <CardDescription>ما يُعرف به AL AI في هذا السيرفر: الاسم الظاهر، والنبذة التي يقرأها من يفتح ملفه.</CardDescription>
+              <CardDescription>الاسم الظاهر والنبذة.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-1.5">
@@ -600,8 +599,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                   className="rounded-xl"
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  الاسم الذي يظهر به AL AI في قائمة أعضاء هذا السيرفر. اتركه فارغاً ليظهر باسمه الأصلي{" "}
-                  <span dir="ltr">{DEFAULT_CUSTOMIZATION.nickname}</span>.
+                  اتركه فارغاً ليظهر الاسم الأصلي <span dir="ltr">{DEFAULT_CUSTOMIZATION.nickname}</span>.
                 </p>
               </div>
 
@@ -625,7 +623,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                   className="rounded-xl"
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  ما يقرأه من يفتح ملف البوت في هذا السيرفر. الحد {MAX_BIO_LENGTH} حرفاً — وهو سقف Discord نفسه لهذا الحقل.
+                  تظهر في ملف البوت. الحد {MAX_BIO_LENGTH} حرفاً (سقف Discord).
                 </p>
               </div>
             </CardContent>
@@ -639,8 +637,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                 الصور
               </CardTitle>
               <CardDescription>
-                الصورة والغلاف اللذان يراهما أعضاء هذا السيرفر. كل منهما يقبل رفعاً من الجهاز أو رابطاً مباشراً، وما تتركه فارغاً يعود
-                إلى الصورة الأساسية للبوت.
+                صورة العضو والغلاف في هذا السيرفر. الفارغ يعود للصورة الأساسية.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -653,7 +650,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
               */}
               <ImageSlot
                 label="الصورة الأساسية"
-                hint="الصورة التي يراها أعضاء هذا السيرفر. مربعة 256×256 على الأقل. PNG أو JPG أو WEBP أو GIF — الحد 500 ك.ب بعد الترميز. تُطبَّق على عضوية البوت في هذا السيرفر فقط."
+                hint="مربعة 256×256 على الأقل · PNG/JPG/WEBP/GIF · حتى 500 ك.ب."
                 dataUrl={draft.avatarDataUrl}
                 savedDataUrl={saved.avatarDataUrl ?? null}
                 fallbackLabel={profile?.accountAvatarUrl ? "صورة الحساب" : "الافتراضية"}
@@ -675,7 +672,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
 
               <ImageSlot
                 label="غلاف البوت"
-                hint="الغلاف الذي يراه أعضاء هذا السيرفر، بنسبة 5:2 تقريباً (مثل 600×240). PNG أو JPG أو WEBP أو GIF — الحد 500 ك.ب بعد الترميز. غلاف الحساب العام لا يُعرض هنا: لكل سيرفر غلافه."
+                hint="بنسبة 5:2 مثل 600×240 · PNG/JPG/WEBP/GIF · حتى 500 ك.ب."
                 dataUrl={draft.bannerDataUrl}
                 savedDataUrl={saved.bannerDataUrl ?? null}
                 fallbackLabel="لا يوجد غلاف"
@@ -796,7 +793,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
           <Card className="border-primary/20 bg-card/70 shadow-lg shadow-primary/5 backdrop-blur-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">معاينة حيّة</CardTitle>
-              <CardDescription>هكذا سيظهر AL AI في هذا السيرفر — تتحدّث مع كل ضغطة دون حفظ.</CardDescription>
+              <CardDescription>هكذا سيظهر AL AI هنا — تتحدّث مباشرة دون حفظ.</CardDescription>
             </CardHeader>
             <CardContent>
               <BotLivePreview
@@ -812,7 +809,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                 </p>
               ) : null}
               <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                الحالة والنشاط لا يظهران هنا: يخصّان البوت كله لا هذا السيرفر، وتُعدَّلان من شاشة «حالة البوت».
+                الحالة والنشاط عامّان للبوت — من شاشة «حالة البوت».
               </p>
             </CardContent>
           </Card>
@@ -822,7 +819,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
 
       {anyDirty ? (
         <SaveBar
-          message="لديك تغييرات غير محفوظة"
+          message="تغييرات غير محفوظة"
           saveLabel="حفظ التغييرات"
           cancelLabel="تجاهل"
           onCancel={resetAll}

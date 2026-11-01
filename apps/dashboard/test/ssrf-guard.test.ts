@@ -22,6 +22,10 @@ test("loopback IPv4, IPv6 and localhost are refused", async () => {
   await assert.rejects(fetchImageAsDataUrl("https://[::1]/avatar.png"), FORBIDDEN);
   await assert.rejects(fetchImageAsDataUrl("https://localhost/avatar.png"), FORBIDDEN);
   await assert.rejects(fetchImageAsDataUrl("https://printer.local/avatar.png"), FORBIDDEN);
+  // IPv4-mapped and NAT64 spellings are the same private address.
+  await assert.rejects(fetchImageAsDataUrl("https://[::ffff:7f00:1]/avatar.png"), FORBIDDEN);
+  await assert.rejects(fetchImageAsDataUrl("https://[::ffff:a9fe:a9fe]/avatar.png"), FORBIDDEN);
+  await assert.rejects(fetchImageAsDataUrl("https://[64:ff9b::7f00:1]/avatar.png"), FORBIDDEN);
 });
 
 test("private and link-local ranges are refused", async () => {

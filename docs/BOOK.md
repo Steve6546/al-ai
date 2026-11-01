@@ -148,7 +148,7 @@ docs            ← هذا الكتاب + [GOVERNANCE.md](GOVERNANCE.md) (٢٧ �
 ![الهوية](images/customization.png)
 
 ### الوصول للشبكة (للمالك فقط)
-مدى الوصول: مغلقة / الشبكة المحلية / نفق Cloudflare — مع روابط اللوحة وحالة التحقق من تسجيل الدخول.
+مدى الوصول: مغلقة / الشبكة المحلية / نفق ngrok — مع روابط اللوحة وحالة التحقق من تسجيل الدخول.
 
 ![الشبكة](images/network.png)
 
@@ -249,7 +249,7 @@ docs            ← هذا الكتاب + [GOVERNANCE.md](GOVERNANCE.md) (٢٧ �
 
 ```bash
 npm run dev              # قاعدة البيانات (عند الحاجة) + لوحة + بوت، ثم إشراف
-npm run dev -- -Tunnel   # مع نفق Cloudflare (عنوان مؤقّت)
+npm run dev -- -Tunnel   # مع نفق ngrok (نطاق ثابت أو عنوان مؤقّت)
 npm run dev -- -Detach   # تشغيل والعودة للسطر
 npm run dev:status       # ما الذي يعمل، على أي منفذ، وحكم الصحة
 npm run dev:stop         # إيقاف رشيق

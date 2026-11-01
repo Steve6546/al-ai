@@ -11,7 +11,6 @@ import {
   LayoutDashboard,
   LayoutGrid,
   Link2,
-  LogOut,
   Menu,
   MessageSquareHeart,
   PanelRightClose,
@@ -29,6 +28,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { splitGuilds } from "@/components/guild-selector";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
@@ -46,9 +46,10 @@ import { AccountMenu } from "@/components/account-menu";
 import { AppearanceMenu } from "@/components/appearance-menu";
 import { PageHeader } from "@/components/page-header";
 import { BrandMark } from "@/components/brand-mark";
+import { ServerSettingsDialog, type ServerSettingEntry } from "@/components/server-settings-dialog";
 import { initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { tierLabels, type Guild, type HealthSnapshot, type SessionInfo } from "@/types";
+import { type Guild, type HealthSnapshot, type SessionInfo } from "@/types";
 
 /**
  * The application frame: sidebar, header and the slot the active view renders
@@ -306,6 +307,15 @@ export function AppShell({
   children
 }: ShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // `/dashboard/:id?settings=1` is the link the bot's /settings command hands
+  // out. Open the hub once, then drop the flag so a refresh is a normal page.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("settings") !== "1") return;
+    setSettingsOpen(true);
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem(RAIL_STORAGE_KEY) === "1";
@@ -357,19 +367,30 @@ export function AppShell({
   );
 
   /**
-   * Where «إعدادات هذا السيرفر» goes.
+   * «إعدادات هذا السيرفر» opens an index of the existing settings screens.
    *
-   * The server's settings are the group of screens in the sidebar, not one
-   * page - so the account menu opens the first of them the caller may reach.
-   * Anything else would either promise a page that does not exist or land the
-   * operator on a screen they cannot use.
+   * It used to jump to the first accessible screen, which hid every other one
+   * and made the account item a shortcut with a different meaning each time.
+   * The dialog owns no settings; it only lists them with the same access
+   * verdict the sidebar computed.
    */
-  const openGuildSettings = () => {
-    const first = navSections
-      .find(section => section.id === "server")
-      ?.items.find(item => allowed(item));
-    if (first) onView(first.key);
-  };
+  const openGuildSettings = () => setSettingsOpen(true);
+
+  const settingsEntries: ServerSettingEntry[] = navSections
+    .filter(section => section.id !== "home" && section.id !== "system")
+    .flatMap(section =>
+      section.items
+        .filter(item => item.key !== "audit")
+        .map(item => ({
+          key: item.key,
+          label: item.label,
+          hint: item.hint,
+          group: section.title ?? "عام",
+          icon: item.icon,
+          disabled: !allowed(item),
+          reason: denyReason(item)
+        }))
+    );
 
   return (
     /*
@@ -429,7 +450,13 @@ export function AppShell({
         <div className={cn("flex items-center gap-1 p-2", collapsed && "lg:flex-col lg:justify-center")}>
           <AppearanceMenu iconOnly />
           {collapsed ? (
-            <AccountMenu user={user} guild={guild} onLogout={onLogout} variant="compact" />
+            <AccountMenu
+              user={user}
+              guild={guild}
+              onLogout={onLogout}
+              onOpenGuildSettings={openGuildSettings}
+              variant="compact"
+            />
           ) : (
             <AccountMenu
               user={user}
@@ -471,25 +498,56 @@ export function AppShell({
                 <Menu />
               </Button>
             </SheetTrigger>
-            <SheetContent side="right" className="w-72 p-0">
-              <SheetHeader className="border-b border-border p-4">
+            <SheetContent side="right" className="flex h-full w-72 max-w-[85vw] flex-col p-0">
+              {/* pr-12 reserves the corner where the sheet's absolute close
+                  button (right-4) sits — without it the X lands on the brand
+                  mark, which starts the title row from the same edge in RTL. */}
+              <SheetHeader className="shrink-0 border-b border-border p-4 pr-12">
                 <SheetTitle className="flex items-center gap-2 text-sm">
                   <BrandMark className="size-6 text-primary" />
                   AL AI
                 </SheetTitle>
               </SheetHeader>
-              <ScrollArea className="h-[calc(100dvh-4rem)]">{nav(false)}</ScrollArea>
+              {/* The server picker lives in the sidebar on desktop; on a
+                  phone the sidebar is this drawer, so the drawer must carry
+                  it too - otherwise there is no way to switch servers
+                  without editing the address bar. */}
+              <GuildSwitcher
+                guilds={guilds}
+                guild={guild}
+                selectedGuildId={selectedGuildId}
+                onSelectGuild={guildId => {
+                  onSelectGuild(guildId);
+                  setMobileOpen(false);
+                }}
+                onBrowseAll={() => {
+                  onBrowseAll();
+                  setMobileOpen(false);
+                }}
+                inviteUrl={inviteUrl}
+                collapsed={false}
+              />
               <Separator />
-              <div className="p-2">
-                <AccountMenu
-                  user={user}
-                  guild={guild}
-                  onLogout={onLogout}
-                  onOpenGuildSettings={() => {
-                    openGuildSettings();
-                    setMobileOpen(false);
-                  }}
-                />
+              {/* `min-h-0 flex-1` is what keeps the account/appearance row at
+                  the bottom of the drawer instead of pushing it below the
+                  viewport on a short phone. */}
+              <ScrollArea className="min-h-0 flex-1">{nav(false)}</ScrollArea>
+              <div className="shrink-0 border-t border-border">
+                <div className="p-2">
+                  <AppearanceMenu />
+                </div>
+                <Separator />
+                <div className="p-2">
+                  <AccountMenu
+                    user={user}
+                    guild={guild}
+                    onLogout={onLogout}
+                    onOpenGuildSettings={() => {
+                      setMobileOpen(false);
+                      openGuildSettings();
+                    }}
+                  />
+                </div>
               </div>
             </SheetContent>
           </Sheet>
@@ -500,13 +558,22 @@ export function AppShell({
               one too many. */}
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <nav aria-label="مسار التنقل" className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="truncate">{guild.name}</span>
-              <span aria-hidden="true">/</span>
-              <span className="truncate text-foreground">{navIndex.get(view)?.label ?? "لوحة التحكم"}</span>
+              {/* Below `sm` the view label is the useful half of the path; the
+                  server name is already in the drawer and the page content. */}
+              <span className="hidden min-w-0 truncate sm:inline">{guild.name}</span>
+              <span aria-hidden="true" className="hidden sm:inline">/</span>
+              <span className="min-w-0 truncate text-foreground">{navIndex.get(view)?.label ?? "لوحة التحكم"}</span>
             </nav>
           </div>
 
           <StatusChips health={health} />
+
+          {/* The sidebar owns the appearance panel on desktop; below `lg` the
+              sidebar is a drawer, so the header carries a compact trigger —
+              otherwise the light/dark switch is unreachable on a phone. */}
+          <div className="lg:hidden">
+            <AppearanceMenu iconOnly className="size-8" />
+          </div>
 
           <Button
             variant="outline"
@@ -524,7 +591,13 @@ export function AppShell({
           {/* The account menu lives in the sidebar on the desktop; on a phone
               the sidebar is a drawer, so the header carries the account. */}
           <div className="lg:hidden">
-            <AccountMenu user={user} guild={guild} onLogout={onLogout} variant="compact" />
+            <AccountMenu
+              user={user}
+              guild={guild}
+              onLogout={onLogout}
+              onOpenGuildSettings={openGuildSettings}
+              variant="compact"
+            />
           </div>
         </header>
 
@@ -538,8 +611,8 @@ export function AppShell({
          * panel stretched across a 4K monitor reads as scattered stripes, not
          * as a dashboard.
          */}
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-24 lg:p-6">
-          <div className="mx-auto w-full max-w-6xl px-1 py-2 lg:px-4 lg:py-3">
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-3 pb-24 sm:p-4 lg:p-6">
+          <div className="mx-auto w-full max-w-6xl px-0.5 py-2 sm:px-1 lg:px-4 lg:py-3">
             {/* The screen's own title and one line of context, taken from the
                 navigation so the menu and the page can never describe the same
                 screen differently. */}
@@ -551,6 +624,14 @@ export function AppShell({
           </div>
         </main>
       </div>
+
+      <ServerSettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        guild={guild}
+        entries={settingsEntries}
+        onOpenView={onView}
+      />
     </div>
   );
 }
@@ -581,6 +662,10 @@ function GuildSwitcher({
   inviteUrl: string;
   collapsed: boolean;
 }) {
+  // The same predicate the selector uses: `botPresent` is the whole test for
+  // "there is something here to switch to".
+  const switchable = splitGuilds(guilds).active;
+
   if (collapsed) {
     return (
       <div className="flex justify-center p-2">
@@ -624,9 +709,16 @@ function GuildSwitcher({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-64">
           {/* Only guilds the bot is in are switchable here: the others have
-              nothing to show yet, and the selector is where they are invited. */}
+              nothing to show yet, and the selector is where they are invited.
+              The trigger stays enabled on an empty list — «كل السيرفرات» and the
+              invite row below are the way out of a guild without AL AI. */}
           <DropdownMenuLabel>السيرفرات</DropdownMenuLabel>
-          {guilds.map(item => (
+          {switchable.length === 0 && (
+            <DropdownMenuItem disabled className="gap-2 text-muted-foreground">
+              لا يوجد سيرفر أضفت إليه AL AI بعد
+            </DropdownMenuItem>
+          )}
+          {switchable.map(item => (
             <DropdownMenuItem key={item.id} onSelect={() => onSelectGuild(item.id)} className="gap-2">
               <Avatar className="size-6 rounded-md">
                 {item.iconUrl && <AvatarImage src={item.iconUrl} alt="" />}
@@ -730,7 +822,6 @@ function SidebarNav({
             <NavButton
               key={item.key}
               label={item.label}
-              hint={item.hint}
               icon={item.icon}
               active={view === item.key}
               disabled={!allowed(item)}
@@ -776,7 +867,6 @@ function SidebarNav({
 
 function NavButton({
   label,
-  hint,
   icon: Icon,
   active,
   disabled,
@@ -784,7 +874,6 @@ function NavButton({
   onClick
 }: {
   label: string;
-  hint: string;
   icon: typeof LayoutDashboard;
   active: boolean;
   disabled?: boolean;

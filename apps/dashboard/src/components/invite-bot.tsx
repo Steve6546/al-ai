@@ -29,8 +29,7 @@ export function InviteBotPanel({ guild, refreshing, onRefresh }: { guild: Guild;
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           <p className="text-muted-foreground">
-            أضف AL AI إلى هذا السيرفر لفتح الإعدادات. الرابط مثبّت على هذا السيرفر وحده، ولن يطلب منك اختيار
-            سيرفر آخر.
+            أضف AL AI إلى هذا السيرفر لفتح الإعدادات. الرابط مثبّت على هذا السيرفر وحده.
           </p>
 
           <div className="space-y-2">
@@ -70,7 +69,7 @@ export function InviteBotPanel({ guild, refreshing, onRefresh }: { guild: Guild;
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           <p className="text-muted-foreground">
-            يمكنك مراجعة سجل التدقيق وكشف الاختراق وإدارة التوكنات بدون إضافة البوت، لأنها أقسام قراءة فقط.
+            سجل التدقيق وكشف الاختراق وإدارة التوكنات متاحة دون إضافة البوت.
           </p>
         </CardContent>
       </Card>

@@ -89,6 +89,7 @@ const LIVE_PAGES = [
   { label: "commands", view: "commands" },
   { label: "logs", view: "logs" },
   { label: "welcome-messages", view: "welcome-messages" },
+  { label: "roles", view: "roles" },
   { label: "security", view: "security" },
   { label: "audit", view: "audit" },
   { label: "network", view: "network" },
@@ -873,6 +874,7 @@ async function main() {
               bottomGap: Math.round(window.innerHeight - rect.bottom),
               left: Math.round(rect.left),
               right: Math.round(rect.right),
+              sidebarLeft: sidebar ? Math.round(sidebar.getBoundingClientRect().left) : null,
               sidebarRight: sidebar ? Math.round(sidebar.getBoundingClientRect().right) : null,
               viewportWidth: window.innerWidth
             });
@@ -903,8 +905,14 @@ async function main() {
       // sidebar's edge (16.5rem on the desktop) instead of stretching over it,
       // and it is below the dropdown portals, which are portalled at z-50.
       const barPinned = bar.found && bar.position === "fixed" && bar.bottomGap <= 24;
+      // RTL puts the sidebar on the right, so "inside the content column" means
+      // the bar stops at the sidebar's leading edge - not that it starts at a
+      // hard-coded left offset. The check follows whichever side it is on.
+      const sidebarOnRight = bar.sidebarLeft !== null && bar.sidebarLeft > bar.viewportWidth / 2;
       const barInsideColumn =
-        bar.found && bar.left >= 200 && bar.left <= 300 && bar.right <= bar.viewportWidth;
+        bar.found &&
+        (bar.sidebarLeft === null ||
+          (sidebarOnRight ? bar.right <= bar.sidebarLeft + 1 : bar.left >= bar.sidebarRight - 1));
       const barBelowMenus = bar.found && Number(bar.zIndex) < 50;
       if (!bar.found) failures.push("the unsaved-changes bar did not appear after a change");
       if (!barPinned) failures.push(`the unsaved-changes bar is not pinned to the bottom (position=${bar.position}, gap=${bar.bottomGap}px)`);

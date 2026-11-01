@@ -19,8 +19,7 @@ export const SESSION_MAX_AGE_SECONDS = 24 * 60 * 60;
 /**
  * `Secure` follows the environment rather than a flag that has to be remembered:
  * a session id must never cross cleartext HTTP, and the only deployment with any
- * business sending one is production, which sits behind TLS termination (the
- * Cloudflare tunnel) or talks from localhost, where browsers honor Secure
+ * business sending one is production, which sits behind TLS termination (a tunnel) or talks from localhost, where browsers honor Secure
  * cookies on plain HTTP. `NODE_ENV=production` is therefore a hard requirement
  * for any deployment the network screen exposes beyond loopback — development
  * stays plain HTTP on localhost, where the flag would otherwise stop the

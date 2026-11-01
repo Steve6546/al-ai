@@ -17,9 +17,11 @@
  *    server re-checks every one of them; the menu simply does not advertise
  *    what the caller cannot reach.
  */
+import { useState } from "react";
 import { Check, Copy, ExternalLink, LogOut, Settings, ShieldCheck } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { LogoutConfirm } from "@/components/logout-confirm";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,6 +55,7 @@ export function AccountMenu({
   className
 }: AccountMenuProps) {
   const { copied, copy } = useCopy();
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const isOwner = user?.isPlatformOwner === true;
   const role = guild.tier ? tierLabels[guild.tier] : "لا توجد رتبة في هذا السيرفر";
 
@@ -96,8 +99,9 @@ export function AccountMenu({
     );
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
       <DropdownMenuContent align="start" side={variant === "row" ? "top" : "bottom"} className="w-64">
         {/* The identity, first and plainly: the avatar, the display name, the
             handle and the id a moderator is asked for in a support thread. */}
@@ -161,12 +165,21 @@ export function AccountMenu({
         ) : null}
 
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onLogout} className="gap-2 text-destructive focus:text-destructive">
+        <DropdownMenuItem onSelect={() => setConfirmLogout(true)} className="gap-2 text-destructive focus:text-destructive">
           <LogOut className="size-4" />
           تسجيل الخروج
         </DropdownMenuItem>
       </DropdownMenuContent>
-    </DropdownMenu>
+      </DropdownMenu>
+      <LogoutConfirm
+        open={confirmLogout}
+        onOpenChange={setConfirmLogout}
+        onConfirm={() => {
+          setConfirmLogout(false);
+          onLogout();
+        }}
+      />
+    </>
   );
 }
 
@@ -178,10 +191,27 @@ export function AccountMenu({
  * what destroys the session and clears the cookie.
  */
 export function SignOutButton({ onLogout }: { onLogout: () => void }) {
+  const [confirmLogout, setConfirmLogout] = useState(false);
   return (
-    <Button variant="ghost" size="sm" onClick={onLogout} className="gap-2">
-      <LogOut className="size-4" />
-      تسجيل الخروج
-    </Button>
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setConfirmLogout(true)}
+        className="gap-2 px-2 sm:px-3"
+        aria-label="تسجيل الخروج"
+      >
+        <LogOut className="size-4" />
+        <span className="hidden sm:inline">تسجيل الخروج</span>
+      </Button>
+      <LogoutConfirm
+        open={confirmLogout}
+        onOpenChange={setConfirmLogout}
+        onConfirm={() => {
+          setConfirmLogout(false);
+          onLogout();
+        }}
+      />
+    </>
   );
 }

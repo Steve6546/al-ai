@@ -94,7 +94,15 @@ test("signing out calls the handler it was given", () => {
     act(() => {
       (item as HTMLElement).click();
     });
-    assert.equal(signedOut, true, "the sign-out action was invoked");
+    assert.equal(signedOut, false, "signing out waits for confirmation");
+    const dialog = dom.window.document.querySelector('[role="dialog"]');
+    assert.ok(dialog, "the confirmation dialog opens");
+    const confirm = [...dialog!.querySelectorAll("button")].find(button => button.textContent?.trim() === "تسجيل الخروج");
+    assert.ok(confirm, "the dialog has its own confirm action");
+    act(() => {
+      (confirm as HTMLElement).click();
+    });
+    assert.equal(signedOut, true, "the sign-out action runs after confirmation");
   } finally {
     act(() => {
       root.unmount();

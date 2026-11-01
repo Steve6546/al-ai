@@ -5,6 +5,7 @@ import { renderToString } from "react-dom/server";
 import { ServerOff } from "lucide-react";
 import { commandCategories, commandCategoryLabels, commandFlagsFor, commandRegistry, describeAppearanceResult } from "@al-ai/core/browser";
 import { AppShell } from "../src/components/app-shell";
+import { Button } from "../src/components/ui/button";
 import { ColorPicker, DISCORD_ROLE_SWATCHES, contrastingText, hexToRgb, hsvToRgb, rgbToHex, rgbToHsv } from "../src/components/color-picker";
 import { EmptyState } from "../src/components/empty-state";
 import { GuildSelector } from "../src/components/guild-selector";
@@ -704,8 +705,8 @@ test("the save bar warns about unsaved changes and offers both actions", () => {
     createElement(SaveBar, { onSave: async () => {}, onCancel: () => {} })
   ).replace(/<!-- -->/g, "");
 
-  assert.match(html, /لديك تغييرات غير محفوظة/, "the warning is present the moment there is a change");
-  assert.match(html, /تغييرات غير محفوظة/, "the warning says what the problem is");
+  assert.match(html, /تغييرات غير محفوظة/, "the warning is present the moment there is a change");
+  assert.doesNotMatch(html, /لديك تغييرات/, "the warning is short, not a sentence");
   assert.match(html, /حفظ التغييرات/, "the save action is offered");
   assert.match(html, /تجاهل/, "the revert action is offered");
   assert.match(html, /fixed/, "the bar is fixed to the bottom of the window");
@@ -752,4 +753,19 @@ test("the save bar's labels are overridable per screen", () => {
   assert.match(html, /خزّن/);
   assert.match(html, /تراجع/);
   assert.doesNotMatch(html, /حذارِ/, "an overridden message replaces the default rather than joining it");
+});
+
+test("a loading button shows one spinner, not two", () => {
+  // The defect this guards: `loading` prepends its own spinner while the caller
+  // keeps its leading icon spinning beside it — the header refresh button grew a
+  // second disc and its label shifted mid-flight, which is exactly what the
+  // `loading` contract promises never to happen.
+  const busy = renderToString(
+    createElement(Button, { loading: true }, createElement(ServerOff), "تحديث")
+  );
+  assert.match(busy, /animate-spin/, "the spinner is rendered");
+  assert.match(busy, /svg\+svg\]:hidden/, "the caller's leading icon is hidden while in flight");
+
+  const idle = renderToString(createElement(Button, null, createElement(ServerOff), "تحديث"));
+  assert.doesNotMatch(idle, /svg\+svg\]:hidden/, "an idle button keeps both of its icons");
 });

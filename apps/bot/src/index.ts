@@ -170,6 +170,13 @@ const hmacSecret = readEnv(process.env, "EVENT_HMAC_SECRET")!;
 const encryptionKey = readEnv(process.env, "ENCRYPTION_KEY")!;
 const dashboardUrl = readEnv(process.env, "DASHBOARD_URL");
 /**
+ * The private address for signed health snapshots. Kept separate from the
+ * member-facing `DASHBOARD_URL`: the public origin is what `/settings` and
+ * `/dashboard` must link to, but internal telemetry has no reason to cross the
+ * tunnel and pay its latency and request budget.
+ */
+const dashboardInternalUrl = readEnv(process.env, "DASHBOARD_INTERNAL_URL") ?? dashboardUrl;
+/**
  * Where AL AI's own errors and security events are delivered. Deliberately an
  * environment value rather than a per-guild setting: a customer's server must
  * never receive the bot's internals, and no guild should be able to redirect
@@ -1701,8 +1708,12 @@ bindEvents(client, guardedDispatch, {
         return;
       }
       const base = dashboardUrl.replace(/\/$/, "");
-      const link = commandName === "settings" ? `${base}/guilds/${guildId}/commands` : base;
-      const label = commandName === "settings" ? "إعدادات أوامر هذا السيرفر" : "لوحة تحكم AL AI";
+      // The dashboard's guild shell opens the «إعدادات هذا السيرفر» hub when
+      // this flag is present; the old path (`/guilds/:id/commands`) was not a
+      // route the SPA knew and landed on the guild selector.
+      const link =
+        commandName === "settings" ? `${base}/dashboard/${guildId}?settings=1` : base;
+      const label = commandName === "settings" ? "إعدادات هذا السيرفر" : "لوحة تحكم AL AI";
       await reply(`${label}: ${link}`, { autoDeleteSeconds });
       return;
     }
@@ -2568,7 +2579,7 @@ levelsTick.unref?.();
 const supervisor = startSupervisor({
   pipeline,
   database,
-  dashboardUrl,
+  dashboardUrl: dashboardInternalUrl,
   hmacSecret,
   guildIds: () => [...client.guilds.cache.keys()],
   uniqueUsers: () => intentUsage.stats().uniqueUsers,

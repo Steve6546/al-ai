@@ -22,7 +22,7 @@ export default defineConfig({
         // The groups are by *package*, not by file, so a dependency that pulls
         // in another one stays whole. The order matters: the first group that
         // matches wins, so the specific packages come before the general one.
-        advancedChunks: {
+        codeSplitting: {
           groups: [
             { name: "icons", test: /node_modules[\\/]lucide-react[\\/]/ },
             { name: "motion", test: /node_modules[\\/](framer-motion|motion-dom|motion-utils)[\\/]/ },

@@ -160,6 +160,16 @@ function isPublicHost(hostname: string): boolean {
   // private address and has to be checked as one.
   const mapped = /^::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/.exec(host);
   if (mapped) return isPublicHost(mapped[1]!);
+  // The same mapped address in hexadecimal — `::ffff:7f00:1` is 127.0.0.1.
+  // The dotted-only pattern above missed this spelling, and the final IPv6
+  // test then treated it as a public address. NAT64's `64:ff9b::/96` embeds an
+  // IPv4 address the same way.
+  const mappedHex = /^(?:::ffff:|0:0:0:0:0:ffff:|64:ff9b::|::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(host);
+  if (mappedHex) {
+    const hi = Number.parseInt(mappedHex[1]!, 16);
+    const lo = Number.parseInt(mappedHex[2]!, 16);
+    return isPublicHost(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+  }
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (v4) {
     const a = Number(v4[1]);

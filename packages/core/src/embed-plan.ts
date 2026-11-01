@@ -41,6 +41,24 @@ export function renderValue(value: unknown): string {
   }
 }
 
+/**
+ * Neutralises member-authored text before it is shown in an embed field.
+ *
+ * Embed field values render markdown, so a nickname, a thread name or a webhook
+ * name written as `[القواعد](https://example)` becomes a clickable link the bot
+ * appears to have authored. Only the characters Discord documents as escapable
+ * get a backslash — escaping `[`, `(` or `#` would print the backslash — and
+ * pings and link tails are broken with a zero-width space instead, which is
+ * invisible but stops the syntax matching.
+ */
+export function escapeEmbedText(value: string): string {
+  return value
+    .replace(/@(everyone|here)\b/g, "@\u200b$1")
+    .replace(/<([@#][!&]?\d+)>/g, "<\u200b$1>")
+    .replace(/[\\*_~`>|]/g, "\\$&")
+    .replace(/\]\s*\(/g, "]\u200b(");
+}
+
 function clampName(name: string): string {
   return name.length <= EMBED_MAX_NAME ? name : `${name.slice(0, EMBED_MAX_NAME - 1)}…`;
 }

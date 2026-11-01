@@ -5,6 +5,7 @@
    `dark` class), which selects HeroUI's own semantic variables; our palette
    below then refines the shared ones. */
 @import "@heroui/styles";
+@import "./fonts.css";
 
 /* AL AI's two palettes. The neutrals are true grey (hue 0) so nothing competes
    with the brand, and the brand itself is one accent colour that the operator
@@ -95,7 +96,7 @@
   --secondary-foreground: oklch(0.28 0.005 285.8);
 
   --muted: oklch(0.955 0.002 285.8);
-  --muted-foreground: oklch(0.52 0.008 285.8);
+  --muted-foreground: oklch(0.46 0.006 285.8);
 
   --accent: oklch(0.955 0.002 285.8);
   --accent-foreground: oklch(0.28 0.005 285.8);
@@ -146,7 +147,7 @@
   --secondary-foreground: oklch(0.97 0 0);
 
   --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.72 0 0);
+  --muted-foreground: oklch(0.79 0 0);
 
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.97 0 0);
@@ -314,6 +315,25 @@
   .scrollbar-none::-webkit-scrollbar {
     display: none;
   }
+
+  /*
+   * The smallest type on the platform was set for a desktop monitor. On a
+   * phone, 10–12px Arabic is the first thing that stops being readable, so the
+   * two smallest steps move up one notch at that width. The desktop sizes stay
+   * as designed.
+   */
+  @media (max-width: 639px) {
+    .text-\[10px\],
+    .text-\[11px\] {
+      font-size: 0.75rem;
+      line-height: 1.15rem;
+      font-weight: 500;
+    }
+    .text-xs {
+      font-size: 0.8125rem;
+      line-height: 1.3rem;
+    }
+  }
 }
 
 @layer base {
@@ -321,5 +341,15 @@
      320px card rather than wrap; let the word break instead of the layout. */
   body {
     overflow-wrap: break-word;
+  }
+
+  /* The last-resort net under the per-component fixes, not a substitute for
+     them: a stray wide element may never open a page-level horizontal strip.
+     `clip` rather than `hidden` on purpose — hidden turns the root into a
+     scroll container (breaking position: sticky inside) while clip simply
+     forbids scrolling there. Each screen still scrolls its own overflowing
+     rail or table inside its own container. */
+  html {
+    overflow-x: clip;
   }
 }

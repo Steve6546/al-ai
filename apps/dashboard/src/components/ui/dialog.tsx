@@ -58,10 +58,15 @@ const DialogContent = ({
   children: React.ReactNode;
 }) => {
   const { open, onOpenChange } = React.useContext(DialogContext);
+  // Unmount when closed. HeroUI's backdrop kept its own mounted state when the
+  // controlled `isOpen` prop flipped, so a saved/cancelled dialog stayed over
+  // the page and swallowed clicks. Rendering only while open makes the state
+  // the single source of truth.
+  if (!open) return null;
   return (
-    <HeroModal.Backdrop isOpen={open} onOpenChange={onOpenChange}>
+    <HeroModal.Backdrop isOpen onOpenChange={onOpenChange}>
       <HeroModal.Container>
-        <HeroModal.Dialog className={cn("w-full max-w-lg gap-4 border border-border/80 bg-card/95 p-6 shadow-xl backdrop-blur-md", className)}>
+        <HeroModal.Dialog className={cn("w-full max-w-lg gap-4 border border-border/80 bg-card/95 p-4 shadow-xl backdrop-blur-md sm:p-6", className)}>
           {/* Project rule: no corner X. Modals close through their footer
               buttons (إلغاء / حفظ), Escape, or an outside click — all of
               which HeroUI's dismissal already handles. */}
