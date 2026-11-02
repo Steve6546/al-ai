@@ -515,7 +515,10 @@ const loadedMarkers: Record<string, RegExp> = {
   roles: /لم تختر أي رتبة/,
   logs: /التسجيل المركزي/,
   audit: /آخر الأحداث/,
-  security: /محرّك مضاد التخريب/,
+  // The counter is built from the registry *and* the server's config, so it only
+  // exists once the payload arrived — and it cannot be satisfied by the static
+  // card title, which renders while the panel is still loading.
+  security: /4\/12 مفعّل/,
   // The summary line under the controls, which is built from the stored row:
   // the activity kind by its Discord name, then the text beside it. Both halves
   // have to have arrived for the string to exist at all.
@@ -545,6 +548,36 @@ for (const view of views) {
     assert.doesNotMatch(html, LOADING_COPY, `${view} moved past every loading state, not just the first`);
   });
 }
+
+/**
+ * The protection screen's navigation and its honesty about what is wired.
+ *
+ * Four sections, five families, twelve rows — and only the rows the engine
+ * actually counts get an editable number. The rest have to say so in words,
+ * because a disabled input reads to an operator as "configured elsewhere" and a
+ * number that nothing reads reads as "protected".
+ */
+test("the security screen shows its sections and marks what the engine does not enforce", async () => {
+  stubFetch();
+  const { html, errors } = await mount(`/dashboard/${GUILD_ID}/security`);
+  assert.deepEqual(fatal(errors), [], "the security screen produced no render error");
+
+  for (const section of ["تحديد العقوبة", "عقوبة فورية", "كشف فقط", "الدفاع الذاتي للبوت"]) {
+    assert.ok(html.includes(section), `the section ${section} is reachable`);
+  }
+  // The section that is built opens on a family strip, and the family it renders
+  // shows the limit the server returned (3 channel deletions) rather than the
+  // registry's default — proof the number is read from the payload.
+  assert.ok(html.includes("حماية القنوات"), "the family strip renders");
+  assert.ok(html.includes("مكافحة حذف القنوات"), "the enforced channel row renders");
+  assert.ok(html.includes('value="3"'), "the enforced limit comes from the server");
+  // The three channel protections nothing counts yet are labelled rather than
+  // rendered as dead inputs.
+  assert.ok(html.includes("غير موصولة بالمحرّك بعد"), "unwired protections say so");
+  // Only the selected family renders: the roles-family note belongs to a panel
+  // that is not open, and if it appeared here the strip would be decoration.
+  assert.doesNotMatch(html, /ميزانية واحدة/, "one family panel at a time, not all five stacked");
+});
 
 /**
  * The screen this file exists for. Asserted on its own as well as in the loop

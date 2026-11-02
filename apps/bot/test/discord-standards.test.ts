@@ -38,6 +38,7 @@ test("every shared permission bit matches discord.js PermissionFlagsBits", () =>
     MANAGE_CHANNELS: PermissionFlagsBits.ManageChannels,
     MANAGE_MESSAGES: PermissionFlagsBits.ManageMessages,
     MANAGE_ROLES: PermissionFlagsBits.ManageRoles,
+    MANAGE_WEBHOOKS: PermissionFlagsBits.ManageWebhooks,
     MODERATE_MEMBERS: PermissionFlagsBits.ModerateMembers
   };
 

@@ -47,6 +47,12 @@ export const DISCORD_PERMISSION_BITS = {
   MANAGE_CHANNELS: 0x10n,
   MANAGE_MESSAGES: 0x2000n,
   MANAGE_ROLES: 0x10000000n,
+  /**
+   * `1 << 29`, read from the official permission table rather than recalled:
+   * the value moved when Discord added the newer bits, and a stale literal here
+   * would test a bit that belongs to something else entirely.
+   */
+  MANAGE_WEBHOOKS: 0x20000000n,
   MODERATE_MEMBERS: 0x10000000000n
 } as const;
 
@@ -80,6 +86,7 @@ export const discordPermissionLabels: Partial<Record<DiscordPermissionBit, strin
   MANAGE_GUILD: "إدارة السيرفر",
   MANAGE_NICKNAMES: "إدارة الأسماء المستعارة",
   MANAGE_ROLES: "إدارة الرتب",
+  MANAGE_WEBHOOKS: "إدارة الويبهوكات",
   MODERATE_MEMBERS: "إسكات الأعضاء"
 };
 

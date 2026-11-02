@@ -17,6 +17,8 @@ export * from "./session-policy.js";
 export * from "./contracts.js";
 export * from "./hierarchy.js";
 export * from "./anti-nuke.js";
+export * from "./anti-nuke-registry.js";
+export * from "./discord-permissions.js";
 export * from "./snowflake.js";
 export * from "./log-visuals.js";
 export * from "./remote-access.js";
