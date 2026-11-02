@@ -98,8 +98,9 @@ function readImageAsDataUrl(file: File): Promise<ReadImage> {
  *
  * It used to render the same image three times over — a thumbnail beside the
  * zone, the zone itself, and a file bar — which read as three controls for one
- * value. Now there is one zone: it shows the stored image or the fallback, and
- * grows استبدال/إزالة only when there is something to replace.
+ * value. Now there is one zone: it shows the stored image, or the account's own
+ * picture where this server has set no override, and grows استبدال/إزالة only
+ * when there is something to replace.
  */
 function ImageSlot({
   label,
@@ -107,6 +108,8 @@ function ImageSlot({
   dataUrl,
   savedDataUrl,
   fallbackLabel,
+  fallbackUrl = null,
+  fallbackCaption = "",
   fileName,
   urlText = "",
   onUrlText,
@@ -123,6 +126,18 @@ function ImageSlot({
   /** What is stored right now - the slot says whether the shown image is new. */
   savedDataUrl?: string | null;
   fallbackLabel: string;
+  /**
+   * The account's own picture, drawn when this server has no override.
+   *
+   * A server profile is a layer of overrides over the account's profile, so
+   * this is what members actually see while the slot is empty — and the slot
+   * used to say «لا يوجد غلاف» over a bot that has a banner everybody can
+   * already see. It is captioned, never silent: the operator must not read the
+   * account's image as a saved server override.
+   */
+  fallbackUrl?: string | null;
+  /** What the fallback being drawn is, in words. */
+  fallbackCaption?: string;
   fileName: string;
   urlText?: string;
   onUrlText?: (next: string) => void;
@@ -198,6 +213,18 @@ function ImageSlot({
           {shown ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={shown} alt="" className="size-full object-cover" />
+          ) : fallbackUrl ? (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={fallbackUrl} alt="" className="size-full object-cover" />
+              {/* Named, not left silent: this is the account's image showing
+                  through, not a picture this server has saved. */}
+              {fallbackCaption ? (
+                <span className="absolute inset-x-0 bottom-0 bg-background/85 py-0.5 text-center text-[9px] font-medium text-muted-foreground backdrop-blur-sm">
+                  {fallbackCaption}
+                </span>
+              ) : null}
+            </>
           ) : (
             <span className={cn("grid size-full place-items-center", shape === "square" ? "text-[10px]" : "text-[9px]")}>
               {fallbackLabel}
@@ -643,10 +670,11 @@ export function CustomizationView({ guild }: { guild: Guild }) {
             <CardContent className="space-y-4">
               {/*
                 The picture and the banner, each with its own value, its own
-                preview and its own save - they are two different fields of
-                Discord's member edit, and one of them (the picture) falls back
-                to the account's picture where the server has no override,
-                while the other (the banner) does not.
+                preview and its own save — they are two different fields of
+                Discord's member edit. Both fall back the same way: a server
+                profile is a layer of overrides over the account's profile, so
+                where this server has set nothing, members see the account's
+                image, and the slot draws that instead of an empty box.
               */}
               <ImageSlot
                 label="الصورة الأساسية"
@@ -654,6 +682,8 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                 dataUrl={draft.avatarDataUrl}
                 savedDataUrl={saved.avatarDataUrl ?? null}
                 fallbackLabel={profile?.accountAvatarUrl ? "صورة الحساب" : "الافتراضية"}
+                fallbackUrl={profile?.accountAvatarUrl ?? null}
+                fallbackCaption="صورة الحساب"
                 fileName={fileNames.avatar ?? "guild-avatar.png"}
                 urlText={avatarUrlText}
                 onUrlText={setAvatarUrlText}
@@ -676,6 +706,8 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                 dataUrl={draft.bannerDataUrl}
                 savedDataUrl={saved.bannerDataUrl ?? null}
                 fallbackLabel="لا يوجد غلاف"
+                fallbackUrl={profile?.accountBannerUrl ?? null}
+                fallbackCaption="غلاف الحساب"
                 fileName={fileNames.banner ?? "guild-banner.png"}
                 urlText={bannerUrlText}
                 onUrlText={setBannerUrlText}
