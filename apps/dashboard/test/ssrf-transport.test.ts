@@ -160,3 +160,20 @@ test("a refused host is reported as a refusal, not as an unreachable link", asyn
     "the operator needs to know the server said no, not that it did not answer"
   );
 });
+
+test("an animated GIF keeps its type through the importer", async () => {
+  const resolve: Resolver = async () => [{ address: "93.184.216.34", family: 4 }];
+  const connect: Connector = async () =>
+    imageResponse({
+      headers: { "content-type": "image/gif" },
+      body: (async function* () {
+        yield Buffer.from("GIF89a");
+      })()
+    });
+
+  // The picker, the browser read, the validator and Discord all take image/gif;
+  // flattening it here would silently kill the operator's animation before the
+  // request ever left.
+  const dataUrl = await fetchImageAsDataUrl("https://images.example.com/loop.gif", 1024, { resolve, connect });
+  assert.ok(dataUrl.startsWith("data:image/gif;base64,"), `got ${dataUrl.slice(0, 32)}`);
+});
