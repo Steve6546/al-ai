@@ -168,3 +168,20 @@ test together.
     same request. Discord rate-limits per *application*, not per route, so a  
     cache is not an optimisation here; it is what keeps the bot's own calls  
     working.
+28. **A credential never enters the repository, and the gate says so.** Secrets
+    live in `.env`, which `.gitignore` covers; code receives them through
+    `server/env.ts` / the bot's environment and no route, log line or built
+    bundle prints one. `npm run check:secrets` enforces both halves — it fails if
+    `.env` becomes tracked, and it fails on any *value-shaped* credential (an
+    AWS/Alibaba key, a Bailian `sk-`, an STS token, a PEM block) found in tracked
+    files, the local logs or `dist/`. It reports but does not fail on
+    name-shaped hits, because all 23 of those in this repository are type
+    declarations (`hmacSecret: string;`) and interpolated variables
+    (`${POSTGRES_PASSWORD}`); a gate that cries about them is a gate that gets
+    ignored. Deleting a committed secret does not un-leak it: the project that
+    lived in this directory before AL AI committed a 361-byte `.env`
+    (`git log --all -- .env` still shows it, in `7d67921`, removed in `0ed6bff`),
+    and the file's contents were a Supabase **publishable** key — a client-side
+    credential by design, which is the only reason this is a note and not an
+    incident. Anything with a server-side privilege that reaches a commit is
+    rotated first and scrubbed from history second.
