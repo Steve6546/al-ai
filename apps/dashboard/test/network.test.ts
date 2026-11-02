@@ -9,6 +9,7 @@ import {
   lanHostEntriesFrom,
   lanHostsFrom,
   lastTunnelUrlIn,
+  nextProbeState,
   normaliseOrigin,
   packOAuthState,
   parseTunnelUrl,
@@ -236,6 +237,41 @@ test("an error recovers on its own when the URL answers again", async () => {
   assert.deepEqual(
     await probeTunnelReachability({ mode: "tunnel", url: tunnelUrl, status: "error" }, ok),
     { status: "running", error: null }
+  );
+});
+
+/**
+ * When a dead URL is worth killing the agent for.
+ *
+ * Three times in one evening the ngrok agent stayed alive while its edge
+ * dropped: the screen said "running", the browser got `ERR_NGROK_3200`, and the
+ * only fix was the toggle the operator had to find and press. The heal is the
+ * toggle, taken automatically — but only for an address that was advertised and
+ * then stopped answering.
+ */
+test("an address that stops answering is re-minted after two probes", () => {
+  const first = nextProbeState({ url: tunnelUrl, verdict: "error", failures: 0 });
+  assert.deepEqual(first, { failures: 1, remint: false }, "one failed probe is a hiccup, not evidence");
+
+  const second = nextProbeState({ url: tunnelUrl, verdict: "error", failures: first.failures });
+  assert.deepEqual(second, { failures: 0, remint: true }, "the second one thirty seconds later is a wedged agent");
+});
+
+test("a probe that answers clears the count without re-minting", () => {
+  assert.deepEqual(
+    nextProbeState({ url: tunnelUrl, verdict: "running", failures: 1 }),
+    { failures: 0, remint: false },
+    "the tunnel came back on its own, which is what an edge reconnect looks like"
+  );
+});
+
+test("a tunnel with no address is never re-minted by the probe", () => {
+  // ERR_NGROK_9040 — ngrok refusing this ISP address — leaves no URL at all.
+  // That state belongs to the spaced retry ladder, which stops and reports;
+  // healing it would respawn an agent forever against a block no restart fixes.
+  assert.deepEqual(
+    nextProbeState({ url: null, verdict: "error", failures: 4 }),
+    { failures: 0, remint: false }
   );
 });
 

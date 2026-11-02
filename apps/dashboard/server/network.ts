@@ -304,6 +304,29 @@ export const PROBE_TIMEOUT_MS = 5_000;
 
 export type ProbeVerdict = { status: TunnelStatus; error: string | null };
 
+/** Consecutive unreachable probes that justify re-minting the agent. */
+export const RESTART_AFTER_FAILURES = 2;
+
+/**
+ * The heal decision, kept pure so the dangerous case is testable without a real
+ * agent.
+ *
+ * A tunnel that never got an address must **not** be re-minted forever: that is
+ * `ERR_NGROK_9040`, an ISP block, and the spaced retry ladder already owns it —
+ * re-minting on a probe failure would turn a visible "gave up after 2 attempts"
+ * into an endless respawn. Only an address we advertised and that stopped
+ * answering is a wedged agent, and only a wedged agent is worth killing.
+ */
+export function nextProbeState(state: {
+  url: string | null;
+  verdict: TunnelStatus;
+  failures: number;
+}): { failures: number; remint: boolean } {
+  if (!state.url) return { failures: 0, remint: false };
+  const failures = state.verdict === "running" ? 0 : state.failures + 1;
+  return failures >= RESTART_AFTER_FAILURES ? { failures: 0, remint: true } : { failures, remint: false };
+}
+
 export async function probeTunnelReachability(
   state: { mode: RemoteAccessMode; url: string | null; status: TunnelStatus },
   fetchImpl: typeof fetch = fetch,
@@ -810,19 +833,52 @@ export function createNetworkManager(input: {
    */
   let lastProbeAt = 0;
   const PROBE_INTERVAL_MS = 15_000;
+  let probeFailures = 0;
+  let healing = false;
 
   function probeTunnel(): void {
+    if (mode !== "tunnel" || healing) return;
     if (Date.now() - lastProbeAt < PROBE_INTERVAL_MS) return;
     lastProbeAt = Date.now();
     const url = tunnelUrl;
     const status = tunnelStatus;
-    void probeTunnelReachability({ mode, url, status }).then(verdict => {
+    void probeTunnelReachability({ mode, url, status }).then(async verdict => {
       // Re-test against the state as it is now, not as it was at send time:
       // a mode switch to "off" in between must not be overwritten.
       if (mode !== "tunnel" || tunnelUrl !== url) return;
-      if (verdict.status === status) return;
-      tunnelStatus = verdict.status;
-      tunnelError = verdict.error;
+      if (verdict.status !== status) {
+        tunnelStatus = verdict.status;
+        tunnelError = verdict.error;
+      }
+      const heal = nextProbeState({ url, verdict: verdict.status, failures: probeFailures });
+      probeFailures = heal.failures;
+      if (!heal.remint) return;
+
+      /*
+       * The URL is dead and the process that owns it is alive — the one failure
+       * this deployment keeps meeting, three times in one evening. Reporting it
+       * was as far as it went: the screen said «أعد اختيار الوضع» and the
+       * operator pressed the toggle, or restarted the whole stack, by hand.
+       *
+       * `stopTunnel` then `adoptOrStartTunnel` is exactly what that toggle did,
+       * and it is safe to do without asking: the endpoint is already
+       * unreachable, the domain is configuration that survives the restart, and
+       * the reserved address comes back the same. A wedged agent is not
+       * something an operator should have to notice.
+       */
+      healing = true;
+      input.log.warn({ tunnelUrl: url, afterFailures: RESTART_AFTER_FAILURES }, "The tunnel URL stopped answering; re-minting the tunnel");
+      try {
+        await stopTunnel();
+        await adoptOrStartTunnel();
+      } catch (error) {
+        // `warn`, not `error`: the manager's log seam carries info and warn, and
+        // a failed re-mint is the same class of event as the wedge that caused it
+        // — the retry ladder still has a chance to recover it.
+        input.log.warn({ err: error }, "The tunnel could not be re-minted");
+      } finally {
+        healing = false;
+      }
     });
   }
 
@@ -871,6 +927,15 @@ export function createNetworkManager(input: {
     domain = normaliseNgrokDomain(await input.getSetting(NGROK_DOMAIN_KEY)) ?? envNgrokDomain();
     verifiedOrigin = normaliseOrigin(await input.getSetting(VERIFIED_ORIGIN_KEY));
     if (mode === "tunnel") await adoptOrStartTunnel();
+    /*
+     * The probe used to run only when something read the network screen, so a
+     * dead tunnel stayed dead for as long as the operator stayed on another
+     * page — which is most of the time. The timer costs one local request per
+     * interval and is what makes the healing above reachable at all;
+     * `probeTunnel` returns immediately in `off` and `lan`, so it is harmless
+     * when there is no tunnel.
+     */
+    setInterval(() => probeTunnel(), PROBE_INTERVAL_MS).unref();
     input.log.info({ mode, domain, ...(override ? { overrideFrom: "AL_AI_REMOTE_ACCESS" } : {}) }, "AL AI network access loaded");
   }
 
