@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Activity, Loader2 } from "lucide-react";
-import { DEFAULT_BOT_PRESENCE, MAX_ACTIVITY_TEXT_LENGTH, activityTypeShortLabels, activityTypeTerms, activityTypes } from "@al-ai/core/browser";
+import { MAX_ACTIVITY_TEXT_LENGTH, activityTypeShortLabels, activityTypeTerms, activityTypes } from "@al-ai/core/browser";
 import { api } from "@/api";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { SaveBar } from "@/components/save-bar";
@@ -155,12 +155,19 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
                   value={draft.activityText}
                   maxLength={MAX_ACTIVITY_TEXT_LENGTH}
                   onChange={event => patch({ activityText: event.target.value })}
-                  placeholder={DEFAULT_BOT_PRESENCE.activityText || "سيرفرات ديسكورد"}
+                  placeholder="مثال: يراقب السيرفر"
                   className="min-w-0 flex-1 rounded-xl"
                 />
               </div>
+              {/*
+                There is no default activity to fall back to. An empty text makes
+                the bot send `activities: []` — "no activity", not an activity
+                with a blank name — so the sentence used to promise a default that
+                nothing ever applies, and the placeholder spelled an example out
+                as though it were the value the bot would choose.
+              */}
               <p className="text-xs text-muted-foreground">
-                اتركه فارغاً ليظهر النشاط الافتراضي.
+                اتركه فارغاً فلا يظهر أي نشاط تحت الاسم.
               </p>
             </div>
           </div>

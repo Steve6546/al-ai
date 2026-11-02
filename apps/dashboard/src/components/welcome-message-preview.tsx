@@ -3,12 +3,19 @@ import { cn } from "@/lib/utils";
 import { initials } from "@/lib/format";
 
 /**
- * The live preview of a welcome message.
+ * The live preview of a **text** welcome message.
  *
  * It is bound to the *draft*, so it answers the instant something is typed or
- * picked - no save, no request. It draws what the bot will draw: the bot's own
- * picture and name, the message with its variables applied, the embed when the
- * screen is in embed mode, and the generated card when the image is on.
+ * picked - no save, no request. It draws the bot's own picture and name, the
+ * message with its variables applied, and the generated card when the image is
+ * on.
+ *
+ * It has no embed section, on purpose. The bot builds an embed only when
+ * `mode === "embed"` (`apps/bot/src/index.ts:736`), and this component is
+ * mounted only in text mode — the embed half of it was therefore unreachable
+ * code that had grown a title, a description, fields, an image, a thumbnail and
+ * a footer none of them could ever appear. The embed is edited and previewed in
+ * one place instead: `welcome-embed-editor.tsx`, where the card *is* the form.
  *
  * Two rules it keeps:
  *
@@ -41,10 +48,6 @@ export function WelcomeMessagePreview({
   className?: string;
 }) {
   const text = renderWelcomeMessage(settings.text, values).trim();
-  const embed = settings.mode === "embed" ? settings.embed : null;
-  const embedTitle = embed ? renderWelcomeMessage(embed.title, values).trim() : "";
-  const embedDescription = embed ? renderWelcomeMessage(embed.description, values).trim() : "";
-  const embedFields = embed ? embed.fields.filter(field => field.name.trim() || field.value.trim()) : [];
 
   return (
     <div className={cn("overflow-hidden rounded-xl border border-border bg-card", className)}>
@@ -88,44 +91,6 @@ export function WelcomeMessagePreview({
               </p>
             )}
 
-            {embed ? (
-              <div
-                className="mt-2 overflow-hidden rounded-lg border-s-4 bg-background"
-                style={{ borderInlineStartColor: embed.color ?? "#4e5058" }}
-              >
-                <div className="space-y-2 p-3">
-                  {embedTitle ? <p className="text-sm font-semibold">{embedTitle}</p> : null}
-                  {embedDescription ? (
-                    <p className="text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">{embedDescription}</p>
-                  ) : null}
-                  {embedFields.length ? (
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {embedFields.map(field => (
-                        <div key={field.id} className="min-w-0">
-                          {field.name.trim() ? <p className="text-[11px] font-semibold">{field.name}</p> : null}
-                          {field.value.trim() ? (
-                            <p className="text-[11px] text-muted-foreground">{field.value}</p>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                  {!embedTitle && !embedDescription && !embedFields.length ? (
-                    <p className="text-xs text-muted-foreground">الإيمبد فارغ — أضف عنواناً أو وصفاً أو حقلاً.</p>
-                  ) : null}
-                </div>
-                {/* Discord draws the embed image for both sources, so the
-                    preview must: an address that was typed is as real to the
-                    member as a file that was picked. */}
-                {settings.embed.imageMode === "upload" && settings.embed.imageDataUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={settings.embed.imageDataUrl} alt="" className="max-h-48 w-full object-cover" />
-                ) : settings.embed.imageMode === "url" && settings.embed.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={settings.embed.imageUrl} alt="" className="max-h-48 w-full object-cover" />
-                ) : null}
-              </div>
-            ) : null}
 
             {/*
               The card rides with the message only in the «with_message»

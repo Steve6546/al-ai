@@ -101,6 +101,53 @@ test("a draft that is not saved says so instead of claiming Discord has it", () 
   }
 });
 
+test("the text preview has no embed section, because the bot sends none", () => {
+  /*
+   * The bot builds an embed only when `mode === "embed"`
+   * (apps/bot/src/index.ts:736) and this component is mounted only in text mode,
+   * so an embed branch inside it could never render — it had nevertheless grown
+   * a title, fields, an image, a thumbnail and a footer. The embed is previewed
+   * in one place: the editor whose card *is* the form. This asserts the dead
+   * branch stays dead rather than creeping back as a second, unreachable copy.
+   */
+  const { container, root } = render(
+    <WelcomeMessagePreview
+      settings={{
+        ...SETTINGS,
+        mode: "text",
+        embed: {
+          ...SETTINGS.embed,
+          title: "عنوان لا يُرسل",
+          description: "وصف لا يُرسل",
+          footer: "تذييل لا يُرسل",
+          thumbnailMode: "member_avatar"
+        }
+      }}
+      values={{
+        userMention: "@العضو",
+        username: "عضو",
+        server: "سيرفر",
+        memberCount: 12,
+        inviterMention: "",
+        joinDate: "اليوم"
+      }}
+      avatarUrl={null}
+      botName="AL AI"
+      channelName="الترحيب"
+    />
+  );
+  try {
+    const text = container.textContent ?? "";
+    assert.equal(text.includes("عنوان لا يُرسل"), false, "the embed's title is not drawn for a text message");
+    assert.equal(text.includes("تذييل لا يُرسل"), false, "nor its footer");
+    assert.equal(container.querySelectorAll("img").length, 0, "and no embed image or thumbnail is invented");
+    assert.ok(text.includes("أهلاً {user} في {server}".replace("{user}", "@العضو").replace("{server}", "سيرفر")), "the text itself is drawn");
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});
+
 const SETTINGS: WelcomeMessageSettings = {
   enabled: true,
   imageEnabled: false,

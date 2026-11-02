@@ -760,6 +760,15 @@ test("the presence screen says out loud that its reach is every server", async (
   // The dashboard cannot apply this itself, and the save message says so rather
   // than claiming a Discord call that never happened.
   assert.match(html, /ما سيطبّقه البوت/, "the screen is explicit that the bot applies it, not the dashboard");
+  /*
+   * And it must not promise a default activity. The bot sends `activities: []`
+   * when the text is empty (apps/bot/src/index.ts → applyBotPresence), so the
+   * field used to say «اتركه فارغاً ليظهر النشاط الافتراضي» and put an example
+   * in the placeholder as if the bot would choose it. There is no default to
+   * fall back to, and a hint that invents one is a claim about the product.
+   */
+  assert.doesNotMatch(html, /النشاط الافتراضي/, "no default activity is promised, because none exists");
+  assert.doesNotMatch(html, /سيرفرات ديسكورد/, "the placeholder is an example, not a value the bot applies");
 });
 
 test("the live preview stays in view while the settings scroll", async () => {

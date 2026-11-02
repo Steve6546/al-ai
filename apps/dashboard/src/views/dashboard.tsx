@@ -160,7 +160,11 @@ export function DashboardView({ guild }: { guild: Guild }) {
           <CardContent className="space-y-3 text-sm">
             <Row label="الاسم" value={guild.name} />
             <Separator />
-            <Row label="رتبتك" value={guild.tier ? tierLabels[guild.tier] : "لا توجد رتبة AL AI"} />
+            {/* `guild.tier` is the operator's own tier, resolved server-side from
+                the role mapping — the row says so. Its fallback named AL AI,
+                which is a different subject: a null tier means nobody mapped a
+                role for the person reading it, not that the bot lost a rank. */}
+            <Row label="رتبتك" value={guild.tier ? tierLabels[guild.tier] : "لا رتبة لك هنا — لم تُعلّم أي من رتبك"} />
             <Separator />
             <Row
               label="البوت"
