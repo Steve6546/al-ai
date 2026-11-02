@@ -239,13 +239,25 @@ export const DEFAULT_ACTIVITY_TEXT = "سيرفرات ديسكورد";
 export const MAX_BIO_LENGTH = 300;
 
 /**
+ * Largest image the dashboard will accept, counted in image bytes. This is the
+ * number the field hint shows the operator, so it is the number that must hold.
+ */
+export const MAX_IMAGE_UPLOAD_BYTES = 500_000;
+
+/**
  * Largest base64 data URL accepted for an avatar, a banner or a role icon.
+ *
+ * Derived rather than chosen: a data URL is a short prefix plus four characters
+ * for every three bytes, so the byte ceiling the download enforces and the
+ * string ceiling this validator enforces are one limit seen from two ends. Two
+ * independent 500 000s made an image between 375 KB and 500 KB pass the download
+ * and then be refused on save, under a hint that promised 500 KB throughout.
  *
  * The images are cropped in the browser before they arrive, so this is a ceiling
  * on something already small — its job is to stop a hand-crafted request from
  * writing megabytes into a text column.
  */
-export const MAX_IMAGE_DATA_URL_LENGTH = 500_000;
+export const MAX_IMAGE_DATA_URL_LENGTH = Math.ceil((MAX_IMAGE_UPLOAD_BYTES / 3) * 4) + 64;
 
 /**
  * Everything about how the bot presents itself in ONE server.

@@ -64,3 +64,23 @@ test("the request is bounded by a timeout", () => {
   assert.ok(options.signal, "the request carries an abort signal");
   assert.equal(options.signal.aborted, false);
 });
+
+test("the image request identifies itself and asks for an uncompressed body", () => {
+  const options = buildPinnedRequestOptions(new URL("https://images.example.com/a.png"), { address: "93.184.216.34", family: 4 }, 5_000);
+
+  // A request with no user-agent is answered 403 by several image hosts, and a
+  // 403 reads to the operator as "your link is broken".
+  assert.match(String(options.headers["user-agent"]), /^AL-AI-Bot/, "the host must be able to identify the caller");
+  assert.equal(options.headers["accept-encoding"], "identity", "a gzipped body would not match the byte ceiling");
+  assert.equal(options.headers.accept, "image/*");
+});
+
+test("the pinned socket does not run Happy Eyeballs", () => {
+  const options = buildPinnedRequestOptions(new URL("https://images.example.com/a.png"), { address: "93.184.216.34", family: 4 }, 5_000);
+
+  // With autoSelectFamily on, Node asks the resolver for all addresses and reads
+  // the single-address callback above as undefined — the connect then dies with
+  // ERR_INVALID_IP_ADDRESS and every image link, valid or not, is reported as
+  // unreachable. The address is already vetted, so there is nothing to select.
+  assert.equal(options.autoSelectFamily, false, "one vetted address, no racing");
+});

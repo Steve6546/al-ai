@@ -27,7 +27,7 @@
 
 import {
   APPEARANCE_FIELD_LABELS_AR,
-  MAX_IMAGE_DATA_URL_LENGTH,
+  MAX_IMAGE_UPLOAD_BYTES,
   BOT_ROLE_NAME,
   type AppearanceFieldName,
   type CustomizationSettings
@@ -243,7 +243,14 @@ export function buildPinnedRequestOptions(url: URL, pinned: PinnedAddress, timeo
     path: `${url.pathname}${url.search}`,
     method: "GET" as const,
     servername: url.hostname,
-    headers: { host: url.host, accept: "image/*" },
+    headers: { host: url.host, ...IMAGE_REQUEST_HEADERS },
+    // Happy Eyeballs asks the resolver for *every* address and races them, and
+    // with `all: true` it reads the single-address callback below as
+    // `undefined` — Node then fails the connect with ERR_INVALID_IP_ADDRESS, so
+    // every image link, valid or not, came back «could not reach the image».
+    // There is nothing to race here: the address was vetted seconds ago and is
+    // the only one this socket may use.
+    autoSelectFamily: false,
     lookup: (_hostname: string, _options: unknown, callback: (error: null, address: string, family: number) => void) =>
       callback(null, pinned.address, pinned.family),
     signal: AbortSignal.timeout(timeoutMs)
@@ -326,9 +333,27 @@ async function approvedUrl(raw: string, resolve: Resolver): Promise<ApprovedTarg
 
 type ImageFetch =
   | { ok: true; dataUrl: string }
-  | { ok: false; reason: "forbidden" | "unreachable" | "not-image" | "too-large" };
+  | {
+      ok: false;
+      reason: "forbidden" | "unreachable" | "not-image" | "too-large";
+      /** What the host actually answered with, when it answered at all. */
+      contentType?: string;
+      status?: number;
+    };
 
 const IMAGE_MIME = /^image\/(png|jpeg|jpg|webp|gif)$/;
+
+/**
+ * A plain `fetch` from Node carries no `user-agent`, and image hosts that gate
+ * on one answer 403 — which the operator then reads as «the link is broken».
+ * `identity` keeps the body uncompressed so the byte ceiling below counts the
+ * bytes the image really is.
+ */
+const IMAGE_REQUEST_HEADERS = {
+  accept: "image/*",
+  "accept-encoding": "identity",
+  "user-agent": "AL-AI-Bot (dashboard image import; +https://discord.com)"
+};
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 3;
 const IMAGE_FETCH_TIMEOUT_MS = 10_000;
@@ -366,10 +391,12 @@ async function fetchPublicImage(url: string, maxBytes: number, deps: ImageDeps =
         current = next;
         continue;
       }
-      if (response.status < 200 || response.status >= 300) return { ok: false, reason: "unreachable" };
+      if (response.status < 200 || response.status >= 300) {
+        return { ok: false, reason: "unreachable", status: response.status };
+      }
 
       const mime = (headerValue(response.headers, "content-type") ?? "").split(";")[0].trim().toLowerCase();
-      if (!IMAGE_MIME.test(mime)) return { ok: false, reason: "not-image" };
+      if (!IMAGE_MIME.test(mime)) return { ok: false, reason: "not-image", contentType: mime };
 
       const chunks: Buffer[] = [];
       let total = 0;
@@ -543,7 +570,7 @@ export function resolveRoleIconWrite(input: {
  */
 export async function fetchImageAsDataUrl(
   url: string,
-  maxBytes = MAX_IMAGE_DATA_URL_LENGTH,
+  maxBytes = MAX_IMAGE_UPLOAD_BYTES,
   deps: ImageDeps = {}
 ): Promise<string> {
   if (!/^https:\/\//i.test(url.trim())) throw new Error("الرابط يجب أن يبدأ بـ https://");
@@ -554,11 +581,22 @@ export async function fetchImageAsDataUrl(
     case "forbidden":
       throw new Error("الرابط غير مسموح: يجب أن يكون رابطاً عاماً عبر https، وليس عنواناً محلياً أو خاصاً.");
     case "too-large":
-      throw new Error(`حجم الصورة على الرابط يتجاوز الحد المسموح (${Math.round(maxBytes / 1000)} كيلوبايت تقريباً).`);
+      throw new Error(`حجم الصورة على الرابط يتجاوز الحد المسموح (${Math.round(maxBytes / 1000)} كيلوبايت).`);
     case "not-image":
-      throw new Error("الرابط لا يشير إلى صورة (PNG/JPEG/WEBP/GIF).");
+      // The common case is a share link (pin.it, a /status page, an album URL)
+      // that ends at a web page. Naming what came back is the difference between
+      // an operator fixing the link and an operator filing a bug report.
+      throw new Error(
+        `الرابط أعاد صفحة (${result.contentType || "نوع غير معروف"}) لا ملف صورة. ` +
+          "استخدم رابط الصورة المباشر الذي ينتهي بـ .png أو .jpg أو .webp أو .gif، " +
+          "وليس رابط المشاركة أو الألبوم."
+      );
     default:
-      throw new Error("تعذّر الوصول إلى الصورة على الرابط المحدد.");
+      throw new Error(
+        result.status
+          ? `الموقع رفض الطلب (HTTP ${result.status}). تأكد أن الرابط عام وأن الصورة متاحة بدون تسجيل دخول.`
+          : "تعذّر الوصول إلى الصورة على الرابط المحدد — قد يكون الرابط ميتاً أو المضيف لا يستجيب."
+      );
   }
 }
 

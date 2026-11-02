@@ -30,7 +30,7 @@ import {
   DEFAULT_ACTIVITY_TEXT,
   MAX_ACTIVITY_TEXT_LENGTH,
   MAX_BIO_LENGTH,
-  MAX_IMAGE_DATA_URL_LENGTH,
+  MAX_IMAGE_UPLOAD_BYTES,
   MAX_NICKNAME_LENGTH,
   durationToMs,
   isBotStatusDuration,
@@ -2450,7 +2450,7 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
       error: "INVALID_AVATAR",
       message:
         imageRejectionReason(body.avatarDataUrl) === "TOO_LARGE"
-          ? `حجم صورة السيرفر يتجاوز الحد المسموح (${Math.round(MAX_IMAGE_DATA_URL_LENGTH / 1000)} كيلوبايت تقريباً). قصّها أو صغّرها ثم أعد المحاولة.`
+          ? `حجم صورة السيرفر يتجاوز الحد المسموح (${Math.round(MAX_IMAGE_UPLOAD_BYTES / 1000)} كيلوبايت تقريباً). قصّها أو صغّرها ثم أعد المحاولة.`
           : "صيغة صورة السيرفر غير مدعومة. استخدم PNG أو JPEG أو WEBP أو GIF."
     });
   }
@@ -2459,7 +2459,7 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
       error: "INVALID_BANNER",
       message:
         imageRejectionReason(body.bannerDataUrl) === "TOO_LARGE"
-          ? `حجم غلاف السيرفر يتجاوز الحد المسموح (${Math.round(MAX_IMAGE_DATA_URL_LENGTH / 1000)} كيلوبايت تقريباً). قصّه أو صغّره ثم أعد المحاولة.`
+          ? `حجم غلاف السيرفر يتجاوز الحد المسموح (${Math.round(MAX_IMAGE_UPLOAD_BYTES / 1000)} كيلوبايت تقريباً). قصّه أو صغّره ثم أعد المحاولة.`
           : "صيغة غلاف السيرفر غير مدعومة. استخدم PNG أو JPEG أو WEBP أو GIF."
     });
   }
@@ -2472,7 +2472,7 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
       error: "INVALID_ROLE_ICON",
       message:
         imageRejectionReason(body.roleIconUrl) === "TOO_LARGE"
-          ? `حجم أيقونة الرتبة يتجاوز الحد المسموح (${Math.round(MAX_IMAGE_DATA_URL_LENGTH / 1000)} كيلوبايت تقريباً). قصّها أو صغّرها ثم أعد المحاولة.`
+          ? `حجم أيقونة الرتبة يتجاوز الحد المسموح (${Math.round(MAX_IMAGE_UPLOAD_BYTES / 1000)} كيلوبايت تقريباً). قصّها أو صغّرها ثم أعد المحاولة.`
           : "أيقونة الرتبة يجب أن تكون صورة مرفوعة (PNG/JPEG/WEBP/GIF) أو رابط HTTPS صالحاً."
     });
   }

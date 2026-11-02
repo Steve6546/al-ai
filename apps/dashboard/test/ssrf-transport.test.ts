@@ -117,7 +117,12 @@ test("a response that is not an image is refused", async () => {
   const connect: Connector = async () =>
     imageResponse({ headers: { "content-type": "text/html" }, body: (async function* () { yield Buffer.from("<html>"); })() });
 
-  await assert.rejects(fetchImageAsDataUrl("https://images.example.com/a.png", 1024, { resolve, connect }), /لا يشير إلى صورة/);
+  // The message must name what came back: an operator who pasted a share link
+  // needs to be told it is a page, not just that the image is missing.
+  await assert.rejects(
+    fetchImageAsDataUrl("https://images.example.com/a.png", 1024, { resolve, connect }),
+    /أعاد صفحة \(text\/html\)[\s\S]*لا ملف صورة/
+  );
 });
 
 test("a body larger than the ceiling is refused", async () => {
@@ -143,4 +148,15 @@ test("too many redirects end the attempt instead of looping", async () => {
 
   await assert.rejects(fetchImageAsDataUrl("https://images.example.com/a.png", 1024, { resolve, connect }));
   assert.ok(hops <= 4, `the redirect chain is bounded, got ${hops} hops`);
+});
+
+test("a refused host is reported as a refusal, not as an unreachable link", async () => {
+  const resolve: Resolver = async () => [{ address: "93.184.216.34", family: 4 }];
+  const connect: Connector = async () => imageResponse({ status: 403 });
+
+  await assert.rejects(
+    fetchImageAsDataUrl("https://images.example.com/private.png", 1024, { resolve, connect }),
+    /HTTP 403/,
+    "the operator needs to know the server said no, not that it did not answer"
+  );
 });
