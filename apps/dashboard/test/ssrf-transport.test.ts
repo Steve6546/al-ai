@@ -121,7 +121,7 @@ test("a response that is not an image is refused", async () => {
   // needs to be told it is a page, not just that the image is missing.
   await assert.rejects(
     fetchImageAsDataUrl("https://images.example.com/a.png", 1024, { resolve, connect }),
-    /أعاد صفحة \(text\/html\)[\s\S]*لا ملف صورة/
+    /أعاد text\/html[\s\S]*ما أعلن صورة/
   );
 });
 
@@ -176,4 +176,61 @@ test("an animated GIF keeps its type through the importer", async () => {
   // request ever left.
   const dataUrl = await fetchImageAsDataUrl("https://images.example.com/loop.gif", 1024, { resolve, connect });
   assert.ok(dataUrl.startsWith("data:image/gif;base64,"), `got ${dataUrl.slice(0, 32)}`);
+});
+
+test("a share link is followed to the image its page declares", async () => {
+  const resolve: Resolver = async (host) => {
+    if (host === "pin.it") return [{ address: "157.240.0.1", family: 4 }];
+    return [{ address: "93.184.216.34", family: 4 }];
+  };
+  const asked: string[] = [];
+  const connect: Connector = async (url) => {
+    asked.push(url.href);
+    if (url.hostname === "pin.it") {
+      return imageResponse({
+        headers: { "content-type": "text/html; charset=utf-8" },
+        body: (async function* () {
+          yield Buffer.from(
+            '<html><head><meta property="og:image" content="https://i.example.com/pin.png"></head></html>'
+          );
+        })()
+      });
+    }
+    return imageResponse();
+  };
+
+  const dataUrl = await fetchImageAsDataUrl("https://pin.it/deadlookup", 1024, { resolve, connect });
+  assert.ok(dataUrl.startsWith("data:image/png;base64,"), `got ${dataUrl.slice(0, 30)}`);
+  assert.deepEqual(asked, ["https://pin.it/deadlookup", "https://i.example.com/pin.png"], "the page first, then the image it names");
+});
+
+test("a page that declares a private preview is refused, not fetched", async () => {
+  const resolve: Resolver = async () => [{ address: "157.240.0.1", family: 4 }];
+  const connect: Connector = async () =>
+    imageResponse({
+      headers: { "content-type": "text/html" },
+      body: (async function* () {
+        yield Buffer.from('<meta property="og:image" content="http://169.254.169.254/latest/meta-data/">');
+      })()
+    });
+
+  // The declared preview is treated as operator input: same vetting, no shortcut.
+  await assert.rejects(fetchImageAsDataUrl("https://page.example.com/pin", 1024, { resolve, connect }), /الرابط/);
+});
+
+test("a page preview is followed once, not chained", async () => {
+  let pages = 0;
+  const resolve: Resolver = async () => [{ address: "93.184.216.34", family: 4 }];
+  const connect: Connector = async () => {
+    pages += 1;
+    return imageResponse({
+      headers: { "content-type": "text/html" },
+      body: (async function* () {
+        yield Buffer.from('<meta property="og:image" content="https://other.example.com/page">');
+      })()
+    });
+  };
+
+  await assert.rejects(fetchImageAsDataUrl("https://a.example.com/1", 1024, { resolve, connect }), /ما أعلن صورة/);
+  assert.equal(pages, 2, "one page, one declared preview attempt, then stop");
 });

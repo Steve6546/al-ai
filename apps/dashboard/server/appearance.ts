@@ -332,7 +332,7 @@ async function approvedUrl(raw: string, resolve: Resolver): Promise<ApprovedTarg
 }
 
 type ImageFetch =
-  | { ok: true; dataUrl: string }
+  | { ok: true; dataUrl: string; resolvedFromPage?: boolean }
   | {
       ok: false;
       reason: "forbidden" | "unreachable" | "not-image" | "too-large";
@@ -342,6 +342,46 @@ type ImageFetch =
     };
 
 const IMAGE_MIME = /^image\/(png|jpeg|jpg|webp|gif)$/;
+
+/** A page, not a file — the shape a share link answers with. */
+const PAGE_MIME = /^text\/html|^application\/xhtml\+xml$/;
+
+/** Only the head of a document is needed to find the tags that name its image. */
+const PAGE_SNIFF_BYTES = 64_000;
+
+/**
+ * The image a page declares as its own preview.
+ *
+ * A pasted share link — `pin.it/…`, a post URL, an album URL — answers with
+ * HTML, never with the picture itself. The page names its preview in
+ * `og:image` / `twitter:image`, so reading that tag is what makes the operator's
+ * link work instead of telling them to go find a direct file URL.
+ *
+ * The candidate is put back through `approvedUrl`, so a page that points its
+ * preview at a loopback or link-local address is refused exactly the way a
+ * redirect to one would be.
+ */
+export function previewImageFrom(html: string): string | null {
+  for (const tag of html.match(/<meta[^>]*>/gi) ?? []) {
+    const key = /(?:property|name)\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1]?.toLowerCase();
+    if (key !== "og:image" && key !== "twitter:image" && key !== "twitter:image:src") continue;
+    const content = /content\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1]?.trim();
+    if (content) return content;
+  }
+  return null;
+}
+
+/** The first bytes of a response, enough to hold the head of any real page. */
+async function readHead(body: AsyncIterable<Uint8Array>): Promise<string> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of body) {
+    chunks.push(Buffer.from(chunk));
+    total += chunk.byteLength;
+    if (total >= PAGE_SNIFF_BYTES) break;
+  }
+  return Buffer.concat(chunks).subarray(0, PAGE_SNIFF_BYTES).toString("utf8");
+}
 
 /**
  * A plain `fetch` from Node carries no `user-agent`, and image hosts that gate
@@ -379,6 +419,10 @@ async function fetchPublicImage(url: string, maxBytes: number, deps: ImageDeps =
 
   let current = await approvedUrl(url, resolve);
   if (!current) return { ok: false, reason: "forbidden" };
+  // One page may name one preview. A page whose preview is another page is not
+  // followed: that is a crawl, not an image import.
+  let usedPreview = false;
+  let resolvedFromPage = false;
 
   try {
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
@@ -396,7 +440,25 @@ async function fetchPublicImage(url: string, maxBytes: number, deps: ImageDeps =
       }
 
       const mime = (headerValue(response.headers, "content-type") ?? "").split(";")[0].trim().toLowerCase();
-      if (!IMAGE_MIME.test(mime)) return { ok: false, reason: "not-image", contentType: mime };
+      if (!IMAGE_MIME.test(mime)) {
+        // A share link (pin.it, a post URL, an album) answers with HTML. Ask the
+        // page which image stands for it and fetch that one, through the same
+        // vetting — the preview is treated as an operator-supplied URL, never as
+        // a trusted hop.
+        if (!usedPreview && PAGE_MIME.test(mime)) {
+          usedPreview = true;
+          const found = previewImageFrom(await readHead(response.body));
+          const next: ApprovedTarget | null = found
+            ? await approvedUrl(new URL(found, current.url).toString(), resolve)
+            : null;
+          if (next) {
+            current = next;
+            resolvedFromPage = true;
+            continue;
+          }
+        }
+        return { ok: false, reason: "not-image", contentType: mime };
+      }
 
       const chunks: Buffer[] = [];
       let total = 0;
@@ -407,7 +469,11 @@ async function fetchPublicImage(url: string, maxBytes: number, deps: ImageDeps =
       }
       if (total === 0) return { ok: false, reason: "unreachable" };
       const safeMime = mime === "image/jpg" ? "image/jpeg" : mime;
-      return { ok: true, dataUrl: `data:${safeMime};base64,${Buffer.concat(chunks).toString("base64")}` };
+      return {
+        ok: true,
+        resolvedFromPage,
+        dataUrl: `data:${safeMime};base64,${Buffer.concat(chunks).toString("base64")}`
+      };
     }
     return { ok: false, reason: "unreachable" };
   } catch {
@@ -583,13 +649,15 @@ export async function fetchImageAsDataUrl(
     case "too-large":
       throw new Error(`حجم الصورة على الرابط يتجاوز الحد المسموح (${Math.round(maxBytes / 1000)} كيلوبايت).`);
     case "not-image":
-      // The common case is a share link (pin.it, a /status page, an album URL)
-      // that ends at a web page. Naming what came back is the difference between
-      // an operator fixing the link and an operator filing a bug report.
+      // A share link is followed to the image the page declares (og:image /
+      // twitter:image). Reaching this line means either the page declared none —
+      // the usual case for an expired short link, which lands on the site's own
+      // home page — or the declared preview failed the same checks any operator
+      // URL faces. Naming what came back is the difference between an operator
+      // fixing the link and one filing a bug report.
       throw new Error(
-        `الرابط أعاد صفحة (${result.contentType || "نوع غير معروف"}) لا ملف صورة. ` +
-          "استخدم رابط الصورة المباشر الذي ينتهي بـ .png أو .jpg أو .webp أو .gif، " +
-          "وليس رابط المشاركة أو الألبوم."
+        `الرابط أعاد ${result.contentType || "محتوى غير صورة"} وما أعلن صورة يمكن استخدامها. ` +
+          "إن كان رابط مشاركة فقد يكون منتهيًا: جرّب رابط الصورة المباشر الذي ينتهي بـ .png أو .jpg أو .webp أو .gif."
       );
     default:
       throw new Error(
