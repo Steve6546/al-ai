@@ -13,7 +13,8 @@
  * family list is the dashboard's offer, and an unavailable family silently
  * falls back, exactly as a browser would.
  */
-import { createCanvas, loadImage, type SKRSContext2D, type Canvas } from "@napi-rs/canvas";
+import { createCanvas, GifEncoder, ImageData, loadImage, type SKRSContext2D, type Canvas } from "@napi-rs/canvas";
+import { decodeGifFrames, looksLikeAnimatedGif, type DecodedGif } from "./gif-frames.js";
 import {
   MAX_IMAGE_BYTES,
   renderWelcomeMessage,
@@ -23,9 +24,13 @@ import {
 
 export type WelcomeImageResult = {
   buffer: Buffer;
-  /** "image/png" or "image/jpeg" — chosen by the background's alpha, not by taste. */
-  contentType: "image/png" | "image/jpeg";
-  extension: "png" | "jpg";
+  /**
+   * "image/png" or "image/jpeg" for a still card — chosen by the background's
+   * alpha, not by taste — and "image/gif" when the member's avatar was animated
+   * and the card was composited frame by frame.
+   */
+  contentType: "image/png" | "image/jpeg" | "image/gif";
+  extension: "png" | "jpg" | "gif";
 };
 
 /**
@@ -332,20 +337,74 @@ export async function executeDrawOp(
 }
 
 /**
+ * The frame budget for an animated card.
+ *
+ * Every frame is a whole card composited in memory (`width × height × 4`
+ * bytes), so the count is the bill rather than a taste. Twelve covers the short
+ * loops animated avatars actually use; beyond that the GIF is sampled, and a
+ * member whose avatar loops longer still gets a moving card.
+ */
+const MAX_ANIMATED_FRAMES = 12;
+
+/** One decoded GIF frame as PNG bytes, so the existing draw ops can consume it. */
+function frameToPng(gif: DecodedGif, rgba: Uint8Array): Buffer {
+  const canvas = createCanvas(gif.width, gif.height);
+  const ctx = canvas.getContext("2d");
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.length), gif.width, gif.height), 0, 0);
+  return canvas.toBuffer("image/png");
+}
+
+/**
  * Renders the card. Returns null when there is genuinely nothing to draw
  * (no ops at all) — the caller then sends the message without an image
  * instead of attaching a blank canvas.
+ *
+ * An animated avatar makes the card an animated GIF: the plan is built once and
+ * replayed per frame with only the avatar source swapped, so the background, the
+ * glow, the outline and the Arabic text are identical in every frame — which is
+ * the same drawing the still card already does, not a second renderer to keep in
+ * step. Anything that goes wrong (no frames, a format the decoder refuses, a
+ * single-frame file) falls through to the still card, because a greeting without
+ * a picture is better than a greeting that never arrives.
  */
 export async function renderWelcomeImage(
   config: WelcomeImageConfig,
   facts: { values: WelcomeTemplateValues; avatarBuffer: Buffer | null; backgroundBuffer: Buffer | null }
 ): Promise<WelcomeImageResult | null> {
+  const ops = await planWelcomeImageDraw(config, facts);
+  if (ops.length === 0) return null;
+
+  const animated = facts.avatarBuffer && looksLikeAnimatedGif(facts.avatarBuffer)
+    ? decodeGifFrames(facts.avatarBuffer, MAX_ANIMATED_FRAMES)
+    : null;
+
+  if (animated && animated.frames.length > 1) {
+    const encoder = new GifEncoder(config.width, config.height, { repeat: 0 });
+    for (const frame of animated.frames) {
+      const source = frameToPng(animated, frame.rgba);
+      const frameCanvas = createCanvas(config.width, config.height);
+      const frameCtx = frameCanvas.getContext("2d");
+      for (const op of ops) {
+        await executeDrawOp(frameCtx, frameCanvas, op.kind === "avatar" ? { ...op, source } : op, new Map<Buffer, unknown>());
+      }
+      const { data } = frameCtx.getImageData(0, 0, config.width, config.height);
+      // A copy, not a view. `getImageData` hands back a buffer the engine reuses
+      // for the next call, and `addFrame` keeps what it is given until
+      // `finish()` — so passing a view produced four identical frames, all of
+      // them the last one. Measured, not guessed: the test decodes the card.
+      const rgba = new Uint8Array(data.length);
+      rgba.set(data);
+      // The file stores hundredths of a second; this encoder takes milliseconds.
+      encoder.addFrame(rgba, config.width, config.height, {
+        delay: frame.delayCs > 0 ? frame.delayCs * 10 : 100
+      });
+    }
+    return { buffer: Buffer.from(encoder.finish()), contentType: "image/gif", extension: "gif" };
+  }
+
   const canvas = createCanvas(config.width, config.height);
   const ctx = canvas.getContext("2d");
   const images = new Map<Buffer, unknown>();
-
-  const ops = await planWelcomeImageDraw(config, facts);
-  if (ops.length === 0) return null;
   for (const op of ops) await executeDrawOp(ctx, canvas, op, images);
 
   // Alpha only survives in a PNG, so an opaque background may use the JPEG

@@ -2,20 +2,36 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { GifEncoder, createCanvas, loadImage } from "@napi-rs/canvas";
 import type { WelcomeImageResult } from "../src/runtime/welcome-image.js";
+import { decodeGifFrames } from "../src/runtime/gif-frames.js";
 
 /**
- * Whether a welcome card can ever animate.
+ * Whether a welcome card can animate, and what that costs.
  *
- * An operator can upload an animated GIF as the joiner's avatar and the whole
- * pipeline lets it through — the file picker accepts `image/gif`, the browser
- * sends it unmodified (`FileReader.readAsDataURL`, no re-encode), the link
- * importer accepts it, and the stored data URL allows it. The card is still
- * static, and this is the reason: `@napi-rs/canvas` decodes a GIF but exposes no
- * frame API, so `drawImage` paints the first frame and nothing else.
+ * `@napi-rs/canvas` decodes a GIF to its **first frame** and exposes no frame
+ * API — `pages`, `frames`, `numFrames` are all `undefined` — so a card
+ * composited from an animated avatar used to be a still of frame one. That is
+ * what the first three tests here measure, on a real two-frame GIF89a built with
+ * the encoder this same library ships.
  *
- * Measured, not assumed — the fixture below is a real GIF89a with two frames,
- * built with the encoder this same library ships.
+ * The rest of the file is the consequence: the bot now decodes the avatar itself
+ * (`gif-frames.ts`) and replays the draw plan per frame, so an animated avatar
+ * produces an animated card. Both halves are asserted — the limitation that made
+ * the decoder necessary, and the behaviour that replaced it.
  */
+
+const VALUES = {
+  userMention: "<@111>",
+  username: "naxhz",
+  server: "Baran",
+  memberCount: 80,
+  inviterMention: "<@222>",
+  joinDate: "10 أكتوبر 2026"
+};
+
+/** The output type still has to name the format it returned. */
+type CardFormats = WelcomeImageResult["contentType"];
+const formatsCovered: CardFormats[] = ["image/png", "image/jpeg", "image/gif"];
+void formatsCovered;
 
 /** A 2×2 GIF89a: frame one red, frame two green, both marked as a graphic control block. */
 function buildTwoFrameGif(): Buffer {
@@ -64,17 +80,83 @@ test("drawing an animated GIF paints the first frame only", async () => {
 });
 
 /**
- * Compile-time fence on the output contract.
+ * The output contract, stated instead of fenced.
  *
- * `renderWelcomeImage` answers `image/png | image/jpeg`. The tuple wrapper stops
- * the conditional from distributing, so widening that union to an animated type
- * makes `CardIsStill` false and this file stops typechecking — deliberately,
- * because every sender would then be shipping a still frame under an animated
- * name.
+ * This file used to carry a compile-time fence asserting the card could only
+ * ever be PNG or JPEG. The card can now be an animated GIF, so the fence is
+ * gone and the rule is asserted where it belongs: a still source still yields a
+ * still file, and only an animated avatar yields a moving one.
  */
-type CardIsStill = [WelcomeImageResult["contentType"]] extends ["image/png" | "image/jpeg"] ? true : false;
-const cardIsStill: CardIsStill = true;
-void cardIsStill;
+test("a still avatar still produces a still card", async () => {
+  const { renderWelcomeImage } = await import("../src/runtime/welcome-image.js");
+  const { normaliseWelcomeImageConfig } = await import("@al-ai/core");
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64"
+  );
+  const card = await renderWelcomeImage(
+    normaliseWelcomeImageConfig({
+      width: 32,
+      height: 32,
+      background: { type: "transparent" },
+      avatar: { enabled: true, x: 0, y: 0, size: 32, circular: false },
+      username: { text: "", x: 0, y: 0, fontSize: 10 },
+      customTexts: []
+    }),
+    { values: VALUES, avatarBuffer: png, backgroundBuffer: null }
+  );
+  assert.ok(card);
+  assert.equal(card.contentType, "image/png", "a static avatar is not promoted to a GIF");
+  assert.equal(card.extension, "png");
+});
+
+/**
+ * The animated case, end to end: a four-frame GIF avatar in, a moving card out.
+ *
+ * Asserted by decoding the *output* with the same decoder the pipeline uses, so
+ * the test proves the frames survived the compositing — not merely that the
+ * renderer claimed to write a GIF.
+ */
+test("an animated avatar makes the card an animated GIF", async () => {
+  const { renderWelcomeImage } = await import("../src/runtime/welcome-image.js");
+  const { normaliseWelcomeImageConfig } = await import("@al-ai/core");
+  const gif = buildFourFrameGif();
+
+  const card = await renderWelcomeImage(
+    normaliseWelcomeImageConfig({
+      width: 64,
+      height: 64,
+      background: { type: "transparent" },
+      avatar: { enabled: true, x: 0, y: 0, size: 64, circular: false },
+      username: { text: "", x: 0, y: 0, fontSize: 10 },
+      customTexts: []
+    }),
+    { values: VALUES, avatarBuffer: gif.bytes, backgroundBuffer: null }
+  );
+  assert.ok(card, "the card is drawn");
+  assert.equal(card.contentType, "image/gif");
+  assert.equal(card.extension, "gif", "the attachment is named for the format it actually is");
+  assert.equal(card.buffer.subarray(0, 6).toString(), "GIF89a");
+
+  const decoded = decodeGifFrames(card.buffer, 20);
+  assert.ok(decoded, "the card decodes");
+  assert.equal(decoded.frames.length, gif.colors.length, "every frame of the avatar is in the card");
+  const centre = (index: number) => {
+    const rgba = decoded.frames[index]!.rgba;
+    const at = (32 * decoded.width + 32) * 4;
+    return [rgba[at]!, rgba[at + 1]!, rgba[at + 2]!];
+  };
+  const first = centre(0);
+  const second = centre(1);
+  assert.ok(
+    first.every((value, i) => Math.abs(value - gif.colors[0]![i]!) <= 12),
+    `frame one carries the avatar's first frame, got ${first.join(",")}`
+  );
+  assert.ok(
+    Math.abs(second[0] - first[0]) > 40 || Math.abs(second[1] - first[1]) > 40,
+    `frame two must differ from frame one, or nothing animates: ${first.join(",")} vs ${second.join(",")}`
+  );
+});
 
 /**
  * Four frames, four colours, 64×64 — far enough apart that a later frame cannot
@@ -103,20 +185,17 @@ function buildFourFrameGif(): { bytes: Buffer; colors: number[][] } {
 }
 
 /**
- * The whole question, end to end: an operator uploads an animated GIF, the bot
- * draws the card, and the file that lands in the channel is the **first frame**
- * of that GIF — as a still.
+ * The speed survives the round trip.
  *
- * Measured rather than assumed, because the alternative is a claim about what
- * members see. Frame 2 is pure green and frame 3 pure blue, so "it animated"
- * and "it picked a later frame" are both distinguishable from "it took frame 1".
+ * A card that animates at the wrong rate is a defect nobody can name — it just
+ * feels wrong — so the delay is asserted per frame. The avatar's file stores
+ * hundredths of a second, this engine's encoder takes milliseconds, and the
+ * renderer converts between them: 200 ms in, 20 cs out.
  */
-test("a card drawn from an animated GIF carries that GIF's first frame, as a still", async () => {
+test("the card keeps the avatar's frame delays", async () => {
   const { renderWelcomeImage } = await import("../src/runtime/welcome-image.js");
   const { normaliseWelcomeImageConfig } = await import("@al-ai/core");
   const gif = buildFourFrameGif();
-  assert.equal(gif.colors.length, 4);
-
   const card = await renderWelcomeImage(
     normaliseWelcomeImageConfig({
       width: 64,
@@ -126,22 +205,14 @@ test("a card drawn from an animated GIF carries that GIF's first frame, as a sti
       username: { text: "", x: 0, y: 0, fontSize: 10 },
       customTexts: []
     }),
-    {
-      values: { userMention: "@x", username: "x", server: "s", memberCount: 1, inviterMention: "", joinDate: "today" },
-      avatarBuffer: gif.bytes,
-      backgroundBuffer: null
-    }
+    { values: VALUES, avatarBuffer: gif.bytes, backgroundBuffer: null }
   );
-  assert.ok(card, "the card is drawn");
-
-  const decoded = await loadImage(card.buffer);
-  const probe = createCanvas(decoded.width, decoded.height);
-  const ctx = probe.getContext("2d");
-  ctx.drawImage(decoded, 0, 0);
-  const [red, green, blue] = [...ctx.getImageData(32, 32, 1, 1).data];
-
-  assert.ok(red > 200 && green < 60 && blue < 60, `expected frame one (red), got rgb ${[red, green, blue].join(",")}`);
-  // An animated PNG would carry an `acTL` chunk; the card never does, because
-  // the engine has no frame API to step through in the first place.
-  assert.equal(card.buffer.includes(Buffer.from("acTL", "latin1")), false, "the exported card is not an animated PNG");
+  assert.ok(card);
+  const decoded = decodeGifFrames(card.buffer, 20);
+  assert.ok(decoded, "the card decodes");
+  assert.deepEqual(
+    decoded.frames.map(frame => frame.delayCs),
+    decoded.frames.map(() => 20),
+    "every frame holds the avatar's 200 ms, converted to the file's unit"
+  );
 });
