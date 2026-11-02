@@ -145,16 +145,66 @@ function FocusTokenStrip({ targetRef }: { targetRef: { current: ((token: string)
   );
 }
 
+/**
+ * A pasted address, drawn the way Discord will draw it.
+ *
+ * Every image URL on an embed — the big image, the thumbnail, the footer icon —
+ * is fetched by **Discord's** servers when the message is sent, not by this
+ * dashboard. That is the whole difference from the identity screen, whose links
+ * our own server resolves and stores as bytes: an embed has no bytes to store,
+ * so a share link (a Pinterest *page*, a Google Drive preview) has nothing for
+ * Discord to attach and the member sees no picture.
+ *
+ * So the honest preview is the browser's own `<img>` against the same URL, and
+ * an address that does not answer with an image says so here, before the
+ * operator finds out from a silent greeting.
+ */
+function RemoteImage({ url, className, label }: { url: string | null; className: string; label: string }) {
+  const [failed, setFailed] = useState(false);
+  const trimmed = (url ?? "").trim();
+  useEffect(() => setFailed(false), [trimmed]);
+
+  if (!/^https?:\/\/.+/i.test(trimmed)) {
+    return (
+      <p className="px-1 text-[10px] text-[#949ba4]">
+        {label}: الرابط يجب أن يكون صورة مباشرة (ينتهي بـ JPG أو PNG أو GIF) — ديسكورد لا يفتح صفحات المشاركة.
+      </p>
+    );
+  }
+  if (failed) {
+    return (
+      <p className="rounded border border-dashed border-border/60 px-2 py-1 text-[10px] text-[#949ba4]">
+        {label}: هذا الرابط لا يعرض صورة، وديسكورد لن يرفعه بالرسالة.
+      </p>
+    );
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={trimmed} alt="" className={className} onError={() => setFailed(true)} />;
+}
+
 export type EmbedEditorProps = {
   botName: string;
   botAvatarUrl: string | null;
+  /**
+   * The bot's role colour in this guild. Discord paints a member's name in it,
+   * so a preview that ignores it shows a white name for a bot whose name is
+   * green in the member list.
+   */
+  roleColor: string | null;
+  /**
+   * A real face for the `member_avatar` thumbnail slot. The bot substitutes the
+   * joiner's own picture at send time; the editor borrows one it can actually
+   * reach, so the slot shows a face instead of the words «صورة العضو».
+   */
+  memberAvatarUrl: string | null;
   embed: WelcomeEmbed;
   /** Write-back into the shared draft — the editor owns no copy of its own. */
   onEmbedChange: (patch: Partial<WelcomeEmbed>) => void;
   /* The big-image upload plumbing stays with the screen (file input + naming). */
   imageUpload: {
     imageDataUrl: string | null;
-    fileName: string;
+    /** The picked file's name, or null: a stored image has no file behind it. */
+    fileName: string | null;
     onPickFile: () => void;
     onFileDrop: (file: File | undefined) => void;
     onRemove: () => void;
@@ -167,6 +217,8 @@ export type EmbedEditorProps = {
 export function EmbedEditor({
   botName,
   botAvatarUrl,
+  roleColor,
+  memberAvatarUrl,
   embed,
   onEmbedChange,
   imageUpload,
@@ -195,6 +247,9 @@ export function EmbedEditor({
   const footerRef = useRef<HTMLTextAreaElement>(null);
 
   const accent = /^#[0-9a-fA-F]{3,6}$/.test(embed.color ?? "") ? embed.color! : "#4e5058";
+  // A stored row is not a validated type: a colour Discord no longer recognises
+  // must fall back to white rather than paint the name with an invalid value.
+  const nameColor = roleColor && /^#[0-9a-f]{6}$/i.test(roleColor) ? roleColor : "#ffffff";
   const now = new Date();
 
   // Inline field rows: inline fields flow side-by-side the way Discord lays
@@ -268,10 +323,17 @@ export function EmbedEditor({
       {/* -------- The message body -------- */}
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-center gap-2">
-          <span className="text-sm font-semibold text-white" dir="ltr">{botName}</span>
+          {/* Discord paints the sender's name in their highest role's colour, so a
+              white name here describes a bot that does not look like this in the
+              member list. */}
+          <span className="text-sm font-semibold" style={{ color: nameColor }} dir="ltr">
+            {botName}
+          </span>
           <span className="rounded bg-[#5865f2] px-1 py-px text-[9px] font-bold uppercase text-white">Bot</span>
+          {/* The card is Discord's layout, so it stays LTR — but the words are
+              the ones the operator's own Arabic client prints. */}
           <span className="text-[11px] text-[#949ba4]">
-            Today at {now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+            اليوم في {now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
           </span>
         </div>
 
@@ -485,86 +547,9 @@ export function EmbedEditor({
                   </button>
                 )}
 
-                {/* Big image: mode chips + upload zone, all in place */}
-                {editing && (
-                  <div className="flex flex-wrap items-center gap-1">
-                    {([
-                      ["none", "بدون صورة"],
-                      ["upload", "رفع صورة"],
-                      ["url", "رابط صورة"]
-                    ] as const).map(([mode, label]) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        aria-pressed={embed.imageMode === mode}
-                        className={cn(
-                          "rounded-md border px-2 py-0.5 text-[10px] transition-colors",
-                          embed.imageMode === mode
-                            ? "border-primary/50 bg-primary/10 text-primary"
-                            : "border-border/60 text-[#949ba4] hover:border-primary/40 hover:text-primary"
-                        )}
-                        onClick={() =>
-                          onEmbedChange({ imageMode: mode, ...(mode === "none" ? { imageDataUrl: null, imageUrl: null } : {}) })
-                        }
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {embed.imageMode === "upload" && imageUpload.imageDataUrl ? (
-                  <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-black/30 p-2">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={imageUpload.imageDataUrl} alt="" className="size-10 rounded object-cover" />
-                    <span className="min-w-0 flex-1 truncate text-[11px] text-[#949ba4]" dir="ltr">
-                      {imageUpload.fileName}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={imageUpload.onPickFile}
-                      className="shrink-0 rounded-md border border-border/60 px-2 py-0.5 text-[11px] text-[#dbdee1] transition-colors hover:border-primary/50 hover:text-primary"
-                    >
-                      استبدال
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="إزالة الصورة"
-                      onClick={imageUpload.onRemove}
-                      className="grid size-5 shrink-0 place-items-center rounded text-[#949ba4] hover:bg-black/30 hover:text-destructive"
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className={cn(
-                      "grid w-full place-items-center gap-1 rounded-lg border border-dashed py-6 text-center transition-all hover:border-primary/60 hover:bg-primary/5",
-                      editing ? "" : "hidden"
-                    )}
-                    onClick={imageUpload.onPickFile}
-                    onDragOver={event => event.preventDefault()}
-                    onDrop={event => {
-                      event.preventDefault();
-                      imageUpload.onFileDrop(event.dataTransfer.files?.[0]);
-                    }}
-                  >
-                    <Upload className="size-4 text-[#949ba4]" aria-hidden />
-                    <span className="text-xs font-medium text-[#dbdee1]">اضغط للرفع أو اسحب الصورة هنا</span>
-                    <span className="text-[10px] text-[#949ba4]">صورة الإيمبد الكبيرة — يتم تحسين ملفات JPG و PNG تلقائياً</span>
-                  </button>
-                )}
-                {embed.imageMode === "url" && editing && (
-                  <input
-                    dir="ltr"
-                    value={embed.imageUrl ?? ""}
-                    onChange={event => onEmbedChange({ imageUrl: event.target.value })}
-                    placeholder="https://..."
-                    maxLength={512}
-                    aria-label="رابط صورة الإيمبد"
-                    className="w-full rounded border border-border/60 bg-black/30 px-2 py-1 text-xs text-[#dbdee1] outline-none focus:border-primary/50"
-                  />
-                )}
+                {/* The big image belongs *below* the text and the thumbnail,
+                    full width, because that is where Discord puts it — see the
+                    block after the row closes. */}
               </div>
 
               {/* Thumbnail + its mode toggle. It is a 96px column on desktop,
@@ -572,9 +557,15 @@ export function EmbedEditor({
                   phone; below `sm` it becomes a row under the text. */}
               {editing || embed.thumbnailMode !== "none" ? (
                 <div className="flex w-full flex-wrap items-center gap-2 sm:w-24 sm:shrink-0 sm:flex-col sm:flex-nowrap sm:items-center sm:gap-1">
+                  {/* The three states of the slot, in Discord's own order:
+                      a custom picture, the member's picture (a real face here,
+                      the joiner's at send time), then the labelled empty box. */}
                   {embed.thumbnailMode === "custom" && embed.thumbnailUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={embed.thumbnailUrl} alt="" className="size-14 rounded object-cover sm:size-20" />
+                  ) : embed.thumbnailMode === "member_avatar" && memberAvatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={memberAvatarUrl} alt="" className="size-14 rounded object-cover sm:size-20" />
                   ) : (
                     <span className="grid size-14 place-items-center rounded border border-dashed border-border/60 bg-black/30 text-[10px] text-[#949ba4] sm:size-20">
                       {embed.thumbnailMode === "member_avatar" ? "صورة العضو" : "المصغرة"}
@@ -612,26 +603,148 @@ export function EmbedEditor({
               ) : null}
             </div>
 
+            {/* -------------------------------------------------- big image
+              *
+              * Discord draws the embed image under the text and the thumbnail,
+              * across the whole card. It used to live inside the text column,
+              * which left the thumbnail's column standing as a wall on its right
+              * and shrank the picture to a 40px chip.
+              *
+              * Each mode now draws its own surface. Before, the upload zone was
+              * the `else` of "upload mode with a picture", so it also appeared in
+              * `none` and in `url` — which is why the three chips looked dead:
+              * pressing any of them left the same box on screen.
+              */}
+            {editing && (
+              <div className="flex flex-wrap items-center gap-1 px-2.5 pt-2 sm:px-3">
+                {([
+                  ["none", "بدون صورة"],
+                  ["upload", "رفع صورة"],
+                  ["url", "رابط صورة"]
+                ] as const).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={embed.imageMode === mode}
+                    className={cn(
+                      "rounded-md border px-2 py-0.5 text-[10px] transition-colors",
+                      embed.imageMode === mode
+                        ? "border-primary/50 bg-primary/10 text-primary"
+                        : "border-border/60 text-[#949ba4] hover:border-primary/40 hover:text-primary"
+                    )}
+                    onClick={() =>
+                      onEmbedChange({ imageMode: mode, ...(mode === "none" ? { imageDataUrl: null, imageUrl: null } : {}) })
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {embed.imageMode === "upload" ? (
+              imageUpload.imageDataUrl ? (
+                <div className="overflow-hidden rounded-lg border border-border/60">
+                  {/* The picture at the card's own width — the size it will be,
+                      not a thumbnail of it. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={imageUpload.imageDataUrl} alt="" className="max-h-80 w-full object-cover" />
+                  <div className="flex items-center gap-2 bg-black/30 p-2">
+                    {imageUpload.fileName ? (
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-[#949ba4]" dir="ltr">
+                        {imageUpload.fileName}
+                      </span>
+                    ) : (
+                      <span className="min-w-0 flex-1 text-[11px] text-[#949ba4]">صورة محفوظة من جلسة سابقة</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={imageUpload.onPickFile}
+                      className="shrink-0 rounded-md border border-border/60 px-2 py-0.5 text-[11px] text-[#dbdee1] transition-colors hover:border-primary/50 hover:text-primary"
+                    >
+                      استبدال
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="إزالة الصورة"
+                      onClick={imageUpload.onRemove}
+                      className="grid size-5 shrink-0 place-items-center rounded text-[#949ba4] hover:bg-black/30 hover:text-destructive"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className={cn(
+                    "grid w-full place-items-center gap-1 rounded-lg border border-dashed py-6 text-center transition-all hover:border-primary/60 hover:bg-primary/5",
+                    editing ? "" : "hidden"
+                  )}
+                  onClick={imageUpload.onPickFile}
+                  onDragOver={event => event.preventDefault()}
+                  onDrop={event => {
+                    event.preventDefault();
+                    imageUpload.onFileDrop(event.dataTransfer.files?.[0]);
+                  }}
+                >
+                  <Upload className="size-4 text-[#949ba4]" aria-hidden />
+                  <span className="text-xs font-medium text-[#dbdee1]">اضغط للرفع أو اسحب الصورة هنا</span>
+                  <span className="text-[10px] text-[#949ba4]">صورة الإيمبد الكبيرة — يتم تحسين ملفات JPG و PNG تلقائياً</span>
+                </button>
+              )
+            ) : null}
+
+            {embed.imageMode === "url" ? (
+              <div className="space-y-1.5">
+                {editing && (
+                  <input
+                    dir="ltr"
+                    value={embed.imageUrl ?? ""}
+                    onChange={event => onEmbedChange({ imageUrl: event.target.value })}
+                    placeholder="https://..."
+                    maxLength={512}
+                    aria-label="رابط صورة الإيمبد"
+                    className="w-full rounded border border-border/60 bg-black/30 px-2 py-1 text-xs text-[#dbdee1] outline-none focus:border-primary/50"
+                  />
+                )}
+                <RemoteImage url={embed.imageUrl} className="max-h-80 w-full rounded-lg object-cover" label="صورة الإيمبد" />
+              </div>
+            ) : null}
+
             {/* Footer: editable text, icon toggle, timestamp chip */}
             <div className="flex flex-col gap-2 px-3 pb-3 sm:flex-row sm:items-center">
               <div className="min-w-0 flex-1">
-                <AutoTextarea
-                  value={embed.footer}
-                  onValueChange={footer => onEmbedChange({ footer })}
-                  placeholder={editing ? "نتمنى لك وقتاً ممتعاً" : undefined}
-                  maxLength={2048}
-                  readOnly={!editing}
-                  inputRef={footerRef}
-                  aria-label="نص التذييل"
-                  onFocus={event => {
-                    const element = event.currentTarget;
-                    insertTarget.current = token =>
-                      onEmbedChange({ footer: insertAtCursor(element, embed.footer, token) });
-                  }}
-                  className="text-[11px] text-[#949ba4]"
-                />
+                {/* Discord draws the footer icon *inside* the footer line, before
+                    its text. The field stored it and the bot sent it, but the
+                    card never drew it — so the one URL control on this embed had
+                    no preview at all, which reads as a dead control. */}
+                <div className="flex items-start gap-1.5">
+                  {embed.footerIconUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={embed.footerIconUrl} alt="" className="mt-0.5 size-4 shrink-0 rounded" />
+                  ) : null}
+                  <div className="min-w-0 flex-1">
+                    <AutoTextarea
+                      value={embed.footer}
+                      onValueChange={footer => onEmbedChange({ footer })}
+                      placeholder={editing ? "نتمنى لك وقتاً ممتعاً" : undefined}
+                      maxLength={2048}
+                      readOnly={!editing}
+                      inputRef={footerRef}
+                      aria-label="نص التذييل"
+                      onFocus={event => {
+                        const element = event.currentTarget;
+                        insertTarget.current = token =>
+                          onEmbedChange({ footer: insertAtCursor(element, embed.footer, token) });
+                      }}
+                      className="text-[11px] text-[#949ba4]"
+                    />
+                  </div>
+                </div>
                 {editing && footerIconOpen && (
-                  <div className="animate-in fade-in flex items-center gap-1.5 pt-1">
+                  <div className="space-y-1 pt-1">
+                    <div className="animate-in fade-in flex items-center gap-1.5">
                     <button
                       type="button"
                       aria-label="تأكيد أيقونة التذييل"
@@ -652,6 +765,11 @@ export function EmbedEditor({
                       className="min-w-0 flex-1 rounded border border-border/60 bg-black/30 px-1 py-0.5 text-[10px] text-[#dbdee1] outline-none focus:border-primary/50"
                       aria-label="رابط أيقونة التذييل"
                     />
+                    </div>
+                    {/* The same check the big image gets: an address that is not
+                        a picture is said here, not discovered in a greeting that
+                        arrives without one. */}
+                    <RemoteImage url={embed.footerIconUrl} className="size-8 rounded object-cover" label="أيقونة التذييل" />
                   </div>
                 )}
               </div>

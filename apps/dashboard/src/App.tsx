@@ -300,7 +300,17 @@ export function App() {
               {view === "customization" && <CustomizationView guild={guild} />}
               {view === "logs" && <LogsView guild={guild} />}
               {view === "welcome" && <WelcomeView guild={guild} />}
-              {view === "welcome-messages" && <WelcomeMessagesView guild={guild} />}
+              {view === "welcome-messages" && (
+                /* The welcome previews need a *person* to stand in for the
+                   joiner, and the only real person this screen already knows is
+                   the operator. Their own display name and picture — animated
+                   ones included, since the server resolves the CDN URL — beat
+                   the invented «اسم_المستخدِم» the previews used to draw. */
+                <WelcomeMessagesView
+                  guild={guild}
+                  sample={session?.user ? { name: session.user.username, avatarUrl: session.user.avatarUrl } : null}
+                />
+              )}
               {view === "levels" && <LevelsView guild={guild} />}
               {view === "invites" && <InvitesView guild={guild} />}
               {view === "audit" && <AuditView guild={guild} />}

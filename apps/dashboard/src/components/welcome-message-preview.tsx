@@ -15,9 +15,9 @@ import { initials } from "@/lib/format";
  * - **It never invents data.** The picture and the name come from the server's
  *   own read of the bot in this guild; a missing one is shown as a placeholder
  *   and labelled, not drawn as something else.
- * - **It never shows a Discord trade mark.** The AL AI mark is the platform's
- *   own; the little "Bot" tag says what the message is, the way Discord says
- *   it, without borrowing their logo.
+ * - **It borrows Discord's wording, not its artwork.** The "Bot" tag is the word
+ *   the client prints beside a bot's name — the same one the embed editor uses —
+ *   drawn with this platform's own tokens rather than their logo or palette.
  */
 export function WelcomeMessagePreview({
   settings,
@@ -25,6 +25,7 @@ export function WelcomeMessagePreview({
   avatarUrl,
   botName,
   channelName,
+  nameColor,
   className
 }: {
   settings: WelcomeMessageSettings;
@@ -35,6 +36,8 @@ export function WelcomeMessagePreview({
   botName: string | null;
   /** Where the message goes, by name, or null when it is not chosen yet. */
   channelName: string | null;
+  /** The bot's role colour in this guild, which Discord paints the name with. */
+  nameColor?: string | null;
   className?: string;
 }) {
   const text = renderWelcomeMessage(settings.text, values).trim();
@@ -67,9 +70,14 @@ export function WelcomeMessagePreview({
           </span>
           <div className="min-w-0 flex-1">
             <p className="flex flex-wrap items-center gap-1.5 text-sm">
-              <span className="font-semibold">{botName ?? "AL AI"}</span>
-              {/* The platform's own word for what this is - not Discord's logo. */}
-              <span className="rounded bg-primary/15 px-1 py-0.5 text-[9px] font-semibold text-primary">AL AI</span>
+              <span className="font-semibold" style={nameColor ? { color: nameColor } : undefined} dir="ltr">
+                {botName ?? "AL AI"}
+              </span>
+              {/* Discord's own word for the sender kind, in the same shape its
+                  client draws — and the same one the embed editor uses, so the
+                  two previews on this screen cannot disagree about what the
+                  message is. */}
+              <span className="rounded bg-primary/15 px-1 py-0.5 text-[9px] font-bold uppercase text-primary">Bot</span>
             </p>
 
             {text ? (
@@ -106,9 +114,15 @@ export function WelcomeMessagePreview({
                     <p className="text-xs text-muted-foreground">الإيمبد فارغ — أضف عنواناً أو وصفاً أو حقلاً.</p>
                   ) : null}
                 </div>
+                {/* Discord draws the embed image for both sources, so the
+                    preview must: an address that was typed is as real to the
+                    member as a file that was picked. */}
                 {settings.embed.imageMode === "upload" && settings.embed.imageDataUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={settings.embed.imageDataUrl} alt="" className="max-h-48 w-full object-cover" />
+                ) : settings.embed.imageMode === "url" && settings.embed.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={settings.embed.imageUrl} alt="" className="max-h-48 w-full object-cover" />
                 ) : null}
               </div>
             ) : null}

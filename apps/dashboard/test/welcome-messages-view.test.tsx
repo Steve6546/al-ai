@@ -34,6 +34,15 @@ const CHANNELS: ChannelOption[] = [
   { id: "755555555555555552", name: "welcome" }
 ] as ChannelOption[];
 
+/**
+ * The signed-in operator, which is what the previews borrow as the joiner.
+ *
+ * The animated hash in the URL is deliberate: it is the one shape that proves
+ * the picture reaches the canvas as the server resolved it, rather than being
+ * rebuilt (and flattened) in the browser.
+ */
+const SAMPLE = { name: "كلاوس", avatarUrl: "https://cdn.discordapp.com/avatars/9/abc.gif" };
+
 const SETTINGS: WelcomeMessageSettings = {
   enabled: false,
   imageEnabled: false,
@@ -102,7 +111,7 @@ async function mountScreen() {
   document.body.appendChild(container);
   const root = createRoot(container);
   await act(async () => {
-    root.render(createElement(WelcomeMessagesView, { guild: GUILD }));
+    root.render(createElement(WelcomeMessagesView, { guild: GUILD, sample: SAMPLE }));
   });
   await act(async () => {
     await Promise.resolve();
@@ -189,9 +198,58 @@ test("the image tab shows the canvas, the sub-tab strip, and the drag hint", asy
   try {
     await press(container, clickButton(container, "الصورة"));
     assert.equal(container.textContent.includes("اسحب لتحريك الطبقة"), true);
-    assert.equal(container.textContent.includes("اسم_المستخدِم"), true, "the username layer previews its rendered token");
+    /* The layer previews a *person*: the operator's own name, because the card
+       is drawn for whoever joins and the dashboard cannot know them. The
+       invented «اسم_المستخدِم» it used to print is asserted absent — a preview
+       that shows a made-up name is the thing this screen exists to avoid. */
+    assert.equal(container.textContent.includes("كلاوس"), true, "the username layer previews with the real sample name");
+    assert.equal(container.textContent.includes("اسم_المستخدِم"), false, "no invented placeholder is drawn");
+    const avatarPicture = [...container.querySelectorAll("img")].find(image => image.getAttribute("src") === SAMPLE.avatarUrl);
+    assert.ok(avatarPicture, "the avatar layer draws the sample picture, animated source included");
     assert.equal(container.textContent.includes("الخلفية"), true, "the sub-tabs render");
     assert.equal(container.textContent.includes("الإعدادات"), true);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("the three embed-image choices each draw their own surface", async () => {
+  const { container, root } = await mountScreen();
+  try {
+    await press(container, clickButton(container, "الرسالة"));
+    const zone = () => container.textContent.includes("اضغط للرفع أو اسحب الصورة هنا");
+    const urlField = () => container.querySelector("input[aria-label='رابط صورة الإيمبد']");
+
+    // The regression: the upload zone was the `else` of "upload mode with a
+    // picture", so it stood in `none` and in `url` too — pressing any of the
+    // three chips left the same box on screen, which is why they read as dead.
+    assert.equal(zone(), false, "«بدون صورة» draws no image surface at all");
+    assert.equal(urlField(), null, "and no address field");
+
+    await press(container, clickButton(container, "رابط صورة"));
+    assert.ok(urlField(), "«رابط صورة» opens the address field");
+    assert.equal(zone(), false, "and does not keep the upload zone under it");
+
+    await press(container, clickButton(container, "رفع صورة"));
+    assert.equal(zone(), true, "«رفع صورة» is the only mode that offers the drop zone");
+    assert.equal(urlField(), null, "and the address field is gone");
+
+    await press(container, clickButton(container, "بدون صورة"));
+    assert.equal(zone(), false, "choosing «بدون صورة» clears the surface again");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("the member thumbnail shows a real face, not the words describing it", async () => {
+  const { container, root } = await mountScreen();
+  try {
+    await press(container, clickButton(container, "الرسالة"));
+    await press(container, clickButton(container, "صورة العضو"));
+    const picture = [...container.querySelectorAll("img")].find(image => image.getAttribute("src") === SAMPLE.avatarUrl);
+    assert.ok(picture, "the thumbnail slot draws the sample member's picture");
   } finally {
     await act(async () => root.unmount());
     container.remove();

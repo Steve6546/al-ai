@@ -27,6 +27,16 @@ test("tokens fill with real values, and a missing inviter reads as غير معر
   assert.equal(noInviter, "جاء بـغير معروف");
 });
 
+test("a member count that was never read is said as unknown, not invented", () => {
+  // The dashboard's preview is the caller this protects: it cannot know how many
+  // members the server will have when the join happens, and it used to print a
+  // literal `1234` into the card. A number the caller does not have is a claim.
+  const text = renderWelcomeMessage("عددنا {memberCount}", {
+    userMention: "<@1>", username: "n", server: "s", memberCount: null, inviterMention: "<@2>", joinDate: "today"
+  });
+  assert.equal(text, "عددنا غير معروف");
+});
+
 test("the settings normaliser clamps everything a hand-crafted PUT could try", () => {
   const normalised = normaliseWelcomeMessageSettings({
     enabled: "yes",

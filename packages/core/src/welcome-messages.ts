@@ -149,7 +149,8 @@ export type WelcomeTemplateValues = {
   userMention: string;
   username: string;
   server: string;
-  memberCount: number;
+  /** Null when the count has not been read — the dashboard's preview case. */
+  memberCount: number | null;
   inviterMention: string;
   joinDate: string;
 };
@@ -157,14 +158,16 @@ export type WelcomeTemplateValues = {
 /**
  * Fills a welcome template's tokens. An unknown token is left as the operator
  * typed it — a template is prose. A missing inviter renders the token as
- * "غير معروف" rather than an empty slot.
+ * "غير معروف" rather than an empty slot, and an unread member count does the
+ * same: a number the caller does not have is a claim about the server, not a
+ * placeholder, and the one place that could not read it used to print `1234`.
  */
 export function renderWelcomeMessage(template: string, values: WelcomeTemplateValues): string {
   return template
     .replaceAll("{user}", values.userMention)
     .replaceAll("{username}", values.username)
     .replaceAll("{server}", values.server)
-    .replaceAll("{memberCount}", String(values.memberCount))
+    .replaceAll("{memberCount}", values.memberCount === null ? "غير معروف" : String(values.memberCount))
     .replaceAll("{inviter}", values.inviterMention || "غير معروف")
     .replaceAll("{joinDate}", values.joinDate);
 }

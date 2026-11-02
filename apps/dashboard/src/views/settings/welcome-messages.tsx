@@ -64,12 +64,23 @@ function readImageAsDataUrl(file: File): Promise<string> {
 }
 
 /**
+ * A real person to stand in for the joiner.
+ *
+ * The previews used to print «اسم_المستخدِم» and a silhouette: invented words in
+ * a card whose entire job is to say what a member will see. The operator is the
+ * one real account this screen already holds — name and picture both resolved
+ * server-side, animated avatars included — so the sample is a person, and it is
+ * labelled as one.
+ */
+export type WelcomeSample = { name: string; avatarUrl: string | null };
+
+/**
  * رسائل الترحيب — three tabs over one draft: what is sent and where
  * (الإعدادات), the message and its embed (الرسالة), and the generated card
  * (الصورة). One `useDraftForm`, one save bar, exactly the contract every
  * other settings screen keeps.
  */
-export function WelcomeMessagesView({ guild }: { guild: Guild }) {
+export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: WelcomeSample | null }) {
   const [tab, setTab] = useState<Tab>("settings");
   const [settings, setSettings] = useState<WelcomeMessageSettings | null>(null);
   const [channels, setChannels] = useState<ChannelOption[]>([]);
@@ -80,6 +91,9 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
   /* The bot's picture and name in THIS guild, for the preview. The same read the
      identity screen uses, so the preview shows the bot the members see. */
   const [profile, setProfile] = useState<GuildProfileSnapshot | null>(null);
+  /* The bot's role colour in this guild. Discord paints a member's name in it,
+     so the preview needs it to look like the message rather than like a form. */
+  const [roleColor, setRoleColor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [canvasPanel, setCanvasPanel] = useState<CanvasPanel>("background");
   const [selection, setSelection] = useState<Selection>(null);
@@ -115,7 +129,11 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
     // placeholder instead of failing the screen.
     void api
       .customization(guild.id)
-      .then(result => !cancelled && setProfile(result.profile ?? null))
+      .then(result => {
+        if (cancelled) return;
+        setProfile(result.profile ?? null);
+        setRoleColor(result.settings?.roleColor ?? null);
+      })
       .catch(() => undefined);
     return () => {
       cancelled = true;
@@ -124,14 +142,17 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
 
   const sampleValues = useMemo(
     () => ({
-      userMention: "@العضو",
-      username: "اسم_المستخدِم",
+      /* With no real person to borrow, the token is shown exactly as typed: an
+         unresolved `{user}` reads as "a variable goes here", while «@العضو»
+         reads as a name the bot would actually print — and it never does. */
+      userMention: sample ? `@${sample.name}` : "{user}",
+      username: sample?.name ?? "{username}",
       server: guild.name,
-      memberCount: guild.memberCount ?? 1234,
-      inviterMention: "@الداعي",
+      memberCount: guild.memberCount ?? null,
+      inviterMention: sample ? `@${sample.name}` : "{inviter}",
       joinDate: new Date().toLocaleDateString("ar", { year: "numeric", month: "long", day: "numeric" })
     }),
-    [guild.name, guild.memberCount]
+    [guild.name, guild.memberCount, sample]
   );
 
   /** The chosen channel's name, for the preview's header. */
@@ -522,6 +543,7 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
                 avatarUrl={botAvatarUrl}
                 botName={profile?.nickname || profile?.username || null}
                 channelName={channelName}
+                nameColor={roleColor}
                 className="lg:sticky lg:top-6 lg:self-start"
               />
             </div>
@@ -538,11 +560,17 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
                 <EmbedEditor
                   botName={profile?.nickname || profile?.username || "AL AI"}
                   botAvatarUrl={botAvatarUrl}
+                  roleColor={roleColor}
+                  memberAvatarUrl={sample?.avatarUrl ?? null}
                     embed={draft.embed}
                     onEmbedChange={patchEmbed}
                     imageUpload={{
                       imageDataUrl: draft.embed.imageDataUrl,
-                      fileName: fileNames.embed ?? "welcome-image.png",
+                      // The name of the file the operator actually picked, or
+                      // nothing: a stored image reloaded from the database has
+                      // no file behind it any more, and inventing a name for it
+                      // would describe an upload that happened in a previous session.
+                      fileName: fileNames.embed ?? null,
                       onPickFile: () => pickImage("embed-image"),
                       onFileDrop: (file: File | undefined) => {
                         imageInputTarget.current = "embed-image";
@@ -590,13 +618,14 @@ export function WelcomeMessagesView({ guild }: { guild: Guild }) {
             <CardHeader className="pb-3">
               <CardTitle className="text-base">مصمم صورة الترحيب</CardTitle>
               <CardDescription>
-                اسحب الطبقات، والمقبض لتغيير الحجم. ما تراه هنا هو ما يُرسل.
+                اسحب الطبقات، والمقبض لتغيير الحجم. الوجه هنا عيّنة بحسابك — العضو الحقيقي يظهر تلقائياً عند الترحيب.
               </CardDescription>
             </CardHeader>
             <CardContent className="px-2 pb-4 pt-0 sm:px-5 sm:pb-5">
               <WelcomeImageCanvas
                 config={draft.image}
                 values={sampleValues}
+                sampleAvatarUrl={sample?.avatarUrl ?? null}
                 selected={selection}
                 onSelect={setSelection}
                 onConfigChange={patchImage}

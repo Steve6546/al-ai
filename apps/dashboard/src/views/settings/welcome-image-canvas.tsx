@@ -50,12 +50,19 @@ type LayerBox = { x: number; y: number };
 export function WelcomeImageCanvas({
   config,
   values,
+  sampleAvatarUrl,
   selected,
   onSelect,
   onConfigChange
 }: {
   config: WelcomeImageConfig;
   values: WelcomeTemplateValues;
+  /**
+   * The joiner's face, which the operator cannot know — so the designer borrows
+   * a real one (the signed-in account) instead of drawing a silhouette and
+   * asking them to imagine the rest. Null leaves the silhouette.
+   */
+  sampleAvatarUrl?: string | null;
   selected: Selection;
   onSelect: (selection: Selection) => void;
   onConfigChange: (next: WelcomeImageConfig) => void;
@@ -397,10 +404,17 @@ export function WelcomeImageCanvas({
 
   const handle = (visible: boolean) =>
     cn(
-      // The handle sits at the *physical* bottom-right of the box, in both
-      // directions: a logical `end` would jump to the left in a right-to-left
-      // page, away from the corner the operator is holding.
-      "absolute -bottom-2 -right-2 size-4 cursor-nwse-resize rounded-full border-2 border-background bg-primary shadow",
+      // The handle lives *inside* the corner. The canvas clips its own overflow,
+      // so a handle hanging outside the box left the card the moment a layer
+      // reached its edge — and a layer whose handle is off the card can grow but
+      // can never be shrunk back, which is exactly the "the mouse ran away from
+      // the edge" report. Inside, the corner is always grabbable, and the
+      // capture on the canvas keeps the drag alive when the pointer leaves it.
+      //
+      // The corner is the *physical* bottom-right in both directions: a logical
+      // `end` would jump to the left in a right-to-left page, away from the
+      // corner the operator is holding.
+      "absolute bottom-0 right-0 size-3.5 cursor-nwse-resize rounded-full border-2 border-background bg-primary shadow",
       !visible && "hidden"
     );
 
@@ -446,7 +460,9 @@ export function WelcomeImageCanvas({
         <div className="min-w-0">
           <p className="text-xs text-muted-foreground">
             {preview
-              ? "معاينة نظيفة — كما ستراها الأعضاء."
+              ? sampleAvatarUrl
+                ? "معاينة نظيفة — الصورة هنا عيّنة بحسابك، والعضو الحقيقي يحلّ مكانه عند الترحيب."
+                : "معاينة نظيفة — كما ستراها الأعضاء."
               : selectedInfo
                 ? `المحدد: ${selectedInfo.label} · ${selectedInfo.size}`
                 : "اختر طبقة من اللوحة أو التبويبات."}
@@ -554,12 +570,21 @@ export function WelcomeImageCanvas({
               }}
             >
               {/*
-                The layer is the **member's** picture - the one the card draws
-                for whoever joins. The operator cannot know it, so the designer
-                shows a neutral silhouette; the bot's own picture belongs to
-                the message preview, not here.
+                The layer is the **member's** picture — the bot draws whoever
+                joins. The designer cannot know that person, so it borrows a
+                real face (the signed-in account) rather than showing a
+                silhouette and asking the operator to imagine the rest: with a
+                picture in the slot, the size, the ring, the glow and the
+                circular crop can all be judged instead of guessed. An animated
+                account arrives as a `.gif` from the server, so it animates here
+                exactly as it animates in Discord.
               */}
-              <User className="size-1/2" aria-hidden />
+              {sampleAvatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={sampleAvatarUrl} alt="" className="size-full object-cover" />
+              ) : (
+                <User className="size-1/2" aria-hidden />
+              )}
             </span>
             <span
               className={cn(handle(isSelected({ kind: "avatar" })), preview && "hidden")}
