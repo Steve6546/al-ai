@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Activity, Globe2, Loader2 } from "lucide-react";
-import { DEFAULT_BOT_PRESENCE, MAX_ACTIVITY_TEXT_LENGTH, activityTypeLabels, activityTypes } from "@al-ai/core/browser";
+import { Activity, Loader2 } from "lucide-react";
+import { DEFAULT_BOT_PRESENCE, MAX_ACTIVITY_TEXT_LENGTH, activityTypeShortLabels, activityTypeTerms, activityTypes } from "@al-ai/core/browser";
 import { api } from "@/api";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { SaveBar } from "@/components/save-bar";
@@ -23,10 +23,10 @@ import type { BotPresenceSettings, Guild } from "@/types";
  * A control that changes all of them cannot sit on a form whose whole promise is
  * «هذا ما يظهر به البوت هنا» — that was the contradiction this screen resolves.
  *
- * So the screen says what it is, out loud, twice: once in the header and once
- * under the controls. The feature is unchanged — the same two fields, the same
- * status picker with its timed windows — and the operator is no longer invited
- * to believe it is scoped to the server they happen to be looking at.
+ * So the screen says it once, in a plain line above the controls. The feature is
+ * unchanged — the same two fields, the same status picker with its timed windows
+ * — and the operator is no longer invited to believe it is scoped to the server
+ * they happen to be looking at.
  *
  * The write is stored here and applied by the bot: it re-reads the row every
  * fifteen seconds and pushes the value onto the gateway. The dashboard has no
@@ -93,18 +93,12 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
     <div className="space-y-4">
       <Toaster toasts={toasts} onDismiss={dismiss} />
 
-      <div className="space-y-1 pt-1">
-        <p className="text-xs text-muted-foreground">
-          الحالة والنشاط يظهران في كل السيرفرات — بما فيها {guild.name}.
-        </p>
-      </div>
-
-      <Alert>
-        <Globe2 className="size-4" />
-        <AlertDescription>
-          الحالة تُكتب على اتصال البوت (gateway) وتظهر في كل السيرفرات.
-        </AlertDescription>
-      </Alert>
+      {/* One line, not a bar. The paragraph and the bordered Alert used to say
+          the same thing twice, and the Alert carried `role="alert"` — so a
+          static note interrupted a screen reader on every load. */}
+      <p className="text-xs text-muted-foreground">
+        الحالة والنشاط يُكتبان على اتصال البوت (gateway)، فيظهران في كل السيرفرات — بما فيها {guild.name}.
+      </p>
 
       <Card>
         <CardHeader className="pb-3">
@@ -119,6 +113,7 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
             <div className="space-y-1.5">
               <Label className="text-xs">حالة البوت</Label>
               <StatusPicker
+                className="w-full"
                 status={draft.status}
                 duration={draft.statusDuration}
                 onChange={({ status, duration: chosen }) =>
@@ -145,8 +140,13 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
                   </SelectTrigger>
                   <SelectContent>
                     {activityTypes.map(type => (
-                      <SelectItem key={type} value={type}>
-                        {activityTypeLabels[type]}
+                      <SelectItem
+                        key={type}
+                        value={type}
+                        textValue={activityTypeShortLabels[type]}
+                        hint={activityTypeTerms[type]}
+                      >
+                        {activityTypeShortLabels[type]}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -159,7 +159,7 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
                   className="min-w-0 flex-1 rounded-xl"
                 />
               </div>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 اتركه فارغاً ليظهر النشاط الافتراضي.
               </p>
             </div>

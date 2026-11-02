@@ -202,6 +202,36 @@ export const activityTypeLabels: Record<ActivityType, string> = {
   competing: "يتنافس في (Competing)"
 };
 
+/**
+ * The same kinds without the Discord term beside them.
+ *
+ * The full label belongs in the menu, where the operator is choosing and the
+ * English word resolves an ambiguity. In the closed control it is noise: the
+ * trigger is 160px wide and «يستمع إلى (Listening)» barely fits, so the chosen
+ * value reads as a truncated sentence instead of a setting.
+ */
+export const activityTypeShortLabels: Record<ActivityType, string> = {
+  playing: "يلعب",
+  listening: "يستمع إلى",
+  watching: "يشاهد",
+  competing: "يتنافس في"
+};
+
+/**
+ * The Discord term for each activity kind, on its own.
+ *
+ * `activityTypeLabels` carries it inside the label, which is right for a menu
+ * row and wrong for the closed trigger — «يستمع إلى (Listening)» does not fit in
+ * a 160px control and reads as a truncated sentence. The screen draws the short
+ * Arabic verb in the row and this term beside it, muted.
+ */
+export const activityTypeTerms: Record<ActivityType, string> = {
+  playing: "Playing",
+  listening: "Listening",
+  watching: "Watching",
+  competing: "Competing"
+};
+
 /** Discord's own numbers for the activity kinds. */
 export const activityTypeNumbers: Record<ActivityType, number> = {
   playing: 0,

@@ -145,12 +145,16 @@ export function StatusPicker({
   status,
   duration,
   onChange,
-  disabled
+  disabled,
+  className
 }: {
   status: BotStatus;
   duration: BotStatusDuration | null;
   onChange: (next: { status: BotStatus; duration: BotStatusDuration | null }) => void;
   disabled?: boolean;
+  /** The trigger sizes itself to its content by default; a form that pairs it
+   * with a full-width control passes `w-full` so the two read as one generation. */
+  className?: string;
 }) {
   // The duration only means something for a status that can carry one, so it is
   // dropped on the way out rather than stored behind `online` where nothing
@@ -173,7 +177,8 @@ export function StatusPicker({
           // generations of control.
           "inline-flex h-9 items-center gap-2 rounded-md border border-input bg-transparent px-3 text-sm",
           "hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-          "disabled:cursor-not-allowed disabled:opacity-50"
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          className
         )}
       >
         {/* The mask is the trigger's own background so the crescent's bite reads

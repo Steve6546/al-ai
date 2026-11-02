@@ -164,8 +164,18 @@ SelectLabel.displayName = SelectPrimitive.Label.displayName
  */
 const SelectItem = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
->(({ className, children, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & {
+    /**
+     * Extra content for the menu row only.
+     *
+     * Radix clones `ItemText` into the trigger, so anything rendered inside it
+     * becomes the closed control's text too. A sibling outside it shows in the
+     * list and nowhere else — which is how a row can carry a muted English term
+     * without the trigger inheriting it.
+     */
+    hint?: React.ReactNode;
+  }
+>(({ className, children, hint, ...props }, ref) => (
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
@@ -182,6 +192,7 @@ const SelectItem = React.forwardRef<
     {/* `min-w-0` is load-bearing: without it the flex item keeps its content
         width and a long option pushes the popup wider than its trigger. */}
     <SelectPrimitive.ItemText className="min-w-0 truncate">{children}</SelectPrimitive.ItemText>
+    {hint ? <span className="ms-2 shrink-0 text-xs text-muted-foreground">{hint}</span> : null}
   </SelectPrimitive.Item>
 ))
 SelectItem.displayName = SelectPrimitive.Item.displayName

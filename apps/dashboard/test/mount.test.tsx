@@ -713,6 +713,10 @@ test("the activity kind is the themed Select, not the operating system's", async
    * placeholder that was never filled in.
    */
   assert.match(html, /يستمع إلى/, "the stored value is spelled out in the trigger, not left blank");
+  // The English term is for the open menu, where a row has room for it. Inside
+  // the closed 160px control it read as a truncated sentence — «يستمع إلى
+  // (Listening» — which is how the operator saw it.
+  assert.doesNotMatch(trigger, /\(Listening\)/, "the closed control carries the Arabic verb alone");
 });
 
 /**
