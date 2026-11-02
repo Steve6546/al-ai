@@ -16,6 +16,7 @@ import {
   BOT_INVITE_PERMISSIONS,
   BOT_INVITE_SCOPES,
   DISCORD_PERMISSION_BITS,
+  rolePowers,
   type ChannelOption,
   type DiscordRoleWire
 } from "@al-ai/core";
@@ -903,7 +904,11 @@ export async function fetchGuildRoles(botToken: string, guildId: string): Promis
         position: role.position,
         managed: role.managed,
         isDefault: false,
-        color: role.color ?? 0
+        color: role.color ?? 0,
+        // Derived here, on the server, from Discord's own bitfield: the tier
+        // screen has to be able to say what a role already is, and the browser
+        // must not grow a second copy of the bit values (GOVERNANCE rule 25).
+        powers: rolePowers(role.permissions)
       }));
   });
 }

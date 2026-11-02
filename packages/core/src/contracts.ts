@@ -44,6 +44,22 @@ export type GuildSummary = {
  * `color` is Discord's packed RGB integer; `0` means "no colour" (the default
  * grey), which is why the swatches treat it as `#000000` and not as an error.
  */
+/**
+ * One moderation permission a role already holds in Discord.
+ *
+ * Computed on the server from the role's bitfield (see
+ * `discord-permissions.ts`), and carried as plain text so the dashboard never
+ * has to know what a bigint is: the operator reads «حظر الأعضاء», not `1 << 2`.
+ */
+export type RolePower = {
+  /** Discord's own flag name, stable enough to key a list on. */
+  key: string;
+  /** The Arabic label Discord's role editor uses. */
+  label: string;
+  /** The tier this permission is the usual marker for. */
+  tier: "admin" | "moderator";
+};
+
 export type DiscordRoleWire = {
   id: string;
   name: string;
@@ -53,6 +69,8 @@ export type DiscordRoleWire = {
   /** True for the @everyone role, which cannot carry a tier. */
   isDefault: boolean;
   color: number;
+  /** What this role already can do in Discord — the evidence the tier list needs. */
+  powers: RolePower[];
 };
 
 /** A channel the operator can choose as a log destination. */

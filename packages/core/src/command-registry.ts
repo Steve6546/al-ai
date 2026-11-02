@@ -1,5 +1,5 @@
 import type { DiscordPermissionBit } from "./discord-permissions.js";
-import { isTier, type Tier } from "./permissions.js";
+import { isTier, tierOrder, type Tier } from "./permissions.js";
 import { filterSnowflakes, normaliseSnowflake } from "./snowflake.js";
 
 /**
@@ -262,6 +262,20 @@ export const commandRegistry: readonly CommandDefinition[] = [
 const byName = new Map(commandRegistry.map(entry => [entry.name, entry]));
 
 if (byName.size !== commandRegistry.length) throw new Error("Duplicate command name in the AL AI command registry.");
+
+/**
+ * How many commands a tier can actually run.
+ *
+ * A tier screen that asks "which of your roles are moderators?" without saying
+ * what a moderator *is* asks for a decision nobody can weigh. This counts the
+ * registry the bot itself serves — including the commands a higher tier inherits,
+ * because `admin` can run everything `moderator` can — so the card can state a
+ * number instead of a promise.
+ */
+export function commandsUnlockedBy(tier: Tier): number {
+  const rank = tierOrder.indexOf(tier);
+  return commandRegistry.filter(definition => tierOrder.indexOf(definition.minimumTier) >= rank).length;
+}
 
 export function requireCommand(name: string) {
   const command = byName.get(name);

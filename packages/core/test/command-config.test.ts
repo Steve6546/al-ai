@@ -22,12 +22,13 @@ import {
   MAX_COOLDOWN_SECONDS,
   MAX_PRESET_REASONS,
   normaliseCommandConfig,
+  commandsUnlockedBy,
   requireCommand,
   resolveCommandDuration,
   ROLE_FIELD_OWNERS,
   TIMEOUT_MAX_SECONDS
 } from "../src/command-registry.js";
-import { discordPermissionLabels, DISCORD_PERMISSION_BITS } from "../src/discord-permissions.js";
+import { discordPermissionLabels, DISCORD_PERMISSION_BITS, rolePowers } from "../src/discord-permissions.js";
 
 /**
  * The per-command configuration contract.
@@ -839,4 +840,48 @@ test("every state-based punishment acts on a member", () => {
     assert.equal(requireCommand(name).target, "member", name);
     assert.equal(requireCommand(name).category, "penalties", name);
   }
+});
+
+/* ------------------------------------------------------------------ *
+ * What a role already is, in Discord's terms
+ *
+ * The tier screen used to ask the operator to pick staff roles out of a list
+ * that said nothing about them. Discord sends the role's permission bitfield on
+ * the same request, so the screen can state what each role grants and propose
+ * the mapping. These are the rules that make that statement true.
+ * ------------------------------------------------------------------ */
+
+test("a role's powers are the moderation bits it actually holds", () => {
+  const bits = DISCORD_PERMISSION_BITS.BAN_MEMBERS | DISCORD_PERMISSION_BITS.MODERATE_MEMBERS;
+  const powers = rolePowers(String(bits));
+  assert.deepEqual(
+    powers.map(power => [power.key, power.tier]),
+    [
+      ["BAN_MEMBERS", "admin"],
+      ["MODERATE_MEMBERS", "moderator"]
+    ],
+    "each bit is named once, with the tier it marks"
+  );
+  assert.ok(powers.every(power => power.label === discordPermissionLabels[power.key as keyof typeof discordPermissionLabels]), "the labels are Discord's own Arabic names, not a second vocabulary");
+});
+
+test("Administrator is one entry, because Discord treats it as every permission", () => {
+  const powers = rolePowers(String(DISCORD_PERMISSION_BITS.ADMINISTRATOR));
+  assert.equal(powers.length, 1);
+  assert.equal(powers[0].key, "ADMINISTRATOR");
+});
+
+test("a role with no moderation bits says so instead of inventing some", () => {
+  assert.deepEqual(rolePowers("0"), [], "the @everyone default");
+  assert.deepEqual(rolePowers(null), [], "a field Discord did not send");
+  assert.deepEqual(rolePowers("not a number"), [], "a hand-crafted payload is not a crash");
+});
+
+test("the tiers unlock a different, real number of commands", () => {
+  const moderator = commandsUnlockedBy("moderator");
+  const admin = commandsUnlockedBy("admin");
+  const owner = commandsUnlockedBy("owner");
+  assert.ok(moderator > 0, "the lowest staff tier still unlocks something");
+  assert.ok(admin > moderator, "admin runs everything moderator does plus more");
+  assert.equal(owner, commandRegistry.length, "the owner tier can run every registered command");
 });

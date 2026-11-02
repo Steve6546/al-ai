@@ -39,7 +39,7 @@ const SETTINGS: WelcomeSettings = {
 };
 
 const ROLES: DiscordRole[] = [
-  { id: "711111111111111111", name: "عضو", color: 0x34d399, position: 1, managed: false, isDefault: false }
+  { id: "711111111111111111", name: "عضو", color: 0x34d399, position: 1, managed: false, isDefault: false, powers: [] }
 ] as unknown as DiscordRole[];
 
 let fetchCalls: { path: string; init?: RequestInit }[] = [];

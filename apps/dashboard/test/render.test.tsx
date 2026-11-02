@@ -208,8 +208,8 @@ const boardProps = {
   commands: commandFlags,
   categories: commandSections,
   roles: [
-    { id: "111111111111111111", name: "مشرف", position: 5, managed: false, isDefault: false, color: 0x5865f2 },
-    { id: "222222222222222222", name: "مساعد", position: 3, managed: false, isDefault: false, color: 0 }
+    { id: "111111111111111111", name: "مشرف", position: 5, managed: false, isDefault: false, color: 0x5865f2, powers: [] },
+    { id: "222222222222222222", name: "مساعد", position: 3, managed: false, isDefault: false, color: 0, powers: [] }
   ],
   channels: [{ id: "333333333333333333", name: "عام", type: "text" as const }],
   permissionLabels,

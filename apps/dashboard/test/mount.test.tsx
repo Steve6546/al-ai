@@ -54,7 +54,17 @@ const guild = {
   canAdminInstance: true
 };
 
-const role = { id: "1", name: "AL AI", position: 5, managed: false, isDefault: false, color: 0 };
+const role = {
+  id: "1",
+  name: "AL AI",
+  position: 5,
+  managed: false,
+  isDefault: false,
+  color: 0,
+  // A real moderation power, so the tier screen has something to show: the row is
+  // no longer a bare name, and the suggestion button has a role to propose.
+  powers: [{ key: "MODERATE_MEMBERS", label: "إسكات الأعضاء", tier: "moderator" as const }]
+};
 
 /**
  * Every payload the BFF can answer with, by path.
@@ -371,7 +381,7 @@ const payloads: [RegExp, unknown][] = [
    */
   [/^\/api\/guilds\/[^/]+\/security\/config$/, {
     config: { enabled: true, limits: { channelDeletesPerMinute: 3, bansPerMinute: 5, roleChangesPerMinute: 3 }, quarantineRoleId: null },
-    roles: [{ id: "1", name: "AL AI", position: 5, managed: false, isDefault: false, color: 0 }],
+    roles: [{ id: "1", name: "AL AI", position: 5, managed: false, isDefault: false, color: 0, powers: [] }],
     actions: [
       { action: "channel-delete", label: "حذف القنوات", limit: 3 },
       { action: "ban", label: "حظر الأعضاء", limit: 5 },

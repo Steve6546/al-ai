@@ -90,3 +90,59 @@ export const discordPermissionLabels: Partial<Record<DiscordPermissionBit, strin
  * bit above rather than written as a second literal — one number, one place.
  */
 export const BOT_INVITE_PERMISSIONS = String(DISCORD_PERMISSION_BITS.ADMINISTRATOR);
+
+/**
+ * Which tier each moderation permission is the usual marker for.
+ *
+ * This is the table that lets the tier screen say *what a role already is*
+ * instead of asking the operator to remember. It is deliberately about the
+ * permissions Discord itself shows in the role editor: the operator granted
+ * these by hand at some point, so naming them is the one explanation that does
+ * not have to be learned twice.
+ */
+export const ROLE_POWER_TIERS = {
+  ADMINISTRATOR: "admin",
+  BAN_MEMBERS: "admin",
+  KICK_MEMBERS: "admin",
+  MANAGE_ROLES: "admin",
+  MANAGE_CHANNELS: "admin",
+  MANAGE_GUILD: "admin",
+  MODERATE_MEMBERS: "moderator",
+  MANAGE_MESSAGES: "moderator",
+  MANAGE_NICKNAMES: "moderator"
+} as const satisfies Partial<Record<DiscordPermissionBit, "admin" | "moderator">>;
+
+/** The bits worth showing, in the order Discord's own editor lists them. */
+const ROLE_POWER_ORDER = Object.keys(ROLE_POWER_TIERS) as (keyof typeof ROLE_POWER_TIERS)[];
+
+/**
+ * The moderation powers a role's decimal bitfield grants, in Discord's words.
+ *
+ * Administrator collapses to one entry rather than nine: Discord treats its
+ * holder as holding every permission, so listing the rest would be a guess about
+ * what the server's other bits say.
+ *
+ * Anything that is not a number answers as no powers — a role whose field came
+ * back missing is reported as "grants nothing we recognise", which is the truth,
+ * rather than as a crash or a fabricated list.
+ */
+export function rolePowers(permissions: string | number | null | undefined): { key: string; label: string; tier: "admin" | "moderator" }[] {
+  let bits: bigint;
+  try {
+    bits = BigInt(permissions ?? "0");
+  } catch {
+    return [];
+  }
+  const administrator = DISCORD_PERMISSION_BITS.ADMINISTRATOR;
+  if ((bits & administrator) === administrator) {
+    return [{ key: "ADMINISTRATOR", label: discordPermissionLabels.ADMINISTRATOR ?? "المشرف العام", tier: "admin" }];
+  }
+  return ROLE_POWER_ORDER.filter(key => {
+    const bit = DISCORD_PERMISSION_BITS[key];
+    return typeof bit === "bigint" && (bits & bit) === bit;
+  }).map(key => ({
+    key,
+    label: discordPermissionLabels[key] ?? key,
+    tier: ROLE_POWER_TIERS[key]
+  }));
+}

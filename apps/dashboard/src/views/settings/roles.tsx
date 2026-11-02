@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
-import { Info, ShieldCheck, TriangleAlert, UserCog, X } from "lucide-react";
+import { Info, ShieldCheck, Sparkles, TriangleAlert, UserCog, X } from "lucide-react";
 import { api } from "@/api";
 import { wireEqual } from "@/lib/records";
+import { cn } from "@/lib/utils";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { SaveBar } from "@/components/save-bar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RoleSwatch } from "@/components/role-swatch";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { commandsUnlockedBy, type Tier } from "@al-ai/core/browser";
 import { tierDescriptions, tierLabels, type DiscordRole, type Guild, type TierConfig, type TierRoles } from "@/types";
 import { EMPTY_TIER_ROLES } from "@al-ai/core/browser";
 
@@ -77,6 +80,32 @@ export function RolesView({ guild }: { guild: Guild }) {
 
   const unassignable = new Set(config.unassignable ?? []);
 
+  /**
+   * The roles that already *are* staff, by what Discord says they can do.
+   *
+   * A role holding BAN_MEMBERS is an administrator of this server whether or not
+   * anyone typed it into a box; a role holding MODERATE_MEMBERS is a moderator.
+   * Deriving the suggestion from the permission bits the server already read
+   * turns the screen from "guess which of these ten rows you meant" into
+   * "here is what your server already grants — confirm or change it".
+   */
+  const suggestedFor = (tier: Tier) =>
+    config.roles
+      .filter(role => !unassignable.has(role.id) && (role.powers ?? []).some(power => power.tier === tier))
+      .map(role => role.id);
+
+  const applySuggestion = (tier: keyof TierRoles) =>
+    setDraft(current => {
+      if (!current) return current;
+      const ids = suggestedFor(tier === "adminRoleIds" ? "admin" : "moderator");
+      const keep = new Set(ids);
+      // The other list loses every role this one takes, which is the same rule
+      // `assign` applies one row at a time: a role in both would resolve to
+      // admin and leave its moderator entry silently dead.
+      const other: keyof TierRoles = tier === "adminRoleIds" ? "moderatorRoleIds" : "adminRoleIds";
+      return { ...current, [tier]: ids, [other]: current[other].filter(id => !keep.has(id)) };
+    });
+
   return (
     <div className="space-y-3">
       {/* The automatic tier is a card like the two pickers below, not a
@@ -121,6 +150,9 @@ export function RolesView({ guild }: { guild: Guild }) {
             roles={config.roles}
             selected={draft.adminRoleIds}
             unassignable={unassignable}
+            unlocked={commandsUnlockedBy("admin")}
+            suggested={suggestedFor("admin")}
+            onSuggest={() => applySuggestion("adminRoleIds")}
             onToggle={(roleId, checked) => assign("adminRoleIds", roleId, checked)}
           />
           <RolePicker
@@ -129,6 +161,9 @@ export function RolesView({ guild }: { guild: Guild }) {
             roles={config.roles}
             selected={draft.moderatorRoleIds}
             unassignable={unassignable}
+            unlocked={commandsUnlockedBy("moderator")}
+            suggested={suggestedFor("moderator")}
+            onSuggest={() => applySuggestion("moderatorRoleIds")}
             onToggle={(roleId, checked) => assign("moderatorRoleIds", roleId, checked)}
           />
         </div>
@@ -180,6 +215,9 @@ function RolePicker({
   roles,
   selected,
   unassignable,
+  unlocked,
+  suggested,
+  onSuggest,
   onToggle
 }: {
   title: string;
@@ -187,6 +225,11 @@ function RolePicker({
   roles: DiscordRole[];
   selected: readonly string[];
   unassignable: ReadonlySet<string>;
+  /** How many commands this tier actually runs, counted from the registry. */
+  unlocked: number;
+  /** The roles whose Discord permissions already mark them as this tier. */
+  suggested: readonly string[];
+  onSuggest: () => void;
   onToggle: (roleId: string, checked: boolean) => void;
 }) {
   const chosen = new Set(selected);
@@ -194,6 +237,7 @@ function RolePicker({
   const chosenRoles = selected
     .map(id => byId.get(id))
     .filter((role): role is DiscordRole => Boolean(role));
+  const suggestionIsUseful = suggested.length > 0 && !suggested.every(id => chosen.has(id));
 
   return (
     <Card className="overflow-hidden">
@@ -207,9 +251,20 @@ function RolePicker({
             <Badge variant={chosen.size ? "secondary" : "outline"} className="tabular">
               {chosen.size}
             </Badge>
+            {/* The size of the choice. Counted from the command registry the bot
+                actually serves, so it cannot disagree with it. */}
+            <Badge variant="outline" className="tabular text-[10px] text-muted-foreground">
+              {unlocked} أمرًا
+            </Badge>
           </div>
           <CardDescription className="mt-0.5 text-xs">{description}</CardDescription>
         </div>
+        {suggestionIsUseful ? (
+          <Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={onSuggest}>
+            <Sparkles className="size-3.5" aria-hidden />
+            اقترح ({suggested.length})
+          </Button>
+        ) : null}
       </CardHeader>
       <CardContent className="space-y-2 pb-3 sm:pb-4">
         {/*
@@ -260,7 +315,35 @@ function RolePicker({
                     onCheckedChange={checked => onToggle(role.id, checked === true)}
                   />
                   <RoleSwatch color={role.color} />
-                  <span className="min-w-0 flex-1 truncate">{role.name}</span>
+                  {/* What Discord already grants this role. The row used to be a
+                      name and a box, which asks the operator to remember what
+                      they configured in a different app months ago; the
+                      permissions are in the payload we read from Discord, so
+                      there is no reason to make them guess.
+                      The `?? []` is for the one window where a freshly built
+                      bundle meets a server that has not restarted yet — it
+                      showed up as a dead screen, not a missing chip, because a
+                      missing array is read before it is checked. */}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{role.name}</span>
+                    {(role.powers ?? []).length ? (
+                      <span className="mt-0.5 flex flex-wrap gap-1">
+                        {(role.powers ?? []).map(power => (
+                          <span
+                            key={power.key}
+                            className={cn(
+                              "rounded px-1 py-px text-[10px]",
+                              power.tier === "admin" ? "bg-primary/15 text-primary" : "bg-accent text-accent-foreground"
+                            )}
+                          >
+                            {power.label}
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="block text-[10px] text-muted-foreground">لا صلاحيات إشراف في ديسكورد</span>
+                    )}
+                  </span>
                   {blocked && (
                     <Badge variant="destructive" className="shrink-0 text-[10px]">
                       أعلى من رتبة البوت
