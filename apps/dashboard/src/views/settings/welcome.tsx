@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import { Shield } from "lucide-react";
-import { ListBox, Select } from "@heroui/react";
 import { api } from "@/api";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { ModuleStatusCard } from "@/components/module-status-card";
+import { RoleSwatch } from "@/components/role-swatch";
 import { SaveBar } from "@/components/save-bar";
 import { Toaster, useToasts } from "@/components/toaster";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DiscordRole, Guild, WelcomeSettings } from "@/types";
 
@@ -20,9 +21,15 @@ const NONE = "__none__";
  * The welcome screen: an auto-role for arriving members and a different one for
  * arriving bots.
  *
- * This is the first screen migrated to HeroUI v3 (`data-heroui` scope). The
- * HeroUI pieces (Card, Switch, Select) live beside the dashboard's own SaveBar
- * and role list, and the role lists come from the server already filtered to
+ * This screen keeps HeroUI v3 for its surfaces (`data-heroui` scope: the Card
+ * and the Switch), but its two pickers are the dashboard's own Radix `Select`.
+ * The reason is measurable, not stylistic: HeroUI's trigger ships with no border
+ * and a surface one point of lightness away from the card it sits on — 24,24,27
+ * on 23,23,26 — so the control vanished into the card and the operator could not
+ * see where to press. The app's `SelectTrigger` is the field surface every other
+ * picker in the dashboard already uses.
+ *
+ * The role lists come from the server already filtered to
  * what the bot can actually grant — real, not integration-managed, and below
  * its own highest position, which is Discord's hard ceiling on any role grant.
  * The bot repeats the hierarchy check at assign time because ranks move after a
@@ -60,18 +67,15 @@ export function WelcomeView({ guild }: { guild: Guild }) {
     return <LoadingRow />;
   }
 
-  const roleItem = (role: DiscordRole) => (
-    <ListBox.Item key={role.id} id={role.id} textValue={role.name}>
-      <span className="flex w-full items-center gap-2">
-        <span
-          aria-hidden
-          className="size-2.5 shrink-0 rounded-full border border-border"
-          style={{ background: role.color ? `#${role.color.toString(16).padStart(6, "0")}` : undefined }}
-        />
-        {role.name}
-      </span>
-      <ListBox.ItemIndicator />
-    </ListBox.Item>
+  /**
+   * One role row. The colour dot rides *beside* the label rather than inside it:
+   * the trigger clones the label as its own text, and a dot in there would be
+   * read out as part of the name.
+   */
+  const roleOption = (role: DiscordRole) => (
+    <SelectItem key={role.id} value={role.id} hint={<RoleSwatch color={role.color} />}>
+      {role.name}
+    </SelectItem>
   );
 
   return (
@@ -101,24 +105,16 @@ export function WelcomeView({ guild }: { guild: Guild }) {
               الرتبة
             </Label>
             <Select
-              className="w-full"
-              placeholder="بدون رتبة"
               value={draft.memberRoleId ?? NONE}
-              onChange={value => patch({ memberRoleId: value === NONE || value === null ? null : String(value) })}
+              onValueChange={value => patch({ memberRoleId: value === NONE ? null : value })}
             >
-              <Select.Trigger id="welcome-member-role">
-                <Select.Value />
-                <Select.Indicator />
-              </Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  <ListBox.Item id={NONE} textValue="بدون رتبة">
-                    بدون رتبة
-                    <ListBox.ItemIndicator />
-                  </ListBox.Item>
-                  {roles.map(role => roleItem(role))}
-                </ListBox>
-              </Select.Popover>
+              <SelectTrigger id="welcome-member-role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>بدون رتبة</SelectItem>
+                {roles.map(role => roleOption(role))}
+              </SelectContent>
             </Select>
           </CardContent>
         </Card>
@@ -133,24 +129,16 @@ export function WelcomeView({ guild }: { guild: Guild }) {
               الرتبة
             </Label>
             <Select
-              className="w-full"
-              placeholder="بدون رتبة"
               value={draft.botRoleId ?? NONE}
-              onChange={value => patch({ botRoleId: value === NONE || value === null ? null : String(value) })}
+              onValueChange={value => patch({ botRoleId: value === NONE ? null : value })}
             >
-              <Select.Trigger id="welcome-bot-role">
-                <Select.Value />
-                <Select.Indicator />
-              </Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  <ListBox.Item id={NONE} textValue="بدون رتبة">
-                    بدون رتبة
-                    <ListBox.ItemIndicator />
-                  </ListBox.Item>
-                  {roles.map(role => roleItem(role))}
-                </ListBox>
-              </Select.Popover>
+              <SelectTrigger id="welcome-bot-role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>بدون رتبة</SelectItem>
+                {roles.map(role => roleOption(role))}
+              </SelectContent>
             </Select>
           </CardContent>
         </Card>

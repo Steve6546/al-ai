@@ -498,7 +498,11 @@ const loadedMarkers: Record<string, RegExp> = {
   // The settings tab's text-XP card only renders once `settings` arrived; the
   // armed header above it is static and would satisfy any skeleton.
   levels: /الخبرة الكتابية/,
-  roles: /المالك/,
+  // The consequence line the picker draws when the mapping it just read is
+  // empty. `/المالك/` used to be the marker here, but that is the static owner
+  // card — it renders before any role list has arrived. This sentence only
+  // exists once `roles` came back and the picker ran.
+  roles: /لم تختر أي رتبة/,
   logs: /التسجيل المركزي/,
   audit: /آخر الأحداث/,
   security: /محرّك مضاد التخريب/,

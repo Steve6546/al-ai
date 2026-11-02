@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, Info, ShieldCheck, TriangleAlert, UserCog } from "lucide-react";
+import { Info, ShieldCheck, TriangleAlert, UserCog, X } from "lucide-react";
 import { api } from "@/api";
 import { wireEqual } from "@/lib/records";
 import { useDraftForm } from "@/lib/use-draft-form";
@@ -190,6 +190,10 @@ function RolePicker({
   onToggle: (roleId: string, checked: boolean) => void;
 }) {
   const chosen = new Set(selected);
+  const byId = new Map(roles.map(role => [role.id, role] as const));
+  const chosenRoles = selected
+    .map(id => byId.get(id))
+    .filter((role): role is DiscordRole => Boolean(role));
 
   return (
     <Card className="overflow-hidden">
@@ -207,7 +211,41 @@ function RolePicker({
           <CardDescription className="mt-0.5 text-xs">{description}</CardDescription>
         </div>
       </CardHeader>
-      <CardContent className="pb-3 sm:pb-4">
+      <CardContent className="space-y-2 pb-3 sm:pb-4">
+        {/*
+          What the list is *for*, stated before the list rather than after it.
+          The resolver (packages/core/src/permissions.ts:72) gives this tier to
+          whoever holds one of these roles and to nobody else, so an empty list
+          is not a neutral state — it is "only the owner can do this", and the
+          screen has to say so while the operator is looking at it.
+        */}
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          {chosenRoles.length
+            ? `كل من يمسك إحدى هذه الرتب يملك: ${description}`
+            : "لم تختر أي رتبة — هذه الصلاحيات الآن لمالك السيرفر ولمن يملك صلاحية Administrator في ديسكورد فقط."}
+        </p>
+
+        {/* The selection, out of the list and where it can be read at a glance.
+            A choice that scrolls away inside a 60-row list is a choice nobody
+            can audit, and the count badge alone says only "2". */}
+        {chosenRoles.length ? (
+          <div className="flex flex-wrap gap-1.5">
+            {chosenRoles.map(role => (
+              <button
+                key={role.id}
+                type="button"
+                onClick={() => onToggle(role.id, false)}
+                aria-label={`إزالة ${role.name} من ${title}`}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] transition-colors hover:border-destructive/60 hover:text-destructive"
+              >
+                <RoleSwatch color={role.color} />
+                <span className="max-w-36 truncate">{role.name}</span>
+                <X className="size-3 shrink-0" aria-hidden />
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         <ScrollArea className="h-60 rounded-md border border-border p-2 sm:h-72">
           <div className="space-y-0.5">
             {roles.map(role => {
@@ -228,7 +266,6 @@ function RolePicker({
                       أعلى من رتبة البوت
                     </Badge>
                   )}
-                  {chosen.has(role.id) && !blocked && <Check className="size-3.5 shrink-0 text-muted-foreground" />}
                 </label>
               );
             })}

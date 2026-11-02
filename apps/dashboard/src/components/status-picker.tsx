@@ -175,7 +175,10 @@ export function StatusPicker({
           // default button all share it, and this trigger sits beside a Select
           // in «الحالة والنشاط». At the old h-8 the pair read as two different
           // generations of control.
-          "inline-flex h-9 items-center gap-2 rounded-md border border-input bg-transparent px-3 text-sm",
+          // The same field surface every other control on the screen uses: a
+          // transparent trigger on a card inherits the card's colour and reads
+          // as a label, not as something to press.
+          "inline-flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm transition-colors hover:border-ring/60 data-[state=open]:border-ring",
           "hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
           "disabled:cursor-not-allowed disabled:opacity-50",
           className
