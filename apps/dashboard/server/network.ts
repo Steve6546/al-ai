@@ -411,10 +411,16 @@ export const TUNNEL_URL_KEY = "remote_access_tunnel_url";
 /** The operator's fixed ngrok hostname; empty means a random tunnel URL. */
 export const NGROK_DOMAIN_KEY = "remote_access_ngrok_domain";
 /**
- * The origin a completed sign-in travelled through. Discord offers no API to
- * read an application's registered redirect URIs, so the round trip *is* the
- * check: an origin that exchanged a code answered `redirect_uri` that Discord
- * accepted, which cannot happen for an unregistered URI.
+ * The origin a completed sign-in travelled through.
+ *
+ * An origin that exchanged a code answered a `redirect_uri` Discord accepted,
+ * which cannot happen for an unregistered URI — so the round trip is evidence
+ * stronger than any list: it proves a browser actually got here and back.
+ *
+ * (This used to claim Discord offers no API to read the registered URIs. It
+ * does: `GET /applications/@me` with the bot token returns `redirect_uris`, and
+ * `scripts/oauth-preflight.mjs` reads it before launch. Reading the list says a
+ * URI *could* work; the round trip says it did.)
  */
 export const VERIFIED_ORIGIN_KEY = "remote_access_verified_origin";
 
