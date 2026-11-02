@@ -253,9 +253,9 @@ export const MAX_IMAGE_UPLOAD_BYTES = 500_000;
  * independent 500 000s made an image between 375 KB and 500 KB pass the download
  * and then be refused on save, under a hint that promised 500 KB throughout.
  *
- * The images are cropped in the browser before they arrive, so this is a ceiling
- * on something already small — its job is to stop a hand-crafted request from
- * writing megabytes into a text column.
+ * The browser sends the picked file as it is (`FileReader.readAsDataURL`, no
+ * re-encode), so this ceiling is what stops a hand-crafted request from writing
+ * megabytes into a text column — not a crop that already shrank the image.
  */
 export const MAX_IMAGE_DATA_URL_LENGTH = Math.ceil((MAX_IMAGE_UPLOAD_BYTES / 3) * 4) + 64;
 
