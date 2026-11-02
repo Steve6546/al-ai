@@ -190,9 +190,13 @@ test together.
     it prints which surfaces actually ran, so a missing scanner or a shallow
     clone is stated instead of counted clean. `.github/workflows/verify.yml`
     therefore checks out with `fetch-depth: 0`, and `check:secrets` runs *after*
-    `build` so the bundle it claims to read exists. Deleting a committed secret
-    does not un-leak it: the project that lived in this directory before AL AI
-    committed a 361-byte `.env` (`7d67921`, removed in `0ed6bff`, still visible in
-    `git log --all -- .env`), and its contents were that publishable key. Anything
-    with a server-side privilege that reaches a commit is rotated first and
-    scrubbed from history second.
+    `build` so the bundle it claims to read exists. Nothing depends on someone
+    remembering to run it: `npm run setup:hooks` points git at
+    `scripts/git-hooks/pre-push`, which refuses a push the gate would fail (a
+    commit carrying a `ghp_` shape was measured blocked, never reaching the
+    remote), and `--no-verify` stays the deliberate way round it. Deleting a
+    committed secret does not un-leak it: the project that lived in this directory
+    before AL AI committed a 361-byte `.env` (`7d67921`, removed in `0ed6bff`,
+    still visible in `git log --all -- .env`), and its contents were that
+    publishable key. Anything with a server-side privilege that reaches a commit
+    is rotated first and scrubbed from history second.

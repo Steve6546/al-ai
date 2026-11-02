@@ -23,6 +23,8 @@
     "lint": "npm run lint --workspaces --if-present",
     "check:schema": "node scripts/parse-schema.mjs infra/schema.sql",
     "check:secrets": "node scripts/check-secrets.mjs",
+    "setup:hooks": "git config core.hooksPath scripts/git-hooks",
+    "hooks:off": "git config --unset core.hooksPath",
     "check:dead": "knip",
     "check:ui": "npm run build --workspace=@al-ai/dashboard && node scripts/ui-check.mjs",
     "check:ui:live": "node scripts/ui-check.mjs --live",

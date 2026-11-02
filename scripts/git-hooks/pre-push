@@ -1,0 +1,25 @@
+#!/bin/sh
+# The pre-push hook: `npm run setup:hooks` points git at this directory.
+#
+# Pushing is the last moment a credential is still only on this machine. Once a
+# push lands, the value is in GitHub's copy of the history and deleting the file
+# later does not remove it — so this is the one point where a check can be
+# preventive instead of forensic.
+#
+# It runs the repository's own gate, which is deliberately the *whole* gate and
+# not a diff-scoped scan: a secret committed an hour ago and pushed today is the
+# case that a per-push diff scan misses. The gate reads tracked files, every ref
+# of history, the local logs and the built bundle, and it prints which surfaces
+# it actually read.
+#
+# Escape hatch: `git push --no-verify`. It exists in git, so this hook cannot be
+# a guarantee — what it does is make the accidental push the default and the
+# deliberate one the exception, and make the exception cost a keystroke someone
+# has to type on purpose.
+exec node scripts/check-secrets.mjs || {
+  echo "" >&2
+  echo "push refused: npm run check:secrets said no (see the problem list above)." >&2
+  echo "If this is genuinely not a credential, fix the shape or the rule rather" >&2
+  echo "than the push: --no-verify skips the check, it does not skip the leak." >&2
+  exit 1
+}
