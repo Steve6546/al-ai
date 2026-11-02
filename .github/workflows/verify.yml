@@ -13,11 +13,19 @@
 #    supports (`.nvmrc` holds the version it is developed on) - so a release
 #    that breaks the floor fails here, not in a deployment.
 # 5. No secret is ever needed: the checks below are static (lint, types,
-#    schema, tests, build, dependency audit, dead code). The database-backed
-#    check (`db:verify`) is deliberately *not* here - it needs a real
-#    PostgreSQL with the project's credentials, which is a deployment concern,
-#    not a pull-request one. `npm run db:verify` runs against a real database
-#    in the deployment pipeline.
+#    schema, tests, build, secret gate, dependency audit, dead code). The
+#    database-backed check (`db:verify`) is deliberately *not* here - it needs a
+#    real PostgreSQL with the project's credentials, which is a deployment
+#    concern, not a pull-request one. `npm run db:verify` runs against a real
+#    database in the deployment pipeline.
+# 6. `fetch-depth: 0`, and the audit step is not the same audit `npm run verify`
+#    runs. The secret gate scans the diff of every ref in the history, and a
+#    default checkout hands it one commit - a shallow clone makes that surface
+#    report clean while reading almost nothing, so the gate now fails loudly
+#    instead (verified: the same script run in a `--depth 1` clone exits 1). The
+#    step below covers dev dependencies too; `npm run audit` is `--omit=dev`,
+#    because a build-time package with a high advisory is a supply-chain hole
+#    even when it never ships.
 name: verify
 
 on:
@@ -39,6 +47,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # The secret gate reads the diff of every ref; the default single-commit
+          # checkout would let it report a clean history it never looked at.
+          fetch-depth: 0
 
       - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:

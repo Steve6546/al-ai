@@ -10,6 +10,11 @@
  * answers come from `@al-ai/core`, shared with the bot. Only the *policy* — the
  * list of required names, and the shape the values are returned in — belongs to
  * the dashboard.
+ *
+ * GOVERNANCE rule 28 names this file. Every secret the dashboard needs arrives
+ * through it and stops here: no required name below is written back to disk,
+ * interpolated into a log line, or returned to a browser, which is the half of
+ * the credential contract the secret gate cannot check on its own.
  */
 
 import { isProduction, missingEnv, readEnv } from "@al-ai/core";

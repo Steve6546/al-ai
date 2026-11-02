@@ -122,12 +122,12 @@ const governance = readFileSync(governancePath, "utf8");
 /** Rule numbers declared in docs/GOVERNANCE.md, e.g. "1. **Slash commands only.**" */
 const declaredRules = [...governance.matchAll(/^(\d+)\.\s+\*\*/gm)].map(match => Number(match[1]));
 
-test("docs/GOVERNANCE.md declares exactly twenty-seven rules", () => {
-  assert.equal(declaredRules.length, 27, `found ${declaredRules.length} numbered rules`);
+test("docs/GOVERNANCE.md declares exactly twenty-eight rules", () => {
+  assert.equal(declaredRules.length, 28, `found ${declaredRules.length} numbered rules`);
   assert.deepEqual(
     declaredRules,
-    Array.from({ length: 27 }, (_, index) => index + 1),
-    "rules are numbered 1..27 with no gaps"
+    Array.from({ length: 28 }, (_, index) => index + 1),
+    "rules are numbered 1..28 with no gaps"
   );
 });
 
@@ -149,7 +149,10 @@ test("the rule numbers actually used cover the rules that need code", () => {
   }
   // Rules 1, 4, 6, 8 and 9 are enforced structurally by the other tests above
   // and by the deploy/registry modules; the rest must be cited where they live.
-  for (const rule of [2, 3, 5, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 24, 25, 26, 27]) {
+  // Rule 28 is in this list because the gate that enforces it is only half the
+  // contract — the other half is the loader that refuses a value it was not
+  // given, and that has to name the rule it is obeying.
+  for (const rule of [2, 3, 5, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 24, 25, 26, 27, 28]) {
     assert.ok(cited.has(rule), `rule ${rule} is not cited anywhere in src`);
   }
 });

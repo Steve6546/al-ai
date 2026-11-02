@@ -29,7 +29,7 @@
     "check:oauth": "node scripts/oauth-check.mjs",
     "check:oauth:preflight": "node scripts/oauth-preflight.mjs",
     "check:load": "node scripts/load-check.mjs",
-    "verify": "npm run lint && npm run check:schema && npm run check:secrets && npm test && npm run build && npm run audit",
+    "verify": "npm run lint && npm run check:schema && npm test && npm run build && npm run check:secrets && npm run audit",
     "audit": "npm audit --omit=dev --audit-level=high",
     "backup": "node --env-file=.env scripts/backup-db.mjs",
     "secrets:rotate": "node --env-file=.env scripts/rotate-secrets.mjs",

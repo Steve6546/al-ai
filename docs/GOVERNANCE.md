@@ -168,20 +168,31 @@ test together.
     same request. Discord rate-limits per *application*, not per route, so a  
     cache is not an optimisation here; it is what keeps the bot's own calls  
     working.
-28. **A credential never enters the repository, and the gate says so.** Secrets
-    live in `.env`, which `.gitignore` covers; code receives them through
+28. **A credential never enters the repository, and the gate says what it read.**
+    Secrets live in `.env`, which `.gitignore` covers; code receives them through
     `server/env.ts` / the bot's environment and no route, log line or built
-    bundle prints one. `npm run check:secrets` enforces both halves — it fails if
-    `.env` becomes tracked, and it fails on any *value-shaped* credential (an
-    AWS/Alibaba key, a Bailian `sk-`, an STS token, a PEM block) found in tracked
-    files, the local logs or `dist/`. It reports but does not fail on
-    name-shaped hits, because all 23 of those in this repository are type
-    declarations (`hmacSecret: string;`) and interpolated variables
-    (`${POSTGRES_PASSWORD}`); a gate that cries about them is a gate that gets
-    ignored. Deleting a committed secret does not un-leak it: the project that
-    lived in this directory before AL AI committed a 361-byte `.env`
-    (`git log --all -- .env` still shows it, in `7d67921`, removed in `0ed6bff`),
-    and the file's contents were a Supabase **publishable** key — a client-side
-    credential by design, which is the only reason this is a note and not an
-    incident. Anything with a server-side privilege that reaches a commit is
-    rotated first and scrubbed from history second.
+    bundle prints one. `npm run check:secrets` enforces four surfaces — tracked
+    files named from `git ls-files` (not `.`, because the scanner skips hidden
+    directories and `.github/workflows/` is where a pasted token lands), every
+    ref of git history attributed to a commit, the gitignored logs and `dist/`,
+    and `.env` by *membership* rather than content, which also catches a future
+    `.env.local`. `.env.example` stays allowed: it holds names, not values.
+    Only *value-shaped* matches block — eleven documented prefix+length formats
+    (GitHub's six, Supabase's publishable/secret pair, AWS, Alibaba, Bailian)
+    plus the PEM private-key header. A Supabase **publishable** key is reported
+    and never fails the gate, because it is a client-side credential by design;
+    the same length behind `sb_secret_` is an incident, because that key carries
+    `BYPASSRLS`. Name-shaped hits (`hmacSecret: string;`, `${POSTGRES_PASSWORD}`)
+    are counted and reported, not failed: a gate that cries at vocabulary is a
+    gate that gets switched off. Two honesty rules are tested in: the gate runs
+    its own detector on every invocation (38 cases — each shape found, a body one
+    character short not found, reports carrying the prefix and nothing else), and
+    it prints which surfaces actually ran, so a missing scanner or a shallow
+    clone is stated instead of counted clean. `.github/workflows/verify.yml`
+    therefore checks out with `fetch-depth: 0`, and `check:secrets` runs *after*
+    `build` so the bundle it claims to read exists. Deleting a committed secret
+    does not un-leak it: the project that lived in this directory before AL AI
+    committed a 361-byte `.env` (`7d67921`, removed in `0ed6bff`, still visible in
+    `git log --all -- .env`), and its contents were that publishable key. Anything
+    with a server-side privilege that reaches a commit is rotated first and
+    scrubbed from history second.
