@@ -421,6 +421,9 @@ export const VERIFIED_ORIGIN_KEY = "remote_access_verified_origin";
 const execFileAsync = promisify(execFile);
 const TUNNEL_START_TIMEOUT_MS = 20_000;
 
+/** Spacing for the automatic re-spawn after an unexpected tunnel exit. */
+const TUNNEL_RETRY_DELAYS_MS = [5_000, 15_000, 45_000];
+
 /** The tunnel log lives next to the dashboard process; `*.log` is git-ignored. */
 function tunnelLogPath(): string {
   return join(process.cwd(), ".al-tunnel.log");
@@ -473,7 +476,10 @@ export function createNetworkManager(input: {
   getSetting: (key: string) => Promise<string | null>;
   setSetting: (key: string, value: string) => Promise<void>;
   log: NetworkLog;
+  /** Overridable so a test can watch the retry ladder without waiting minutes. */
+  retryDelaysMs?: number[];
 }) {
+  const retryDelaysMs = input.retryDelaysMs ?? TUNNEL_RETRY_DELAYS_MS;
   let mode: RemoteAccessMode = "off";
   let tunnelUrl: string | null = null;
   let tunnelStatus: TunnelStatus = "off";
@@ -485,6 +491,14 @@ export function createNetworkManager(input: {
   let child: ChildProcess | null = null;
   let tunnelPid: number | null = null;
   let verifiedOrigin: string | null = null;
+  // A tunnel can die for a reason that fixes itself: ngrok refuses agents from
+  // some ISP addresses (ERR_NGROK_9040), and a residential line rotates to an
+  // allowed one minutes later. Dying on the first attempt made the operator
+  // re-pick the mode by hand every time, so a few spaced retries happen first —
+  // bounded, because an auth failure that is *not* transient must not retry
+  // forever and spawn an ngrok per attempt.
+  let startAttempts = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   const machineHosts = () => lanHostsFrom(networkInterfaces());
   const machineHostEntries = () => lanHostEntriesFrom(networkInterfaces());
@@ -695,11 +709,24 @@ export function createNetworkManager(input: {
     child.on("exit", code => {
       if (!child) return;
       child = null;
-      if (tunnelStatus !== "off") {
+      tunnelUrl = null;
+      if (tunnelStatus === "off") return;
+
+      const delay = retryDelaysMs[startAttempts];
+      input.log.warn({ code, attempt: startAttempts + 1 }, "ngrok tunnel exited");
+      if (delay === undefined) {
         tunnelStatus = "error";
-        tunnelError = `انتهت عملية النفق بالرمز ${code ?? "غير معروف"}. أعد اختيار الوضع لإعادة التشغيل.`;
+        tunnelError = `انتهت عملية النفق بالرمز ${code ?? "غير معروف"} بعد ${startAttempts} محاولات. أعد اختيار الوضع لإعادة التشغيل.`;
+        return;
       }
-      input.log.warn({ code }, "ngrok tunnel exited");
+      startAttempts += 1;
+      tunnelStatus = "starting";
+      tunnelError = `انتهت عملية النفق بالرمز ${code ?? "غير معروف"} — إعادة المحاولة ${startAttempts} بعد ${Math.round(delay / 1000)} ثانية.`;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (tunnelStatus === "off") return;
+        void startTunnel();
+      }, delay);
     });
     // ngrok prints the public URL once; poll the log rather than hold pipes.
     const startedAt = Date.now();
@@ -713,6 +740,8 @@ export function createNetworkManager(input: {
         clearInterval(poll);
         tunnelUrl = found;
         tunnelStatus = "running";
+        // It is up: the next unexpected exit starts the ladder over.
+        startAttempts = 0;
         void input.setSetting(TUNNEL_URL_KEY, found).catch(() => undefined);
         input.log.info({ tunnelUrl: found }, "ngrok tunnel is up");
         return;
@@ -728,6 +757,11 @@ export function createNetworkManager(input: {
   }
 
   async function stopTunnel(): Promise<void> {
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    startAttempts = 0;
     const dyingChild = child;
     const dyingPid = tunnelPid ?? dyingChild?.pid ?? null;
     child = null;
