@@ -32,6 +32,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual run from Actions -> Verify -> Run workflow. It exists because the
+  # automatic triggers are not always available - when the account cannot start
+  # runners, this is the way to prove a workflow is correct the moment it can -
+  # and because a gate that only runs on push cannot be re-run against a branch
+  # on purpose.
+  workflow_dispatch:
 
 permissions:
   contents: read
