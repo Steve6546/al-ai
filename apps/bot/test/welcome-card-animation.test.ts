@@ -75,3 +75,73 @@ test("drawing an animated GIF paints the first frame only", async () => {
 type CardIsStill = [WelcomeImageResult["contentType"]] extends ["image/png" | "image/jpeg"] ? true : false;
 const cardIsStill: CardIsStill = true;
 void cardIsStill;
+
+/**
+ * Four frames, four colours, 64×64 — far enough apart that a later frame cannot
+ * be mistaken for the first by rounding.
+ */
+function buildFourFrameGif(): { bytes: Buffer; colors: number[][] } {
+  const size = 64;
+  const colors = [
+    [255, 0, 0],
+    [0, 255, 0],
+    [0, 0, 255],
+    [255, 255, 0]
+  ];
+  const encoder = new GifEncoder(size, size, { repeat: 0 });
+  for (const [r, g, b] of colors) {
+    const rgba = new Uint8Array(size * size * 4);
+    for (let i = 0; i < size * size; i += 1) {
+      rgba[i * 4] = r;
+      rgba[i * 4 + 1] = g;
+      rgba[i * 4 + 2] = b;
+      rgba[i * 4 + 3] = 255;
+    }
+    encoder.addFrame(rgba, size, size, { delay: 200 });
+  }
+  return { bytes: Buffer.from(encoder.finish()), colors };
+}
+
+/**
+ * The whole question, end to end: an operator uploads an animated GIF, the bot
+ * draws the card, and the file that lands in the channel is the **first frame**
+ * of that GIF — as a still.
+ *
+ * Measured rather than assumed, because the alternative is a claim about what
+ * members see. Frame 2 is pure green and frame 3 pure blue, so "it animated"
+ * and "it picked a later frame" are both distinguishable from "it took frame 1".
+ */
+test("a card drawn from an animated GIF carries that GIF's first frame, as a still", async () => {
+  const { renderWelcomeImage } = await import("../src/runtime/welcome-image.js");
+  const { normaliseWelcomeImageConfig } = await import("@al-ai/core");
+  const gif = buildFourFrameGif();
+  assert.equal(gif.colors.length, 4);
+
+  const card = await renderWelcomeImage(
+    normaliseWelcomeImageConfig({
+      width: 64,
+      height: 64,
+      background: { type: "transparent" },
+      avatar: { enabled: true, x: 0, y: 0, size: 64, circular: false },
+      username: { text: "", x: 0, y: 0, fontSize: 10 },
+      customTexts: []
+    }),
+    {
+      values: { userMention: "@x", username: "x", server: "s", memberCount: 1, inviterMention: "", joinDate: "today" },
+      avatarBuffer: gif.bytes,
+      backgroundBuffer: null
+    }
+  );
+  assert.ok(card, "the card is drawn");
+
+  const decoded = await loadImage(card.buffer);
+  const probe = createCanvas(decoded.width, decoded.height);
+  const ctx = probe.getContext("2d");
+  ctx.drawImage(decoded, 0, 0);
+  const [red, green, blue] = [...ctx.getImageData(32, 32, 1, 1).data];
+
+  assert.ok(red > 200 && green < 60 && blue < 60, `expected frame one (red), got rgb ${[red, green, blue].join(",")}`);
+  // An animated PNG would carry an `acTL` chunk; the card never does, because
+  // the engine has no frame API to step through in the first place.
+  assert.equal(card.buffer.includes(Buffer.from("acTL", "latin1")), false, "the exported card is not an animated PNG");
+});

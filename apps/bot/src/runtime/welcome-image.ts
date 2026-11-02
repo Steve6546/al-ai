@@ -13,7 +13,7 @@
  * family list is the dashboard's offer, and an unavailable family silently
  * falls back, exactly as a browser would.
  */
-import { createCanvas, Image as CanvasImage, type SKRSContext2D, type Canvas } from "@napi-rs/canvas";
+import { createCanvas, loadImage, type SKRSContext2D, type Canvas } from "@napi-rs/canvas";
 import {
   MAX_IMAGE_BYTES,
   renderWelcomeMessage,
@@ -224,7 +224,12 @@ export async function fetchImageBytes(url: string | null): Promise<Buffer | null
 }
 
 /** One canvas op, executed. Exported for the tests to drive directly. */
-export function executeDrawOp(ctx: SKRSContext2D, canvas: Canvas, op: DrawOp, images: Map<Buffer, unknown>): void {
+export async function executeDrawOp(
+  ctx: SKRSContext2D,
+  canvas: Canvas,
+  op: DrawOp,
+  images: Map<Buffer, unknown>
+): Promise<void> {
   if (op.kind === "fill") {
     ctx.save();
     ctx.globalAlpha = op.opacity ?? 1;
@@ -249,9 +254,13 @@ export function executeDrawOp(ctx: SKRSContext2D, canvas: Canvas, op: DrawOp, im
     // not decode twice — and drawImage accepts the engine's own Image object.
     let image = images.get(op.source);
     if (!image) {
-      const decoded = new CanvasImage();
-      decoded.src = op.source;
-      image = decoded;
+      // `loadImage`, never `new Image()` with `.src`. Measured on 1.0.11: the
+      // constructed image reports the correct width, height and `complete`, and
+      // then paints **nothing** — a 1×1 red PNG, a solid JPEG and an animated
+      // GIF all came back `0,0,0,0` through that path, in both drawImage
+      // overloads. `loadImage` decodes all three. The old path made every avatar
+      // and every picture background on this card invisible.
+      image = await loadImage(op.source);
       images.set(op.source, image);
     }
     if (op.kind === "image") {
@@ -337,7 +346,7 @@ export async function renderWelcomeImage(
 
   const ops = await planWelcomeImageDraw(config, facts);
   if (ops.length === 0) return null;
-  for (const op of ops) executeDrawOp(ctx, canvas, op, images);
+  for (const op of ops) await executeDrawOp(ctx, canvas, op, images);
 
   // Alpha only survives in a PNG, so an opaque background may use the JPEG
   // quality setting — that is what the builder's quality control means.
