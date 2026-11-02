@@ -200,8 +200,9 @@ export function createBotDatabase(databaseUrl: string) {
         bans_per_minute: number;
         role_changes_per_minute: number;
         quarantine_role_id: string | null;
+        protection_settings: unknown;
       }>(
-        `SELECT enabled, channel_deletes_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id
+        `SELECT enabled, channel_deletes_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id, protection_settings
          FROM guild_security WHERE guild_id = $1`,
         [guildId]
       );
@@ -210,6 +211,7 @@ export function createBotDatabase(databaseUrl: string) {
       return normaliseAntiNukeConfig({
         enabled: row.enabled,
         quarantineRoleId: row.quarantine_role_id,
+        protections: row.protection_settings,
         limits: {
           channelDeletesPerMinute: row.channel_deletes_per_minute,
           bansPerMinute: row.bans_per_minute,

@@ -590,6 +590,16 @@ CREATE TABLE IF NOT EXISTS guild_security (
 -- that has explicitly disarmed the engine stays disarmed.
 ALTER TABLE guild_security ALTER COLUMN enabled SET DEFAULT true;
 
+-- Per-protection switches, as one JSON object keyed by the registry's names.
+--
+-- JSONB rather than twelve boolean columns because the object grows in the
+-- rounds after this one (limit, punishment, window, exceptions per protection)
+-- and a column per field would mean a migration per field. The code never trusts
+-- what it reads here: `normaliseProtectionSettings` rebuilds the whole map from
+-- the registry, so an unknown key written directly into the table is dropped
+-- rather than honoured.
+ALTER TABLE guild_security ADD COLUMN IF NOT EXISTS protection_settings JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 -- Auto-role on join: one role for arriving members and a different one for
 -- arriving bots, per the operator's welcome screen. Both are nullable — a guild
 -- may want one without the other, or neither while keeping the switch armed for

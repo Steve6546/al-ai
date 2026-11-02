@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Bot, Eye, Gavel, Hash, Loader2, MessageSquare, ShieldAlert, ShieldCheck, ShieldOff, Users, Webhook, Zap } from "lucide-react";
+import { Bot, ChevronDown, Eye, Gavel, Hash, Loader2, MessageSquare, Minus, Plus, ShieldAlert, ShieldCheck, ShieldOff, Users, Webhook, Zap } from "lucide-react";
 import { api } from "@/api";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { SaveBar } from "@/components/save-bar";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,13 +15,16 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import {
   ANTI_NUKE_LIMIT_KEYS,
+  ANTI_NUKE_WINDOW_MS,
   NUKE_FAMILIES,
   NUKE_FAMILY_LABELS,
   NUKE_PROTECTIONS,
   activeProtectionCount,
   discordPermissionLabels,
+  protectionEnabled,
   protectionsInFamily,
-  type NukeFamily
+  type NukeFamily,
+  type NukeProtection
 } from "@al-ai/core/browser";
 import { formatDateTime } from "@/lib/format";
 import type { AntiNukeConfig, AntiNukeSettings, Guild, SecurityEvent } from "@/types";
@@ -214,6 +218,28 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
    * nicer layout.
    */
   const watchedLimits = new Set(loaded.actions.map(entry => ANTI_NUKE_LIMIT_KEYS[entry.action]));
+  /**
+   * The punishment the engine actually applies, named from the roles Discord
+   * returned rather than from the stored ID.
+   *
+   * A row that said «رتبة الحجر» without naming which one would be describing a
+   * setting the operator cannot verify, and a stored ID matching no role renders
+   * as the no-role case — which is what mitigation does in that situation.
+   */
+  const quarantineRole = draft.quarantineRoleId ? loaded.roles.find(role => role.id === draft.quarantineRoleId) : undefined;
+  const punishmentLabel = quarantineRole ? `سحب الرتب ← ${quarantineRole.name}` : "بدون رتبة حجر";
+  /**
+   * Live for this guild right now: armed, switched on, and counted by the engine.
+   *
+   * One definition used by the section badge and every family pill, because two
+   * counters that disagree about what «مفعّل» means is how a screen ends up
+   * showing 4/12 beside a family that says 2/2.
+   */
+  const isActive = (protection: NukeProtection) =>
+    draft.enabled &&
+    protection.limitKey !== undefined &&
+    watchedLimits.has(protection.limitKey) &&
+    protectionEnabled(draft.protections, protection.key);
   const setLimit = (limitKey: keyof AntiNukeConfig["limits"], value: number) =>
     setDraft({
       ...draft,
@@ -304,7 +330,7 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
                 const Icon = familyIcons[entry];
                 const active = family === entry;
                 const rows = protectionsInFamily(entry);
-                const enforced = rows.filter(protection => protection.limitKey && watchedLimits.has(protection.limitKey)).length;
+                const live = rows.filter(isActive).length;
                 return (
                   <button
                     key={entry}
@@ -320,7 +346,7 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
                     <Icon className="size-3.5" aria-hidden />
                     {NUKE_FAMILY_LABELS[entry]}
                     <span className="tabular text-[11px] opacity-80">
-                      {enforced}/{rows.length}
+                      {live}/{rows.length}
                     </span>
                   </button>
                 );
@@ -335,53 +361,41 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
                 </p>
               </div>
               <Badge variant={draft.enabled ? "secondary" : "destructive"} className="tabular shrink-0">
-                {activeProtectionCount(draft.enabled)}/{NUKE_PROTECTIONS.length} مفعّل
+                {activeProtectionCount(draft.enabled, draft.protections)}/{NUKE_PROTECTIONS.length} مفعّل
               </Badge>
             </div>
 
-            <div className="space-y-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium">{NUKE_FAMILY_LABELS[family]}</p>
+              <span className="tabular text-xs text-muted-foreground">
+                {protectionsInFamily(family).filter(isActive).length}/{protectionsInFamily(family).length} مفعّل
+              </span>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-2">
               {protectionsInFamily(family).map(protection => {
                 const limitKey = protection.limitKey;
                 const enforced = limitKey !== undefined && watchedLimits.has(limitKey);
                 return (
-                  <div
+                  <ProtectionCard
                     key={protection.key}
-                    className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/80 bg-background/40 px-3 py-2.5"
-                  >
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <p className="text-sm">{protection.label}</p>
-                      <p className="text-xs text-muted-foreground">{protection.description}</p>
-                      <p className="font-mono text-[11px] text-muted-foreground/80" dir="ltr">
-                        {protection.auditEvents.join(" · ")}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground">
-                        يتطلب صلاحية: {discordPermissionLabels[protection.permission] ?? protection.permission}
-                      </p>
-                    </div>
-
-                    {enforced && limitKey ? (
-                      <div className="shrink-0 space-y-1 text-center">
-                        <Label htmlFor={`limit-${protection.key}`} className="text-[11px] font-normal text-muted-foreground">
-                          الحد / دقيقة
-                        </Label>
-                        <Input
-                          id={`limit-${protection.key}`}
-                          type="number"
-                          min={protection.limit.min}
-                          max={protection.limit.max}
-                          dir="ltr"
-                          className="w-20 tabular text-center"
-                          disabled={!canEdit}
-                          value={draft.limits[limitKey]}
-                          onChange={event => setLimit(limitKey, Number(event.target.value))}
-                        />
-                      </div>
-                    ) : (
-                      <Badge variant="outline" className="shrink-0 self-center">
-                        غير موصولة بالمحرّك بعد
-                      </Badge>
-                    )}
-                  </div>
+                    protection={protection}
+                    enforced={enforced}
+                    canEdit={canEdit && enforced}
+                    enabled={protectionEnabled(draft.protections, protection.key)}
+                    limitValue={limitKey ? draft.limits[limitKey] : protection.limit.default}
+                    punishmentLabel={punishmentLabel}
+                    windowSeconds={ANTI_NUKE_WINDOW_MS / 1000}
+                    onToggle={enabled =>
+                      setDraft({
+                        ...draft,
+                        protections: { ...draft.protections, [protection.key]: { enabled } }
+                      })
+                    }
+                    onLimitChange={value => {
+                      if (limitKey) setLimit(limitKey, value);
+                    }}
+                  />
                 );
               })}
             </div>
@@ -433,5 +447,196 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
         />
       )}
     </Card>
+  );
+}
+
+/**
+ * One protection, as the operator meets it: a switch, and the settings that only
+ * matter once the switch is on.
+ *
+ * The fields appear under the toggle rather than beside it because three of the
+ * four are not per-protection yet. Showing them always would put a disabled
+ * dropdown in front of someone who has not enabled the protection; showing them
+ * only when it is on matches what the engine will do with them, and the hint at
+ * the bottom says exactly which of them the engine reads today.
+ */
+function ProtectionCard({
+  protection,
+  enforced,
+  canEdit,
+  enabled,
+  limitValue,
+  punishmentLabel,
+  windowSeconds,
+  onToggle,
+  onLimitChange
+}: {
+  protection: NukeProtection;
+  /** Whether the engine counts this action at all. */
+  enforced: boolean;
+  canEdit: boolean;
+  enabled: boolean;
+  limitValue: number;
+  punishmentLabel: string;
+  windowSeconds: number;
+  onToggle: (enabled: boolean) => void;
+  onLimitChange: (value: number) => void;
+}) {
+  const [showExceptions, setShowExceptions] = useState(false);
+
+  return (
+    <div className="rounded-2xl border border-border/80 bg-background/40 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <p className="text-sm font-medium">{protection.label}</p>
+          <p className="text-xs text-muted-foreground">{protection.description}</p>
+          <p className="font-mono text-[11px] text-muted-foreground/80" dir="ltr">
+            {protection.auditEvents.join(" · ")}
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            يتطلب صلاحية: {discordPermissionLabels[protection.permission] ?? protection.permission}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <Switch
+            checked={enabled && enforced}
+            disabled={!canEdit}
+            aria-label={`تفعيل ${protection.label}`}
+            onCheckedChange={onToggle}
+          />
+          {!enforced && (
+            <Badge variant="outline" className="text-[10px]">
+              غير موصولة بالمحرّك بعد
+            </Badge>
+          )}
+        </div>
+      </div>
+
+      {enabled && enforced && (
+        <>
+          <Separator className="my-3" />
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor={`limit-${protection.key}`} className="text-xs font-normal text-muted-foreground">
+                الحد المسموح
+              </Label>
+              <LimitStepper
+                id={`limit-${protection.key}`}
+                value={limitValue}
+                min={protection.limit.min}
+                max={protection.limit.max}
+                disabled={!canEdit}
+                onChange={onLimitChange}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-xs font-normal text-muted-foreground">العقوبة</span>
+              {/* Disabled on purpose: mitigation is one sequence for the whole
+                  engine (strip roles → quarantine → notify owner), not a choice
+                  per action yet. The value shown is the real one. */}
+              <Select value="quarantine" disabled>
+                <SelectTrigger aria-label={`عقوبة ${protection.label}`} className="w-full">
+                  <SelectValue>{punishmentLabel}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="quarantine">{punishmentLabel}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor={`window-${protection.key}`} className="text-xs font-normal text-muted-foreground">
+                نفاذة الوقت (ثانية)
+              </Label>
+              <LimitStepper
+                id={`window-${protection.key}`}
+                value={windowSeconds}
+                min={windowSeconds}
+                max={windowSeconds}
+                disabled
+                onChange={() => {}}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                onClick={() => setShowExceptions(open => !open)}
+                aria-expanded={showExceptions}
+                className="flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                استثناءات خاصة بهذه الحماية
+                <ChevronDown className={`size-3.5 transition-transform ${showExceptions ? "rotate-180" : ""}`} aria-hidden />
+              </button>
+              {showExceptions && (
+                <p className="rounded-lg border border-dashed border-border/70 px-3 py-2 text-[11px] text-muted-foreground">
+                  قائمة مستثنيين لكل حماية لم تُوصَل بالمحرّك بعد؛ المحرّك الآن يستثني نفسه فقط.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            الحد يقرؤه المحرّك الآن. العقوبة والنافذة والاستثناءات تُطبَّق على كل المحرّك: العقوبة هي رتبة الحجر،
+            والنافذة {windowSeconds} ثانية ثابتة.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A bounded number with − and + beside it.
+ *
+ * The buttons clamp rather than pass a raw value on, so the field can never hold
+ * a number the engine would refuse — and the lower button disappears at the
+ * floor instead of sitting there disabled, which is how a limit of 1 tells you it
+ * is already at its minimum.
+ */
+function LimitStepper({
+  id,
+  value,
+  min,
+  max,
+  disabled,
+  onChange
+}: {
+  id: string;
+  value: number;
+  min: number;
+  max: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+}) {
+  const step = (delta: number) => onChange(Math.min(max, Math.max(min, Math.trunc(value + delta))));
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {value > min && (
+        <Button type="button" size="icon" variant="outline" className="size-8 shrink-0 rounded-lg" disabled={disabled} onClick={() => step(-1)} aria-label="إنقاص الحد">
+          <Minus className="size-3.5" />
+        </Button>
+      )}
+      <Input
+        id={id}
+        type="number"
+        min={min}
+        max={max}
+        dir="ltr"
+        className="h-8 w-full tabular text-center"
+        disabled={disabled}
+        value={value}
+        onChange={event => onChange(Number(event.target.value))}
+      />
+      {value < max && (
+        <Button type="button" size="icon" variant="outline" className="size-8 shrink-0 rounded-lg" disabled={disabled} onClick={() => step(1)} aria-label="زيادة الحد">
+          <Plus className="size-3.5" />
+        </Button>
+      )}
+    </div>
   );
 }

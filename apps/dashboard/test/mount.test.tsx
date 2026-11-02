@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { act, createElement, StrictMode, type ReactElement } from "react";
 import { MotionGlobalConfig } from "framer-motion";
-import { commandFlagsFor } from "@al-ai/core/browser";
+import { commandFlagsFor, DEFAULT_PROTECTION_SETTINGS } from "@al-ai/core/browser";
 import { App } from "../src/App";
 import { ErrorBoundary } from "../src/components/error-boundary";
 import { TooltipProvider } from "../src/components/ui/tooltip";
@@ -380,7 +380,12 @@ const payloads: [RegExp, unknown][] = [
    * A fake that does not match the contract tests nothing about the screen.
    */
   [/^\/api\/guilds\/[^/]+\/security\/config$/, {
-    config: { enabled: true, limits: { channelDeletesPerMinute: 3, bansPerMinute: 5, roleChangesPerMinute: 3 }, quarantineRoleId: null },
+    config: {
+      enabled: true,
+      limits: { channelDeletesPerMinute: 3, bansPerMinute: 5, roleChangesPerMinute: 3 },
+      protections: DEFAULT_PROTECTION_SETTINGS,
+      quarantineRoleId: null
+    },
     roles: [{ id: "1", name: "AL AI", position: 5, managed: false, isDefault: false, color: 0, powers: [] }],
     actions: [
       { action: "channel-delete", label: "حذف القنوات", limit: 3 },

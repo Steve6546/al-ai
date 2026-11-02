@@ -4,7 +4,9 @@ import {
   type AntiNukeConfig,
   type AntiNukeLimits,
   type NukeAction,
-  type NukeAssessment
+  type NukeAssessment,
+  type NukeProtectionKey,
+  protectionEnabled
 } from "@al-ai/core";
 import type { BotEvent } from "../lib/discord.js";
 
@@ -203,7 +205,20 @@ export function ownerAlert(incident: NukeIncident, outcome: Pick<MitigationOutco
  * one place: `BotEvent` has variants with no guild or actor at all, and the
  * switch below is the only spot that knows which are which.
  */
-export type NukeObservation = { action: NukeAction; guildId: string; actorId: string };
+export type NukeObservation = {
+  action: NukeAction;
+  /**
+   * The registry entry this event belongs to, so the operator's switch for
+   * *this* action is the one asked about.
+   *
+   * Not the same as `action`: creating and deleting roles share one budget but
+   * are two protections, and an operator who turns off role creation still
+   * expects deletions to be caught.
+   */
+  protectionKey: NukeProtectionKey;
+  guildId: string;
+  actorId: string;
+};
 
 /**
  * Which destructive actions the engine watches.
@@ -215,14 +230,15 @@ export type NukeObservation = { action: NukeAction; guildId: string; actorId: st
 export function nukeActionOf(event: BotEvent): NukeObservation | null {
   switch (event.type) {
     case "server.channel-delete":
-      return { action: "channel-delete", guildId: event.guildId, actorId: event.actorId };
+      return { action: "channel-delete", protectionKey: "channel-delete", guildId: event.guildId, actorId: event.actorId };
     case "moderation.ban":
-      return { action: "ban", guildId: event.guildId, actorId: event.actorId };
+      return { action: "ban", protectionKey: "member-ban", guildId: event.guildId, actorId: event.actorId };
     case "role.create":
+      return { action: "role-change", protectionKey: "role-create", guildId: event.guildId, actorId: event.actorId };
     case "role.delete":
-      // Counted together: swapping roles out is one behaviour, and two separate
-      // budgets would quietly double the allowance.
-      return { action: "role-change", guildId: event.guildId, actorId: event.actorId };
+      // Counted with role creation in one budget: swapping roles out is one
+      // behaviour, and two separate budgets would quietly double the allowance.
+      return { action: "role-change", protectionKey: "role-delete", guildId: event.guildId, actorId: event.actorId };
     default:
       return null;
   }
@@ -261,13 +277,17 @@ export function createAntiNukeEngine(deps: AntiNukeEngineDeps, options: AntiNuke
         const observation = nukeActionOf(event);
         if (!observation) return null;
 
-        const { action, guildId, actorId } = observation;
+        const { action, protectionKey, guildId, actorId } = observation;
         // The bot's own role creation on invite would otherwise trip its own
         // limit the moment it joined a busy server.
         if (actorId === deps.selfId?.()) return null;
 
         const config = await deps.configFor(guildId).catch(() => null);
         if (!config?.enabled) return null;
+        // The per-protection switch, asked after the guild-level one: an operator
+        // who turned this action off does not want it counted, and a counter that
+        // runs anyway can still trip the shared budget it feeds.
+        if (!protectionEnabled(config.protections, protectionKey)) return null;
 
         const assessment = tracker.record({ guildId, actorId, action, limits: config.limits });
         if (!assessment?.tripped) return null;

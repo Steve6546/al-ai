@@ -330,8 +330,9 @@ export function createDatabase(pool: pg.Pool) {
         bans_per_minute: number;
         role_changes_per_minute: number;
         quarantine_role_id: string | null;
+        protection_settings: unknown;
       }>(
-        `SELECT enabled, channel_deletes_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id
+        `SELECT enabled, channel_deletes_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id, protection_settings
          FROM guild_security WHERE guild_id = $1`,
         [guildId]
       );
@@ -340,6 +341,7 @@ export function createDatabase(pool: pg.Pool) {
       return normaliseAntiNukeConfig({
         enabled: row.enabled,
         quarantineRoleId: row.quarantine_role_id,
+        protections: row.protection_settings,
         limits: {
           channelDeletesPerMinute: row.channel_deletes_per_minute,
           bansPerMinute: row.bans_per_minute,
@@ -350,14 +352,15 @@ export function createDatabase(pool: pg.Pool) {
 
     async saveSecurity(guildId: string, config: AntiNukeConfig) {
       await pool.query(
-        `INSERT INTO guild_security (guild_id, enabled, channel_deletes_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now())
+        `INSERT INTO guild_security (guild_id, enabled, channel_deletes_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id, protection_settings, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now())
          ON CONFLICT (guild_id) DO UPDATE
            SET enabled = EXCLUDED.enabled,
                channel_deletes_per_minute = EXCLUDED.channel_deletes_per_minute,
                bans_per_minute = EXCLUDED.bans_per_minute,
                role_changes_per_minute = EXCLUDED.role_changes_per_minute,
                quarantine_role_id = EXCLUDED.quarantine_role_id,
+               protection_settings = EXCLUDED.protection_settings,
                updated_at = now()`,
         [
           guildId,
@@ -365,7 +368,8 @@ export function createDatabase(pool: pg.Pool) {
           config.limits.channelDeletesPerMinute,
           config.limits.bansPerMinute,
           config.limits.roleChangesPerMinute,
-          config.quarantineRoleId
+          config.quarantineRoleId,
+          JSON.stringify(config.protections)
         ]
       );
     },

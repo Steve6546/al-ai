@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_ANTI_NUKE_CONFIG, type AntiNukeConfig } from "@al-ai/core";
+import { DEFAULT_ANTI_NUKE_CONFIG, DEFAULT_PROTECTION_SETTINGS, type AntiNukeConfig } from "@al-ai/core";
 import {
   createAntiNukeEngine,
   createAntiNukeTracker,
@@ -29,6 +29,7 @@ const limits = { channelDeletesPerMinute: 2, bansPerMinute: 3, roleChangesPerMin
 const armed: AntiNukeConfig = {
   enabled: true,
   limits,
+  protections: DEFAULT_PROTECTION_SETTINGS,
   quarantineRoleId: QUARANTINE_ROLE
 };
 
@@ -141,10 +142,19 @@ test("pruning drops expired counters", () => {
  * ------------------------------------------------------------------ */
 
 test("the watched events map to their action class", () => {
-  assert.deepEqual(nukeActionOf(channelDelete()), { action: "channel-delete", guildId: GUILD, actorId: ACTOR });
+  assert.deepEqual(nukeActionOf(channelDelete()), {
+    action: "channel-delete",
+    protectionKey: "channel-delete",
+    guildId: GUILD,
+    actorId: ACTOR
+  });
   assert.equal(nukeActionOf({ type: "moderation.ban", guildId: GUILD, targetId: "t", actorId: ACTOR })?.action, "ban");
   assert.equal(nukeActionOf({ type: "role.create", guildId: GUILD, roleId: "r", actorId: ACTOR })?.action, "role-change");
   assert.equal(nukeActionOf({ type: "role.delete", guildId: GUILD, roleId: "r", actorId: ACTOR })?.action, "role-change");
+  // One budget, two protections: the switch that must be able to silence creation
+  // alone depends on the observation carrying the event's own key.
+  assert.equal(nukeActionOf({ type: "role.create", guildId: GUILD, roleId: "r", actorId: ACTOR })?.protectionKey, "role-create");
+  assert.equal(nukeActionOf({ type: "role.delete", guildId: GUILD, roleId: "r", actorId: ACTOR })?.protectionKey, "role-delete");
 });
 
 test("ordinary events are not treated as destructive", () => {
@@ -291,6 +301,28 @@ test("a disarmed engine observes but never acts", async () => {
     assert.equal(await engine.observe(channelDelete()), null);
   }
   assert.deepEqual(calls, { quarantine: 0, notify: 0, report: 0 });
+});
+
+test("a protection switched off is not counted, while the others keep counting", async () => {
+  const off = { ...DEFAULT_PROTECTION_SETTINGS, "channel-delete": { enabled: false } };
+  const { engine, calls } = makeEngine({ protections: off });
+
+  for (let i = 0; i < 6; i += 1) {
+    assert.equal(await engine.observe(channelDelete()), null, "channel deletion is off, so nothing accumulates");
+  }
+  assert.deepEqual(calls, { quarantine: 0, notify: 0, report: 0 }, "an off protection cannot trip");
+
+  // The gate asks about the *event's* protection, not about the budget it feeds.
+  // Turning role creation off must not silence role deletion, which shares that
+  // budget — the operator who disabled one still expects the other caught.
+  const roleOff = { ...DEFAULT_PROTECTION_SETTINGS, "role-create": { enabled: false } };
+  const other = makeEngine({ protections: roleOff });
+  const roleDelete = (): BotEvent => ({ type: "role.delete", guildId: GUILD, roleId: "r", actorId: ACTOR });
+  assert.equal(await other.engine.observe({ type: "role.create", guildId: GUILD, roleId: "r", actorId: ACTOR }), null);
+  await other.engine.observe(roleDelete());
+  await other.engine.observe(roleDelete());
+  const outcome = await other.engine.observe(roleDelete());
+  assert.ok(outcome, "the third deletion trips a limit of two, creation being off included");
 });
 
 test("an armed engine mitigates and reports once the burst crosses the limit", async () => {

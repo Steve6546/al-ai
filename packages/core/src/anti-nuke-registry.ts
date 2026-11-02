@@ -1,4 +1,4 @@
-import type { AntiNukeLimits } from "./anti-nuke.js";
+import type { AntiNukeLimits, NukeAction } from "./anti-nuke.js";
 import type { DiscordPermissionBit } from "./discord-permissions.js";
 
 /**
@@ -24,9 +24,31 @@ import type { DiscordPermissionBit } from "./discord-permissions.js";
 
 export type NukeFamily = "channels" | "roles" | "members" | "webhooks" | "content";
 
+/**
+ * Every protection, by key.
+ *
+ * A union rather than `string` because the operator's per-protection switches are
+ * stored as a JSON object: an unlisted key must be rejected at the boundary, not
+ * accepted and then read by nothing — a typo that persists is a setting that
+ * silently does nothing forever.
+ */
+export type NukeProtectionKey =
+  | "channel-delete"
+  | "channel-create"
+  | "channel-update"
+  | "channel-permissions"
+  | "role-create"
+  | "role-delete"
+  | "role-update"
+  | "member-ban"
+  | "member-kick"
+  | "member-timeout"
+  | "webhook-churn"
+  | "message-purge";
+
 export type NukeProtection = {
   /** Stable identifier. Never shown to the operator, never renamed for cosmetics. */
-  key: string;
+  key: NukeProtectionKey;
   family: NukeFamily;
   label: string;
   /** One line in the operator's language: what stops when this protection fires. */
@@ -240,8 +262,97 @@ export const DISCORD_AUDIT_EVENTS = [
   "MessageUnpin"
 ] as const satisfies readonly string[];
 
+/**
+ * The operator's per-protection switch.
+ *
+ * One field today, and deliberately an object rather than a bare boolean map:
+ * the limit, the punishment, the window and the member exceptions all land here
+ * in the rounds after this one, and a JSON column shaped as
+ * `{ "channel-delete": { ... } }` grows without a migration each time. A flat
+ * `boolean` map would have to be rewritten the day the second field arrives.
+ */
+export type ProtectionSettings = {
+  /**
+   * Off means the engine does not count this action at all for this guild.
+   *
+   * Defaulted to on, because the registry lists protections the engine mostly
+   * does *not* enforce yet — a default of off would make the badge read 0/12 for
+   * a guild that has never opened the screen, which is the opposite of the truth.
+   */
+  enabled: boolean;
+};
+
+export type ProtectionSettingsMap = Record<NukeProtectionKey, ProtectionSettings>;
+
+export const DEFAULT_PROTECTION_SETTINGS: ProtectionSettingsMap = Object.fromEntries(
+  NUKE_PROTECTIONS.map(protection => [protection.key, { enabled: true }])
+) as ProtectionSettingsMap;
+
+/**
+ * Coerces an untrusted object — a JSON body or a JSONB column — into the full map.
+ *
+ * Unknown keys are dropped rather than stored: a typo would persist, be read by
+ * nothing, and look like a setting the operator made. Missing keys fall back to
+ * the default instead of being read as an opt-out, because silence is not consent
+ * to switch a protection off.
+ */
+export function normaliseProtectionSettings(value: unknown): ProtectionSettingsMap {
+  const source = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const result = { ...DEFAULT_PROTECTION_SETTINGS };
+  for (const [key, raw] of Object.entries(source)) {
+    if (!isNukeProtectionKey(key)) continue;
+    const settings = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    result[key] = { enabled: settings.enabled !== false };
+  }
+  return result;
+}
+
+export function protectionEnabled(settings: ProtectionSettingsMap | undefined, key: NukeProtectionKey): boolean {
+  return settings?.[key]?.enabled ?? true;
+}
+
 export function protectionsInFamily(family: NukeFamily): NukeProtection[] {
   return NUKE_PROTECTIONS.filter(protection => protection.family === family);
+}
+
+/** Every key, for the boundary that normalises stored settings. */
+export const NUKE_PROTECTION_KEYS: readonly NukeProtectionKey[] = NUKE_PROTECTIONS.map(protection => protection.key);
+
+export function isNukeProtectionKey(value: unknown): value is NukeProtectionKey {
+  return typeof value === "string" && (NUKE_PROTECTION_KEYS as readonly string[]).includes(value);
+}
+
+export function findProtection(key: NukeProtectionKey): NukeProtection | undefined {
+  return NUKE_PROTECTIONS.find(protection => protection.key === key);
+}
+
+/**
+ * Which protections an engine action can switch off.
+ *
+ * `role-change` answers to two: the engine counts creating and deleting roles in
+ * one budget, but an operator who turns off "creating roles" still expects
+ * deleting them to be caught. So the gate asks about the *event's* protection,
+ * while the counting stays shared — and the screen says so under the roles
+ * family rather than letting two numbers look unrelated.
+ */
+export const PROTECTION_KEYS_BY_ACTION: Record<NukeAction, readonly NukeProtectionKey[]> = {
+  "channel-delete": ["channel-delete"],
+  ban: ["member-ban"],
+  "role-change": ["role-create", "role-delete"]
+};
+
+/** The single protection an observed event belongs to, or null if the engine ignores it. */
+export function protectionKeyForEvent(event: "server.channel-delete" | "moderation.ban" | "role.create" | "role.delete"): NukeProtectionKey {
+  switch (event) {
+    case "server.channel-delete":
+      return "channel-delete";
+    case "moderation.ban":
+      return "member-ban";
+    case "role.create":
+      return "role-create";
+    case "role.delete":
+      return "role-delete";
+  }
 }
 
 /** Protections the engine actually counts — the ones a limit means anything for. */
@@ -252,11 +363,13 @@ export function enforcedProtections(): NukeProtection[] {
 /**
  * How many protections are live for a guild.
  *
- * Counted from the engine's real state, not from the registry's size: an armed
- * engine enforces every protection that has a limit, and a disarmed one enforces
- * none — which is the difference the operator needs to see, and the reason the
- * badge can honestly read 0.
+ * A protection counts when the engine is armed, the operator has not switched it
+ * off, **and** the engine actually counts that action. All three, because the
+ * badge is the one number on the screen that answers "am I protected?" — a count
+ * of switches alone would read 12/12 for a guild whose engine enforces four
+ * actions, which is the exact kind of comfort a UI must not sell.
  */
-export function activeProtectionCount(enabled: boolean): number {
-  return enabled ? enforcedProtections().length : 0;
+export function activeProtectionCount(enabled: boolean, settings?: Partial<ProtectionSettingsMap>): number {
+  if (!enabled) return 0;
+  return enforcedProtections().filter(protection => settings?.[protection.key]?.enabled !== false).length;
 }

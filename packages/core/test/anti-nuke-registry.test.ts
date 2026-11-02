@@ -8,8 +8,11 @@ import {
   NUKE_FAMILIES,
   NUKE_FAMILY_LABELS,
   NUKE_PROTECTIONS,
+  PROTECTION_KEYS_BY_ACTION,
   activeProtectionCount,
   enforcedProtections,
+  isNukeProtectionKey,
+  normaliseProtectionSettings,
   protectionsInFamily,
   discordPermissionLabels
 } from "../src/index.js";
@@ -96,4 +99,33 @@ test("the badge counts what the engine actually enforces", () => {
   // Disarmed means the operator asked for no protection, so the badge must say 0
   // rather than continuing to advertise the rows below it.
   assert.equal(activeProtectionCount(false), 0);
+  // A per-protection switch only changes the count when it lands on a protection
+  // the engine counts. Turning off something already unenforced must not move a
+  // number that was never claiming to include it.
+  const offUnenforced = { "channel-create": { enabled: false } };
+  assert.equal(activeProtectionCount(true, offUnenforced), enforced, "switching an unenforced protection off changes nothing");
+  const offEnforced = { "channel-delete": { enabled: false } };
+  assert.equal(activeProtectionCount(true, offEnforced), enforced - 1, "switching an enforced protection off is visible");
+});
+
+test("the action → protection map covers every action the engine watches", () => {
+  for (const action of ANTI_NUKE_ACTIONS) {
+    const keys = PROTECTION_KEYS_BY_ACTION[action];
+    assert.ok(keys.length > 0, `${action}: no protection can switch it off`);
+    for (const key of keys) {
+      assert.ok(isNukeProtectionKey(key), `${action} names ${key}, which is not in the registry`);
+    }
+  }
+});
+
+test("stored settings reject keys the registry does not know", () => {
+  const normalised = normaliseProtectionSettings({
+    "channel-delete": { enabled: false },
+    "channel-delet": { enabled: false },
+    "member-ban": "yes"
+  });
+  assert.equal(normalised["channel-delete"].enabled, false, "a real opt-out survives");
+  assert.ok(!("channel-delet" in normalised), "a typo is dropped, not stored and honoured by nothing");
+  assert.equal(normalised["member-ban"].enabled, true, "an unreadable value is not read as an opt-out");
+  assert.equal(Object.keys(normalised).length, NUKE_PROTECTIONS.length, "the map always covers every protection");
 });

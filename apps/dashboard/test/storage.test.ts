@@ -2,7 +2,7 @@ import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { commandFlagsFor, defaultCommandConfig, requireCommand } from "@al-ai/core";
+import { commandFlagsFor, defaultCommandConfig, requireCommand, DEFAULT_PROTECTION_SETTINGS } from "@al-ai/core";
 import { createDatabase, createPool } from "../server/db.js";
 
 /**
@@ -219,6 +219,7 @@ test("security settings survive a round trip", { skip }, async () => {
   const written = {
     enabled: true,
     limits: { channelDeletesPerMinute: 7, bansPerMinute: 12, roleChangesPerMinute: 4 },
+    protections: DEFAULT_PROTECTION_SETTINGS,
     quarantineRoleId: "1540515175826985080"
   };
   await db!.saveSecurity(GUILD_ID, written);
@@ -230,6 +231,7 @@ test("saving twice updates rather than duplicating", { skip }, async () => {
   const base = {
     enabled: false,
     limits: { channelDeletesPerMinute: 3, bansPerMinute: 5, roleChangesPerMinute: 3 },
+    protections: DEFAULT_PROTECTION_SETTINGS,
     quarantineRoleId: null
   };
 

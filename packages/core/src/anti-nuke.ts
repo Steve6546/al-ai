@@ -1,4 +1,9 @@
 import { isSnowflake } from "./snowflake.js";
+import {
+  DEFAULT_PROTECTION_SETTINGS,
+  normaliseProtectionSettings,
+  type ProtectionSettingsMap
+} from "./anti-nuke-registry.js";
 
 /**
  * Anti-nuke: rate limits on destructive actions, and what a breach means.
@@ -37,6 +42,15 @@ export type AntiNukeConfig = {
    */
   enabled: boolean;
   limits: AntiNukeLimits;
+  /**
+   * The operator's switch for each protection in the registry.
+   *
+   * Kept next to `limits` rather than replacing them: the limits are the engine's
+   * budgets (three counters, shared on purpose), and these are which of the
+   * twelve listed actions feed those counters. Collapsing the two would make a
+   * guild able to set a limit for an action nothing counts.
+   */
+  protections: ProtectionSettingsMap;
   /**
    * The role a quarantined member is reduced to. Null means no role is set yet,
    * in which case mitigation still notifies and logs but changes no roles.
@@ -79,6 +93,7 @@ export const MAX_ANTI_NUKE_LIMIT = 100;
 export const DEFAULT_ANTI_NUKE_CONFIG: AntiNukeConfig = {
   enabled: true,
   limits: DEFAULT_ANTI_NUKE_LIMITS,
+  protections: DEFAULT_PROTECTION_SETTINGS,
   quarantineRoleId: null
 };
 
@@ -128,6 +143,7 @@ export function normaliseAntiNukeConfig(value: unknown): AntiNukeConfig {
       bansPerMinute: clampLimit(limits.bansPerMinute, DEFAULT_ANTI_NUKE_LIMITS.bansPerMinute),
       roleChangesPerMinute: clampLimit(limits.roleChangesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.roleChangesPerMinute)
     },
+    protections: normaliseProtectionSettings(source.protections),
     // A malformed ID is dropped rather than stored: it would never match a role,
     // so mitigation would silently do nothing while claiming to be configured.
     quarantineRoleId: isSnowflake(quarantineRoleId) ? quarantineRoleId : null
