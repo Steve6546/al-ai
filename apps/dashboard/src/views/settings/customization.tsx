@@ -714,20 +714,27 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                 ) : null}
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label className="text-xs">لون رتبة البوت</Label>
-                  {/* The controls follow the *same* gate the badge above
-                      announces. They used to be gated by the icon's own lock
-                      only, so a caller without the identity permission could
-                      still pick a colour and a role icon, and the server would
-                      refuse the save - the badge and the controls disagreed
-                      about what was allowed. */}
-                  <div className={cn(!roleEditable && "pointer-events-none opacity-60")} aria-disabled={!roleEditable}>
-                    <ColorPicker value={draft.roleColor ?? ""} onChange={value => patch({ roleColor: value || null })} />
-                  </div>
+              {/* The colour and the icon are two different shapes of control, so
+                  they no longer share a grid row: the picker needs the width it
+                  actually has (its twenty swatches are Discord's two rows of ten),
+                  and the icon is one button and one thumbnail. Side by side in
+                  half a column each, the picker was crushed and the icon had all
+                  the room it did not need. */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">لون رتبة البوت</Label>
+                {/* The controls follow the *same* gate the badge above
+                    announces. They used to be gated by the icon's own lock
+                    only, so a caller without the identity permission could
+                    still pick a colour and a role icon, and the server would
+                    refuse the save - the badge and the controls disagreed
+                    about what was allowed. */}
+                <div className={cn(!roleEditable && "pointer-events-none opacity-60")} aria-disabled={!roleEditable}>
+                  <ColorPicker value={draft.roleColor ?? ""} onChange={value => patch({ roleColor: value || null })} />
                 </div>
-                <div className="space-y-1.5">
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+                <div className="space-y-1">
                   <Label className="flex items-center gap-1.5 text-xs">
                     أيقونة الرتبة
                     {roleIcon?.locked ? (
@@ -737,38 +744,40 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                       </Badge>
                     ) : null}
                   </Label>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={roleIcon?.locked || !roleEditable}
-                      onClick={() => openPicker("roleIcon")}
-                    >
-                      <Upload className="size-3.5" /> اختر أيقونة
-                    </Button>
-                    {draft.roleIconUrl ? (
-                      <>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={draft.roleIconUrl} alt="" className="size-8 rounded-lg object-cover" />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 hover:text-destructive"
-                          aria-label="إزالة أيقونة الرتبة"
-                          disabled={roleIcon?.locked || !roleEditable}
-                          onClick={() => patch({ roleIconUrl: null })}
-                        >
-                          <X />
-                        </Button>
-                      </>
-                    ) : (
-                      <span className="text-[11px] text-muted-foreground">اختيارية</span>
-                    )}
-                  </div>
                   {roleIcon?.locked ? (
-                    <p className="text-[11px] text-muted-foreground">{roleIcon.reason ?? "أيقونة الرتبة تتطلب مستوى تعزيز 2."}</p>
+                    <p className="max-w-sm text-[11px] text-muted-foreground">
+                      {roleIcon.reason ?? "أيقونة الرتبة تتطلب مستوى تعزيز 2."}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">اختيارية — تظهر بجانب اسم البوت في قائمة الأعضاء.</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={roleIcon?.locked || !roleEditable}
+                    onClick={() => openPicker("roleIcon")}
+                  >
+                    <Upload className="size-3.5" /> اختر أيقونة
+                  </Button>
+                  {draft.roleIconUrl ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={draft.roleIconUrl} alt="" className="size-8 rounded-lg object-cover" />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 hover:text-destructive"
+                        aria-label="إزالة أيقونة الرتبة"
+                        disabled={roleIcon?.locked || !roleEditable}
+                        onClick={() => patch({ roleIconUrl: null })}
+                      >
+                        <X />
+                      </Button>
+                    </>
                   ) : null}
                 </div>
               </div>

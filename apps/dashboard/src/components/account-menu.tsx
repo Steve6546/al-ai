@@ -92,7 +92,9 @@ export function AccountMenu({
           <AvatarFallback>{initials(user?.username)}</AvatarFallback>
         </Avatar>
         <span className="min-w-0 flex-1 leading-tight">
-          <span className="block truncate text-sm font-medium">{user?.username ?? "—"}</span>
+          {/* `bdi` because a Discord name is Latin and may end in punctuation:
+              inside an RTL line «shwc.» was mirrored and rendered «.shwc». */}
+          <bdi className="block truncate text-sm font-medium">{user?.username ?? "—"}</bdi>
           <span className="block truncate text-xs text-muted-foreground">{role}</span>
         </span>
       </button>
@@ -112,7 +114,7 @@ export function AccountMenu({
               <AvatarFallback>{initials(user?.username)}</AvatarFallback>
             </Avatar>
             <div className="min-w-0 leading-tight">
-              <p className="truncate text-sm font-semibold">{user?.username ?? "—"}</p>
+              <p className="truncate text-sm font-semibold"><bdi>{user?.username ?? "—"}</bdi></p>
               <p className="truncate text-xs text-muted-foreground">{role}</p>
             </div>
           </div>

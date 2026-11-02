@@ -20,7 +20,12 @@ test("a guild below the boost threshold has the icon field locked", () => {
     const gate = assessRoleIconGate(tier);
     assert.equal(gate.locked, true, `tier ${tier} must lock the field`);
     assert.ok(gate.reason, "a locked field must explain itself");
-    assert.match(gate.reason, /400/, "the reason should name the failure it prevents");
+    // The explanation names what is required and what the server has. It does
+    // not name the HTTP status Discord would return: an operator choosing a
+    // colour has no use for a status code, and the line read like a stack trace.
+    assert.match(gate.reason, /مستوى تعزيز 2/, "the reason names the requirement");
+    assert.match(gate.reason, new RegExp(`الآن ${tier}`), "the reason names the server's current level");
+    assert.doesNotMatch(gate.reason, /400|Discord/, "and carries no programmer's detail");
   }
 });
 

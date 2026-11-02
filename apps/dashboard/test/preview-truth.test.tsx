@@ -15,9 +15,10 @@ import type { WelcomeImageConfig, WelcomeMessageSettings } from "@al-ai/core/bro
  *
  * A preview is the operator's only view of what the members will see, so it
  * has to answer two questions honestly: *what* will be shown, and *is it
- * saved yet*. The first bug this file pins is the banner: the preview used to
- * fall back to the **account's** banner, so a server with no banner of its own
- * showed a picture that had never belonged to it.
+ * saved yet*. The first bug this file pins is the banner: a server profile is a
+ * set of overrides over the account's profile, so a server that set no banner
+ * shows the account's — but the card drew the slot empty and called it
+ * "لا يوجد غلاف" for a bot that has a banner members can see.
  */
 
 const PROFILE: PreviewProfile = {
@@ -42,17 +43,29 @@ function render(element: React.ReactElement) {
   return { container, root };
 }
 
-test("the bot's banner is the server's banner, never the account's", () => {
+test("an override-free server draws the account's own picture and banner", () => {
   const { container, root } = render(
     <BotLivePreview profile={PROFILE} guildName="سيرفر" memberCount={42} />
   );
   try {
     const html = container.innerHTML;
-    // The *picture* falls back to the account's - that is Discord's own rule
-    // for a member with no override. The *banner* does not.
-    assert.equal(html.includes("account-avatar.png"), true, "the picture falls back to the account's, as Discord does");
-    assert.equal(html.includes("account-banner.png"), false, "the account's banner is never the server's banner");
-    assert.equal(html.includes("لا يوجد غلاف"), true, "a server with no banner says so");
+    // Both are overrides over the account's profile, so both fall back the same
+    // way. Drawing one and blanking the other was the inconsistency this pins.
+    assert.equal(html.includes("account-avatar.png"), true, "the picture falls back to the account's");
+    assert.equal(html.includes("account-banner.png"), true, "and so does the banner");
+    assert.equal(html.includes("لا يوجد غلاف"), false, "a bot with a banner is not reported as lacking one");
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});
+
+test("the banner slot says so when neither level has one", () => {
+  const { container, root } = render(
+    <BotLivePreview profile={{ ...PROFILE, accountBannerUrl: null }} guildName="سيرفر" memberCount={42} />
+  );
+  try {
+    assert.equal(container.innerHTML.includes("لا يوجد غلاف"), true, "the empty state is spelled out, not left blank");
   } finally {
     act(() => root.unmount());
     container.remove();

@@ -150,22 +150,23 @@ export function BotLivePreview({
   pending?: boolean;
 }) {
   /*
-   * The same resolution Discord walks - with one deliberate difference.
+   * The same resolution Discord walks, for both pictures.
    *
-   * A *picture* falls back: where this server has no override, members see
-   * the account's picture, so the preview shows the account's picture too.
+   * A server profile is a set of *overrides* laid on the account's own profile,
+   * so where this server has set nothing, members see the account's value. That
+   * is true of the avatar and of the banner alike, and the card draws both the
+   * same way.
    *
-   * A *banner* does not: the account's banner is the account's, and Discord
-   * never draws it as the member's banner. Falling back to it here put a
-   * completely different image in the server's banner slot - the operator
-   * removed the server's banner, and the preview kept showing a picture that
-   * had never belonged to this server at all. The server's banner is the only
-   * banner this screen owns, and "no banner" is said plainly.
+   * The banner used to be the exception — it was left blank while the avatar
+   * fell back — which read as "this bot has no banner" for a bot that plainly
+   * has one, and was a rule nothing in Discord actually applies. The slot still
+   * says so out loud when *neither* level has a banner, because an empty box is
+   * indistinguishable from a broken one.
    */
   const serverAvatar = profile.serverAvatarDataUrl ?? null;
   const serverBanner = profile.serverBannerDataUrl ?? null;
   const avatar = serverAvatar ?? profile.accountAvatarUrl;
-  const banner = serverBanner;
+  const banner = serverBanner ?? profile.accountBannerUrl;
 
   // Normalised once, at the point a stored row meets the DOM: `bio` is trimmed
   // and would be a TypeError if it arrived as a non-string, and a presentational

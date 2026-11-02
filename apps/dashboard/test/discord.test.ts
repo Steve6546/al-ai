@@ -8,6 +8,7 @@ import {
   fetchGuildHierarchy,
   fetchGuildPremiumTier,
   fetchGuildRoles,
+  fetchIdentity,
   resetBotUserIdCache,
   resetGuildReadCaches,
   resolveBotUserId
@@ -316,4 +317,35 @@ test("the shared role list still reports each consumer's own answer", async () =
   assert.equal(roles[0]!.position, 7, "with the position Discord reported");
   assert.equal(bits, 8n, "the permission check still unions the role's bits");
   assert.equal(hierarchy?.botPosition, 7, "the hierarchy still finds the bot's highest role");
+});
+
+/* ------------------------------------------------------------------ *
+ * The signed-in person's identity
+ *
+ * `/users/@me` answers in snake_case (`global_name`), the session column wants
+ * camelCase (`globalName`). Casting the response instead of mapping it compiled,
+ * ran, and produced `undefined` for every account — so the display name was
+ * silently dropped and the operator was greeted by their @handle. A cast is not
+ * a check, so nothing else in the build could notice.
+ * ------------------------------------------------------------------ */
+
+test("fetchIdentity maps Discord's global_name onto the camelCase field", async () => {
+  routes = [{ match: "/users/@me", respond: json({ id: "123", username: ".shwc", global_name: "♪Klaus", avatar: "abc" }) }];
+
+  const identity = await fetchIdentity("access-token");
+
+  assert.equal(identity.id, "123");
+  assert.equal(identity.username, ".shwc", "the @handle stays the handle");
+  assert.equal(identity.globalName, "♪Klaus", "the display name survives the response mapping");
+  assert.equal(identity.avatar, "abc");
+});
+
+test("fetchIdentity reports an absent display name as null, not undefined", async () => {
+  // Accounts without a display name — and bots — omit the key entirely. The
+  // session writer falls back with `??`, so both shapes have to land on null.
+  routes = [{ match: "/users/@me", respond: json({ id: "123", username: "no_display_name", avatar: null }) }];
+
+  const identity = await fetchIdentity("access-token");
+
+  assert.equal(identity.globalName, null);
 });

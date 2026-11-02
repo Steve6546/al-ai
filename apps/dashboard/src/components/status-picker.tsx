@@ -232,7 +232,7 @@ export function StatusPicker({
                 {body}
                 {status === candidate ? <Check className="mt-1 size-3.5 shrink-0 text-primary" /> : null}
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-48">
+              <DropdownMenuSubContent className="w-48 max-w-[calc(100vw-1.5rem)]">
                 {botStatusDurations.map(entry => (
                   <DurationItem
                     key={entry.id}

@@ -257,7 +257,12 @@ export function ColorPicker({ value, onChange, unsetLabel = "بلا لون", id 
         />
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
+      {/* Discord's own twenty role colours, laid out the way Discord lays them
+          out in its picker: two rows of ten, in the same order. A wrapping flex
+          row made an arbitrary number of columns per row depending on the width
+          of the card, so the operator was looking at the same twenty colours in
+          an arrangement that matched nothing they had ever seen in the client. */}
+      <div className="grid grid-cols-10 gap-1.5">
         {DISCORD_ROLE_SWATCHES.map(swatch => (
           <button
             key={swatch}
@@ -266,24 +271,24 @@ export function ColorPicker({ value, onChange, unsetLabel = "بلا لون", id 
             title={swatch}
             onClick={() => onChange(swatch)}
             className={cn(
-              "size-6 rounded-md border transition-transform hover:scale-110",
+              "size-6 justify-self-center rounded-md border transition-transform hover:scale-110",
               current?.toLowerCase() === swatch ? "border-foreground ring-2 ring-ring" : "border-border"
             )}
             style={{ backgroundColor: swatch }}
           />
         ))}
-        <button
-          type="button"
-          onClick={() => onChange(null)}
-          className={cn(
-            "ms-1 rounded-md border px-2 py-1 text-xs transition-colors",
-            current === null ? "border-foreground bg-accent text-accent-foreground" : "border-border text-muted-foreground hover:bg-accent"
-          )}
-          id={id}
-        >
-          {unsetLabel}
-        </button>
       </div>
+      <button
+        type="button"
+        onClick={() => onChange(null)}
+        className={cn(
+          "w-full rounded-md border px-2 py-1 text-xs transition-colors",
+          current === null ? "border-foreground bg-accent text-accent-foreground" : "border-border text-muted-foreground hover:bg-accent"
+        )}
+        id={id}
+      >
+        {unsetLabel}
+      </button>
     </div>
   );
 }

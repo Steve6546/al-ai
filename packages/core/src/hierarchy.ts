@@ -43,9 +43,10 @@ export function assessRoleIconGate(premiumTier: number | null): RoleIconGate {
   if (premiumTier >= ROLE_ICON_MIN_PREMIUM_TIER) return { locked: false, reason: null, unknown: false };
   return {
     locked: true,
-    reason:
-      `أيقونة الرتبة تتطلب مستوى تعزيز السيرفر ${ROLE_ICON_MIN_PREMIUM_TIER} على الأقل. ` +
-      `سيرفرك حالياً في المستوى ${premiumTier}، وسيرفض Discord الحفظ بخطأ 400.`,
+    // The operator needs the requirement and their current level — nothing else.
+    // The HTTP status Discord would return is a programmer's fact; it made this
+    // line read like a stack trace over a colour swatch.
+    reason: `أيقونة الرتبة تحتاج مستوى تعزيز ${ROLE_ICON_MIN_PREMIUM_TIER}، وسيرفرك الآن ${premiumTier}.`,
     unknown: false
   };
 }

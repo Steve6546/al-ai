@@ -153,7 +153,9 @@ test("the selector offers the welcome, the search and both guild sections", () =
   // actually reads.
   const html = renderToString(screen("GuildSelector")()).replace(/<!-- -->/g, "");
 
-  assert.match(html, /مرحباً، owner! 👑/, "the welcome names the operator");
+  // The name sits in a `bdi`: a Latin username ending in punctuation was
+  // mirrored by the RTL line and shown as ".shwc" instead of "shwc.".
+  assert.match(html, /مرحباً، <bdi[^>]*>owner<\/bdi>! 👑/, "the welcome names the operator, isolated from the line direction");
   assert.match(html, /اختر سيرفراً لإدارة إعدادات البوت/, "the subtitle explains the screen");
   assert.match(html, /ابحث عن سيرفر\.\.\. 🔭/, "the instant search is present");
 

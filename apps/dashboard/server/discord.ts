@@ -272,8 +272,22 @@ export async function exchangeCode(input: { clientId: string; clientSecret: stri
   return (await response.json()) as { access_token: string; refresh_token?: string; scope: string; expires_in: number };
 }
 
-export async function fetchIdentity(accessToken: string) {
-  return request<DiscordIdentity>("/users/@me", { token: accessToken, scheme: "Bearer" });
+/**
+ * The signed-in person's own account, as `/users/@me` answers it.
+ *
+ * The raw payload is snake_case (`global_name`) while `DiscordIdentity` is
+ * camelCase, so this maps the fields instead of casting the response. The cast
+ * it replaces compiled cleanly and returned `globalName === undefined` for every
+ * account, which made the session store the @handle as the display name — an
+ * operator named "♪Klaus" was greeted as ".shwc", and no test could see the
+ * difference because a cast is not a check.
+ */
+export async function fetchIdentity(accessToken: string): Promise<DiscordIdentity> {
+  const me = await request<{ id: string; username: string; global_name?: string | null; avatar: string | null }>(
+    "/users/@me",
+    { token: accessToken, scheme: "Bearer" }
+  );
+  return { id: me.id, username: me.username, globalName: me.global_name ?? null, avatar: me.avatar };
 }
 
 export async function fetchUserGuilds(accessToken: string) {

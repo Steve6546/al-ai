@@ -143,7 +143,7 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
 
             <div className="min-w-0 flex-1 space-y-1">
               <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold">
-                <span className="truncate">مرحباً، {user?.username ?? "—"}! 👑</span>
+                <span className="truncate">مرحباً، <bdi>{user?.username ?? "—"}</bdi>! 👑</span>
                 {tier && (
                   <Badge variant="secondary" className="gap-1">
                     <Crown className="size-3" />

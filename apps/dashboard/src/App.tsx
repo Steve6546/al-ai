@@ -39,6 +39,15 @@ const authMessages: Record<string, string> = {
 /** Shown when a link points at a guild this account cannot administer. */
 const NO_ACCESS_NOTICE = "لا تملك صلاحية الوصول إلى هذا السيرفر. اختر سيرفراً من القائمة.";
 
+/**
+ * How often the header status strip re-reads `/api/health`.
+ *
+ * The bot's heartbeat goes stale at 45s and the dashboard's own throttle allows
+ * 120 requests a minute, so 20s reports a bot that dropped within one poll
+ * without spending a third of the budget on one operator's tab.
+ */
+const HEALTH_POLL_MS = 20_000;
+
 export function App() {
   const route = useRoute();
   const [session, setSession] = useState<SessionInfo | null>(null);
@@ -117,6 +126,32 @@ export function App() {
     }
     void load().finally(() => setBooting(false));
   }, [load]);
+
+  /**
+   * The header chips are the operator's only live read on the bot and the
+   * database, so they are re-read on their own. `load()` would also re-fetch the
+   * guild list — a Discord round trip per poll — and the whole point of a status
+   * strip is that it changes *while the operator is looking at it*, not only
+   * after they press refresh.
+   *
+   * A failed poll clears the strip rather than keeping the last good answer: a
+   * green dot that survives because the request that would have contradicted it
+   * never arrived is worse than no dot.
+   */
+  useEffect(() => {
+    if (booting) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      api
+        .health()
+        .then(next => !cancelled && setHealth(next))
+        .catch(() => !cancelled && setHealth(null));
+    }, HEALTH_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [booting]);
 
   const routeGuildId = route.kind === "guild" ? route.guildId : null;
 
