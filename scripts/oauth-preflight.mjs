@@ -76,7 +76,18 @@ async function main() {
     return 2;
   }
   const app = await response.json();
-  const registered = Array.isArray(app.redirect_uris) ? app.redirect_uris : [];
+  // `redirect_uris` on this endpoint is what the check reads, and it is not in
+  // the official docs for a bot token — the documented shape is
+  // `GET /oauth2/applications/@me` with a user Bearer token. So a payload that
+  // has no such field is reported as undetermined, never as "nothing is
+  // registered": treating an absent field as an empty list would send every
+  // operator to add URIs that are already there.
+  if (!Array.isArray(app.redirect_uris)) {
+    console.log(`UNKNOWN  Discord returned no redirect_uris field (keys: ${Object.keys(app).slice(0, 10).join(",")})`);
+    console.log("the documented alternative is GET /oauth2/applications/@me with a user token");
+    return 2;
+  }
+  const registered = app.redirect_uris;
 
   console.log(`application ${app.id} (${app.name}) — ${registered.length} redirect URI(s) registered`);
   for (const uri of registered) console.log(`   registered: ${uri}`);
