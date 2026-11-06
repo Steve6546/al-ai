@@ -85,7 +85,7 @@ async function copyText(text: string): Promise<boolean> {
 export function QrPanel({ value, label, caption }: { value: string; label: string; caption?: string }) {
   return (
     <div className="relative mx-auto w-full max-w-[16rem]">
-      <span aria-hidden className="absolute -inset-3 rounded-[1.75rem] bg-[#6ee7b7]/10 blur-2xl" />
+      <span aria-hidden className="absolute -inset-3 rounded-[1.75rem] bg-primary/10 blur-2xl" />
       <div className="relative rounded-2xl bg-white p-3 shadow-[0_0_45px_rgba(110,231,183,0.18)]">
         <QRCodeSVG
           value={value}
@@ -154,7 +154,7 @@ export function SecretField({
           onClick={() => setVisible(value => !value)}
           aria-label={visible ? hideLabel : showLabel}
           title={visible ? hideLabel : showLabel}
-          className="grid size-9 shrink-0 place-items-center rounded-lg border border-white/10 text-white/55 transition hover:border-[#6ee7b7]/50 hover:text-[#8ff0c5]"
+          className="grid size-9 shrink-0 place-items-center rounded-lg border border-white/10 text-white/55 transition hover:border-primary/50 hover:text-primary"
         >
           {visible ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
         </button>
@@ -163,9 +163,9 @@ export function SecretField({
           onClick={() => void copy()}
           aria-label={copyLabel}
           title={copyLabel}
-          className="grid size-9 shrink-0 place-items-center rounded-lg border border-white/10 text-white/55 transition hover:border-[#6ee7b7]/50 hover:text-[#8ff0c5]"
+          className="grid size-9 shrink-0 place-items-center rounded-lg border border-white/10 text-white/55 transition hover:border-primary/50 hover:text-primary"
         >
-          {copied ? <Check className="size-4 text-[#6ee7b7]" aria-hidden /> : <Copy className="size-4" aria-hidden />}
+          {copied ? <Check className="size-4 text-primary" aria-hidden /> : <Copy className="size-4" aria-hidden />}
         </button>
       </div>
       <p className="text-[10px] leading-relaxed text-white/35">{t("settings.security.secretWarning")}</p>
@@ -232,17 +232,17 @@ export function RecoveryCodeGrid({
           <button
             type="button"
             onClick={() => void copyOne(codes.join("\n"), "all")}
-            className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[11px] text-white/70 transition hover:border-[#6ee7b7]/50 hover:text-[#8ff0c5]"
+            className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[11px] text-white/70 transition hover:border-primary/50 hover:text-primary"
           >
-            {copied === "all" ? <Check className="size-3 text-[#6ee7b7]" aria-hidden /> : <Copy className="size-3" aria-hidden />}
+            {copied === "all" ? <Check className="size-3 text-primary" aria-hidden /> : <Copy className="size-3" aria-hidden />}
             {copyAllLabel}
           </button>
           <button
             type="button"
             onClick={download}
-            className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[11px] text-white/70 transition hover:border-[#6ee7b7]/50 hover:text-[#8ff0c5]"
+            className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[11px] text-white/70 transition hover:border-primary/50 hover:text-primary"
           >
-            {downloaded ? <Check className="size-3 text-[#6ee7b7]" aria-hidden /> : <Download className="size-3" aria-hidden />}
+            {downloaded ? <Check className="size-3 text-primary" aria-hidden /> : <Download className="size-3" aria-hidden />}
             {downloadLabel}
           </button>
         </div>
@@ -255,15 +255,15 @@ export function RecoveryCodeGrid({
               type="button"
               onClick={() => void copyOne(code, String(index))}
               aria-label={`${copyEachLabel}: ${code}`}
-              className="group flex w-full items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2 text-start transition hover:border-[#6ee7b7]/40 hover:bg-white/[0.06]"
+              className="group flex w-full items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2 text-start transition hover:border-primary/40 hover:bg-white/[0.06]"
             >
               <code dir="ltr" className="font-mono text-[11px] tracking-wide text-white/80">
                 {code}
               </code>
               {copied === String(index) ? (
-                <Check className="size-3.5 shrink-0 text-[#6ee7b7]" aria-hidden />
+                <Check className="size-3.5 shrink-0 text-primary" aria-hidden />
               ) : (
-                <Copy className="size-3.5 shrink-0 text-white/25 group-hover:text-[#8ff0c5]" aria-hidden />
+                <Copy className="size-3.5 shrink-0 text-white/25 group-hover:text-primary" aria-hidden />
               )}
             </button>
           </li>
@@ -345,15 +345,15 @@ export function OtpInput({
               key={index}
               className={cn(
                 "relative grid h-12 place-items-center rounded-lg border bg-white/[0.03] font-mono text-lg font-semibold text-white transition sm:h-14",
-                digit ? "border-[#6ee7b7]/45 bg-[#6ee7b7]/[0.06]" : "border-white/10",
-                active && "border-[#6ee7b7] ring-2 ring-[#6ee7b7]/20",
+                digit ? "border-primary/45 bg-primary/[0.06]" : "border-white/10",
+                active && "border-primary ring-2 ring-primary/20",
                 disabled && "opacity-50"
               )}
             >
               {digit ? (
                 digit
               ) : active ? (
-                <span className="h-5 w-px animate-pulse bg-[#6ee7b7]" />
+                <span className="h-5 w-px animate-pulse bg-primary" />
               ) : (
                 <span className="size-1 rounded-full bg-white/15" />
               )}
@@ -399,7 +399,7 @@ export function TotpRing({ seconds }: { seconds: number }) {
           cy="11"
           r="9"
           fill="none"
-          stroke="#6ee7b7"
+          stroke="var(--primary)"
           strokeWidth="2"
           strokeLinecap="round"
           strokeDasharray={circumference}

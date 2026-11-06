@@ -77,6 +77,16 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 const MAX_RETRY_WAIT_MS = 5_000;
 
 /**
+ * How long a single request may hang before the screen is told it timed out.
+ *
+ * A `fetch` with no deadline is what turned a slow Discord read into a screen
+ * stuck on «جاري التحميل» forever: the BFF was waiting on Discord, and the
+ * browser was waiting on the BFF with no end. The deadline turns that into a
+ * stated failure the screen can show and the operator can retry.
+ */
+const REQUEST_TIMEOUT_MS = 25_000;
+
+/**
  * One request, with a single retry when Discord is rate limiting us.
  *
  * The BFF forwards Discord's own `retry-after`, and a 429 here is momentary by
@@ -93,11 +103,25 @@ async function request<T>(path: string, init: RequestInit | undefined, mayRetry:
   if (init?.body !== undefined && init.body !== null) {
     headers["Content-Type"] = headers["Content-Type"] ?? "application/json";
   }
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    ...init,
-    headers
-  });
+
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      credentials: "same-origin",
+      ...init,
+      headers,
+      signal: controller.signal
+    });
+  } catch (cause) {
+    if (controller.signal.aborted) {
+      throw new ApiError("TIMEOUT", "انتهت مهلة الطلب. أعد المحاولة.", 408);
+    }
+    throw cause;
+  } finally {
+    clearTimeout(deadline);
+  }
 
   if (!response.ok) {
     if (response.status === 429 && mayRetry) {

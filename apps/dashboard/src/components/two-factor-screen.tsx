@@ -264,17 +264,17 @@ export function TwoFactorScreen({
               </div>
             ) : (
               <div className="relative mx-auto grid size-36 place-items-center sm:size-44">
-                <span aria-hidden className="absolute inset-0 rounded-full border border-[#6ee7b7]/20" />
-                <span aria-hidden className="absolute inset-6 rounded-full border border-[#6ee7b7]/30" />
-                <span aria-hidden className="absolute inset-0 rounded-full bg-[#6ee7b7]/10 blur-2xl" />
-                <div className="relative grid size-24 place-items-center rounded-2xl border border-[#6ee7b7]/30 bg-[#0b1411] text-[#8ff0c5] shadow-[0_0_50px_rgba(110,231,183,0.20)] sm:size-28">
+                <span aria-hidden className="absolute inset-0 rounded-full border border-primary/20" />
+                <span aria-hidden className="absolute inset-6 rounded-full border border-primary/30" />
+                <span aria-hidden className="absolute inset-0 rounded-full bg-primary/10 blur-2xl" />
+                <div className="relative grid size-24 place-items-center rounded-2xl border border-primary/30 bg-[#0b1411] text-primary shadow-[0_0_50px_rgba(110,231,183,0.20)] sm:size-28">
                   <LockKeyhole className="size-10" aria-hidden />
                 </div>
               </div>
             )}
 
             <div className="space-y-2">
-              <p className="inline-flex items-center gap-1.5 rounded-full border border-[#6ee7b7]/25 bg-[#6ee7b7]/[0.07] px-2.5 py-1 text-[10px] font-medium text-[#8ff0c5]">
+              <p className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/[0.07] px-2.5 py-1 text-[10px] font-medium text-primary">
                 <ShieldCheck className="size-3" aria-hidden />
                 {t("twoFactor.title")}
               </p>
@@ -300,13 +300,13 @@ export function TwoFactorScreen({
             </header>
 
             {notice && (
-              <p className="mb-4 rounded-lg border border-[#6ee7b7]/20 bg-[#6ee7b7]/[0.06] px-3 py-2 text-[11px] text-[#a7f3d0]">
+              <p className="mb-4 rounded-lg border border-primary/20 bg-primary/[0.06] px-3 py-2 text-[11px] text-primary">
                 {notice}
               </p>
             )}
 
             {copyStatus && (
-              <p role="status" aria-live="polite" className="mb-3 text-[11px] text-[#8ff0c5]">
+              <p role="status" aria-live="polite" className="mb-3 text-[11px] text-primary">
                 {copyStatus}
               </p>
             )}
@@ -330,7 +330,7 @@ export function TwoFactorScreen({
                     <button
                       type="button"
                       onClick={() => setReloadToken(token => token + 1)}
-                      className="text-[11px] text-[#8ff0c5] underline underline-offset-4"
+                      className="text-[11px] text-primary underline underline-offset-4"
                     >
                       {t("twoFactor.retry")}
                     </button>
@@ -341,7 +341,7 @@ export function TwoFactorScreen({
                     {t("twoFactor.loading")}
                   </div>
                 ) : enrollment.enrolled ? (
-                  <p className="rounded-lg border border-[#6ee7b7]/20 bg-[#6ee7b7]/[0.06] px-3 py-2 text-[11px] text-[#a7f3d0]">
+                  <p className="rounded-lg border border-primary/20 bg-primary/[0.06] px-3 py-2 text-[11px] text-primary">
                     {t("twoFactor.alreadyEnrolled")}
                   </p>
                 ) : (
@@ -371,7 +371,7 @@ export function TwoFactorScreen({
                             type="button"
                             onClick={() => void copy(enrollment.otpauthUri ?? "", t("twoFactor.uriCopied"))}
                             aria-label={t("twoFactor.copyUri")}
-                            className="grid size-9 shrink-0 place-items-center rounded-lg border border-white/10 text-white/55 transition hover:border-[#6ee7b7]/50 hover:text-[#8ff0c5]"
+                            className="grid size-9 shrink-0 place-items-center rounded-lg border border-white/10 text-white/55 transition hover:border-primary/50 hover:text-primary"
                           >
                             <Copy className="size-4" aria-hidden />
                           </button>
@@ -395,7 +395,7 @@ export function TwoFactorScreen({
                         type="checkbox"
                         checked={savedCodes}
                         onChange={event => setSavedCodes(event.target.checked)}
-                        className="mt-0.5 size-4 accent-[#6ee7b7]"
+                        className="mt-0.5 size-4 accent-primary"
                       />
                       <span className="text-[11px] leading-relaxed text-white/60">{t("twoFactor.recoverySaved")}</span>
                     </label>
@@ -460,7 +460,7 @@ export function TwoFactorScreen({
                       value={code}
                       onChange={event => setCode(event.target.value)}
                       disabled={verifying || cancelling}
-                      className="h-12 w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 text-center font-mono text-sm tracking-widest text-white placeholder:text-white/20 focus:border-[#6ee7b7] focus:outline-none focus:ring-2 focus:ring-[#6ee7b7]/20"
+                      className="h-12 w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 text-center font-mono text-sm tracking-widest text-white placeholder:text-white/20 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     />
                   ) : (
                     <OtpInput
@@ -489,7 +489,7 @@ export function TwoFactorScreen({
                   <button
                     type="button"
                     onClick={toggleMode}
-                    className="text-[11px] text-[#8ff0c5] underline underline-offset-4"
+                    className="text-[11px] text-primary underline underline-offset-4"
                   >
                     {isRecoveryMode ? t("twoFactor.useTotp") : t("twoFactor.useRecovery")}
                   </button>
@@ -518,7 +518,7 @@ export function TwoFactorScreen({
                   <button
                     type="submit"
                     disabled={verifying || cancelling}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#6ee7b7] px-5 py-2.5 text-sm font-semibold text-[#04110b] shadow-[0_0_30px_rgba(110,231,183,0.22)] transition hover:bg-[#8ff0c5] disabled:opacity-60"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[0_0_30px_rgba(110,231,183,0.22)] transition hover:bg-primary disabled:opacity-60"
                   >
                     {verifying ? (
                       <Loader2 className="size-4 animate-spin" aria-hidden />
@@ -536,7 +536,7 @@ export function TwoFactorScreen({
                   </p>
                 )}
                 {enrolled && savedCodes ? (
-                  <p className="flex items-center gap-1.5 text-[10px] text-[#8ff0c5]/70">
+                  <p className="flex items-center gap-1.5 text-[10px] text-primary/70">
                     <Check className="size-3" aria-hidden />
                     {t("twoFactor.remainingCodes", { count: 10 })}
                   </p>
