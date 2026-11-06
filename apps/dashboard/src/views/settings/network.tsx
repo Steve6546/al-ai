@@ -177,10 +177,21 @@ export function NetworkView() {
   // on several adapters at once (Wi-Fi, a virtual host-only NIC, a VPN), and
   // naming every row «شبكة محلية» told the operator nothing about which was
   // which. The address stays in the row so it stays identifiable at a glance.
-  const lanUrls = snapshot.machineHosts.map(({ host, label }) => ({
-    url: `http://${host}:${snapshot.port}`,
-    label: t("network.localLabel", { label })
-  }));
+  // Only addresses that can actually be reached are worth advertising: the
+  // server binds IPv4, so an IPv6 link-local (fe80::…) row is dead, a VPN or
+  // virtual adapter is not a door onto this machine, and the VirtualBox
+  // host-only default (192.168.56.0/24) and APIPA (169.254.0.0/16) are not
+  // reachable from another device. Those rows are dropped rather than shown
+  // with a link that will not open.
+  const unusableAdapter = /wireguard|vpn|tap|virtual|vmware|virtualbox|hyper-?v|vethernet|wsl|docker|loopback|bluetooth/i;
+  const unusableHost = (host: string) =>
+    host.includes(":") || host.startsWith("169.254.") || host.startsWith("192.168.56.");
+  const lanUrls = snapshot.machineHosts
+    .filter(({ host, label }) => !unusableHost(host) && !unusableAdapter.test(label))
+    .map(({ host, label }) => ({
+      url: `http://${host}:${snapshot.port}`,
+      label: t("network.localLabel", { label })
+    }));
   const tunnelUrl = snapshot.tunnelUrl;
   const status = tunnelStatusCopy[snapshot.tunnelStatus];
 
@@ -277,9 +288,6 @@ export function NetworkView() {
               </button>
             );
           })}
-          <p className="pt-1 text-xs text-muted-foreground">
-            {t("network.persisted")}
-          </p>
         </CardContent>
       </Card>
 
@@ -350,9 +358,6 @@ export function NetworkView() {
                   {t("network.saveDomain")}
                 </Button>
               </div>
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
-                {t("network.domainHint")}
-              </p>
             </form>
           </CardContent>
         </Card>

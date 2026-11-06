@@ -41,8 +41,6 @@ export type AccountMenuProps = {
   guild: Guild;
   /** Opens the signed-in account's own settings screen. */
   onOpenSettings?: () => void;
-  /** Opens the selected guild's own settings screen. */
-  onOpenGuildSettings?: () => void;
   onLogout: () => void;
   /** The sidebar renders the trigger as a full row; the header renders a dot. */
   variant?: "row" | "compact";
@@ -53,7 +51,6 @@ export function AccountMenu({
   user,
   guild,
   onOpenSettings,
-  onOpenGuildSettings,
   onLogout,
   variant = "row",
   className
@@ -142,6 +139,16 @@ export function AccountMenu({
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
 
+        {/* Settings comes first: it is the account's own screen. The guild's
+            settings live in the sidebar, so a second "settings" entry here
+            only made the two ambiguous. */}
+        {onOpenSettings ? (
+          <DropdownMenuItem onSelect={onOpenSettings} className="gap-2">
+            <Settings className="size-4" />
+            {t("nav.settings.label")}
+          </DropdownMenuItem>
+        ) : null}
+
         <DropdownMenuItem asChild>
           <a
             href={user?.id ? `https://discord.com/users/${user.id}` : "https://discord.com"}
@@ -153,20 +160,6 @@ export function AccountMenu({
             {t("account.openDiscord")}
           </a>
         </DropdownMenuItem>
-
-        {onOpenSettings ? (
-          <DropdownMenuItem onSelect={onOpenSettings} className="gap-2">
-            <Settings className="size-4" />
-            {t("nav.settings.label")}
-          </DropdownMenuItem>
-        ) : null}
-
-        {onOpenGuildSettings ? (
-          <DropdownMenuItem onSelect={onOpenGuildSettings} className="gap-2">
-            <Settings className="size-4" />
-            {t("account.guildSettings")}
-          </DropdownMenuItem>
-        ) : null}
 
         {isOwner ? (
           <>

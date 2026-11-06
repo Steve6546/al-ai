@@ -1708,11 +1708,10 @@ bindEvents(client, guardedDispatch, {
         return;
       }
       const base = dashboardUrl.replace(/\/$/, "");
-      // The dashboard's guild shell opens the «إعدادات هذا السيرفر» hub when
-      // this flag is present; the old path (`/guilds/:id/commands`) was not a
-      // route the SPA knew and landed on the guild selector.
+      // The guild's settings are the sidebar's own screens now, so the link
+      // opens the guild dashboard directly (no `?settings=1` hub any more).
       const link =
-        commandName === "settings" ? `${base}/dashboard/${guildId}?settings=1` : base;
+        commandName === "settings" ? `${base}/dashboard/${guildId}` : base;
       const label = commandName === "settings" ? "إعدادات هذا السيرفر" : "لوحة تحكم AL AI";
       await reply(`${label}: ${link}`, { autoDeleteSeconds });
       return;

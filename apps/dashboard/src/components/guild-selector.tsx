@@ -1,10 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
-  Bot,
   Crown,
   Info,
-  Languages,
   Loader2,
   RefreshCw,
   Search,
@@ -19,7 +17,7 @@ import { SignOutButton } from "@/components/account-menu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { api } from "@/api";
+import { BrandMark } from "@/components/brand-mark";
 import { formatMemberCount, initials } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -85,7 +83,7 @@ type Props = {
 };
 
 export function GuildSelector({ user, guilds, health, notice, error, refreshing, onRefresh, onSelect, onLogout }: Props) {
-  const { t, language, setLanguage } = useI18n();
+  const { t, language } = useI18n();
   const [query, setQuery] = useState("");
 
   const { active, eligible } = useMemo(() => splitGuilds(guilds), [guilds]);
@@ -95,18 +93,6 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
 
   const searching = query.trim().length > 0;
   const nothingFound = searching && visibleActive.length === 0 && visibleEligible.length === 0;
-
-  async function switchLanguage() {
-    const next = language === "ar" ? "en" : "ar";
-    setLanguage(next);
-    try {
-      await api.savePreferences(next);
-    } catch {
-      // The account preference did not land. Put the device back rather than
-      // leaving this screen in a language the account does not have.
-      setLanguage(language);
-    }
-  }
 
   return (
     /*
@@ -121,9 +107,7 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
     <div className="flex h-full flex-col bg-background">
       <header className="z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background/85 px-4 backdrop-blur">
         <div className="flex items-center gap-2.5">
-          <div className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <Bot className="size-4" />
-          </div>
+          <BrandMark className="size-8 text-primary" />
           <span className="text-sm font-semibold">AL AI</span>
         </div>
 
@@ -140,16 +124,6 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
         >
           <RefreshCw className={cn(refreshing && "animate-spin")} />
           <span className="hidden sm:inline">{t("common.refresh")}</span>
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => void switchLanguage()}
-          aria-label={t("common.switchLanguage")}
-          title={t("common.switchLanguage")}
-        >
-          <Languages />
         </Button>
 
         <SignOutButton onLogout={onLogout} />

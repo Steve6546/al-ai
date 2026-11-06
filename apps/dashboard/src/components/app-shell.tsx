@@ -47,7 +47,6 @@ import { AccountMenu } from "@/components/account-menu";
 import { AppearanceMenu } from "@/components/appearance-menu";
 import { PageHeader } from "@/components/page-header";
 import { BrandMark } from "@/components/brand-mark";
-import { ServerSettingsDialog, type ServerSettingEntry } from "@/components/server-settings-dialog";
 import { initials } from "@/lib/format";
 import { navText, useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -329,15 +328,6 @@ export function AppShell({
 }: ShellProps) {
   const { t } = useI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-
-  // `/dashboard/:id?settings=1` is the link the bot's /settings command hands
-  // out. Open the hub once, then drop the flag so a refresh is a normal page.
-  useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("settings") !== "1") return;
-    setSettingsOpen(true);
-    window.history.replaceState({}, "", window.location.pathname);
-  }, []);
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem(RAIL_STORAGE_KEY) === "1";
@@ -387,38 +377,6 @@ export function AppShell({
       }}
     />
   );
-
-  /**
-   * «إعدادات هذا السيرفر» opens an index of the existing settings screens.
-   *
-   * It used to jump to the first accessible screen, which hid every other one
-   * and made the account item a shortcut with a different meaning each time.
-   * The dialog owns no settings; it only lists them with the same access
-   * verdict the sidebar computed.
-   */
-  const openGuildSettings = () => setSettingsOpen(true);
-
-  const sectionTitle = (section: { id: string; title: string | null }) =>
-    section.id === "home" ? t("nav.section.general") : t(`nav.section.${section.id}` as "nav.section.server");
-
-  const settingsEntries: ServerSettingEntry[] = navSections
-    .filter(section => section.id !== "home" && section.id !== "system")
-    .flatMap(section =>
-      section.items
-        .filter(item => item.key !== "audit")
-        .map(item => {
-          const text = navText(t, item.key);
-          return {
-            key: item.key,
-            label: text.label,
-            hint: text.hint,
-            group: sectionTitle(section),
-            icon: item.icon,
-            disabled: !allowed(item),
-            reason: denyReason(item)
-          };
-        })
-    );
 
   return (
     /*
@@ -476,14 +434,12 @@ export function AppShell({
         <ScrollArea className="min-h-0 flex-1">{nav(collapsed)}</ScrollArea>
         <Separator />
         <div className={cn("flex items-center gap-1 p-2", collapsed && "lg:flex-col lg:justify-center")}>
-          <AppearanceMenu iconOnly />
           {collapsed ? (
             <AccountMenu
               user={user}
               guild={guild}
               onLogout={onLogout}
               onOpenSettings={onOpenSettings}
-              onOpenGuildSettings={openGuildSettings}
               variant="compact"
             />
           ) : (
@@ -492,7 +448,6 @@ export function AppShell({
               guild={guild}
               onLogout={onLogout}
               onOpenSettings={onOpenSettings}
-              onOpenGuildSettings={openGuildSettings}
               className="flex-1"
             />
           )}
@@ -576,10 +531,6 @@ export function AppShell({
                       setMobileOpen(false);
                       onOpenSettings?.();
                     }}
-                    onOpenGuildSettings={() => {
-                      setMobileOpen(false);
-                      openGuildSettings();
-                    }}
                   />
                 </div>
               </div>
@@ -630,7 +581,6 @@ export function AppShell({
               guild={guild}
               onLogout={onLogout}
               onOpenSettings={onOpenSettings}
-              onOpenGuildSettings={openGuildSettings}
               variant="compact"
             />
           </div>
@@ -663,14 +613,6 @@ export function AppShell({
           </div>
         </main>
       </div>
-
-      <ServerSettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        guild={guild}
-        entries={settingsEntries}
-        onOpenView={onView}
-      />
     </div>
   );
 }
