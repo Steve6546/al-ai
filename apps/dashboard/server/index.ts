@@ -1161,11 +1161,15 @@ app.get("/auth/discord/callback", async (request, reply) => {
       app.log.warn({ err: error }, "Could not read the operator's guilds at sign-in; requiring the second factor");
       return null;
     });
-    const needsSecondFactor = requiresSecondFactor({
-      ownerId: env.ownerId,
-      discordUserId: identity.id,
-      guilds: adminGuilds
-    });
+    // 2FA is opt-in: an administrator is challenged only when they have actually
+    // enrolled an authenticator. Enrolment lives in the account settings, so a
+    // first sign-in — or an admin who never set it up — is not blocked by it.
+    const needsSecondFactor =
+      requiresSecondFactor({
+        ownerId: env.ownerId,
+        discordUserId: identity.id,
+        guilds: adminGuilds
+      }) && (await secondFactor.isEnrolled(identity.id));
 
     // A code exchanged through this origin is proof its redirect URI is
     // registered in the Developer Portal — Discord rejects an unregistered one

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AlertTriangle, Check, Clock, Copy, KeyRound, Loader2, LockKeyhole, ShieldCheck, X } from "lucide-react";
 import { api, ApiError } from "@/api";
-import { BrandMark } from "@/components/brand-mark";
 import {
   compactSecret,
   OtpInput,
@@ -247,14 +246,9 @@ export function TwoFactorScreen({
            * Left plate: the QR when setting up, the brand when signing in
            * ---------------------------------------------------------- */}
           <div className="relative flex flex-col justify-between gap-6 border-b border-white/10 bg-[#060a08] p-6 sm:p-8 lg:border-b-0 lg:border-e">
-            <div className="flex items-center gap-2.5">
-              <span className="grid size-10 place-items-center rounded-xl bg-[#6ee7b7] text-[#04110b]">
-                <BrandMark className="size-6" />
-              </span>
-              <div className="leading-tight">
-                <p className="text-sm font-semibold text-white">AL AI</p>
-                <p className="text-[11px] text-white/40">{t("login.subtitle")}</p>
-              </div>
+            <div className="leading-tight">
+              <p className="text-sm font-semibold text-white">AL AI</p>
+              <p className="text-[11px] text-white/40">{t("login.subtitle")}</p>
             </div>
 
             {qrReady && enrollment?.otpauthUri ? (

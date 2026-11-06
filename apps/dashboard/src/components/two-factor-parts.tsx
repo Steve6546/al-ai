@@ -67,10 +67,6 @@ export function QrPanel({ value, label, caption }: { value: string; label: strin
   return (
     <div className="relative mx-auto w-full max-w-[16rem]">
       <span aria-hidden className="absolute -inset-3 rounded-[1.75rem] bg-[#6ee7b7]/10 blur-2xl" />
-      <span aria-hidden className="absolute -start-2 -top-2 size-5 rounded-ss-lg border-s-2 border-t-2 border-[#6ee7b7]" />
-      <span aria-hidden className="absolute -end-2 -top-2 size-5 rounded-se-lg border-e-2 border-t-2 border-[#6ee7b7]" />
-      <span aria-hidden className="absolute -bottom-2 -start-2 size-5 rounded-es-lg border-b-2 border-s-2 border-[#6ee7b7]" />
-      <span aria-hidden className="absolute -bottom-2 -end-2 size-5 rounded-ee-lg border-b-2 border-e-2 border-[#6ee7b7]" />
       <div className="relative rounded-2xl bg-white p-3 shadow-[0_0_45px_rgba(110,231,183,0.18)]">
         <QRCodeSVG
           value={value}
