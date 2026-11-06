@@ -88,34 +88,25 @@ async function mountScreen() {
   return { container, root };
 }
 
-function slotByLabel(container: HTMLElement, label: string) {
-  const field = [...container.querySelectorAll("div")].find(node => node.querySelector("label")?.textContent?.trim() === label);
-  return field ? field.querySelector("span.relative.shrink-0") : null;
-}
-
-test("the banner slot draws the account's banner and says whose it is", async () => {
+test("the preview card draws the account's banner where the server has none", async () => {
   const { container, root } = await mountScreen();
   try {
-    const slot = slotByLabel(container, "غلاف البوت");
-    assert.ok(slot, "the banner field renders");
-    const image = slot.querySelector("img");
-    assert.equal(image?.getAttribute("src"), ACCOUNT_BANNER, "the account's banner is drawn where the server has none");
-    assert.equal(slot.textContent?.includes("غلاف الحساب"), true, "and it is labelled as the account's, not as a saved override");
-    assert.equal(slot.textContent?.includes("لا يوجد غلاف"), false, "the fake empty state is gone");
+    const banner = [...container.querySelectorAll<HTMLElement>("[style]")].find(element =>
+      element.style.backgroundImage.includes(ACCOUNT_BANNER)
+    );
+    assert.ok(banner, "the account's banner is drawn on the card where the server has none");
   } finally {
     await act(async () => root.unmount());
     container.remove();
   }
 });
 
-test("the picture slot does the same, and an animated account arrives as a gif", async () => {
+test("the preview card draws the account's picture, and an animated account arrives as a gif", async () => {
   const { container, root } = await mountScreen();
   try {
-    const slot = slotByLabel(container, "الصورة الأساسية");
-    const image = slot?.querySelector("img");
-    assert.equal(image?.getAttribute("src"), ACCOUNT_AVATAR, "the account's picture shows through");
-    assert.match(String(image?.getAttribute("src")), /\.gif\?/, "an animated account is served as the gif, so it animates");
-    assert.equal(slot?.textContent?.includes("صورة الحساب"), true, "labelled, never silent");
+    const image = [...container.querySelectorAll("img")].find(element => element.getAttribute("src") === ACCOUNT_AVATAR);
+    assert.ok(image, "the account's picture shows through where the server has none");
+    assert.match(ACCOUNT_AVATAR, /\.gif\?/, "an animated account is served as the gif, so it animates");
   } finally {
     await act(async () => root.unmount());
     container.remove();

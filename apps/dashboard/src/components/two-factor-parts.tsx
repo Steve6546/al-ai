@@ -46,9 +46,28 @@ export function downloadText(filename: string, text: string): boolean {
 
 async function copyText(text: string): Promise<boolean> {
   try {
-    if (!navigator.clipboard?.writeText) return false;
-    await navigator.clipboard.writeText(text);
-    return true;
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through to the legacy path */
+  }
+  // Insecure origins (plain HTTP on a LAN address) have no async clipboard;
+  // the selection + execCommand path is what makes the button work there.
+  try {
+    const field = document.createElement("textarea");
+    field.value = text;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed";
+    field.style.top = "-1000px";
+    field.style.opacity = "0";
+    document.body.appendChild(field);
+    field.select();
+    field.setSelectionRange(0, field.value.length);
+    const ok = document.execCommand("copy");
+    field.remove();
+    return ok;
   } catch {
     return false;
   }

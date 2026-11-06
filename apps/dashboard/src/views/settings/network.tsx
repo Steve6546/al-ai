@@ -229,7 +229,14 @@ export function NetworkView() {
         size="icon"
         className="size-7"
         aria-label={t("network.copyLabel", { label })}
-        onClick={async () => (await copy(value, value)) && push({ title: t("network.copied"), tone: "success" })}
+        onClick={async () => {
+          const ok = await copy(value, value);
+          push(
+            ok
+              ? { title: t("network.copied"), tone: "success" }
+              : { title: t("settings.security.copyFailed"), tone: "error" }
+          );
+        }}
       >
         {copied === value ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
       </Button>

@@ -35,6 +35,15 @@ export interface DraftForm<T> {
   reset: () => void;
   /** Rebases both values on what a save returned. The bar disappears. */
   commit: (next: T) => void;
+  /**
+   * Rebases only the saved value, keeping the operator's draft.
+   *
+   * Auto-save needs this: a save that resolves while the operator is still
+   * typing must not overwrite what they typed, but the value it *did* store is
+   * now the new reference. `dirty` then stays true if an edit arrived during
+   * the request, and the next debounce saves it.
+   */
+  rebaseSaved: (next: T) => void;
 }
 
 /**
@@ -88,5 +97,7 @@ export function useDraftForm<T>(
 
   const dirty = saved !== null && draft !== null && !equals(saved as NonNullable<T>, draft as NonNullable<T>);
 
-  return { saved, draft, dirty, setDraft, patch, reset, commit };
+  const rebaseSaved = useCallback((next: T) => setSaved(next), []);
+
+  return { saved, draft, dirty, setDraft, patch, reset, commit, rebaseSaved };
 }

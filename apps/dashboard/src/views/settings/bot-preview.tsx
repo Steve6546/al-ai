@@ -1,6 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Camera, Upload } from "lucide-react";
 import { activityTypeLabels, activityTypeShortLabels, botStatusDurations, botStatusLabels } from "@al-ai/core/browser";
 import { Separator } from "@/components/ui/separator";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ColorPicker } from "@/components/color-picker";
 import { useI18n, type Language, type Translate, type TranslationKey } from "@/lib/i18n";
 import type { ActivityType, BotStatus, BotStatusDuration } from "@/types";
 
@@ -159,7 +162,15 @@ export function BotLivePreview({
   guildName,
   memberCount,
   enabled = true,
-  pending = false
+  pending = false,
+  editable = false,
+  onPickAvatar,
+  onPickBanner,
+  onNicknameChange,
+  onBioChange,
+  onRoleColorChange,
+  nicknameMax,
+  bioMax
 }: {
   profile: PreviewProfile;
   guildName: string;
@@ -168,6 +179,19 @@ export function BotLivePreview({
   enabled?: boolean;
   /** True while the draft differs from what is stored - nothing is saved yet. */
   pending?: boolean;
+  /**
+   * When true the card itself becomes the editor: the picture and the banner
+   * are click targets, the name and the bio are inline fields, and the role
+   * colour opens a picker. The side form is gone; the card is the form.
+   */
+  editable?: boolean;
+  onPickAvatar?: () => void;
+  onPickBanner?: () => void;
+  onNicknameChange?: (value: string) => void;
+  onBioChange?: (value: string) => void;
+  onRoleColorChange?: (value: string | null) => void;
+  nicknameMax?: number;
+  bioMax?: number;
 }) {
   const { t } = useI18n();
 
@@ -222,7 +246,20 @@ export function BotLivePreview({
        * ---------------------------------------------------------------- */}
       <div className="overflow-hidden rounded-xl border border-border bg-card">
         <div
-          className="relative aspect-[5/2] w-full"
+          role={editable ? "button" : undefined}
+          tabIndex={editable ? 0 : undefined}
+          onClick={editable ? onPickBanner : undefined}
+          onKeyDown={
+            editable
+              ? event => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onPickBanner?.();
+                  }
+                }
+              : undefined
+          }
+          className={`relative aspect-[5/2] w-full ${editable ? "group cursor-pointer" : ""}`}
           style={
             banner
               ? { backgroundImage: `url(${banner})`, backgroundSize: "cover", backgroundPosition: "center" }
@@ -230,29 +267,102 @@ export function BotLivePreview({
           }
         >
           {!banner ? <span className="absolute inset-0 grid place-items-center text-[11px] text-white/70">{t("preview.noBanner")}</span> : null}
+          {editable ? (
+            <span className="absolute inset-0 grid place-items-center bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1 text-xs">
+                <Upload className="size-3.5" aria-hidden /> {t("customization.replace")}
+              </span>
+            </span>
+          ) : null}
         </div>
 
         <div className="relative px-4 pb-4">
           <div className="-mt-10 mb-3 flex items-end justify-between gap-2">
-            <PreviewAvatar
-              src={avatar}
-              alt={t("preview.avatarAlt")}
-              wrapperClassName="block size-20 overflow-hidden rounded-full border-4 border-card bg-muted"
-              imageClassName="size-full object-cover"
-              fallbackClassName="grid size-full place-items-center text-lg font-semibold text-muted-foreground"
-            />
+            {editable ? (
+              <button
+                type="button"
+                onClick={onPickAvatar}
+                aria-label={t("customization.replace")}
+                className="group relative rounded-full"
+              >
+                <PreviewAvatar
+                  src={avatar}
+                  alt={t("preview.avatarAlt")}
+                  wrapperClassName="block size-20 overflow-hidden rounded-full border-4 border-card bg-muted"
+                  imageClassName="size-full object-cover"
+                  fallbackClassName="grid size-full place-items-center text-lg font-semibold text-muted-foreground"
+                />
+                <span className="absolute inset-0 grid place-items-center rounded-full bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100">
+                  <Camera className="size-5" aria-hidden />
+                </span>
+              </button>
+            ) : (
+              <PreviewAvatar
+                src={avatar}
+                alt={t("preview.avatarAlt")}
+                wrapperClassName="block size-20 overflow-hidden rounded-full border-4 border-card bg-muted"
+                imageClassName="size-full object-cover"
+                fallbackClassName="grid size-full place-items-center text-lg font-semibold text-muted-foreground"
+              />
+            )}
           </div>
 
           <div className="space-y-1">
-            <p className="font-semibold" style={{ color: roleColor ?? undefined }}>
-              {displayName}
-            </p>
+            <div className="flex items-center gap-2">
+              {editable ? (
+                <input
+                  id="nickname"
+                  value={profile.nickname}
+                  onChange={event => onNicknameChange?.(event.target.value)}
+                  maxLength={nicknameMax}
+                  placeholder={profile.username}
+                  aria-label={t("customization.nickname")}
+                  style={{ color: roleColor ?? undefined }}
+                  className="min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 font-semibold outline-none ring-1 ring-border focus:ring-2 focus:ring-primary"
+                />
+              ) : (
+                <p className="font-semibold" style={{ color: roleColor ?? undefined }}>
+                  {displayName}
+                </p>
+              )}
+              {editable ? (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={t("customization.roleColor")}
+                      title={t("customization.roleColor")}
+                      className="grid size-6 shrink-0 place-items-center rounded-full border border-border bg-background/60"
+                    >
+                      <span className="size-3.5 rounded-full border border-border" style={{ backgroundColor: roleColor ?? "#4e5058" }} />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-64 p-3">
+                    <ColorPicker value={profile.roleColor} onChange={value => onRoleColorChange?.(value)} />
+                  </PopoverContent>
+                </Popover>
+              ) : null}
+            </div>
             <p className="text-sm text-muted-foreground">
               {t("preview.memberOf")} <span className="text-foreground">{guildName}</span>
             </p>
           </div>
 
-          {bio ? (
+          {editable ? (
+            <>
+              <Separator className="my-3" />
+              <textarea
+                id="bio"
+                value={profile.bio ?? ""}
+                onChange={event => onBioChange?.(event.target.value)}
+                maxLength={bioMax}
+                rows={2}
+                placeholder={t("customization.bioPlaceholder")}
+                aria-label={t("customization.bio")}
+                className="w-full resize-none rounded-lg border border-border bg-background/40 p-2 text-sm text-muted-foreground outline-none focus:ring-2 focus:ring-primary"
+              />
+            </>
+          ) : bio ? (
             <>
               <Separator className="my-3" />
               <p className="text-sm whitespace-pre-wrap text-muted-foreground">{bio}</p>

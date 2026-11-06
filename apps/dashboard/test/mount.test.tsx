@@ -595,7 +595,7 @@ test("the security screen shows its sections and marks what the engine does not 
  * deletes. The pair of assertions is the whole change in one place: the server
  * is named, the platform is not.
  */
-test("the identity screen renders its fields, not just a spinner", async () => {
+test("the identity screen renders its card, not just a spinner", async () => {
   stubFetch();
   const { html } = await mount(`/dashboard/${GUILD_ID}/customization`);
 
@@ -603,14 +603,13 @@ test("the identity screen renders its fields, not just a spinner", async () => {
   // is the screen's own subtitle — a string only this view produces. Asserting
   // on the label would pass on a shell with an empty content area.
   assert.match(html, /لقب ونبذة وصورة وغلاف/, "the screen's own header renders");
-  assert.match(html, /اللقب/, "the nickname field renders");
   // The one scope, named on the screen itself.
   assert.match(html, /هذا السيرفر/, "the per-guild scope is named");
   assert.doesNotMatch(html, /كل السيرفرات/, "…and the platform-wide scope is named nowhere");
   assert.match(html, /معاينة حيّة/, "the live preview is rendered");
-  assert.match(html, /AL uwu/, "the stored nickname reaches the form");
-  assert.match(html, /نبذة هذا السيرفر/, "the stored bio reaches the form");
-  assert.match(html, /id="bio"/, "…as an editor, not as plain text");
+  assert.match(html, /AL uwu/, "the stored nickname reaches the card");
+  assert.match(html, /نبذة هذا السيرفر/, "the stored bio reaches the card");
+  assert.match(html, /تعديل/, "the Edit toggle turns the card into the editor");
   // The account picture is the only thing on this page that does not belong to
   // the guild, and it is drawn as the *fallback* — so its presence is also what
   // proves the read-only profile read arrived at all.
@@ -637,21 +636,10 @@ test("a guild admin edits every field of their own server", async () => {
 
     assert.deepEqual(fatal(errors), []);
 
-    // The controls' own strings — an id, two aria-labels, a placeholder — not
-    // their labels. A label is drawn for every viewer, so asserting on one
-    // would go green the moment the control behind it stopped existing.
-    assert.match(html, /id="bio"/, "the bio is a real editor for a guild admin");
-    assert.match(html, /id="nickname"/, "…as is the nickname");
-    // The names are the screen's own: «الصورة الأساسية» and «غلاف البوت» are
-    // the two fields that write *this server's* override, so neither may be
-    // named after the account the override falls back to.
-    assert.match(html, /aria-label="رابط الصورة الأساسية"/, "…and the server picture accepts a pasted address");
-    assert.match(html, /aria-label="رابط غلاف البوت"/, "…and so does the banner");
-    assert.doesNotMatch(html, /رابط صورة السيرفر/, "the picture is not named after the server any more");
-
-    // The stored row reaches the form rather than the defaults, which is what
-    // separates "the fields are editable" from "the fields are editable and
-    // wired to the right row".
+    // The card is the editor now: the Edit toggle is the way in, and the stored
+    // row reaches the card rather than the defaults — which separates "the
+    // fields are editable" from "the fields are editable and wired to the row".
+    assert.match(html, /تعديل/, "the Edit toggle is offered to a guild admin");
     assert.match(html, /نبذة هذا السيرفر/, "the stored bio is loaded");
     assert.match(html, /AL uwu/, "the stored nickname is loaded");
 
@@ -809,14 +797,15 @@ test("the presence screen says out loud that its reach is every server", async (
   assert.doesNotMatch(html, /سيرفرات ديسكورد/, "the placeholder is an example, not a value the bot applies");
 });
 
-test("the live preview stays in view while the settings scroll", async () => {
+test("the identity screen is the card, with no side form left", async () => {
   stubFetch();
   const { html } = await mount(`/dashboard/${GUILD_ID}/customization`);
 
-  const column = html.match(/<div class="[^"]*lg:sticky[^"]*"/);
-  assert.ok(column, "the preview column is sticky");
-  assert.match(column![0], /lg:top-6/, "…at the shell's own padding, so it comes to rest at the top of the content");
-  assert.match(column![0], /lg:self-start/, "…and does not stretch, which would leave it nowhere to travel");
+  // The old layout put the preview in a sticky side column beside a long form.
+  // The form is gone; the card is the page, so there is nothing to pin.
+  assert.doesNotMatch(html, /lg:sticky/, "no sticky side column is left");
+  assert.match(html, /معاينة حيّة/, "the preview card is the page");
+  assert.match(html, /تعديل/, "and the Edit toggle is how it becomes the editor");
 });
 
 /* ------------------------------------------------------------------ *
@@ -1096,25 +1085,26 @@ test("a locked role icon cannot be picked and is left out of the save", async ()
     assert.ok(picker, "the role icon picker is rendered");
     assert.equal((picker as HTMLButtonElement).disabled, true, "the locked picker cannot be clicked");
 
-    // Make the form dirty so the save bar appears, then save once. React tracks
-    // its own value, so the native setter has to be used for the change to land.
+    // Enter edit mode — the card's fields exist only then — and change the
+    // nickname. React tracks its own value, so the native setter is used.
+    const edit = [...container.querySelectorAll("button")].find(el => el.textContent?.trim() === "تعديل");
+    assert.ok(edit, "the Edit toggle is rendered");
+    await act(async () => {
+      (edit as HTMLButtonElement).click();
+      await new Promise(resolve => setTimeout(resolve, 15));
+    });
+
     const nickname = container.querySelector<HTMLInputElement>("#nickname");
-    assert.ok(nickname, "the nickname field is rendered");
+    assert.ok(nickname, "the nickname field is rendered in edit mode");
     await act(async () => {
       const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")?.set;
       setValue?.call(nickname, "AL محفوظ");
       nickname!.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
     });
-    for (let i = 0; i < 3; i += 1) {
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, 15)); });
-    }
 
-    const save = [...container.querySelectorAll("button")].find(el => /حفظ/.test(el.textContent ?? ""));
-    assert.ok(save, "the save bar appeared once the nickname changed");
-    await act(async () => {
-      (save as HTMLButtonElement).click();
-      await new Promise(resolve => setTimeout(resolve, 60));
-    });
+    // Auto-save: wait past the debounce, then let the request settle.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 900)); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 80)); });
 
     assert.equal(writes.length, 1, "exactly one customization write was sent");
     assert.doesNotMatch(writes[0]!, /roleIconUrl/, "the gated icon was left out of the request");
