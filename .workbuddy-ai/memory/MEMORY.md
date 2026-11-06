@@ -21,6 +21,10 @@ HeroUI فقط. **فحوص المشروع الحيّة هي:** `scripts/ui-check.
   `storage.test.ts` بصمت ويرجع **exit 0**.
 - PostgreSQL 17 على **55432** (`C:\Users\dlwta\.al-ai\pgdata`)؛ `psql` ليس على `PATH`؛ **5432 مشغول — لا تلمسه**.
   اقرأ `information_schema.columns` قبل أي استعلام.
+- **⚠️ ngrok + بروكسي الـsandbox لا يجتمعان:** المتغيّرات `http_proxy`/`https_proxy` الموروثة تُسقط
+  الوكيل بـ`ERR_NGROK_9009` (خطة مجانية ترفض البروكسي) فيخرج برمز 1 ثم يتوقف بعد 3 محاولات.
+  شغّل النفق بـ`env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY npm run dev -- -Tunnel`
+  كمهمة خلفية مُدارة؛ الدليل `apps/dashboard/.al-tunnel.log` وواجهة ngrok المحلية `:4040/api/tunnels`.
 - سكربتات الـworkspace بـcwd = مجلد الحزمة ⇒ `--env-file=../../.env`. **`tsx` بلا hot-reload** ⇒ أعد التشغيل بعد
   كل تعديل خلفي وإلا خدمت مسارات قديمة (404).
 - **التسليم** `present_files` بمسار مطلق؛ **إثبات الواجهة** = طابق بصمة الحزمة المخدومة مع `dist/assets/`.
