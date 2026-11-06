@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Eye, EyeOff, Maximize2, Minimize2, User } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
   AVATAR_MAX_SIZE,
@@ -67,6 +68,7 @@ export function WelcomeImageCanvas({
   onSelect: (selection: Selection) => void;
   onConfigChange: (next: WelcomeImageConfig) => void;
 }) {
+  const { t } = useI18n();
   const canvasRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   /** The clean look: the card as the members will see it, with no editing. */
@@ -439,11 +441,11 @@ export function WelcomeImageCanvas({
     selected?.kind === "custom" ? config.customTexts.find(layer => layer.id === selected.id) ?? null : null;
   const selectedInfo = selected
     ? selected.kind === "avatar"
-      ? { label: "الصورة الرمزية", size: `${config.avatar.size}px` }
+      ? { label: t("welcome.canvas.avatar"), size: `${config.avatar.size}px` }
       : selected.kind === "username"
-        ? { label: "اسم المستخدم", size: `${config.username.fontSize}px` }
+        ? { label: t("welcome.canvas.username"), size: `${config.username.fontSize}px` }
         : selectedLayer
-          ? { label: "نص مخصص", size: `${selectedLayer.fontSize}px` }
+          ? { label: t("welcome.canvas.custom"), size: `${selectedLayer.fontSize}px` }
           : null
     : null;
 
@@ -461,11 +463,11 @@ export function WelcomeImageCanvas({
           <p className="text-xs text-muted-foreground">
             {preview
               ? sampleAvatarUrl
-                ? "معاينة نظيفة — الصورة هنا عيّنة بحسابك، والعضو الحقيقي يحلّ مكانه عند الترحيب."
-                : "معاينة نظيفة — كما ستراها الأعضاء."
+                ? t("welcome.canvas.cleanSample")
+                : t("welcome.canvas.clean")
               : selectedInfo
-                ? `المحدد: ${selectedInfo.label} · ${selectedInfo.size}`
-                : "اختر طبقة من اللوحة أو التبويبات."}
+                ? t("welcome.canvas.selected", { label: selectedInfo.label, size: selectedInfo.size })
+                : t("welcome.canvas.pickLayer")}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -474,10 +476,10 @@ export function WelcomeImageCanvas({
             onClick={() => setPreview(current => !current)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted"
             aria-pressed={preview}
-            aria-label={preview ? "العودة إلى وضع التحرير" : "معاينة الصورة كما ستراها الأعضاء"}
+            aria-label={preview ? t("welcome.canvas.backToEdit") : t("welcome.canvas.previewAria")}
           >
             {preview ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-            {preview ? "تحرير" : "معاينة"}
+            {preview ? t("welcome.canvas.edit") : t("welcome.canvas.preview")}
           </button>
           <button
             type="button"
@@ -487,10 +489,10 @@ export function WelcomeImageCanvas({
             }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted"
             aria-pressed={expanded}
-            aria-label={expanded ? "إغلاق المعاينة المكبّرة" : "تكبير المعاينة لملء الشاشة"}
+            aria-label={expanded ? t("welcome.canvas.closeAria") : t("welcome.canvas.expandAria")}
           >
             {expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-            {expanded ? "إغلاق" : "تكبير"}
+            {expanded ? t("welcome.canvas.close") : t("welcome.canvas.expand")}
           </button>
         </div>
       </div>
@@ -518,14 +520,14 @@ export function WelcomeImageCanvas({
         onPointerCancel={endDrag}
         onClick={onCanvasClick}
         role="application"
-        aria-label="لوحة تصميم صورة الترحيب"
+        aria-label={t("welcome.canvas.designLabel")}
       >
         {backgroundLayer ? (
           <div className="absolute inset-0" style={{ ...backgroundLayer, opacity: backgroundOpacity }} aria-hidden />
         ) : null}
         {!preview ? (
           <span className="absolute top-2 start-2 z-10 rounded-md bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground backdrop-blur-sm">
-            اسحب لتحريك الطبقة
+            {t("welcome.canvas.dragHint")}
           </span>
         ) : null}
 

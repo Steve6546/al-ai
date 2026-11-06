@@ -10,8 +10,10 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
+import { formatMemberCount } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { tierLabels, type Guild } from "@/types";
+import type { Guild } from "@/types";
 import type { ViewKey } from "@/components/app-shell";
 
 export type ServerSettingEntry = {
@@ -46,6 +48,7 @@ export function ServerSettingsDialog({
   entries: ServerSettingEntry[];
   onOpenView: (view: ViewKey) => void;
 }) {
+  const { t, language } = useI18n();
   const groups = entries.reduce<{ title: string; items: ServerSettingEntry[] }[]>((all, entry) => {
     const group = all.find(item => item.title === entry.group);
     if (group) group.items.push(entry);
@@ -57,24 +60,27 @@ export function ServerSettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>إعدادات هذا السيرفر</DialogTitle>
+          <DialogTitle>{t("serverSettings.title")}</DialogTitle>
           <DialogDescription>
-            {guild.name} · {guild.tier ? tierLabels[guild.tier] : "بدون رتبة"} — اختر قسماً لفتحه.
+            {t("serverSettings.description", {
+              guild: guild.name,
+              role: guild.tier ? t(`tier.${guild.tier}` as "tier.owner") : t("serverSettings.noTier")
+            })}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <Badge variant={guild.botPresent ? "secondary" : "destructive"}>
-            {guild.botPresent ? "البوت مضاف" : "البوت غير مضاف"}
+            {guild.botPresent ? t("serverSettings.botAdded") : t("serverSettings.botMissing")}
           </Badge>
-          <span>{guild.memberCount === null ? "عدد الأعضاء غير متاح" : `${guild.memberCount} عضواً`}</span>
+          <span>{formatMemberCount(guild.memberCount, language)}</span>
         </div>
 
         {!guild.botPresent ? (
           <div className="flex flex-col gap-2 rounded-xl border border-warning/40 bg-warning/10 p-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-warning">أضف AL AI إلى السيرفر لفتح الإعدادات.</p>
+            <p className="text-sm text-warning">{t("serverSettings.addPrompt")}</p>
             <Button asChild size="sm" variant="outline" className="shrink-0 border-warning/50">
-              <a href={`/api/guilds/${guild.id}/invite`}>إضافة البوت</a>
+              <a href={`/api/guilds/${guild.id}/invite`}>{t("serverSettings.addBot")}</a>
             </Button>
           </div>
         ) : null}
@@ -110,7 +116,7 @@ export function ServerSettingsDialog({
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm font-medium leading-tight">{entry.label}</span>
                         <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                          {entry.disabled ? entry.reason ?? "غير متاح" : entry.hint}
+                          {entry.disabled ? entry.reason ?? t("common.notAvailable") : entry.hint}
                         </span>
                       </span>
                       {entry.disabled ? (
@@ -128,7 +134,7 @@ export function ServerSettingsDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            إغلاق
+            {t("common.close")}
           </Button>
         </DialogFooter>
       </DialogContent>

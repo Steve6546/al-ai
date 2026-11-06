@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Activity, Loader2 } from "lucide-react";
-import { MAX_ACTIVITY_TEXT_LENGTH, activityTypeShortLabels, activityTypeTerms, activityTypes } from "@al-ai/core/browser";
+import { MAX_ACTIVITY_TEXT_LENGTH, activityTypes } from "@al-ai/core/browser";
 import { api } from "@/api";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { SaveBar } from "@/components/save-bar";
 import { StatusDot, StatusPicker } from "@/components/status-picker";
@@ -11,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { activityLabel, durationLabel, statusLabel } from "@/views/settings/bot-preview";
+import { activitySummaryLabel, durationLabel, statusLabel } from "@/views/settings/bot-preview";
 import type { BotPresenceSettings, Guild } from "@/types";
 
 /**
@@ -34,6 +35,7 @@ import type { BotPresenceSettings, Guild } from "@/types";
  * Discord call that never happened.
  */
 export function BotPresenceView({ guild }: { guild: Guild }) {
+  const { t, language } = useI18n();
   const [settings, setSettings] = useState<BotPresenceSettings | null>(null);
   const form = useDraftForm(settings);
   const [error, setError] = useState<string | null>(null);
@@ -47,12 +49,12 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
     api
       .botPresence(guild.id)
       .then(result => !cancelled && setSettings(result.settings))
-      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
+      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : t("presence.loadFailed")));
 
     return () => {
       cancelled = true;
     };
-  }, [guild.id]);
+  }, [guild.id, t]);
 
   if (error) {
     return (
@@ -65,13 +67,13 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="size-4 animate-spin" />
-        جارٍ التحميل
+        {t("presence.loading")}
       </div>
     );
   }
 
   const { draft, patch, reset, dirty } = form;
-  const duration = durationLabel(draft.statusDuration);
+  const duration = durationLabel(draft.statusDuration, t);
   const activityText = (draft.activityText ?? "").trim();
 
   const onSave = async () => {
@@ -81,10 +83,10 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
       // Not "applied": the dashboard cannot apply this. The bot picks the row up
       // on its next tick, which is why the sentence names the delay instead of
       // claiming a write that never happened.
-      push({ tone: "success", title: "تم حفظ الحالة — يطبّقها البوت خلال ثوانٍ في كل السيرفرات" });
+      push({ tone: "success", title: t("presence.saved") });
     } catch (cause) {
-      const refused = cause instanceof Error ? cause : new Error("تعذّر حفظ الحالة.");
-      push({ tone: "error", title: "تعذّر حفظ الحالة", description: refused.message });
+      const refused = cause instanceof Error ? cause : new Error(t("presence.saveFailedFallback"));
+      push({ tone: "error", title: t("presence.saveFailed"), description: refused.message });
       throw refused;
     }
   };
@@ -97,21 +99,21 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
           the same thing twice, and the Alert carried `role="alert"` — so a
           static note interrupted a screen reader on every load. */}
       <p className="text-xs text-muted-foreground">
-        الحالة والنشاط يُكتبان على اتصال البوت (gateway)، فيظهران في كل السيرفرات — بما فيها {guild.name}.
+        {t("presence.scope", { guild: guild.name })}
       </p>
 
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <Activity className="size-4" />
-            الحالة والنشاط
+            {t("presence.title")}
           </CardTitle>
-          <CardDescription>اختر الحالة ومدة انتهائها إن أردت، واكتب النشاط الذي يظهر تحتها.</CardDescription>
+          <CardDescription>{t("presence.subtitle")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label className="text-xs">حالة البوت</Label>
+              <Label className="text-xs">{t("presence.status")}</Label>
               <StatusPicker
                 className="w-full"
                 status={draft.status}
@@ -129,13 +131,13 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
               {/* One label for both controls: the kind and its text are two
                   halves of one activity, and naming them separately is what made
                   the old card read as two fields. */}
-              <Label className="text-xs">نشاط البوت</Label>
+              <Label className="text-xs">{t("presence.activity")}</Label>
               <div className="flex gap-2">
                 <Select
                   value={draft.activityType}
                   onValueChange={value => patch({ activityType: value as BotPresenceSettings["activityType"] })}
                 >
-                  <SelectTrigger className="w-40 shrink-0 rounded-xl" aria-label="نوع النشاط">
+                  <SelectTrigger className="w-40 shrink-0 rounded-xl" aria-label={t("presence.activityKind")}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -143,10 +145,10 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
                       <SelectItem
                         key={type}
                         value={type}
-                        textValue={activityTypeShortLabels[type]}
-                        hint={activityTypeTerms[type]}
+                        textValue={t(`presence.kind.${type}` as TranslationKey)}
+                        hint={language === "ar" ? t(`presence.term.${type}` as TranslationKey) : undefined}
                       >
-                        {activityTypeShortLabels[type]}
+                        {t(`presence.kind.${type}` as TranslationKey)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -155,7 +157,7 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
                   value={draft.activityText}
                   maxLength={MAX_ACTIVITY_TEXT_LENGTH}
                   onChange={event => patch({ activityText: event.target.value })}
-                  placeholder="مثال: يراقب السيرفر"
+                  placeholder={t("presence.activityPlaceholder")}
                   className="min-w-0 flex-1 rounded-xl"
                 />
               </div>
@@ -167,7 +169,7 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
                 as though it were the value the bot would choose.
               */}
               <p className="text-xs text-muted-foreground">
-                اتركه فارغاً فلا يظهر أي نشاط تحت الاسم.
+                {t("presence.activityHint")}
               </p>
             </div>
           </div>
@@ -178,15 +180,15 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
           drafts; this is what the bot will push, and it is deliberately plain
           text so a value that did not survive normalisation is visible. */}
       <div className="rounded-xl border border-border bg-card px-3 py-2.5 text-xs">
-        <p className="mb-1 font-medium text-muted-foreground">ما سيطبّقه البوت</p>
+        <p className="mb-1 font-medium text-muted-foreground">{t("presence.applied")}</p>
         <p className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1.5">
             <StatusDot status={draft.status} size={9} />
-            <span className="font-medium">{statusLabel(draft.status)}</span>
+            <span className="font-medium">{statusLabel(draft.status, t)}</span>
             {duration ? <span className="text-muted-foreground">· {duration}</span> : null}
           </span>
           <span className="text-muted-foreground">
-            {activityText ? `${activityLabel(draft.activityType)} ${activityText}` : "لا يوجد نشاط ظاهر"}
+            {activityText ? `${activitySummaryLabel(draft.activityType, t, language)} ${activityText}` : t("presence.noActivity")}
           </span>
         </p>
       </div>
@@ -194,9 +196,9 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
 
       {dirty ? (
         <SaveBar
-          message="تغييرات غير محفوظة"
-          saveLabel="حفظ الحالة"
-          cancelLabel="تجاهل"
+          message={t("presence.unsaved")}
+          saveLabel={t("presence.save")}
+          cancelLabel={t("presence.discard")}
           onCancel={reset}
           onSave={onSave}
         />

@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { INVITE_MESSAGE_TOKENS, MAX_FAKE_ACCOUNT_DAYS, normaliseInviteMilestones } from "@al-ai/core/browser";
+import { useI18n } from "@/lib/i18n";
 import type { DiscordRole, Guild, InviteMilestone, InviteSettings } from "@/types";
 
 const NONE_ROLE = "__none__";
@@ -28,6 +29,7 @@ const NONE_ROLE = "__none__";
  * settings screen carries, never a second copy of it.
  */
 export function InvitesView({ guild }: { guild: Guild }) {
+  const { t } = useI18n();
   const [settings, setSettings] = useState<InviteSettings | null>(null);
   const [problems, setProblems] = useState<{ code: string; message: string }[]>([]);
   const [roles, setRoles] = useState<DiscordRole[]>([]);
@@ -48,11 +50,11 @@ export function InvitesView({ guild }: { guild: Guild }) {
         setProblems(result.problems ?? []);
         setRoles(result.roles);
       })
-      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
+      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : t("invites.loadFailed")));
     return () => {
       cancelled = true;
     };
-  }, [guild.id]);
+  }, [guild.id, t]);
 
   if (error) return <LoadError message={error} />;
   if (!settings || !draft) return <LoadingRow />;
@@ -60,16 +62,16 @@ export function InvitesView({ guild }: { guild: Guild }) {
   const addMilestone = () => {
     const net = Number(newMilestone.net);
     if (!Number.isInteger(net) || net < 1) {
-      push({ title: "حدّد عتبة صحيحة (رقم موجب).", tone: "error" });
+      push({ title: t("invites.invalidThreshold"), tone: "error" });
       return;
     }
     if (newMilestone.roleId === NONE_ROLE) {
-      push({ title: "اختر رتبة القاعدة قبل الإضافة.", tone: "error" });
+      push({ title: t("invites.chooseRoleFirst"), tone: "error" });
       return;
     }
     const next = normaliseInviteMilestones([...draft.milestoneRoles, { id: `ms-${Date.now()}`, net, roleId: newMilestone.roleId }]);
     if (next.length === draft.milestoneRoles.length) {
-      push({ title: "هذه القاعدة مكررة — رتبة واحدة وعتبة واحدة لا تُضاف مرتين.", tone: "error" });
+      push({ title: t("invites.duplicateRule"), tone: "error" });
       return;
     }
     patch({ milestoneRoles: next });
@@ -80,7 +82,7 @@ export function InvitesView({ guild }: { guild: Guild }) {
     patch({ milestoneRoles: draft.milestoneRoles.filter(rule => rule.id !== milestone.id || rule.roleId !== milestone.roleId) });
   };
 
-  const roleName = (roleId: string) => roles.find(role => role.id === roleId)?.name ?? "رتبة غير معروفة";
+  const roleName = (roleId: string) => roles.find(role => role.id === roleId)?.name ?? t("invites.unknownRole");
 
   return (
     <div className="space-y-4">
@@ -99,28 +101,28 @@ export function InvitesView({ guild }: { guild: Guild }) {
 
       <ModuleStatusCard
         icon={Link2}
-        title="تتبّع الدعوات"
-        description="امنح رتباً عند بلوغ عدد الدعوات."
+        title={t("invites.moduleTitle")}
+        description={t("invites.moduleBody")}
         enabled={draft.enabled}
         onToggle={enabled => patch({ enabled })}
-        toggleLabel="تفعيل موديول الإحالات"
-        disabledHint="الإحالات متوقفة. فعّلها لبدء التتبع ومنح الرتب."
-        enableLabel="تفعيل الإحالات"
+        toggleLabel={t("invites.moduleToggle")}
+        disabledHint={t("invites.moduleDisabled")}
+        enableLabel={t("invites.moduleEnable")}
       />
 
       {draft.enabled ? (
         <>
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">آلية التتبع</CardTitle>
+          <CardTitle className="text-base">{t("invites.tracking")}</CardTitle>
           <CardDescription>
-            الرابط المخصص لا يمنح نقطة، والدعوة الذاتية لا تُحسب.
+            {t("invites.trackingBody")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label className="text-xs">عتبة الحساب الوهمي (أيام)</Label>
+              <Label className="text-xs">{t("invites.fakeAge")}</Label>
               <Input
                 type="number"
                 min={0}
@@ -128,15 +130,15 @@ export function InvitesView({ guild }: { guild: Guild }) {
                 value={draft.fakeAccountDays}
                 onChange={event => patch({ fakeAccountDays: Number(event.target.value) })}
               />
-              <p className="text-[10px] text-muted-foreground">0 = بلا حد للعمر.</p>
+              <p className="text-[10px] text-muted-foreground">{t("invites.fakeAgeHint")}</p>
             </div>
             <div className="grid grid-cols-1 gap-2 self-end">
               <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-1.5">
-                <span className="text-xs">إبقاء رتب الإنجاز عند انخفاض الصافي</span>
+                <span className="text-xs">{t("invites.keepRoles")}</span>
                 <Switch checked={draft.keepRolesOnLeave} onCheckedChange={keepRolesOnLeave => patch({ keepRolesOnLeave })} />
               </label>
               <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-1.5">
-                <span className="text-xs">تسجيل محاولات الدعوة الذاتية</span>
+                <span className="text-xs">{t("invites.logSelf")}</span>
                 <Switch checked={draft.logSelfInvites} onCheckedChange={logSelfInvites => patch({ logSelfInvites })} />
               </label>
             </div>
@@ -144,20 +146,20 @@ export function InvitesView({ guild }: { guild: Guild }) {
 
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-1.5">
-              <span className="text-xs">سجل الدخول</span>
+              <span className="text-xs">{t("invites.logJoins")}</span>
               <Switch checked={draft.logJoins} onCheckedChange={logJoins => patch({ logJoins })} />
             </label>
             <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-1.5">
-              <span className="text-xs">سجل الخروج والخصم</span>
+              <span className="text-xs">{t("invites.logLeaves")}</span>
               <Switch checked={draft.logLeaves} onCheckedChange={logLeaves => patch({ logLeaves })} />
             </label>
             <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-1.5">
-              <span className="text-xs">سجل رتب الإنجاز</span>
+              <span className="text-xs">{t("invites.logMilestones")}</span>
               <Switch checked={draft.logMilestones} onCheckedChange={logMilestones => patch({ logMilestones })} />
             </label>
           </div>
           <p className="text-[10px] text-muted-foreground">
-            تُرسل إلى قناة «الدعوات» في السجلات.
+            {t("invites.logChannel")}
           </p>
         </CardContent>
       </Card>
@@ -165,16 +167,16 @@ export function InvitesView({ guild }: { guild: Guild }) {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
-            <Users className="size-4" /> رتب الإنجاز (Milestones)
+            <Users className="size-4" /> {t("invites.milestones")}
           </CardTitle>
           <CardDescription>
-            رتب تُمنح عند بلوغ عتبة الإحالات، وتُسحب عند النزول عنها.
+            {t("invites.milestonesBody")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {draft.milestoneRoles.length === 0 && (
             <p className="rounded-lg border border-dashed border-border/80 px-3 py-4 text-center text-xs text-muted-foreground">
-              لا توجد قواعد. أضف أول عتبة.
+              {t("invites.milestonesEmpty")}
             </p>
           )}
           {draft.milestoneRoles.length > 0 && (
@@ -185,10 +187,12 @@ export function InvitesView({ guild }: { guild: Guild }) {
                   className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-1.5"
                 >
                   <span className="text-xs">
-                    <span className="font-semibold">{milestone.net}</span> إحالة صافية ← رتبة{" "}
-                    <span className="font-semibold">{roleName(milestone.roleId)}</span>
+                    {t("invites.milestoneRule", {
+                      count: milestone.net,
+                      role: roleName(milestone.roleId)
+                    })}
                   </span>
-                  <Button variant="ghost" size="icon" className="size-7" onClick={() => removeMilestone(milestone)} aria-label="حذف القاعدة">
+                  <Button variant="ghost" size="icon" className="size-7" onClick={() => removeMilestone(milestone)} aria-label={t("invites.deleteRule")}>
                     <Trash2 className="size-3.5" />
                   </Button>
                 </li>
@@ -197,23 +201,23 @@ export function InvitesView({ guild }: { guild: Guild }) {
           )}
           <div className="flex flex-wrap items-end gap-2">
             <div className="w-28 space-y-1">
-              <Label className="text-xs">العتبة</Label>
+              <Label className="text-xs">{t("invites.threshold")}</Label>
               <Input
                 type="number"
                 min={1}
-                placeholder="مثال: 5"
+                placeholder={t("invites.thresholdPlaceholder")}
                 value={newMilestone.net}
                 onChange={event => setNewMilestone(current => ({ ...current, net: event.target.value }))}
               />
             </div>
             <div className="min-w-52 flex-1 space-y-1">
-              <Label className="text-xs">الرتبة</Label>
+              <Label className="text-xs">{t("invites.role")}</Label>
               <Select
                 value={newMilestone.roleId}
                 onValueChange={roleId => setNewMilestone(current => ({ ...current, roleId }))}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر رتبة" />
+                  <SelectValue placeholder={t("invites.chooseRole")} />
                 </SelectTrigger>
                 <SelectContent>
                   {roles.map(role => (
@@ -225,12 +229,12 @@ export function InvitesView({ guild }: { guild: Guild }) {
               </Select>
             </div>
             <Button type="button" size="sm" onClick={addMilestone}>
-              <Plus className="size-3.5" /> إضافة
+              <Plus className="size-3.5" /> {t("invites.add")}
             </Button>
           </div>
           {roles.length === 0 && (
             <p className="text-[10px] text-muted-foreground">
-              اختر رتبة أسفل رتبة البوت.
+              {t("invites.roleBelowBot")}
             </p>
           )}
         </CardContent>
@@ -238,9 +242,9 @@ export function InvitesView({ guild }: { guild: Guild }) {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">قوالب السجلات</CardTitle>
+          <CardTitle className="text-base">{t("invites.templates")}</CardTitle>
           <CardDescription>
-            نصوص سجل الدخول والخروج ورتب الإنجاز. اضغط متغيراً لإدراجه.
+            {t("invites.templatesBody")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -253,9 +257,9 @@ export function InvitesView({ guild }: { guild: Guild }) {
           </div>
           {(
             [
-              { key: "joinMessage", label: "قالب سجل الدخول", rows: 4 },
-              { key: "leaveMessage", label: "قالب سجل الخروج والخصم", rows: 3 },
-              { key: "milestoneMessage", label: "قالب سجل رتبة الإنجاز", rows: 2 }
+              { key: "joinMessage", label: t("invites.joinTemplate"), rows: 4 },
+              { key: "leaveMessage", label: t("invites.leaveTemplate"), rows: 3 },
+              { key: "milestoneMessage", label: t("invites.milestoneTemplate"), rows: 2 }
             ] as const
           ).map(field => (
             <div key={field.key} className="space-y-1.5">
@@ -278,14 +282,14 @@ export function InvitesView({ guild }: { guild: Guild }) {
 
       {dirty && (
         <SaveBar
-          message="تغييرات غير محفوظة"
-          saveLabel="حفظ التعديلات"
-          cancelLabel="إلغاء"
+          message={t("invites.unsaved")}
+          saveLabel={t("invites.save")}
+          cancelLabel={t("common.cancel")}
           onCancel={reset}
           onSave={async () => {
             const result = await api.saveInvitesSettings(guild.id, draft);
             commit(result.settings);
-            push({ title: "حُفظت إعدادات الإحالات — تُطبَّق على البوت خلال نصف دقيقة.", tone: "success" });
+            push({ title: t("invites.saved"), tone: "success" });
           }}
         />
       )}

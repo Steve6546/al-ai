@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { RotateCcw, TriangleAlert } from "lucide-react";
+import { readStoredLanguage, translate } from "@/lib/i18n";
 
 /**
  * The last line of defence between a render error and a black page.
@@ -64,12 +65,15 @@ export class ErrorBoundary extends Component<Props, State> {
     const { error } = this.state;
     if (!error) return this.props.children;
 
-    const scope = this.props.scope ? `شاشة «${this.props.scope}»` : "هذه الشاشة";
+    const language = readStoredLanguage();
+    const t = (key: Parameters<typeof translate>[1], values?: Record<string, string | number>) =>
+      translate(language, key, values);
+    const scope = this.props.scope
+      ? t("error.screenName", { scope: this.props.scope })
+      : t("error.thisScreen");
     const fullPage = this.props.fullPage === true;
-    const title = fullPage ? "تعذّر تشغيل لوحة التحكم" : `تعذّر عرض ${scope}`;
-    const description = fullPage
-      ? "حدث خطأ غير متوقع أثناء تشغيل اللوحة. أعد المحاولة، وإن استمر حدّث الصفحة. التفاصيل التقنية في وحدة تحكّم المتصفّح (Console)."
-      : "حدث خطأ غير متوقع أثناء بناء الواجهة. بقية الصفحة تعمل — تنقّل إلى شاشة أخرى أو أعد المحاولة. التفاصيل التقنية في وحدة تحكّم المتصفّح (Console).";
+    const title = fullPage ? t("error.fullTitle") : t("error.scopeTitle", { scope });
+    const description = fullPage ? t("error.fullBody") : t("error.scopeBody");
 
     return (
       <div
@@ -94,7 +98,7 @@ export class ErrorBoundary extends Component<Props, State> {
           className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
         >
           <RotateCcw className="size-3.5" />
-          إعادة المحاولة
+          {t("error.retry")}
         </button>
       </div>
     );

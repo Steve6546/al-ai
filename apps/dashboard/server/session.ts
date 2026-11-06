@@ -92,6 +92,8 @@ export async function issueSession(
     discordAvatar?: string | null;
     accessToken: string;
     scopes: string;
+    /** A display hint for the security screen; never used for authorisation. */
+    userAgent?: string | null;
   }
 ) {
   const id = randomUUID();
@@ -102,7 +104,8 @@ export async function issueSession(
     discordHandle: input.discordHandle ?? null,
     discordAvatar: input.discordAvatar ?? null,
     accessTokenCiphertext: encryptSecret(input.accessToken, env.encryptionKey),
-    scopes: input.scopes
+    scopes: input.scopes,
+    userAgent: input.userAgent ?? null
   });
   return { id, expiresAt };
 }

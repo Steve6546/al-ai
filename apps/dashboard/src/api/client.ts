@@ -32,8 +32,13 @@ import type {
   RoleIconGate,
   SecurityEvent,
   SessionInfo,
+  Language,
+  SecurityOverview,
   TierConfig,
-  TierRoles
+  TierRoles,
+  TwoFactorEnrollment,
+  TwoFactorSetup,
+  UserPreferences
 } from "@/types";
 
 /**
@@ -49,7 +54,15 @@ export class ApiError extends Error {
   constructor(
     public readonly code: string,
     message: string,
-    public readonly status: number
+    public readonly status: number,
+    /**
+     * Optional detail some envelopes carry — `INVALID_CODE` on
+     * `POST /api/2fa/verify` reports `attemptsRemaining` here. Kept on the
+     * error (rather than dropped by `request()`) so a screen can show it. The
+     * parameter is optional, so every existing three-argument construction
+     * still compiles unchanged.
+     */
+    public readonly attemptsRemaining?: number
   ) {
     super(message);
     this.name = "ApiError";
@@ -93,8 +106,17 @@ async function request<T>(path: string, init: RequestInit | undefined, mayRetry:
       await new Promise(resolve => setTimeout(resolve, waitMs));
       return request<T>(path, init, false);
     }
-    const body = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
-    throw new ApiError(body.error ?? "REQUEST_FAILED", body.message ?? "تعذّر إكمال الطلب.", response.status);
+    const body = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      message?: string;
+      attemptsRemaining?: number;
+    };
+    throw new ApiError(
+      body.error ?? "REQUEST_FAILED",
+      body.message ?? "تعذّر إكمال الطلب.",
+      response.status,
+      body.attemptsRemaining
+    );
   }
   return (await response.json()) as T;
 }
@@ -106,6 +128,55 @@ export const session = () => call<SessionInfo>("/api/session");
 export const logout = () => call<{ ok: boolean }>("/auth/logout", { method: "POST" });
 export const health = () => call<HealthSnapshot>("/api/health");
 export const guilds = () => call<{ guilds: Guild[] }>("/api/guilds");
+
+/* ------------------------------------------------------------------ *
+ * Second factor for a pending admin login
+ *
+ * These are deliberately plain `call()`s: the `ApiError` (status, code and
+ * message, plus `attemptsRemaining` when the envelope carries it) is left to
+ * propagate to the screen, so INVALID_CODE / TOO_MANY_ATTEMPTS /
+ * PENDING_EXPIRED reach the operator instead of being swallowed here.
+ * ------------------------------------------------------------------ */
+export const secondFactorEnrollment = () => call<TwoFactorEnrollment>("/api/2fa/enrollment");
+export const verifySecondFactor = (code: string) =>
+  call<{ ok: true }>("/api/2fa/verify", { method: "POST", body: JSON.stringify({ code }) });
+export const cancelSecondFactor = () => call<{ ok: true }>("/api/2fa/cancel", { method: "POST" });
+
+/* ------------------------------------------------------------------ *
+ * The signed-in account's own settings
+ *
+ * These are the only routes here that are not about a guild. Sensitive
+ * changes send the current authenticator code with the request; the server
+ * re-verifies and consumes it, which is the re-authentication step.
+ * ------------------------------------------------------------------ */
+export const preferences = () => call<UserPreferences>("/api/me/preferences");
+export const savePreferences = (language: Language) =>
+  call<UserPreferences>("/api/me/preferences", { method: "PUT", body: JSON.stringify({ language }) });
+
+export const securityOverview = () => call<SecurityOverview>("/api/me/security");
+export const revokeOtherSessions = () =>
+  call<{ ok: true; revoked: number }>("/api/me/sessions/revoke-others", { method: "POST" });
+
+export const beginTwoFactorSetup = (code?: string) =>
+  call<TwoFactorSetup>("/api/me/2fa/setup", {
+    method: "POST",
+    body: JSON.stringify(code ? { code } : {})
+  });
+export const confirmTwoFactorSetup = (code: string) =>
+  call<{ ok: true; recoveryCodesRemaining: number }>("/api/me/2fa/confirm", {
+    method: "POST",
+    body: JSON.stringify({ code })
+  });
+export const disableTwoFactor = (code: string) =>
+  call<{ ok: true; enrolled: false }>("/api/me/2fa/disable", {
+    method: "POST",
+    body: JSON.stringify({ code })
+  });
+export const regenerateRecoveryCodes = (code: string) =>
+  call<{ ok: true; recoveryCodes: string[] }>("/api/me/2fa/recovery-codes", {
+    method: "POST",
+    body: JSON.stringify({ code })
+  });
 
 /* ------------------------------------------------------------------ *
  * Per-guild reads

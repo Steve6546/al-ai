@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Pipette } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * A dependency-free colour picker.
@@ -126,7 +127,9 @@ type Props = {
   id?: string;
 };
 
-export function ColorPicker({ value, onChange, unsetLabel = "بلا لون", id }: Props) {
+export function ColorPicker({ value, onChange, unsetLabel, id }: Props) {
+  const { t } = useI18n();
+  const resolvedUnsetLabel = unsetLabel ?? t("common.noColor");
   // The HSV state is kept separately from the hex prop. Round-tripping through
   // hex on every drag would lose the hue whenever saturation or brightness hits
   // zero — every dark colour becomes black, and the hue slider would snap to red
@@ -196,7 +199,7 @@ export function ColorPicker({ value, onChange, unsetLabel = "بلا لون", id 
         <div
           ref={squareRef}
           role="slider"
-          aria-label="اللون والتشبّع"
+          aria-label={t("common.colorSaturation")}
           aria-valuetext={resolved}
           aria-valuenow={Math.round(hsv.s * 100)}
           tabIndex={0}
@@ -214,14 +217,14 @@ export function ColorPicker({ value, onChange, unsetLabel = "بلا لون", id 
           <div
             className="grid h-32 w-14 shrink-0 place-items-center rounded-md border border-border"
             style={{ backgroundColor: resolved }}
-            title={current ?? unsetLabel}
+            title={current ?? resolvedUnsetLabel}
           >
             <Pipette className="size-4 opacity-70" style={{ color: contrastingText(resolved) }} />
           </div>
           <Input
             dir="ltr"
             className="w-24"
-            aria-label="قيمة اللون"
+            aria-label={t("common.colorValue")}
             placeholder="#rrggbb"
             value={hexDraft}
             onChange={event => {
@@ -239,7 +242,7 @@ export function ColorPicker({ value, onChange, unsetLabel = "بلا لون", id 
       <div
         ref={hueRef}
         role="slider"
-        aria-label="درجة اللون"
+        aria-label={t("common.hue")}
         aria-valuemin={0}
         aria-valuemax={360}
         aria-valuenow={Math.round(hsv.h)}

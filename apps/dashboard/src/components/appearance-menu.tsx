@@ -12,17 +12,19 @@
  */
 import { Monitor, Moon, Sun } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { ACCENTS, useThemePrefs, type AccentName, type ThemeMode } from "@/lib/theme";
 
-const MODES: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
-  { value: "light", label: "فاتح", icon: Sun },
-  { value: "dark", label: "داكن", icon: Moon },
-  { value: "system", label: "النظام", icon: Monitor }
+const MODES: { value: ThemeMode; key: "appearance.light" | "appearance.dark" | "appearance.system"; icon: typeof Sun }[] = [
+  { value: "light", key: "appearance.light", icon: Sun },
+  { value: "dark", key: "appearance.dark", icon: Moon },
+  { value: "system", key: "appearance.system", icon: Monitor }
 ];
 
 export function AppearanceMenu({ className, iconOnly = false }: { className?: string; iconOnly?: boolean }) {
   const { prefs, setMode, setAccent } = useThemePrefs();
+  const { t } = useI18n();
 
   return (
     <Popover>
@@ -30,8 +32,8 @@ export function AppearanceMenu({ className, iconOnly = false }: { className?: st
         {iconOnly ? (
           <button
             type="button"
-            aria-label="المظهر"
-            title="المظهر"
+            aria-label={t("appearance.title")}
+            title={t("appearance.title")}
             className={cn(
               "grid size-9 place-items-center rounded-md text-muted-foreground transition-ui hover:bg-accent hover:text-accent-foreground",
               className
@@ -42,20 +44,20 @@ export function AppearanceMenu({ className, iconOnly = false }: { className?: st
         ) : (
           <button
             type="button"
-            aria-label="المظهر"
+            aria-label={t("appearance.title")}
             className={cn(
               "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-ui hover:bg-accent hover:text-accent-foreground",
               className
             )}
           >
             <Sun className="size-4 shrink-0" />
-            <span>المظهر</span>
+            <span>{t("appearance.title")}</span>
           </button>
         )}
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-3">
-        <p className="px-1 pb-2 text-xs font-medium text-muted-foreground">الوضع</p>
-        <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="وضع المظهر">
+        <p className="px-1 pb-2 text-xs font-medium text-muted-foreground">{t("appearance.mode")}</p>
+        <div className="grid grid-cols-3 gap-1.5" role="group" aria-label={t("appearance.modeLabel")}>
           {MODES.map(mode => {
             const Icon = mode.icon;
             const active = prefs.mode === mode.value;
@@ -73,22 +75,22 @@ export function AppearanceMenu({ className, iconOnly = false }: { className?: st
                 )}
               >
                 <Icon className="size-4" />
-                {mode.label}
+                {t(mode.key)}
               </button>
             );
           })}
         </div>
 
-        <p className="px-1 pb-2 pt-4 text-xs font-medium text-muted-foreground">لون التمييز</p>
-        <div className="flex flex-wrap gap-2" role="group" aria-label="لون التمييز">
+        <p className="px-1 pb-2 pt-4 text-xs font-medium text-muted-foreground">{t("appearance.accent")}</p>
+        <div className="flex flex-wrap gap-2" role="group" aria-label={t("appearance.accent")}>
           {ACCENTS.map(accent => (
             <button
               key={accent.name}
               type="button"
               onClick={() => setAccent(accent.name as AccentName)}
-              aria-label={accent.label}
+              aria-label={t(`appearance.${accent.name}` as "appearance.blue")}
               aria-pressed={prefs.accent === accent.name}
-              title={accent.label}
+              title={t(`appearance.${accent.name}` as "appearance.blue")}
               className={cn(
                 "size-7 rounded-full border-2 transition-ui",
                 prefs.accent === accent.name ? "border-foreground" : "border-transparent hover:border-muted-foreground/50"
@@ -98,7 +100,7 @@ export function AppearanceMenu({ className, iconOnly = false }: { className?: st
           ))}
         </div>
         <p className="px-1 pt-3 text-[11px] leading-relaxed text-muted-foreground">
-          يُحفظ التفضيل على هذا الجهاز فقط.
+          {t("appearance.localOnly")}
         </p>
       </PopoverContent>
     </Popover>

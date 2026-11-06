@@ -112,6 +112,93 @@ try {
   }
   console.log(`audit_trail: ${auditDone}/${audits.rows.length} payloads re-encrypted.`);
 
+  /**
+   * Admin second factor. The confirmed TOTP secret is a ciphertext like any
+   * other; a pending login carries two (its OAuth token and, until enrolment is
+   * confirmed, the secret + recovery codes shown once). Recovery-code HMACs in
+   * `admin_two_factor_recovery` are NOT ciphertext: they are keyed by
+   * SESSION_SECRET, so rotating that secret invalidates outstanding recovery
+   * codes while the TOTP secret below keeps working.
+   *
+   * The tables are guarded by to_regclass so this script still runs against a
+   * database created before the second factor shipped.
+   */
+  const hasTwoFactor = await client.query<{ ok: boolean }>(
+    `SELECT to_regclass('public.admin_two_factor') IS NOT NULL AS ok`
+  );
+  if (hasTwoFactor.rows[0]?.ok) {
+    const factors = await client.query<{ discord_user_id: string; secret_ciphertext: string }>(
+      `SELECT discord_user_id, secret_ciphertext FROM admin_two_factor`
+    );
+    for (const row of factors.rows) {
+      try {
+        const secret = decryptSecret(row.secret_ciphertext, oldKey);
+        await client.query(`UPDATE admin_two_factor SET secret_ciphertext = $1 WHERE discord_user_id = $2`, [
+          encryptSecret(secret, newKey),
+          row.discord_user_id
+        ]);
+        reEncrypted += 1;
+      } catch (error) {
+        undecryptable += 1;
+        console.log(`admin_two_factor row ${row.discord_user_id}: skipped — ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    console.log(`admin_two_factor: done.`);
+
+    const pendings = await client.query<{
+      id: string;
+      access_token_ciphertext: string;
+      enrollment_ciphertext: string | null;
+    }>(`SELECT id, access_token_ciphertext, enrollment_ciphertext FROM admin_two_factor_pending`);
+    for (const row of pendings.rows) {
+      try {
+        const token = decryptSecret(row.access_token_ciphertext, oldKey);
+        const enrollment = row.enrollment_ciphertext ? decryptSecret(row.enrollment_ciphertext, oldKey) : null;
+        await client.query(
+          `UPDATE admin_two_factor_pending SET access_token_ciphertext = $1, enrollment_ciphertext = $2 WHERE id = $3`,
+          [encryptSecret(token, newKey), enrollment ? encryptSecret(enrollment, newKey) : null, row.id]
+        );
+        reEncrypted += 1;
+      } catch {
+        // An unreadable pending login is not worth keeping: it is a five-minute
+        // window, and the operator simply signs in again.
+        undecryptable += 1;
+        await client.query(`DELETE FROM admin_two_factor_pending WHERE id = $1`, [row.id]);
+        console.log(`admin_two_factor_pending row ${row.id}: deleted — could not be re-encrypted.`);
+      }
+    }
+    console.log(`admin_two_factor_pending: done.`);
+
+    // A setup row started from the account settings screen. It is short-lived
+    // (ten minutes) but still holds a secret, so rotate it rather than leaving
+    // a change that would fail to confirm after the key changed.
+    const hasSetups = await client.query<{ ok: boolean }>(
+      `SELECT to_regclass('public.admin_two_factor_setup') IS NOT NULL AS ok`
+    );
+    if (hasSetups.rows[0]?.ok) {
+      const setups = await client.query<{ discord_user_id: string; enrollment_ciphertext: string }>(
+        `SELECT discord_user_id, enrollment_ciphertext FROM admin_two_factor_setup`
+      );
+      for (const row of setups.rows) {
+        try {
+          const enrollment = decryptSecret(row.enrollment_ciphertext, oldKey);
+          await client.query(
+            `UPDATE admin_two_factor_setup SET enrollment_ciphertext = $1 WHERE discord_user_id = $2`,
+            [encryptSecret(enrollment, newKey), row.discord_user_id]
+          );
+          reEncrypted += 1;
+        } catch {
+          undecryptable += 1;
+          await client.query(`DELETE FROM admin_two_factor_setup WHERE discord_user_id = $1`, [
+            row.discord_user_id
+          ]);
+          console.log(`admin_two_factor_setup row ${row.discord_user_id}: deleted — could not be re-encrypted.`);
+        }
+      }
+      console.log(`admin_two_factor_setup: done.`);
+    }
+  }
+
   console.log(`rotate-encryption-key: ${reEncrypted} values re-encrypted, ${undecryptable} skipped.`);
 } finally {
   await client.end();

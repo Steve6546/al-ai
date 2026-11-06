@@ -16,6 +16,20 @@
  * with the live choice.
  */
 (function () {
+  // Language first: `dir` changes where the whole layout's start edge is, and
+  // applying it after the palette would still be one frame of the wrong
+  // direction. The key is the same one `src/lib/i18n.tsx` writes.
+  try {
+    var language = window.localStorage.getItem("al-ai.language");
+    if (language !== "ar" && language !== "en") language = "ar";
+    document.documentElement.lang = language;
+    document.documentElement.dir = language === "ar" ? "rtl" : "ltr";
+    document.documentElement.dataset.language = language;
+  } catch (error) {
+    document.documentElement.lang = "ar";
+    document.documentElement.dir = "rtl";
+  }
+
   try {
     var stored = window.localStorage.getItem("al-ai.appearance");
     var prefs = stored ? JSON.parse(stored) : {};

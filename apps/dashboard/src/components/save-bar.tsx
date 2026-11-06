@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -35,9 +36,9 @@ import { useRef, useState } from "react";
 export function SaveBar({
   onSave,
   onCancel,
-  message = "تغييرات غير محفوظة",
-  saveLabel = "حفظ التغييرات",
-  cancelLabel = "تجاهل",
+  message,
+  saveLabel,
+  cancelLabel,
   canSave = true,
   blockedMessage = null
 }: {
@@ -55,6 +56,10 @@ export function SaveBar({
   canSave?: boolean;
   blockedMessage?: string | null;
 }) {
+  const { t } = useI18n();
+  const barMessage = message ?? t("common.unsaved");
+  const barSaveLabel = saveLabel ?? t("common.saveChanges");
+  const barCancelLabel = cancelLabel ?? t("common.discard");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /*
@@ -123,14 +128,14 @@ export function SaveBar({
                   layout is fixed. Nothing is truncated, because "there are
                   unsaved changes" cut to half a sentence reads as a different
                   message. */}
-              <span className="min-w-0 text-foreground">{message}</span>
+              <span className="min-w-0 text-foreground">{barMessage}</span>
             </>
           )}
         </span>
         <div className="flex shrink-0 items-center gap-1.5">
           <Button variant="ghost" size="sm" className="rounded-full hover:bg-primary/10 hover:text-primary" onClick={onCancel} disabled={saving}>
             <RotateCcw />
-            {cancelLabel}
+            {barCancelLabel}
           </Button>
           {/* `loading` on the shared Button owns the spinner and the disable -
               the bar states the intent once and the component applies the rule. */}
@@ -147,7 +152,7 @@ export function SaveBar({
               try {
                 await onSave();
               } catch (cause) {
-                setError(cause instanceof Error ? cause.message : "تعذّر الحفظ.");
+                setError(cause instanceof Error ? cause.message : t("common.saveFailed"));
               } finally {
                 inFlight.current = false;
                 setSaving(false);
@@ -158,7 +163,7 @@ export function SaveBar({
                 puts a spinner in front of it - swapping the text for
                 "جارٍ الحفظ…" as well would move the button's contents twice
                 for one event. */}
-            {saveLabel}
+            {barSaveLabel}
           </Button>
         </div>
       </div>

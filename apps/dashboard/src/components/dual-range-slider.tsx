@@ -1,4 +1,5 @@
 import { useCallback, useRef } from "react";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * A dual-thumb range slider: two native range inputs stacked over one track,
@@ -31,6 +32,7 @@ export function DualRangeSlider({
   label: string;
   formatValue?: (value: number) => string;
 }) {
+  const { t } = useI18n();
   const trackRef = useRef<HTMLDivElement>(null);
   const span = Math.max(1, ceiling - floor);
   const loPct = ((Math.min(valueMin, valueMax) - floor) / span) * 100;
@@ -53,7 +55,7 @@ export function DualRangeSlider({
     step,
     value,
     onChange: handle(which),
-    "aria-label": `${label} — ${which === "min" ? "الأدنى" : "الأقصى"}`,
+    "aria-label": `${label} — ${which === "min" ? t("common.minimum") : t("common.maximum")}`,
     dir: "ltr" as const
   });
 

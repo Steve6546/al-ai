@@ -1,4 +1,5 @@
 import { renderWelcomeMessage, type WelcomeImageConfig, type WelcomeMessageSettings, type WelcomeTemplateValues } from "@al-ai/core/browser";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { initials } from "@/lib/format";
 
@@ -47,17 +48,18 @@ export function WelcomeMessagePreview({
   nameColor?: string | null;
   className?: string;
 }) {
+  const { t } = useI18n();
   const text = renderWelcomeMessage(settings.text, values).trim();
 
   return (
     <div className={cn("overflow-hidden rounded-xl border border-border bg-card", className)}>
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
-        <span className="shrink-0 text-[11px] font-medium text-muted-foreground">معاينة الرسالة</span>
+        <span className="shrink-0 text-[11px] font-medium text-muted-foreground">{t("welcome.previewTitle")}</span>
         <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
-          {channelName ? `إلى #${channelName}` : "لم تُختر القناة بعد"}
+          {channelName ? t("welcome.toChannel", { channel: channelName }) : t("welcome.noChannelYet")}
         </span>
         {settings.imageEnabled ? (
-          <span className="shrink-0 rounded-md bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary">صورة الترحيب مفعّلة</span>
+          <span className="shrink-0 rounded-md bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary">{t("welcome.imageEnabledBadge")}</span>
         ) : null}
       </div>
 
@@ -87,7 +89,7 @@ export function WelcomeMessagePreview({
               <p className="mt-1 break-words text-sm leading-relaxed whitespace-pre-wrap text-foreground">{text}</p>
             ) : (
               <p className="mt-1 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
-                لا يوجد نص — سيصل عضو جديد بلا رسالة.
+                {t("welcome.noText")}
               </p>
             )}
 
@@ -106,7 +108,7 @@ export function WelcomeMessagePreview({
             ) : null}
             {settings.imageEnabled && settings.imageMode === "before_message" ? (
               <p className="mt-2 rounded-lg border border-dashed border-border px-3 py-2 text-[11px] text-muted-foreground">
-                تُرسل صورة الترحيب في رسالة منفصلة قبل هذه الرسالة.
+                {t("welcome.imageSeparate")}
               </p>
             ) : null}
           </div>
@@ -123,12 +125,13 @@ export function WelcomeMessagePreview({
  * only has to say that a card is coming, at the card's own proportions.
  */
 function WelcomeImageStub({ config }: { config: WelcomeImageConfig }) {
+  const { t } = useI18n();
   return (
     <div
       className="grid place-items-center text-[11px] text-muted-foreground"
       style={{ aspectRatio: `${config.width} / ${config.height}` }}
     >
-      صورة الترحيب تُرسم في تبويب «الصورة»
+      {t("welcome.imageStub")}
     </div>
   );
 }

@@ -190,11 +190,72 @@ async function waitForShell(cdp, sessionId, timeoutMs = 10_000) {
   return state;
 }
 
-async function runAxe(cdp, sessionId, url, label, palette) {
+/**
+ * Waits for the live pass to be genuinely signed in.
+ *
+ * A relative `fetch` on `about:blank` has no origin, so it resolves to `false`
+ * for *every* cookie name - the exact symptom of a refused session. A fixed
+ * sleep after `Page.navigate` is not a navigation guarantee: on a busy machine
+ * the document can still be `about:blank`, and probing too early turned the
+ * whole live sweep into a hard failure that had nothing to do with the cookie.
+ * Poll for the committed document first, then keep polling the session probe so
+ * a slow first BFF answer cannot fail the sweep either. Nothing here loosens
+ * the cookie policy; it only stops the check from lying about a valid session.
+ */
+async function waitForLiveSession(cdp, sessionId, origin, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = "no response";
+  while (Date.now() < deadline) {
+    let probe = null;
+    try {
+      probe = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `(async () => {
+            if (!location.href.startsWith(${JSON.stringify(origin)})) return "not navigated";
+            try {
+              const response = await fetch("/api/session", { credentials: "same-origin" });
+              const body = await response.json();
+              return body.authenticated === true ? "signed in" : "signed out";
+            } catch {
+              return "request failed";
+            }
+          })()`,
+          awaitPromise: true,
+          returnByValue: true
+        },
+        sessionId
+      );
+    } catch {
+      // The execution context is replaced while the navigation commits.
+      last = "navigation in progress";
+    }
+    if (probe) last = probe.result?.value ?? "no value";
+    if (last === "signed in") return true;
+    await sleep(250);
+  }
+  throw new Error(
+    `the live pass is not signed in - /api/session says the cookie did not arrive (last state: ${last}), so every screen checked below would be the login card`
+  );
+}
+
+async function runAxe(cdp, sessionId, url, label, palette, liveReady = false) {
   const source = await readFile(AXE_SOURCE, "utf8");
   await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source }, sessionId);
   await cdp.send("Page.navigate", { url }, sessionId);
   await sleep(1500);
+  /*
+   * A live page answers from the real BFF, so 1.5 s is not a rendering
+   * guarantee. Scanning an empty #root reports "no main landmark" and "no h1"
+   * on a page that is simply still loading — an accessibility regression that
+   * exists only in the check. The visual sweep already waits for the signed-in
+   * shell; this re-navigation must wait for the same thing before axe reads
+   * the DOM. A page that genuinely never renders is reported by that sweep.
+   */
+  if (liveReady) {
+    await waitForApp(cdp, sessionId);
+    await waitForShell(cdp, sessionId);
+  }
   const result = await cdp.send(
     "Runtime.evaluate",
     {
@@ -563,24 +624,7 @@ async function main() {
         throw new Error("the browser refused the live session cookie - the live pass would render the login screen");
       }
       await cdp.send("Page.navigate", { url: `${origin}/` }, sessionId);
-      await sleep(800);
-      const auth = await cdp.send(
-        "Runtime.evaluate",
-        {
-          expression: `fetch("/api/session", { credentials: "same-origin" })
-            .then(response => response.json())
-            .then(body => body.authenticated === true)
-            .catch(() => false)`,
-          awaitPromise: true,
-          returnByValue: true
-        },
-        sessionId
-      );
-      if (auth.result?.value !== true) {
-        throw new Error(
-          "the live pass is not signed in - /api/session says the cookie did not arrive, so every screen checked below would be the login card"
-        );
-      }
+      await waitForLiveSession(cdp, sessionId, origin);
     }
     if (!LIVE) await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: API_STUB }, sessionId);
 
@@ -769,7 +813,7 @@ async function main() {
             continue;
           }
           await sleep(3_500);
-          liveReports.push(await runAxe(cdp, sessionId, `${origin}${path}`, page.label, palette.name));
+          liveReports.push(await runAxe(cdp, sessionId, `${origin}${path}`, page.label, palette.name, true));
         }
       }
       const liveViolations = liveReports.flatMap(report =>

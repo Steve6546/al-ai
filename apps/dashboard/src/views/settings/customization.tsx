@@ -9,6 +9,7 @@ import {
   describeAppearanceResult
 } from "@al-ai/core/browser";
 import { api } from "@/api";
+import { useI18n, type Translate } from "@/lib/i18n";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { cn } from "@/lib/utils";
 import { ColorPicker } from "@/components/color-picker";
@@ -69,26 +70,26 @@ type ReadImage = { dataUrl: string; width: number; height: number };
  * fact the operator should see before the save, not after Discord has already
  * scaled it.
  */
-function readImageAsDataUrl(file: File): Promise<ReadImage> {
+function readImageAsDataUrl(file: File, t: Translate): Promise<ReadImage> {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith("image/")) {
-      reject(new Error("الملف ليس صورة. استخدم PNG أو JPG أو WEBP أو GIF."));
+      reject(new Error(t("customization.imageNotImage")));
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = String(reader.result);
       if (dataUrl.length > MAX_IMAGE_DATA_URL_LENGTH) {
-        reject(new Error("حجم الصورة يتجاوز الحد المسموح (500 كيلوبايت تقريباً بعد الترميز)."));
+        reject(new Error(t("customization.imageTooLarge")));
         return;
       }
       const image = new Image();
       image.onload = () => resolve({ dataUrl, width: image.naturalWidth, height: image.naturalHeight });
       // A picture the browser cannot decode is not one we can send either.
-      image.onerror = () => reject(new Error("تعذّر قراءة الصورة. تأكّد أن الملف صورة صحيحة."));
+      image.onerror = () => reject(new Error(t("customization.imageUndecodable")));
       image.src = dataUrl;
     };
-    reader.onerror = () => reject(new Error("تعذّر قراءة الصورة."));
+    reader.onerror = () => reject(new Error(t("customization.imageReadFailed")));
     reader.readAsDataURL(file);
   });
 }
@@ -150,6 +151,7 @@ function ImageSlot({
   /** The state of the image itself: stored, changed, saving, or refused. */
   state?: "saved" | "pending" | "saving" | "failed";
 }) {
+  const { t } = useI18n();
   const pending = state === "pending" || state === "saving";
   const shown = dataUrl ?? savedDataUrl ?? null;
   const isNew = Boolean(dataUrl) && dataUrl !== (savedDataUrl ?? null);
@@ -166,22 +168,22 @@ function ImageSlot({
         {state === "failed" ? (
           <span className="flex items-center gap-1 text-[11px] text-destructive">
             <TriangleAlert className="size-3.5" aria-hidden />
-            فشل الحفظ
+            {t("customization.imageFailed")}
           </span>
         ) : state === "saving" ? (
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <Loader2 className="size-3.5 animate-spin" aria-hidden />
-            جارٍ الحفظ…
+            {t("common.saving")}
           </span>
         ) : pending ? (
           <span className="flex items-center gap-1 text-[11px] text-warning">
             <Pencil className="size-3.5" aria-hidden />
-            تغيير غير محفوظ
+            {t("customization.imagePending")}
           </span>
         ) : shown ? (
           <span className="flex items-center gap-1 text-[11px] text-success">
             <CheckCircle2 className="size-3.5" aria-hidden />
-            محفوظة
+            {t("customization.imageSaved")}
           </span>
         ) : null}
       </div>
@@ -232,7 +234,7 @@ function ImageSlot({
           )}
           {isNew ? (
             <span className="absolute inset-x-0 bottom-0 bg-warning/90 py-0.5 text-center text-[9px] font-medium text-warning-foreground">
-              لم يُحفظ بعد
+              {t("customization.imageNotSaved")}
             </span>
           ) : null}
         </span>
@@ -242,7 +244,7 @@ function ImageSlot({
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" size="sm" onClick={onPick} disabled={disabled}>
               <Upload className="size-3.5" />
-              {shown ? "استبدال" : "اختر صورة"}
+              {shown ? t("customization.replace") : t("customization.chooseImage")}
             </Button>
             {shown ? (
               <>
@@ -255,11 +257,11 @@ function ImageSlot({
                   size="sm"
                   className="hover:text-destructive"
                   disabled={disabled}
-                  aria-label={`إزالة ${label}`}
+                  aria-label={t("customization.removeLabel", { label })}
                   onClick={onRemove}
                 >
                   <X className="size-3.5" />
-                  إزالة
+                  {t("customization.remove")}
                 </Button>
               </>
             ) : null}
@@ -271,9 +273,9 @@ function ImageSlot({
         dir="ltr"
         value={urlText}
         onChange={event => onUrlText?.(event.target.value)}
-        placeholder="أو الصق رابط صورة مباشر (https://…)"
+        placeholder={t("customization.urlPlaceholder")}
         className="h-8 rounded-lg text-xs"
-        aria-label={`رابط ${label}`}
+        aria-label={t("customization.urlLabel", { label })}
         disabled={disabled}
       />
     </div>
@@ -307,6 +309,7 @@ function firstImage(...candidates: (string | null | undefined)[]): string | null
 }
 
 export function CustomizationView({ guild }: { guild: Guild }) {
+  const { t } = useI18n();
   const [guildSettings, setGuildSettings] = useState<CustomizationSettings | null>(null);
   const guildForm = useDraftForm(guildSettings);
 
@@ -358,12 +361,12 @@ export function CustomizationView({ guild }: { guild: Guild }) {
         setRoleIcon(result.roleIcon);
         setProfile(result.profile ?? null);
       })
-      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
+      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : t("customization.loadFailed")));
 
     return () => {
       cancelled = true;
     };
-  }, [guild.id]);
+  }, [guild.id, t]);
 
   /*
    * The preview draws the drafts — a picked file or a pasted URL lands here the
@@ -410,7 +413,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="size-4 animate-spin" />
-        جارٍ التحميل
+        {t("common.loading")}
       </div>
     );
   }
@@ -446,7 +449,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
   const onFileChosen = async (file: File | undefined) => {
     if (!file) return;
     try {
-      const image = await readImageAsDataUrl(file);
+      const image = await readImageAsDataUrl(file, t);
       const dataUrl = image.dataUrl;
       const target = pendingTarget.current;
       if (target === "avatar") {
@@ -454,7 +457,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
         setFileNames(current => ({ ...current, avatar: file.name }));
         setImageWarning(
           image.width < AVATAR_MIN_SIDE || image.height < AVATAR_MIN_SIDE
-            ? `الأبعاد ${image.width}×${image.height} أصغر من 256×256؛ ديسكورد سيصغّرها.`
+            ? t("customization.avatarTooSmall", { width: image.width, height: image.height })
             : null
         );
       } else if (target === "banner") {
@@ -462,7 +465,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
         setFileNames(current => ({ ...current, banner: file.name }));
         setImageWarning(
           image.width < BANNER_MIN_SIZE.width || image.height < BANNER_MIN_SIZE.height
-            ? `الأبعاد ${image.width}×${image.height} أصغر من 600×240؛ ديسكورد سيصغّرها.`
+            ? t("customization.bannerTooSmall", { width: image.width, height: image.height })
             : null
         );
       } else {
@@ -473,7 +476,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
       setAvatarUrlText("");
       setBannerUrlText("");
     } catch (cause) {
-      push({ tone: "error", title: cause instanceof Error ? cause.message : "تعذّر قراءة الصورة." });
+      push({ tone: "error", title: cause instanceof Error ? cause.message : t("customization.imageReadFailed") });
     }
   };
 
@@ -507,7 +510,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
     try {
       const { result, ...outcome } = await save();
       if (outcome.ok) {
-        push({ tone: "success", title: "تم حفظ وتطبيق التغييرات على البوت في هذا السيرفر" });
+        push({ tone: "success", title: t("customization.savedApplied") });
         return;
       }
       // Which image failed, so the slot can say so instead of the screen
@@ -517,7 +520,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
       );
       if (failed) setFailedField(failed.field === "guildAvatarDataUrl" ? "avatar" : "banner");
       const refused = new Error(outcome.message);
-      push({ tone: "error", title: "تعذّر تطبيق بعض التغييرات", description: outcome.message });
+      push({ tone: "error", title: t("customization.applyFailed"), description: outcome.message });
       throw refused;
     } finally {
       setSaving(false);
@@ -569,12 +572,12 @@ export function CustomizationView({ guild }: { guild: Guild }) {
       <div className="flex flex-wrap items-start justify-between gap-3 pt-1">
         <div className="min-w-0 space-y-1">
           <p className="text-xs text-muted-foreground">
-            لقب ونبذة وصورة وغلاف ولون رتبة — خاصة بهذا السيرفر.
+            {t("customization.subtitle")}
           </p>
         </div>
         <label className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">تفعيل التخصيص في هذا السيرفر</span>
-          <Switch checked={draft.enabled} onCheckedChange={enabled => patch({ enabled })} aria-label="تفعيل التخصيص في هذا السيرفر" />
+          <span className="text-xs text-muted-foreground">{t("customization.enable")}</span>
+          <Switch checked={draft.enabled} onCheckedChange={enabled => patch({ enabled })} aria-label={t("customization.enable")} />
         </label>
       </div>
 
@@ -582,7 +585,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
         <Alert>
           <IdCard className="size-4" />
           <AlertDescription>
-            التخصيص <strong>معطّل</strong> — سيظهر البوت بهويته الأساسية. القيم المحفوظة تبقى.
+            {t("customization.disabledBody")}
           </AlertDescription>
         </Alert>
       )}
@@ -591,7 +594,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
         <Alert variant="destructive">
           <Lock className="size-4" />
           <AlertDescription>
-            البوت لا يملك صلاحية «تغيير الاسم المستعار» — امنحه الصلاحية ثم أعد المحاولة.
+            {t("customization.noPermission")}
           </AlertDescription>
         </Alert>
       )}
@@ -604,15 +607,15 @@ export function CustomizationView({ guild }: { guild: Guild }) {
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
                 <IdCard className="size-4" />
-                الهوية
+                {t("customization.identity")}
               </CardTitle>
-              <CardDescription>الاسم الظاهر والنبذة.</CardDescription>
+              <CardDescription>{t("customization.identityBody")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <Label htmlFor="nickname" className="text-xs">
-                    اللقب
+                    {t("customization.nickname")}
                   </Label>
                   <Counter value={draft.nickname.length} max={MAX_NICKNAME_LENGTH} />
                 </div>
@@ -621,12 +624,12 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                   value={draft.nickname}
                   onChange={event => patch({ nickname: event.target.value })}
                   maxLength={MAX_NICKNAME_LENGTH}
-                  placeholder={`مثال: AL AI في ${guild.name}`}
+                  placeholder={t("customization.nicknamePlaceholder", { guild: guild.name })}
                   disabled={!memberEditable}
                   className="rounded-xl"
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  اتركه فارغاً ليظهر الاسم الأصلي <span dir="ltr">{DEFAULT_CUSTOMIZATION.nickname}</span>.
+                  {t("customization.nicknameHint", { name: DEFAULT_CUSTOMIZATION.nickname })}
                 </p>
               </div>
 
@@ -635,7 +638,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <Label htmlFor="bio" className="text-xs">
-                    نبذة عني
+                    {t("customization.bio")}
                   </Label>
                   <Counter value={draft.bio.length} max={MAX_BIO_LENGTH} />
                 </div>
@@ -644,13 +647,13 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                   rows={3}
                   value={draft.bio}
                   maxLength={MAX_BIO_LENGTH}
-                  placeholder="ما يميّز AL AI في هذا السيرفر"
+                  placeholder={t("customization.bioPlaceholder")}
                   onChange={event => patch({ bio: event.target.value })}
                   disabled={!memberEditable}
                   className="rounded-xl"
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  تظهر في ملف البوت. الحد {MAX_BIO_LENGTH} حرفاً (سقف Discord).
+                  {t("customization.bioHint", { max: MAX_BIO_LENGTH })}
                 </p>
               </div>
             </CardContent>
@@ -661,10 +664,10 @@ export function CustomizationView({ guild }: { guild: Guild }) {
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
                 <ImageIcon className="size-4" />
-                الصور
+                {t("customization.images")}
               </CardTitle>
               <CardDescription>
-                صورة العضو والغلاف في هذا السيرفر. الفارغ يعود للصورة الأساسية.
+                {t("customization.imagesBody")}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -677,13 +680,13 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                 image, and the slot draws that instead of an empty box.
               */}
               <ImageSlot
-                label="الصورة الأساسية"
-                hint="مربعة 256×256 على الأقل · PNG/JPG/WEBP/GIF · حتى 500 ك.ب."
+                label={t("customization.avatarLabel")}
+                hint={t("customization.avatarHint")}
                 dataUrl={draft.avatarDataUrl}
                 savedDataUrl={saved.avatarDataUrl ?? null}
-                fallbackLabel={profile?.accountAvatarUrl ? "صورة الحساب" : "الافتراضية"}
+                fallbackLabel={profile?.accountAvatarUrl ? t("customization.avatarFallback") : t("customization.defaultAvatar")}
                 fallbackUrl={profile?.accountAvatarUrl ?? null}
-                fallbackCaption="صورة الحساب"
+                fallbackCaption={t("customization.avatarFallback")}
                 fileName={fileNames.avatar ?? "guild-avatar.png"}
                 urlText={avatarUrlText}
                 onUrlText={setAvatarUrlText}
@@ -701,13 +704,13 @@ export function CustomizationView({ guild }: { guild: Guild }) {
               <Separator />
 
               <ImageSlot
-                label="غلاف البوت"
-                hint="بنسبة 5:2 مثل 600×240 · PNG/JPG/WEBP/GIF · حتى 500 ك.ب."
+                label={t("customization.bannerLabel")}
+                hint={t("customization.bannerHint")}
                 dataUrl={draft.bannerDataUrl}
                 savedDataUrl={saved.bannerDataUrl ?? null}
-                fallbackLabel="لا يوجد غلاف"
+                fallbackLabel={t("customization.bannerFallback")}
                 fallbackUrl={profile?.accountBannerUrl ?? null}
-                fallbackCaption="غلاف الحساب"
+                fallbackCaption={t("customization.accountBanner")}
                 fileName={fileNames.banner ?? "guild-banner.png"}
                 urlText={bannerUrlText}
                 onUrlText={setBannerUrlText}
@@ -729,19 +732,18 @@ export function CustomizationView({ guild }: { guild: Guild }) {
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Palette className="size-4" />
-                رتبة البوت
+                {t("customization.role")}
               </CardTitle>
               <CardDescription>
-                رتبة AL AI في <span className="font-medium text-foreground">{guild.name}</span> — لونها وأيقونتها، وهي رتبة لا توجد إلا
-                هنا.
+                {t("customization.roleBody", { guild: guild.name })}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-medium text-muted-foreground">اللون والأيقونة يظهران في قائمة الأعضاء بجانب الاسم.</p>
+                <p className="text-xs font-medium text-muted-foreground">{t("customization.roleNote")}</p>
                 {!roleEditable ? (
                   <Badge variant="destructive" className="shrink-0 text-[10px]">
-                    الحفظ معطّل
+                    {t("customization.saveOff")}
                   </Badge>
                 ) : null}
               </div>
@@ -753,7 +755,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                   half a column each, the picker was crushed and the icon had all
                   the room it did not need. */}
               <div className="space-y-1.5">
-                <Label className="text-xs">لون رتبة البوت</Label>
+                <Label className="text-xs">{t("customization.roleColor")}</Label>
                 {/* The controls follow the *same* gate the badge above
                     announces. They used to be gated by the icon's own lock
                     only, so a caller without the identity permission could
@@ -768,20 +770,20 @@ export function CustomizationView({ guild }: { guild: Guild }) {
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
                 <div className="space-y-1">
                   <Label className="flex items-center gap-1.5 text-xs">
-                    أيقونة الرتبة
+                    {t("customization.roleIcon")}
                     {roleIcon?.locked ? (
                       <Badge variant="outline" className="gap-1 text-[10px]" title={roleIcon.reason ?? undefined}>
                         <Lock className="size-3" />
-                        مقفلة
+                        {t("customization.locked")}
                       </Badge>
                     ) : null}
                   </Label>
                   {roleIcon?.locked ? (
                     <p className="max-w-sm text-[11px] text-muted-foreground">
-                      {roleIcon.reason ?? "أيقونة الرتبة تتطلب مستوى تعزيز 2."}
+                      {roleIcon.reason ?? t("customization.roleIconLocked")}
                     </p>
                   ) : (
-                    <p className="text-[11px] text-muted-foreground">اختيارية — تظهر بجانب اسم البوت في قائمة الأعضاء.</p>
+                    <p className="text-[11px] text-muted-foreground">{t("customization.roleIconHint")}</p>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
@@ -792,7 +794,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                     disabled={roleIcon?.locked || !roleEditable}
                     onClick={() => openPicker("roleIcon")}
                   >
-                    <Upload className="size-3.5" /> اختر أيقونة
+                    <Upload className="size-3.5" /> {t("customization.chooseIcon")}
                   </Button>
                   {draft.roleIconUrl ? (
                     <>
@@ -803,7 +805,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                         variant="ghost"
                         size="icon"
                         className="size-8 hover:text-destructive"
-                        aria-label="إزالة أيقونة الرتبة"
+                        aria-label={t("customization.removeRoleIcon")}
                         disabled={roleIcon?.locked || !roleEditable}
                         onClick={() => patch({ roleIconUrl: null })}
                       >
@@ -815,7 +817,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
               </div>
 
               {permissionsUnreadable ? (
-                <p className="text-[11px] text-muted-foreground">تعذّر قراءة صلاحيات البوت الآن — الحفظ يبقى متاحاً والبوت يتحقق عند التطبيق.</p>
+                <p className="text-[11px] text-muted-foreground">{t("customization.permissionsUnreadable")}</p>
               ) : null}
             </CardContent>
           </Card>
@@ -833,8 +835,8 @@ export function CustomizationView({ guild }: { guild: Guild }) {
         <div className="lg:sticky lg:top-6 lg:self-start">
           <Card className="border-primary/20 bg-card/70 shadow-lg shadow-primary/5 backdrop-blur-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">معاينة حيّة</CardTitle>
-              <CardDescription>هكذا سيظهر AL AI هنا — تتحدّث مباشرة دون حفظ.</CardDescription>
+              <CardTitle className="text-base">{t("customization.previewTitle")}</CardTitle>
+              <CardDescription>{t("customization.previewBody")}</CardDescription>
             </CardHeader>
             <CardContent>
               <BotLivePreview
@@ -850,7 +852,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
                 </p>
               ) : null}
               <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                الحالة والنشاط عامّان للبوت — من شاشة «حالة البوت».
+                {t("customization.presenceNote")}
               </p>
             </CardContent>
           </Card>
@@ -860,9 +862,9 @@ export function CustomizationView({ guild }: { guild: Guild }) {
 
       {anyDirty ? (
         <SaveBar
-          message="تغييرات غير محفوظة"
-          saveLabel="حفظ التغييرات"
-          cancelLabel="تجاهل"
+          message={t("customization.unsaved")}
+          saveLabel={t("customization.save")}
+          cancelLabel={t("customization.discard")}
           onCancel={resetAll}
           onSave={onSave}
         />

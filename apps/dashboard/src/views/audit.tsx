@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import type { AuditEntry, Guild } from "@/types";
 
 /**
@@ -23,9 +24,11 @@ const severityVariant: Record<string, "secondary" | "outline" | "destructive"> =
 };
 
 export function AuditView({ guild }: { guild: Guild }) {
+  const { t, language } = useI18n();
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
   const [counts, setCounts] = useState({ total: 0, critical: 0 });
   const [error, setError] = useState<string | null>(null);
+  const locale = language === "en" ? "en" : "ar";
 
   useEffect(() => {
     let cancelled = false;
@@ -38,11 +41,11 @@ export function AuditView({ guild }: { guild: Guild }) {
         setEntries(result.entries);
         setCounts(result.counts);
       })
-      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
+      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : t("audit.loadFailed")));
     return () => {
       cancelled = true;
     };
-  }, [guild.id]);
+  }, [guild.id, t]);
 
   if (error) {
     return <LoadError message={error} />;
@@ -53,14 +56,14 @@ export function AuditView({ guild }: { guild: Guild }) {
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">إجمالي الأحداث</p>
-            <p className="text-lg font-semibold tabular">{counts.total.toLocaleString("ar")}</p>
+            <p className="text-xs text-muted-foreground">{t("audit.total")}</p>
+            <p className="text-lg font-semibold tabular">{counts.total.toLocaleString(locale)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">حرجة</p>
-            <p className="text-lg font-semibold tabular text-destructive">{counts.critical.toLocaleString("ar")}</p>
+            <p className="text-xs text-muted-foreground">{t("audit.critical")}</p>
+            <p className="text-lg font-semibold tabular text-destructive">{counts.critical.toLocaleString(locale)}</p>
           </CardContent>
         </Card>
         {/*
@@ -72,14 +75,14 @@ export function AuditView({ guild }: { guild: Guild }) {
         <Card>
           <CardContent className="flex items-center gap-2 p-4">
             <Lock className="size-4 text-muted-foreground" />
-            <p className="text-xs text-muted-foreground">سجل يُضاف إليه فقط — لا يُعدَّل ولا يُحذف</p>
+            <p className="text-xs text-muted-foreground">{t("audit.appendOnly")}</p>
           </CardContent>
         </Card>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">آخر الأحداث</CardTitle>
+          <CardTitle className="text-base">{t("audit.latest")}</CardTitle>
         </CardHeader>
         <CardContent>
           {!entries ? (
@@ -87,8 +90,8 @@ export function AuditView({ guild }: { guild: Guild }) {
           ) : entries.length === 0 ? (
             <EmptyState
               icon={FileClock}
-              title="لا توجد سجلات بعد"
-              description="تُكتب هنا أحداث warning وcritical. فعّل السجلات ثم نفّذ إجراءً."
+              title={t("audit.emptyTitle")}
+              description={t("audit.emptyBody")}
             />
           ) : (
             <>
@@ -97,13 +100,13 @@ export function AuditView({ guild }: { guild: Guild }) {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10">
-                      <span className="sr-only">التسلسل</span>
+                      <span className="sr-only">{t("audit.sequence")}</span>
                     </TableHead>
-                    <TableHead>الحدث</TableHead>
-                    <TableHead>الخطورة</TableHead>
-                    <TableHead>الطبقة</TableHead>
-                    <TableHead>الجهة</TableHead>
-                    <TableHead>الوقت</TableHead>
+                    <TableHead>{t("audit.event")}</TableHead>
+                    <TableHead>{t("audit.severity")}</TableHead>
+                    <TableHead>{t("audit.layer")}</TableHead>
+                    <TableHead>{t("audit.actor")}</TableHead>
+                    <TableHead>{t("audit.time")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -131,14 +134,16 @@ export function AuditView({ guild }: { guild: Guild }) {
                         {entry.eventId}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={severityVariant[entry.severity] ?? "outline"}>{entry.severity}</Badge>
+                        <Badge variant={severityVariant[entry.severity] ?? "outline"}>
+                          {t(`audit.severity.${entry.severity}` as TranslationKey)}
+                        </Badge>
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{entry.sourceLayer}</TableCell>
                       <TableCell className="font-mono text-xs" dir="ltr" title={entry.actorHash}>
                         {shortId(entry.actorHash, 6)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-xs text-muted-foreground tabular">
-                        {formatDateTime(entry.createdAt)}
+                        {formatDateTime(entry.createdAt, language)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -157,23 +162,23 @@ export function AuditView({ guild }: { guild: Guild }) {
                       {entry.eventId}
                     </span>
                     <Badge variant={severityVariant[entry.severity] ?? "outline"} className="shrink-0">
-                      {entry.severity}
+                      {t(`audit.severity.${entry.severity}` as TranslationKey)}
                     </Badge>
                   </div>
                   <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                     <div className="flex min-w-0 items-center gap-1">
-                      <dt className="shrink-0">الطبقة:</dt>
+                      <dt className="shrink-0">{t("audit.layerColon")}</dt>
                       <dd className="truncate">{entry.sourceLayer}</dd>
                     </div>
                     <div className="flex min-w-0 items-center gap-1">
-                      <dt className="shrink-0">الجهة:</dt>
+                      <dt className="shrink-0">{t("audit.actorColon")}</dt>
                       <dd className="truncate font-mono" dir="ltr" title={entry.actorHash}>
                         {shortId(entry.actorHash, 6)}
                       </dd>
                     </div>
                     <div className="col-span-2 flex items-center gap-1">
-                      <dt className="shrink-0">الوقت:</dt>
-                      <dd className="tabular">{formatDateTime(entry.createdAt)}</dd>
+                      <dt className="shrink-0">{t("audit.timeColon")}</dt>
+                      <dd className="tabular">{formatDateTime(entry.createdAt, language)}</dd>
                     </div>
                   </dl>
                 </li>

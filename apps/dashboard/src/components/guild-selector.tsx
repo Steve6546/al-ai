@@ -4,6 +4,7 @@ import {
   Bot,
   Crown,
   Info,
+  Languages,
   Loader2,
   RefreshCw,
   Search,
@@ -18,9 +19,11 @@ import { SignOutButton } from "@/components/account-menu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { api } from "@/api";
 import { formatMemberCount, initials } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { tierLabels, tierOrder, type Guild, type HealthSnapshot, type SessionInfo } from "@/types";
+import { tierOrder, type Guild, type HealthSnapshot, type SessionInfo } from "@/types";
 
 /**
  * The guild selector — the first screen after signing in.
@@ -82,6 +85,7 @@ type Props = {
 };
 
 export function GuildSelector({ user, guilds, health, notice, error, refreshing, onRefresh, onSelect, onLogout }: Props) {
+  const { t, language, setLanguage } = useI18n();
   const [query, setQuery] = useState("");
 
   const { active, eligible } = useMemo(() => splitGuilds(guilds), [guilds]);
@@ -91,6 +95,18 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
 
   const searching = query.trim().length > 0;
   const nothingFound = searching && visibleActive.length === 0 && visibleEligible.length === 0;
+
+  async function switchLanguage() {
+    const next = language === "ar" ? "en" : "ar";
+    setLanguage(next);
+    try {
+      await api.savePreferences(next);
+    } catch {
+      // The account preference did not land. Put the device back rather than
+      // leaving this screen in a language the account does not have.
+      setLanguage(language);
+    }
+  }
 
   return (
     /*
@@ -120,10 +136,20 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
           size="sm"
           onClick={onRefresh}
           disabled={refreshing}
-          aria-label="تحديث قائمة السيرفرات"
+          aria-label={t("guilds.refresh")}
         >
           <RefreshCw className={cn(refreshing && "animate-spin")} />
-          <span className="hidden sm:inline">تحديث</span>
+          <span className="hidden sm:inline">{t("common.refresh")}</span>
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => void switchLanguage()}
+          aria-label={t("common.switchLanguage")}
+          title={t("common.switchLanguage")}
+        >
+          <Languages />
         </Button>
 
         <SignOutButton onLogout={onLogout} />
@@ -143,15 +169,18 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
 
             <div className="min-w-0 flex-1 space-y-1">
               <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold">
-                <span className="truncate">مرحباً، <bdi>{user?.username ?? "—"}</bdi>! 👑</span>
+                <span className="truncate">
+                  {language === "ar" ? "مرحباً، " : "Welcome, "}
+                  <bdi>{user?.username ?? "—"}</bdi>! 👑
+                </span>
                 {tier && (
                   <Badge variant="secondary" className="gap-1">
                     <Crown className="size-3" />
-                    {tierLabels[tier]}
+                    {t(`tier.${tier}` as "tier.owner")}
                   </Badge>
                 )}
               </h1>
-              <p className="text-sm text-muted-foreground">اختر سيرفراً لإدارة إعدادات البوت</p>
+              <p className="text-sm text-muted-foreground">{t("guilds.choose")}</p>
             </div>
           </div>
 
@@ -176,8 +205,8 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
             <Input
               value={query}
               onChange={event => setQuery(event.target.value)}
-              placeholder="ابحث عن سيرفر... 🔭"
-              aria-label="ابحث عن سيرفر"
+              placeholder={`${t("guilds.search")} 🔭`}
+              aria-label={t("guilds.searchLabel")}
               className="h-11 ps-9"
             />
           </div>
@@ -189,13 +218,13 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
                   <ServerOff className="size-5" />
                 </div>
                 <div className="space-y-1">
-                  <p className="text-sm font-medium">لا نتائج مطابقة</p>
+                  <p className="text-sm font-medium">{t("guilds.noResults")}</p>
                   <p className="text-xs text-muted-foreground">
-                    لا يوجد سيرفر باسم «{query.trim()}». جرّب جزءاً من الاسم أو معرّف السيرفر.
+                    {t("guilds.noResultsBody", { query: query.trim() })}
                   </p>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => setQuery("")}>
-                  مسح البحث
+                  {t("guilds.clearSearch")}
                 </Button>
               </CardContent>
             </Card>
@@ -203,14 +232,14 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
 
           {!nothingFound && visibleActive.length > 0 && (
             <GuildSection
-              title="السيرفرات النشطة"
-              description="AL AI موجود فيها ويمكنك إدارتها الآن."
+              title={t("guilds.activeTitle")}
+              description={t("guilds.activeBody")}
               count={visibleActive.length}
               guilds={visibleActive}
               renderAction={guild => (
                 <Button size="sm" className="w-full" onClick={() => onSelect(guild.id)}>
                   <Settings />
-                  إدارة ⚙️
+                  {t("guilds.manage")} ⚙️
                 </Button>
               )}
             />
@@ -218,15 +247,15 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
 
           {!nothingFound && visibleEligible.length > 0 && (
             <GuildSection
-              title="سيرفرات أخرى مؤهلة"
-              description="تملك صلاحية الإدارة فيها، لكن AL AI ليس مضافاً بعد."
+              title={t("guilds.eligibleTitle")}
+              description={t("guilds.eligibleBody")}
               count={visibleEligible.length}
               guilds={visibleEligible}
               renderAction={guild => (
                 <Button size="sm" variant="outline" className="w-full" asChild>
                   <a href={`/api/guilds/${guild.id}/invite`}>
                     <Sparkles />
-                    إضافة البوت ✨
+                    {t("guilds.addBot")} ✨
                   </a>
                 </Button>
               )}
@@ -240,14 +269,12 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
                   <ServerOff className="size-5" />
                 </div>
                 <div className="space-y-1">
-                  <p className="text-sm font-medium">لا توجد سيرفرات مؤهلة</p>
-                  <p className="text-xs text-muted-foreground">
-                    تظهر هنا السيرفرات التي تملك فيها صلاحية «إدارة السيرفر» أو «Administrator» فقط.
-                  </p>
+                  <p className="text-sm font-medium">{t("guilds.emptyTitle")}</p>
+                  <p className="text-xs text-muted-foreground">{t("guilds.emptyBody")}</p>
                 </div>
                 <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
                   <RefreshCw className={cn(refreshing && "animate-spin")} />
-                  تحديث القائمة
+                  {t("guilds.refresh")}
                 </Button>
               </CardContent>
             </Card>
@@ -256,7 +283,7 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
           {refreshing && guilds.length === 0 && (
             <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
-              جارٍ تحميل السيرفرات
+              {t("guilds.loading")}
             </div>
           )}
         </div>
@@ -302,6 +329,7 @@ function GuildSection({
 }
 
 function GuildCard({ guild, action }: { guild: Guild; action: ReactNode }) {
+  const { t, language } = useI18n();
   return (
     <Card className="transition-colors hover:border-primary/40">
       <CardContent className="space-y-3 p-4">
@@ -315,7 +343,7 @@ function GuildCard({ guild, action }: { guild: Guild; action: ReactNode }) {
             <p className="truncate text-sm font-medium" title={guild.name}>
               {guild.name}
             </p>
-            <p className="text-xs text-muted-foreground">{formatMemberCount(guild.memberCount)}</p>
+            <p className="text-xs text-muted-foreground">{formatMemberCount(guild.memberCount, language)}</p>
           </div>
 
           {/* Present means manageable; absent means invitable. The badge states
@@ -323,11 +351,11 @@ function GuildCard({ guild, action }: { guild: Guild; action: ReactNode }) {
           {guild.botPresent ? (
             <Badge className="shrink-0 gap-1 border-transparent bg-success/15 text-success">
               <ShieldCheck className="size-3" />
-              نشط
+              {t("guilds.activeBadge")}
             </Badge>
           ) : (
             <Badge variant="outline" className="shrink-0 gap-1 text-warning">
-              غير مضاف
+              {t("guilds.missingBadge")}
             </Badge>
           )}
         </div>
@@ -339,12 +367,13 @@ function GuildCard({ guild, action }: { guild: Guild; action: ReactNode }) {
 }
 
 function StatusPill({ health }: { health: HealthSnapshot | null }) {
+  const { t } = useI18n();
   if (!health) return null;
   const healthy = health.status === "healthy" && health.bot === "connected";
   return (
     <Badge variant={healthy ? "secondary" : "destructive"} className="hidden gap-1.5 sm:inline-flex">
       <Activity className="size-3" />
-      {healthy ? "متصل" : health.database === "unreachable" ? "قاعدة البيانات" : "محدود"}
+      {healthy ? t("guilds.connected") : health.database === "unreachable" ? t("guilds.database") : t("guilds.limited")}
     </Badge>
   );
 }

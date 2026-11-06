@@ -20,6 +20,7 @@ import {
   Zap
 } from "lucide-react";
 import { api } from "@/api";
+import { useI18n, type Translate, type TranslationKey } from "@/lib/i18n";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { DualRangeSlider } from "@/components/dual-range-slider";
 import { LoadError, LoadingRow } from "@/components/view-states";
@@ -77,12 +78,12 @@ const SYNC_POLL_MS = 4_000;
 const LEADERBOARD_PAGE_SIZE = 25;
 
 const levelTabs: { key: LevelsTab; label: string; icon: typeof Settings2 }[] = [
-  { key: "settings", label: "الإعدادات العامة", icon: Settings2 },
-  { key: "multipliers", label: "مضاعفات XP", icon: Zap },
-  { key: "text", label: "رتب كتابية", icon: PenLine },
-  { key: "voice", label: "رتب صوتية", icon: Mic },
-  { key: "dual", label: "رتب مشتركة", icon: Link2 },
-  { key: "leaderboard", label: "المتصدرين", icon: Trophy }
+  { key: "settings", label: "levels.tab.settings", icon: Settings2 },
+  { key: "multipliers", label: "levels.tab.multipliers", icon: Zap },
+  { key: "text", label: "levels.tab.text", icon: PenLine },
+  { key: "voice", label: "levels.tab.voice", icon: Mic },
+  { key: "dual", label: "levels.tab.dual", icon: Link2 },
+  { key: "leaderboard", label: "levels.tab.leaderboard", icon: Trophy }
 ];
 
 /** The tab a kind maps to, so the reward editor can jump between lists. */
@@ -90,22 +91,22 @@ function tabKey(kind: LevelRewardInput["kind"]): RewardTab {
   return kind;
 }
 
-function kindLabel(kind: LevelRewardInput["kind"]): string {
-  if (kind === "voice") return "رتبة صوتية";
-  if (kind === "dual") return "رتبة مشتركة";
-  return "رتبة كتابية";
+function kindLabel(kind: LevelRewardInput["kind"], t: Translate): string {
+  if (kind === "voice") return t("levels.kind.voice");
+  if (kind === "dual") return t("levels.kind.dual");
+  return t("levels.kind.text");
 }
 
-function kindChip(kind: LevelRewardKind): string {
-  if (kind === "voice") return "صوتية";
-  if (kind === "dual") return "مشتركة";
-  return "كتابية";
+function kindChip(kind: LevelRewardKind, t: Translate): string {
+  if (kind === "voice") return t("levels.chip.voice");
+  if (kind === "dual") return t("levels.chip.dual");
+  return t("levels.chip.text");
 }
 
-function formatWhen(iso: string | null | undefined): string {
+function formatWhen(iso: string | null | undefined, language: "ar" | "en"): string {
   if (!iso) return "—";
   const at = new Date(iso);
-  return Number.isNaN(at.getTime()) ? "—" : at.toLocaleString("ar", { dateStyle: "short", timeStyle: "short" });
+  return Number.isNaN(at.getTime()) ? "—" : at.toLocaleString(language === "ar" ? "ar" : "en-GB", { dateStyle: "short", timeStyle: "short" });
 }
 
 /** The guild's effective level ceiling, resolving 0 to the hard maximum. */
@@ -119,14 +120,18 @@ function effectiveCap(maxLevelCap: number): number {
 
 /** The XP formula card every rewards tab shows, with the shipped examples. */
 function FormulaCard() {
+  const { t } = useI18n();
   return (
     <Alert>
       <Award aria-hidden />
       <AlertDescription>
-        <p className="font-bold">معادلة احتساب المستوى: XP = (المستوى × 25)²</p>
+        <p className="font-bold">{t("levels.formula.title")}</p>
         <p className="mt-1 text-muted-foreground">
-          مستوى 5 = {xpForLevel(5).toLocaleString("en")} XP · مستوى 10 = {xpForLevel(10).toLocaleString("en")} XP ·
-          مستوى 20 = {xpForLevel(20).toLocaleString("en")} XP
+          {t("levels.formula.example", {
+            l5: xpForLevel(5).toLocaleString("en"),
+            l10: xpForLevel(10).toLocaleString("en"),
+            l20: xpForLevel(20).toLocaleString("en")
+          })}
         </p>
       </AlertDescription>
     </Alert>
@@ -174,6 +179,7 @@ function RangeField({
   onMaxChange: (value: number) => void;
   suffix?: string;
 }) {
+  const { t } = useI18n();
   return (
     <div className="space-y-1.5">
       <Label className="text-xs text-muted-foreground">{label}</Label>
@@ -189,7 +195,7 @@ function RangeField({
       />
       <div className="flex items-center gap-2" dir="ltr">
         <Input
-          aria-label={`${label} — الأدنى (رقمي)`}
+          aria-label={t("levels.range.minAria", { label })}
           type="number"
           min={floor}
           max={ceiling}
@@ -197,9 +203,9 @@ function RangeField({
           onChange={event => onMinChange(Number(event.target.value))}
           className="w-16 text-center"
         />
-        <span className="shrink-0 text-xs text-muted-foreground">إلى</span>
+        <span className="shrink-0 text-xs text-muted-foreground">{t("levels.range.to")}</span>
         <Input
-          aria-label={`${label} — الأقصى (رقمي)`}
+          aria-label={t("levels.range.maxAria", { label })}
           type="number"
           min={floor}
           max={ceiling}
@@ -230,6 +236,7 @@ function SettingsTab({
   roles: DiscordRole[];
   channels: ChannelOption[];
 }) {
+  const { t } = useI18n();
   const textRef = useRef<HTMLTextAreaElement>(null);
   const voiceRef = useRef<HTMLTextAreaElement>(null);
 
@@ -269,19 +276,19 @@ function SettingsTab({
           <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 pb-3">
             <CardTitle className="flex min-w-0 items-center gap-2 text-base">
               <PenLine className="size-4 shrink-0 text-primary" aria-hidden />
-              الخبرة الكتابية
+              {t("levels.textXp.title")}
             </CardTitle>
             <Switch
               id="levels-text-xp"
               checked={draft.textXpEnabled}
               onCheckedChange={textXpEnabled => patch({ textXpEnabled })}
-              aria-label="تفعيل الخبرة الكتابية"
+              aria-label={t("levels.textXp.enableAria")}
               className="shrink-0"
             />
           </CardHeader>
           <CardContent className="flex flex-1 flex-col justify-between gap-4">
             <RangeField
-              label="XP لكل رسالة مؤهلة"
+              label={t("levels.xpPerMessage")}
               floor={1}
               ceiling={100}
               minValue={draft.textXpMin}
@@ -291,7 +298,7 @@ function SettingsTab({
             />
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground" htmlFor="levels-cooldown">
-                فترة الانتظار بين رسالتين
+                {t("levels.cooldown")}
               </Label>
               <div className="flex items-center gap-2" dir="ltr">
                 <Input
@@ -303,11 +310,11 @@ function SettingsTab({
                   onChange={event => patch({ textCooldownSeconds: Number(event.target.value) })}
                   className="w-24 text-center"
                 />
-                <Badge variant="secondary">ثانية</Badge>
+                <Badge variant="secondary">{t("levels.second")}</Badge>
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              كل رسالة تمنح نقاطاً عشوائية بين الحدين. القنوات والرتب المستثناة في البطاقة التالية.
+              {t("levels.textXp.hint")}
             </p>
           </CardContent>
         </Card>
@@ -316,19 +323,19 @@ function SettingsTab({
           <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 pb-3">
             <CardTitle className="flex min-w-0 items-center gap-2 text-base">
               <Mic className="size-4 shrink-0 text-primary" aria-hidden />
-              الخبرة الصوتية
+              {t("levels.voiceXp.title")}
             </CardTitle>
             <Switch
               id="levels-voice-xp"
               checked={draft.voiceXpEnabled}
               onCheckedChange={voiceXpEnabled => patch({ voiceXpEnabled })}
-              aria-label="تفعيل الخبرة الصوتية"
+              aria-label={t("levels.voiceXp.enableAria")}
               className="shrink-0"
             />
           </CardHeader>
           <CardContent className="flex flex-1 flex-col gap-4">
             <RangeField
-              label="XP لكل دقيقة مؤهلة"
+              label={t("levels.xpPerMinute")}
               floor={0}
               ceiling={100}
               minValue={draft.voiceXpMin}
@@ -339,7 +346,7 @@ function SettingsTab({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <Label className="text-xs text-muted-foreground" htmlFor="levels-min-members">
-                  الحد الأدنى للأعضاء المؤهلين
+                  {t("levels.minMembers")}
                 </Label>
                 <Badge variant="secondary" dir="ltr">
                   {draft.voiceMinMembers} / 10
@@ -356,23 +363,23 @@ function SettingsTab({
                   value={draft.voiceMinMembers}
                   onChange={event => patch({ voiceMinMembers: Number(event.target.value) })}
                   className="w-full accent-primary"
-                  aria-label="الحد الأدنى للأعضاء المؤهلين في القناة، من 1 إلى 10"
-                  aria-valuetext={`${draft.voiceMinMembers} من 10`}
+                  aria-label={t("levels.minMembersAria")}
+                  aria-valuetext={t("levels.minMembersValue", { count: draft.voiceMinMembers })}
                 />
                 <span className="w-10 shrink-0 text-end text-[10px] text-muted-foreground">10</span>
               </div>
             </div>
             <div className="grid grid-cols-1 gap-2">
               <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-1.5">
-                <span className="text-xs">تجاهل المكتومين</span>
+                <span className="text-xs">{t("levels.ignoreMuted")}</span>
                 <Switch checked={draft.ignoreMuted} onCheckedChange={ignoreMuted => patch({ ignoreMuted })} />
               </label>
               <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-1.5">
-                <span className="text-xs">تجاهل الصامتين</span>
+                <span className="text-xs">{t("levels.ignoreDeafened")}</span>
                 <Switch checked={draft.ignoreDeafened} onCheckedChange={ignoreDeafened => patch({ ignoreDeafened })} />
               </label>
               <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-1.5">
-                <span className="text-xs">تجاهل قناة AFK</span>
+                <span className="text-xs">{t("levels.ignoreAfk")}</span>
                 <Switch checked={draft.ignoreAfk} onCheckedChange={ignoreAfk => patch({ ignoreAfk })} />
               </label>
             </div>
@@ -382,13 +389,13 @@ function SettingsTab({
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">حدود النظام</CardTitle>
-          <CardDescription>سقف الترقية وما يحدث عند مغادرة الأعضاء.</CardDescription>
+          <CardTitle className="text-base">{t("levels.limits.title")}</CardTitle>
+          <CardDescription>{t("levels.limits.body")}</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground" htmlFor="levels-cap">
-              الحد الأقصى للمستوى (0 = غير محدود)
+              {t("levels.maxLevel")}
             </Label>
             <div className="flex items-center gap-2" dir="ltr">
               <Input
@@ -400,14 +407,14 @@ function SettingsTab({
                 onChange={event => patch({ maxLevelCap: Number(event.target.value) })}
                 className="w-28 text-center"
               />
-              <Badge variant="secondary">مستوى</Badge>
+              <Badge variant="secondary">{t("levels.maxLevelUnit")}</Badge>
             </div>
           </div>
           <label className="flex items-center justify-between gap-3 rounded-lg border border-border/80 px-3 py-2">
             <span>
-              <span className="block text-sm font-medium">تصفير نقاط العضو عند مغادرة السيرفر</span>
+              <span className="block text-sm font-medium">{t("levels.resetOnLeave.title")}</span>
               <span className="block text-xs text-muted-foreground">
-                تُصفّر نقاط المغادر وتُسحب رتبه غير المستحقة في أول مزامنة.
+                {t("levels.resetOnLeave.body")}
               </span>
             </span>
             <Switch checked={draft.resetOnLeave} onCheckedChange={resetOnLeave => patch({ resetOnLeave })} />
@@ -417,19 +424,19 @@ function SettingsTab({
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">إشعارات الترقية والرسائل</CardTitle>
-          <CardDescription>إشعار العضو عند ترقيته، وجهته وصيغته وبطاقة الترقية.</CardDescription>
+          <CardTitle className="text-base">{t("levels.notify.title")}</CardTitle>
+          <CardDescription>{t("levels.notify.body")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-2">
-              <span className="text-sm">رسائل رفع المستوى</span>
+              <span className="text-sm">{t("levels.notify.levelUp")}</span>
               <Switch checked={draft.notifyLevelUp} onCheckedChange={notifyLevelUp => patch({ notifyLevelUp })} />
             </label>
             <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-2">
               <span>
-                <span className="block text-sm">بطاقة صورة الترقية</span>
-                <span className="block text-[10px] text-muted-foreground">بطاقة غنية مع الإشعار</span>
+                <span className="block text-sm">{t("levels.notify.rankCard")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("levels.notify.rankCardHint")}</span>
               </span>
               <Switch checked={draft.rankCardEnabled} onCheckedChange={rankCardEnabled => patch({ rankCardEnabled })} />
             </label>
@@ -438,27 +445,27 @@ function SettingsTab({
             <>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">وجهة الإشعار</Label>
+                  <Label className="text-xs text-muted-foreground">{t("levels.notify.mode")}</Label>
                   <Select value={draft.notifyMode} onValueChange={mode => patch({ notifyMode: mode as LevelNotifyMode })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="same_channel">نفس القناة (الافتراضي)</SelectItem>
-                      <SelectItem value="custom_channel">قناة مخصصة</SelectItem>
-                      <SelectItem value="send_dm">رسالة خاصة (خاص DM)</SelectItem>
+                      <SelectItem value="same_channel">{t("levels.notify.mode.same_channel")}</SelectItem>
+                      <SelectItem value="custom_channel">{t("levels.notify.mode.custom_channel")}</SelectItem>
+                      <SelectItem value="send_dm">{t("levels.notify.mode.send_dm")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 {draft.notifyMode === "custom_channel" && (
                   <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">قناة الإشعارات</Label>
+                    <Label className="text-xs text-muted-foreground">{t("levels.notify.channel")}</Label>
                     <Select
                       value={draft.notifyChannelId ?? NONE}
                       onValueChange={value => patch({ notifyChannelId: value === NONE ? null : value })}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="اختر قناة..." />
+                        <SelectValue placeholder={t("levels.notify.chooseChannel")} />
                       </SelectTrigger>
                       <SelectContent>
                         {channels.map(channel => (
@@ -473,18 +480,18 @@ function SettingsTab({
               </div>
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 {messageCard(
-                  "رسالة الترقية الكتابية",
+                  t("levels.notify.textMessage"),
                   textRef,
                   draft.textLevelUpMessage,
                   textLevelUpMessage => patch({ textLevelUpMessage }),
-                  "{user} منشن · {level} المستوى · {xp} النقاط · {server} السيرفر"
+                  t("levels.notify.textHint")
                 )}
                 {messageCard(
-                  "رسالة الترقية الصوتية",
+                  t("levels.notify.voiceMessage"),
                   voiceRef,
                   draft.voiceLevelUpMessage,
                   voiceLevelUpMessage => patch({ voiceLevelUpMessage }),
-                  "ترقية الصوت تُرسل للقناة المخصصة أو قناة النظام أو الخاص."
+                  t("levels.notify.voiceHint")
                 )}
               </div>
             </>
@@ -494,15 +501,15 @@ function SettingsTab({
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">الاستثناءات</CardTitle>
-          <CardDescription>من وأين لا تُحتسب النقاط إطلاقاً.</CardDescription>
+          <CardTitle className="text-base">{t("levels.exceptions.title")}</CardTitle>
+          <CardDescription>{t("levels.exceptions.body")}</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <SearchableMultiSelect
             id="levels-ignored-text"
             kind="text"
-            label="قنوات كتابية"
-            hint="رسائل هذه القنوات وثريداتها لا تُحتسب."
+            label={t("levels.exceptions.textChannels")}
+            hint={t("levels.exceptions.textHint")}
             options={channels.filter(channel => channel.type === "text")}
             selected={draft.ignoredTextChannelIds}
             onChange={ignoredTextChannelIds => patch({ ignoredTextChannelIds })}
@@ -510,8 +517,8 @@ function SettingsTab({
           <SearchableMultiSelect
             id="levels-ignored-voice"
             kind="voice"
-            label="قنوات صوتية"
-            hint="الوقت في هذه الرومات لا يُحتسب."
+            label={t("levels.exceptions.voiceChannels")}
+            hint={t("levels.exceptions.voiceHint")}
             options={channels.filter(channel => channel.type === "voice")}
             selected={draft.ignoredVoiceChannelIds}
             onChange={ignoredVoiceChannelIds => patch({ ignoredVoiceChannelIds })}
@@ -519,8 +526,8 @@ function SettingsTab({
           <SearchableMultiSelect
             id="levels-ignored-roles"
             kind="role"
-            label="رتب مستثناة"
-            hint="حاملو أي من هذه الرتب لا يكسبون XP."
+            label={t("levels.exceptions.roles")}
+            hint={t("levels.exceptions.rolesHint")}
             options={roles}
             selected={draft.ignoredRoleIds}
             onChange={ignoredRoleIds => patch({ ignoredRoleIds })}
@@ -548,6 +555,7 @@ function MultiplierTable({
   rules: LevelMultiplier[];
   onChange: (next: LevelMultiplier[]) => void;
 }) {
+  const { t } = useI18n();
   const [pendingId, setPendingId] = useState("");
   const [pendingFactor, setPendingFactor] = useState("2");
   const taken = new Set(rules.map(rule => rule.id));
@@ -579,7 +587,7 @@ function MultiplierTable({
                     size="icon"
                     variant="ghost"
                     className="hover:text-destructive"
-                    aria-label={`حذف ${name}`}
+                    aria-label={t("levels.multiplier.remove", { name })}
                     onClick={() => onChange(rules.filter(entry => entry.id !== rule.id))}
                   >
                     <Trash2 className="size-4" />
@@ -594,7 +602,7 @@ function MultiplierTable({
         <div className="flex items-center gap-2">
           <Select value={pendingId} onValueChange={setPendingId}>
             <SelectTrigger className="flex-1">
-              <SelectValue placeholder="اختر..." />
+              <SelectValue placeholder={t("levels.multiplier.choose")} />
             </SelectTrigger>
             <SelectContent>
               {available.map(option => (
@@ -605,7 +613,7 @@ function MultiplierTable({
             </SelectContent>
           </Select>
           <Input
-            aria-label="قيمة المضاعف"
+            aria-label={t("levels.multiplier.factor")}
             type="number"
             min={0.1}
             max={10}
@@ -617,7 +625,7 @@ function MultiplierTable({
           />
           <Button size="sm" variant="outline" onClick={addRule} disabled={!pendingId}>
             <Plus />
-            إضافة
+            {t("levels.multiplier.add")}
           </Button>
         </div>
       )}
@@ -637,24 +645,25 @@ function MultipliersTab({
   roles: DiscordRole[];
   channels: ChannelOption[];
 }) {
+  const { t } = useI18n();
   return (
     <div className="space-y-4">
       <Alert>
         <Zap aria-hidden />
         <AlertDescription>
-          قواعد تضاعف نقاط من يحقق شرطها — وتتركّب عند تطابق أكثر من قاعدة (×2 مع ×1.5 = ×3).
+          {t("levels.multipliers.alert")}
         </AlertDescription>
       </Alert>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">مضاعفات حسب الرتبة</CardTitle>
-            <CardDescription>مثال: رتبة Server Booster بمضاعف ×2.0 — من يحملها يكسب ضعف النقاط.</CardDescription>
+            <CardTitle className="text-base">{t("levels.multipliers.byRole")}</CardTitle>
+            <CardDescription>{t("levels.multipliers.byRoleBody")}</CardDescription>
           </CardHeader>
           <CardContent>
             <MultiplierTable
-              title="قواعد الرتب"
-              hint="تُطبَّق على النقاط الكتابية والصوتية معاً."
+              title={t("levels.multipliers.roleRules")}
+              hint={t("levels.multipliers.roleRulesHint")}
               options={roles}
               rules={draft.roleMultipliers}
               onChange={roleMultipliers => patch({ roleMultipliers })}
@@ -663,13 +672,13 @@ function MultipliersTab({
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">مضاعفات حسب القناة</CardTitle>
-            <CardDescription>مثال: روم الفعاليات بمضاعف ×1.5 — النقاط المكتوبة فيه تتضاعف.</CardDescription>
+            <CardTitle className="text-base">{t("levels.multipliers.byChannel")}</CardTitle>
+            <CardDescription>{t("levels.multipliers.byChannelBody")}</CardDescription>
           </CardHeader>
           <CardContent>
             <MultiplierTable
-              title="قواعد القنوات"
-              hint="القناة الكتابية تضاعف رسائلها، والصوتية تضاعف وقتها."
+              title={t("levels.multipliers.channelRules")}
+              hint={t("levels.multipliers.channelRulesHint")}
               options={channels}
               rules={draft.channelMultipliers}
               onChange={channelMultipliers => patch({ channelMultipliers })}
@@ -720,6 +729,7 @@ function RewardRulesTab({
   syncing: boolean;
   onChanged: () => void;
 }) {
+  const { t } = useI18n();
   const { toasts, push, dismiss } = useToasts();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editor, setEditor] = useState<RewardDraft | null>(null);
@@ -744,15 +754,15 @@ function RewardRulesTab({
     if (!editor) return;
     const level = Number(editor.level);
     if (!Number.isFinite(level) || level < 1) {
-      setError("أدخل مستوى صحيحاً (1 أو أعلى).");
+      setError(t("levels.error.invalidLevel"));
       return;
     }
     if (kind === "dual" && (!Number.isFinite(Number(editor.voiceLevel)) || Number(editor.voiceLevel) < 1)) {
-      setError("أدخل المستوى الصوتي المطلوب.");
+      setError(t("levels.error.invalidVoiceLevel"));
       return;
     }
     if (!editor.roleId) {
-      setError("اختر رتبة ديسكورد.");
+      setError(t("levels.error.chooseRole"));
       return;
     }
     setBusy(true);
@@ -772,10 +782,10 @@ function RewardRulesTab({
       }
       setEditorOpen(false);
       setEditor(null);
-      push({ title: "تم حفظ القاعدة، وستُزامن الرتب تلقائياً.", tone: "success" });
+      push({ title: t("levels.saved"), tone: "success" });
       onChanged();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "تعذّر الحفظ.");
+      setError(cause instanceof Error ? cause.message : t("levels.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -784,10 +794,10 @@ function RewardRulesTab({
   const remove = async (reward: LevelRoleReward) => {
     try {
       await api.deleteLevelReward(guild.id, reward.id);
-      push({ title: "حُذفت القاعدة، وستُزامن الرتب تلقائياً.", tone: "success" });
+      push({ title: t("levels.removed"), tone: "success" });
       onChanged();
     } catch (cause) {
-      push({ title: cause instanceof Error ? cause.message : "تعذّر الحذف.", tone: "error" });
+      push({ title: cause instanceof Error ? cause.message : t("levels.deleteFailed"), tone: "error" });
     }
   };
 
@@ -804,10 +814,10 @@ function RewardRulesTab({
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Link2 className="size-4 text-primary" aria-hidden />
-              كيف تعمل الرتب المشتركة؟
+              {t("levels.dual.howTitle")}
             </CardTitle>
             <CardDescription>
-              تُمنح الرتبة عند تحقق الشرطين، وتُسحب عند فقد أحدهما.
+              {t("levels.dual.howBody")}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -819,7 +829,7 @@ function RewardRulesTab({
         <Alert>
           <Award aria-hidden />
           <AlertDescription>
-            <p className="font-bold text-destructive">مشاكل في الإعداد الحالي</p>
+            <p className="font-bold text-destructive">{t("levels.problems")}</p>
             <ul className="mt-1 list-disc space-y-0.5 pe-5 text-xs text-muted-foreground">
               {problems.map((problem, index) => (
                 <li key={index}>{problem.message}</li>
@@ -833,12 +843,12 @@ function RewardRulesTab({
         <CardHeader className="flex-col gap-3 space-y-0 pb-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 space-y-1">
             <CardTitle className="text-base">
-              {kind === "dual" ? "قواعد الشرط المزدوج" : "رتب المستويات"}
+              {kind === "dual" ? t("levels.dual.rulesTitle") : t("levels.rewards.title")}
             </CardTitle>
             <CardDescription>
               {kind === "dual"
-                ? "رتب تُمنح بتحقق شرطين معاً."
-                : "أضف رتبة لكل مستوى تستهدفه، وقرر لكل قاعدة سلوكها."}
+                ? t("levels.dual.rulesBody")
+                : t("levels.rewards.body")}
             </CardDescription>
           </div>
           <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
@@ -851,19 +861,19 @@ function RewardRulesTab({
                 }}
               >
                 <Plus />
-                {kind === "dual" ? "إنشاء قاعدة مشتركة" : "إضافة رتبة مكافأة"}
+                {kind === "dual" ? t("levels.createDual") : t("levels.addReward")}
               </Button>
               <SyncButton sync={sync} syncing={syncing} onSync={onSync} />
             </div>
             <label className="flex items-start gap-2 text-xs text-muted-foreground">
-              <Switch checked={stacking} onCheckedChange={onStackingChange} aria-label="أدوار تراكمية" className="mt-0.5 shrink-0" />
-              <span className="min-w-0 text-start leading-relaxed">أدوار تراكمية (الاحتفاظ بجميع الرتب السابقة)</span>
+              <Switch checked={stacking} onCheckedChange={onStackingChange} aria-label={t("levels.stackingAria")} className="mt-0.5 shrink-0" />
+              <span className="min-w-0 text-start leading-relaxed">{t("levels.stacking")}</span>
             </label>
           </div>
         </CardHeader>
         <CardContent>
           {kindRewards.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">لا توجد قواعد بعد — أضف أول رتبة.</p>
+            <p className="py-6 text-center text-sm text-muted-foreground">{t("levels.empty")}</p>
           ) : (
             <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {kindRewards.map(reward => {
@@ -878,7 +888,7 @@ function RewardRulesTab({
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="secondary" className="font-mono">
                           {reward.kind === "dual"
-                            ? `كتابي ≥ ${reward.level} · صوتي ≥ ${reward.voiceLevel}`
+                            ? t("levels.dual.badge", { level: reward.level, voice: reward.voiceLevel ?? 0 })
                             : `Lv. ${reward.level}`}
                         </Badge>
                         <span className="flex min-w-0 items-center gap-1.5 text-sm">
@@ -893,11 +903,11 @@ function RewardRulesTab({
                               : "text-[10px] text-muted-foreground"
                           }
                         >
-                          {reward.alwaysKeep ? "تراكمي" : "تطوري"}
+                          {reward.alwaysKeep ? t("levels.stackingShort") : t("levels.evolving")}
                         </Badge>
                         {others.map(other => (
                           <Badge key={other} variant="outline" className="text-[10px] text-muted-foreground">
-                            تُكتسب أيضاً كـ{kindChip(other)}
+                            {t("levels.alsoAs", { kind: kindChip(other, t) })}
                           </Badge>
                         ))}
                       </div>
@@ -915,7 +925,7 @@ function RewardRulesTab({
                         size="icon"
                         variant="ghost"
                         className="hover:text-destructive"
-                        aria-label="حذف"
+                        aria-label={t("levels.deleteAria")}
                         onClick={() => void remove(reward)}
                       >
                         <Trash2 />
@@ -923,7 +933,7 @@ function RewardRulesTab({
                       <Button
                         size="icon"
                         variant="ghost"
-                        aria-label="تعديل"
+                        aria-label={t("levels.editAria")}
                         onClick={() => {
                           openEdit(reward);
                           setEditorOpen(true);
@@ -949,11 +959,11 @@ function RewardRulesTab({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editor?.id ? "تعديل القاعدة" : `إضافة ${kindLabel(kind)}`}</DialogTitle>
+            <DialogTitle>{editor?.id ? t("levels.editor.editTitle") : t("levels.editor.addTitle", { kind: kindLabel(kind, t) })}</DialogTitle>
             <DialogDescription>
               {kind === "dual"
-                ? "حدّد الشرطين معاً، ثم اختر رتبة السيرفر التي تُمنح عندهما."
-                : "حدّد المستوى المستهدف، ثم اختر رتبة ديسكورد التي تُمنح عنده."}
+                ? t("levels.editor.dualBody")
+                : t("levels.editor.body")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -961,7 +971,7 @@ function RewardRulesTab({
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs text-muted-foreground" htmlFor="reward-text-level">
-                    المستوى الكتابي ≥
+                    {t("levels.editor.textLevel")}
                   </Label>
                   <Input
                     id="reward-text-level"
@@ -974,7 +984,7 @@ function RewardRulesTab({
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs text-muted-foreground" htmlFor="reward-voice-level">
-                    المستوى الصوتي ≥
+                    {t("levels.editor.voiceLevel")}
                   </Label>
                   <Input
                     id="reward-voice-level"
@@ -989,7 +999,7 @@ function RewardRulesTab({
             ) : (
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground" htmlFor="reward-level">
-                  المستوى المستهدف
+                  {t("levels.editor.targetLevel")}
                 </Label>
                 <Input
                   id="reward-level"
@@ -1002,13 +1012,13 @@ function RewardRulesTab({
               </div>
             )}
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">رتبة السيرفر</Label>
+              <Label className="text-xs text-muted-foreground">{t("levels.editor.role")}</Label>
               <Select
                 value={editor?.roleId || ""}
                 onValueChange={roleId => setEditor(state => state && { ...state, roleId })}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="اختر رتبة..." />
+                  <SelectValue placeholder={t("levels.editor.chooseRole")} />
                 </SelectTrigger>
                 <SelectContent>
                   {roles.map(role => (
@@ -1022,14 +1032,14 @@ function RewardRulesTab({
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                تظهر فقط الرتب تحت أعلى رتبة البوت — ما فوقها يرفضه ديسكورد.
+                {t("levels.editor.roleHint")}
               </p>
             </div>
             <label className="flex items-center justify-between gap-3 rounded-lg border border-border/80 px-3 py-2">
               <span>
-                <span className="block text-sm font-medium">الاحتفاظ بهذه الرتبة (تراكمية)</span>
+                <span className="block text-sm font-medium">{t("levels.editor.alwaysKeep")}</span>
                 <span className="block text-xs text-muted-foreground">
-                  تبقى مع العضو ما دامت القاعدة مستوفاة، حتى لو كان التكديس معطلاً.
+                  {t("levels.editor.alwaysKeepBody")}
                 </span>
               </span>
               <Switch
@@ -1041,13 +1051,13 @@ function RewardRulesTab({
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setEditorOpen(false)} disabled={busy}>
-              إلغاء
+              {t("levels.cancel")}
             </Button>
             <Button onClick={() => void submit()} loading={busy}>
               {/* The label stays put: the button's own `loading` state puts a
                   spinner in front of it, and swapping the text as well would
                   move the button's contents twice for one event. */}
-              حفظ
+              {t("levels.save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1096,6 +1106,7 @@ function DualRuleState({
   requiredTextLevel: number;
   requiredVoiceLevel: number;
 }) {
+  const { t } = useI18n();
   const chip = (met: boolean | null, label: string) => (
     <Badge
       variant={met === true ? "default" : met === false ? "secondary" : "outline"}
@@ -1105,10 +1116,10 @@ function DualRuleState({
     </Badge>
   );
   if (!personal.available) {
-    return <div className="mt-1 flex flex-wrap gap-1"><Badge variant="outline">حالة التحقق: غير متاح</Badge></div>;
+    return <div className="mt-1 flex flex-wrap gap-1"><Badge variant="outline">{t("levels.personal.unavailable")}</Badge></div>;
   }
   if (!personal.levels) {
-    return <div className="mt-1 flex flex-wrap gap-1"><Badge variant="outline">لا توجد بيانات مستويات لك بعد</Badge></div>;
+    return <div className="mt-1 flex flex-wrap gap-1"><Badge variant="outline">{t("levels.personal.noData")}</Badge></div>;
   }
   const textLevel = levelFromXp(personal.levels.textXp, cap);
   const voiceLevel = levelFromXp(personal.levels.voiceXp, cap);
@@ -1116,10 +1127,10 @@ function DualRuleState({
   const voiceMet = voiceLevel >= requiredVoiceLevel;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1">
-      {chip(textMet, "كتابي")}
-      {chip(voiceMet, "صوتي")}
+      {chip(textMet, t("levels.personal.text"))}
+      {chip(voiceMet, t("levels.personal.voice"))}
       <Badge variant={textMet && voiceMet ? "default" : "outline"}>
-        {textMet && voiceMet ? "مستحق لك ✓" : "غير مستحق لك بعد"}
+        {textMet && voiceMet ? t("levels.personal.eligible") : t("levels.personal.notEligible")}
       </Badge>
     </div>
   );
@@ -1135,6 +1146,7 @@ function SyncButton({
   syncing: boolean;
   onSync: () => void;
 }) {
+  const { t } = useI18n();
   const active = sync?.status === "pending" || sync?.status === "running";
   return (
     <div className="flex flex-col items-end gap-1">
@@ -1149,7 +1161,7 @@ function SyncButton({
         loading={syncing}
       >
         <RotateCw className={active ? "animate-spin" : undefined} />
-        {active ? "جارٍ المزامنة" : sync?.status === "failed" ? "إعادة المحاولة" : "مزامنة"}
+        {active ? t("levels.sync.running") : sync?.status === "failed" ? t("levels.sync.retry") : t("levels.sync.sync")}
       </Button>
       {active && sync?.total !== null && sync?.total !== undefined && (
         <span className="text-xs text-muted-foreground" dir="ltr">
@@ -1159,7 +1171,7 @@ function SyncButton({
       )}
       {sync?.status === "failed" && (
         <span className="max-w-56 truncate text-xs text-destructive" title={sync.error ?? undefined}>
-          {sync.error ?? "فشلت المزامنة"}
+          {sync.error ?? t("levels.sync.failed")}
         </span>
       )}
     </div>
@@ -1178,6 +1190,7 @@ type XpEditorState = {
 };
 
 function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
+  const { t, language } = useI18n();
   const [track, setTrack] = useState<"text" | "voice">("text");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<LeaderboardPage | null>(null);
@@ -1204,7 +1217,7 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
           setUpdatedAt(new Date().toISOString());
           setError(null);
         })
-        .catch(cause => setError(cause instanceof Error ? cause.message : "تعذّر التحميل."))
+        .catch(cause => setError(cause instanceof Error ? cause.message : t("levels.loadFailed")))
         .finally(() => {
           inFlight.current = false;
           setLoading(false);
@@ -1228,11 +1241,11 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
         xpEditor.userId,
         track === "text" ? { textXp: Number(xpEditor.value), voiceXp: null } : { textXp: null, voiceXp: Number(xpEditor.value) }
       );
-      push({ title: "حُدّثت نقاط العضو، وستُزامن رتبه تلقائياً.", tone: "success" });
+      push({ title: t("levels.board.xpUpdated"), tone: "success" });
       setXpEditor(null);
       load(track, page);
     } catch (cause) {
-      push({ title: cause instanceof Error ? cause.message : "تعذّر تحديث النقاط.", tone: "error" });
+      push({ title: cause instanceof Error ? cause.message : t("levels.board.xpUpdateFailed"), tone: "error" });
     } finally {
       setXpSaving(false);
     }
@@ -1243,11 +1256,11 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
     setResetting(true);
     try {
       await api.resetMemberXp(guild.id, resetTarget.userId);
-      push({ title: `صُفّرت نقاط ${resetTarget.displayName}، وستُزامن رتبه تلقائياً.`, tone: "success" });
+      push({ title: t("levels.board.resetDone", { name: resetTarget.displayName }), tone: "success" });
       setResetTarget(null);
       load(track, page);
     } catch (cause) {
-      push({ title: cause instanceof Error ? cause.message : "تعذّر التصفير.", tone: "error" });
+      push({ title: cause instanceof Error ? cause.message : t("levels.board.resetFailed"), tone: "error" });
     } finally {
       setResetting(false);
     }
@@ -1258,7 +1271,7 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
       await api.setMemberLeaderboardHidden(guild.id, entry.userId, !entry.hidden);
       load(track, page);
     } catch (cause) {
-      push({ title: cause instanceof Error ? cause.message : "تعذّر التغيير.", tone: "error" });
+      push({ title: cause instanceof Error ? cause.message : t("levels.board.toggleFailed"), tone: "error" });
     }
   };
 
@@ -1271,19 +1284,19 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
         <Card>
           <CardContent className="pt-6 text-center">
             <p className="text-2xl font-black">{stats?.highestLevel ?? "—"}</p>
-            <p className="text-xs text-muted-foreground">أعلى مستوى</p>
+            <p className="text-xs text-muted-foreground">{t("levels.board.highest")}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6 text-center">
             <p className="text-2xl font-black">{stats ? stats.totalXp.toLocaleString("en") : "—"}</p>
-            <p className="text-xs text-muted-foreground">إجمالي XP</p>
+            <p className="text-xs text-muted-foreground">{t("levels.board.totalXp")}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6 text-center">
             <p className="text-2xl font-black">{stats?.rankedMembers ?? "—"}</p>
-            <p className="text-xs text-muted-foreground">عضو نشط</p>
+            <p className="text-xs text-muted-foreground">{t("levels.board.active")}</p>
           </CardContent>
         </Card>
       </div>
@@ -1292,7 +1305,7 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
         <CardHeader className="flex-col gap-2 space-y-0 pb-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="flex min-w-0 items-center gap-2 text-base">
             <ListOrdered aria-hidden />
-            المتصدرين
+            {t("levels.board.title")}
           </CardTitle>
           <div className="flex flex-wrap items-center gap-2">
             <Select value={track} onValueChange={value => setTrack(value as "text" | "voice")}>
@@ -1300,11 +1313,11 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="text">المستوى الكتابي</SelectItem>
-                <SelectItem value="voice">المستوى الصوتي</SelectItem>
+                <SelectItem value="text">{t("levels.board.trackText")}</SelectItem>
+                <SelectItem value="voice">{t("levels.board.trackVoice")}</SelectItem>
               </SelectContent>
             </Select>
-            <Button size="icon" variant="outline" aria-label="تحديث" onClick={() => load(track, page)} disabled={loading}>
+            <Button size="icon" variant="outline" aria-label={t("levels.board.refresh")} onClick={() => load(track, page)} disabled={loading}>
               <RefreshCw className={loading ? "animate-spin" : undefined} />
             </Button>
           </div>
@@ -1314,13 +1327,13 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
             <div className="space-y-2">
               <LoadError message={error} />
               <Button size="sm" variant="outline" onClick={() => load(track, page)}>
-                إعادة المحاولة
+                {t("levels.board.retry")}
               </Button>
             </div>
           ) : loading && !data ? (
             <LoadingRow />
           ) : (data?.entries.length ?? 0) === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">لا توجد بيانات بعد — النقاط تُجمع تلقائياً مع التفاعل.</p>
+            <p className="py-6 text-center text-sm text-muted-foreground">{t("levels.board.empty")}</p>
           ) : (
             <ol className="divide-y divide-border/80">
               {data?.entries.map((entry, index) => {
@@ -1344,7 +1357,7 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
                           <span className="truncate text-sm font-medium">{entry.displayName ?? entry.userId}</span>
                           {entry.hidden && (
                             <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                              مخفي من اللوحة
+                              {t("levels.board.hidden")}
                             </Badge>
                           )}
                         </span>
@@ -1365,7 +1378,7 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
                     </div>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button size="icon" variant="ghost" aria-label={`إدارة ${entry.displayName ?? entry.userId}`}>
+                        <Button size="icon" variant="ghost" aria-label={t("levels.board.manage", { name: entry.displayName ?? entry.userId })}>
                           <MoreHorizontal />
                         </Button>
                       </DropdownMenuTrigger>
@@ -1380,15 +1393,15 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
                           }
                         >
                           <Pencil aria-hidden />
-                          تعديل الـ XP
+                          {t("levels.board.editXp")}
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => setResetTarget({ userId: entry.userId, displayName: entry.displayName ?? entry.userId })}>
                           <RotateCcw aria-hidden />
-                          إعادة تعيين النقاط
+                          {t("levels.board.resetXp")}
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => void toggleHidden(entry)}>
                           {entry.hidden ? <Eye aria-hidden /> : <EyeOff aria-hidden />}
-                          {entry.hidden ? "إظهار في اللوحة" : "حظر من اللوحة"}
+                          {entry.hidden ? t("levels.board.show") : t("levels.board.hide")}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -1400,10 +1413,10 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
           {(data?.total ?? 0) > LEADERBOARD_PAGE_SIZE && (
             <div className="flex items-center justify-between gap-2 pt-3">
               <Button size="sm" variant="outline" disabled={page <= 1 || loading} onClick={() => setPage(p => p - 1)}>
-                السابق
+                {t("levels.board.previous")}
               </Button>
               <span className="text-xs text-muted-foreground">
-                صفحة {page} من {totalPages} · آخر تحديث {formatWhen(updatedAt)}
+                {t("levels.board.pageInfo", { page, total: totalPages, when: formatWhen(updatedAt, language) })}
               </span>
               <Button
                 size="sm"
@@ -1411,7 +1424,7 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
                 disabled={page >= totalPages || loading}
                 onClick={() => setPage(p => p + 1)}
               >
-                التالي
+                {t("levels.board.next")}
               </Button>
             </div>
           )}
@@ -1421,14 +1434,17 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
       <Dialog open={xpEditor !== null} onOpenChange={open => !open && setXpEditor(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>تعديل نقاط {xpEditor?.displayName}</DialogTitle>
+            <DialogTitle>{t("levels.board.editTitle", { name: xpEditor?.displayName ?? "" })}</DialogTitle>
             <DialogDescription>
-              يُعدّل المسار المعروض فقط؛ المستوى من المعادلة.
+              {t("levels.board.editBody")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground" htmlFor="member-xp-value">
-              الـ {track === "text" ? "الكتابي" : "الصوتي"} ({xpEditor?.displayName})
+              {t("levels.board.editLabel", {
+                track: track === "text" ? t("levels.personal.text") : t("levels.personal.voice"),
+                name: xpEditor?.displayName ?? ""
+              })}
             </Label>
             <Input
               id="member-xp-value"
@@ -1442,10 +1458,10 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setXpEditor(null)} disabled={xpSaving}>
-              إلغاء
+              {t("levels.cancel")}
             </Button>
             <Button onClick={() => void saveXp()} loading={xpSaving}>
-              حفظ
+              {t("levels.save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1454,20 +1470,20 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
       <Dialog open={resetTarget !== null} onOpenChange={open => !open && setResetTarget(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>إعادة تعيين نقاط {resetTarget?.displayName}؟</DialogTitle>
+            <DialogTitle>{t("levels.board.resetTitle", { name: resetTarget?.displayName ?? "" })}</DialogTitle>
             <DialogDescription>
-              سيُصفّر XP الكتابي والصوتي وتُسحب رتب المكافآت غير المستحقة.
+              {t("levels.board.resetBody")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setResetTarget(null)} disabled={resetting}>
-              إلغاء
+              {t("levels.cancel")}
             </Button>
             {/* A destructive action that IS the dialog's intent takes the
                 destructive variant — the inline-ghost rule is for rows, and
                 `loading` keeps the double-click from firing it twice. */}
             <Button variant="destructive" onClick={() => void resetMember()} loading={resetting}>
-              إعادة تعيين
+              {t("levels.board.resetConfirm")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1483,6 +1499,7 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
  * ------------------------------------------------------------------ */
 
 export function LevelsView({ guild }: { guild: Guild }) {
+  const { t, language } = useI18n();
   const [tab, setTab] = useState<LevelsTab>("settings");
   const [settings, setSettings] = useState<LevelSettings | null>(null);
   const [problems, setProblems] = useState<LevelConfigProblem[]>([]);
@@ -1527,7 +1544,7 @@ export function LevelsView({ guild }: { guild: Guild }) {
         setRoles(result.roles);
         setChannels(result.channels);
       })
-      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
+      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : t("levels.loadFailed")));
     loadRewards();
     loadStatus();
     return () => {
@@ -1561,15 +1578,15 @@ export function LevelsView({ guild }: { guild: Guild }) {
       setSync(result.job);
       setStatus(current => (current ? { ...current, sync: result.job } : current));
       if (result.job.status === "pending" || result.job.status === "running") {
-        push({ title: "المزامنة قيد التنفيذ — يعرض الزر التقدم الحي.", tone: "success" });
+        push({ title: t("levels.sync.started"), tone: "success" });
       } else {
         push({
-          title: `اكتملت المزامنة: منحت ${result.job.granted} وسحبت ${result.job.removed}.`,
+          title: t("levels.sync.completed", { granted: result.job.granted, removed: result.job.removed }),
           tone: "success"
         });
       }
     } catch (cause) {
-      push({ title: cause instanceof Error ? cause.message : "تعذّر إرسال طلب المزامنة.", tone: "error" });
+      push({ title: cause instanceof Error ? cause.message : t("levels.sync.requestFailed"), tone: "error" });
     } finally {
       setSyncing(false);
     }
@@ -1599,28 +1616,31 @@ export function LevelsView({ guild }: { guild: Guild }) {
           and the technical heartbeat behind the info button. */}
       <ModuleStatusCard
         icon={Trophy}
-        title="حساب النقاط والرتب"
-        description="XP تلقائي ورتب تُمنح حسب النشاط."
+        title={t("levels.module.title")}
+        description={t("levels.module.body")}
         enabled={armed}
         onToggle={enabled => patch({ enabled })}
-        toggleLabel="تفعيل نظام المستويات"
-        disabledHint="المستويات متوقفة. فعّلها لحساب XP ومنح الرتب."
-        enableLabel="تفعيل المستويات"
+        toggleLabel={t("levels.module.toggle")}
+        disabledHint={t("levels.module.offHint")}
+        enableLabel={t("levels.module.enable")}
         extra={
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="icon" variant="ghost" aria-label="حالة المحرّك التقنية">
+              <Button size="icon" variant="ghost" aria-label={t("levels.engine.statusAria")}>
                 <Info className="size-4 text-muted-foreground" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="space-y-1 text-xs">
-              <p>آخر نبضة صوتية: {formatWhen(status?.lastVoiceTickAt ?? null)}</p>
-              <p>آخر حركة XP: {formatWhen(status?.lastXpWriteAt ?? null)}</p>
-              <p>جلسات صوتية نشطة: {status?.voiceSessions ?? "—"}</p>
+              <p>{t("levels.engine.lastVoice", { when: formatWhen(status?.lastVoiceTickAt ?? null, language) })}</p>
+              <p>{t("levels.engine.lastXp", { when: formatWhen(status?.lastXpWriteAt ?? null, language) })}</p>
+              <p>{t("levels.engine.voiceSessions", { count: status?.voiceSessions ?? "—" })}</p>
               {status?.sync?.status === "completed" && (
                 <p>
-                  آخر مزامنة: {formatWhen(status.sync.completedAt)} (منحت {status.sync.granted}، سحبت{" "}
-                  {status.sync.removed})
+                  {t("levels.engine.lastSync", {
+                    when: formatWhen(status.sync.completedAt, language),
+                    granted: status.sync.granted,
+                    removed: status.sync.removed
+                  })}
                 </p>
               )}
             </TooltipContent>
@@ -1633,7 +1653,7 @@ export function LevelsView({ guild }: { guild: Guild }) {
       {/* Segmented navigation: one pill strip, active tab in primary. */}
       <nav
         role="tablist"
-        aria-label="أقسام نظام المستويات"
+        aria-label={t("levels.tabsLabel")}
         className="scrollbar-none inline-flex max-w-full flex-wrap items-center gap-1 rounded-2xl border border-border/80 bg-card/70 p-1.5 backdrop-blur-md"
       >
         {levelTabs.map(entry => {
@@ -1652,7 +1672,7 @@ export function LevelsView({ guild }: { guild: Guild }) {
               }
             >
               <Icon className="size-4" aria-hidden />
-              {entry.label}
+              {t(entry.label as TranslationKey)}
             </button>
           );
         })}
@@ -1684,14 +1704,14 @@ export function LevelsView({ guild }: { guild: Guild }) {
 
       {dirty && (
         <SaveBar
-          message="تغييرات غير محفوظة"
-          saveLabel="حفظ التعديلات"
-          cancelLabel="إلغاء"
+          message={t("levels.unsaved")}
+          saveLabel={t("levels.saveChanges")}
+          cancelLabel={t("levels.cancel")}
           onCancel={reset}
           onSave={async () => {
             const result = await api.saveLevelsSettings(guild.id, draft);
             commit(result.settings);
-            push({ title: "حُفظت إعدادات المستويات.", tone: "success" });
+            push({ title: t("levels.settingsSaved"), tone: "success" });
           }}
         />
       )}

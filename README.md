@@ -315,6 +315,16 @@ printed) and paces itself, because the dashboard throttles a session to 120
 requests a minute and a page load spends five or six of them. It takes about
 five minutes.
 
+`check:2fa` drives the admin second factor against the running BFF and the real
+database. It creates one throwaway admin (never a real Discord account), a
+pending login per case, and deletes every row it created — including the session
+a successful verification mints. It proves that no session exists before the
+code is verified, that the enrolment secret stays stable across a retry, that a
+replayed TOTP and a spent recovery code are both refused, and that an expired,
+cancelled or over-guessed login is dead. It needs a running dashboard and the
+database (`npm run dev`), because the browser's real HTTP surface is what it
+measures.
+
 `check:oauth` and `check:load` need a running stack (`npm run dev -- -Detach`).
 `check:oauth` follows the login leg, checks the state cookie's attributes,
 refuses a callback with a missing or a wrong state, proves a failed token
@@ -372,9 +382,46 @@ three are needed — a retry in the client alone treats the symptom:
   encrypted audit trail, because Discord's own audit logs expire after 45 days.
 - The bot does **not** log punishments itself — the Gateway records them once from
   the audit log, so a ban produces one entry and not two.
+- **Administrative sign-ins require a second factor.** The platform owner
+  (`OWNER_ID`) and anyone who owns or may administer a Discord guild must clear
+  TOTP (or a single-use recovery code) before the OAuth callback mints a
+  session. An unreadable Discord guild list fails *closed* — an outage adds one
+  step, it does not switch 2FA off. A first sign-in enrols the authenticator
+  itself: the base32 key, the `otpauth://` link and ten recovery codes are shown
+  once, and the first generated code confirms them. Secrets are AES-256-GCM
+  envelopes at rest, recovery codes only keyed HMACs, and the accepted TOTP
+  counter is stored so a replay cannot log in. `npm run keys:rotate`
+  re-encrypts the stored TOTP secret and any pending login; rotating
+  `SESSION_SECRET` invalidates outstanding recovery codes (the TOTP key keeps
+  working). Sessions that already existed before this shipped are left alone,
+  so enabling it never signs the operator out mid-work.
 - **"Saved" is not "applied".** A save is stored even when Discord refuses it (a
   rate limit is momentary; a lost form is not), but the response reports each
   field's outcome separately, so the two can never be conflated in the UI.
+
+## Your account, language and security
+
+The account menu's **Settings / الإعدادات** entry opens a real account screen at
+`/dashboard/:guildId/settings`. It is not a guild section: identity, language,
+appearance and security belong to the signed-in person, so the screen stays
+reachable even when AL AI has not been added to the selected server.
+
+| Section | What it changes |
+|---|---|
+| **Account** | Show the Discord identity the session actually carries, its id and the session's expiry |
+| **Appearance** | Light / dark / system and the five accent colours; stored on this device only |
+| **Language** | Arabic (RTL) or English (LTR), applied instantly and saved to `user_preferences` for every device |
+| **Security** | Enable, replace or disable the authenticator; regenerate the recovery codes; see the protection state and how many codes remain |
+| **Sessions** | List the live sign-ins for the account (device, last use, expiry) and sign out every other browser |
+
+Changing or disabling the authenticator and replacing recovery codes require a
+current TOTP or an unused recovery code. The server verifies and consumes that
+code, so a stolen session cannot quietly swap the second factor, and the code
+cannot be replayed at the login gate. The setup QR is rendered in this browser
+from the `otpauth://` URI — a TOTP secret is never sent to an external image
+service. New recovery codes are shown once, and the dialog cannot close until
+the operator confirms they are saved. Only encrypted TOTP envelopes and keyed
+recovery-code hashes are stored; plaintext secrets never reach the database.
 
 ## The dashboard's appearance
 

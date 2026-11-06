@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { activityTypeLabels, botStatusDurations, botStatusLabels } from "@al-ai/core/browser";
+import { activityTypeLabels, activityTypeShortLabels, botStatusDurations, botStatusLabels } from "@al-ai/core/browser";
 import { Separator } from "@/components/ui/separator";
+import { useI18n, type Language, type Translate, type TranslationKey } from "@/lib/i18n";
 import type { ActivityType, BotStatus, BotStatusDuration } from "@/types";
 
 /**
@@ -59,8 +60,12 @@ export type PreviewProfile = {
  * the menu two inches away said «مشغول» and «غير ظاهر». One status, two words,
  * on one screen — which is exactly what a second copy buys you.
  */
-export function durationLabel(duration: BotStatusDuration | null | undefined): string | null {
+export function durationLabel(
+  duration: BotStatusDuration | null | undefined,
+  t?: Translate
+): string | null {
   if (!duration) return null;
+  if (t) return t(`presence.duration.${duration}` as TranslationKey);
   return botStatusDurations.find(entry => entry.id === duration)?.label ?? null;
 }
 
@@ -72,12 +77,27 @@ export function durationLabel(duration: BotStatusDuration | null | undefined): s
  * once keeps those two from disagreeing — and stops an unknown string from
  * indexing a record that has no entry for it.
  */
-export function statusLabel(status: BotStatus): string {
+export function statusLabel(status: BotStatus, t?: Translate): string {
+  if (t) return t(`presence.status.${status}` as TranslationKey);
   return botStatusLabels[status] ?? botStatusLabels.online;
 }
 
-export function activityLabel(type: ActivityType): string {
-  return activityTypeLabels[type] ?? activityTypeLabels.playing;
+export function activityLabel(type: ActivityType, t?: Translate): string {
+  if (t) return t(`presence.kind.${type}` as TranslationKey);
+  return activityTypeShortLabels[type] ?? activityTypeShortLabels.playing;
+}
+
+/**
+ * The activity kind as the summary line spells it.
+ *
+ * Arabic keeps Discord's own term beside the verb — «يستمع إلى (Listening)» —
+ * so a sentence that begins with the kind reads unambiguously. English does not
+ * need the gloss: «Listening to السجلات» already says which kind it is, and a
+ * trailing «(Listening)» would repeat the verb the operator just read.
+ */
+export function activitySummaryLabel(type: ActivityType, t: Translate, language: Language): string {
+  if (language === "ar") return activityTypeLabels[type] ?? activityTypeLabels.playing;
+  return activityLabel(type, t);
 }
 
 /**
@@ -149,6 +169,8 @@ export function BotLivePreview({
   /** True while the draft differs from what is stored - nothing is saved yet. */
   pending?: boolean;
 }) {
+  const { t } = useI18n();
+
   /*
    * The same resolution Discord walks, for both pictures.
    *
@@ -180,7 +202,7 @@ export function BotLivePreview({
     <div className="space-y-3">
       {!enabled ? (
         <p className="rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-          التخصيص معطّل: هذه هي القيم الأساسية التي يراها الأعضاء الآن.
+          {t("preview.disabled")}
         </p>
       ) : null}
 
@@ -191,7 +213,7 @@ export function BotLivePreview({
       */}
       {pending ? (
         <p className="rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-[11px] text-warning">
-          معاينة: هذه التغييرات لم تُحفظ بعد، وديسكورد لم يستلمها.
+          {t("preview.pending")}
         </p>
       ) : null}
 
@@ -207,14 +229,14 @@ export function BotLivePreview({
               : { backgroundColor: roleColor ?? "#4e5058" }
           }
         >
-          {!banner ? <span className="absolute inset-0 grid place-items-center text-[11px] text-white/70">لا يوجد غلاف</span> : null}
+          {!banner ? <span className="absolute inset-0 grid place-items-center text-[11px] text-white/70">{t("preview.noBanner")}</span> : null}
         </div>
 
         <div className="relative px-4 pb-4">
           <div className="-mt-10 mb-3 flex items-end justify-between gap-2">
             <PreviewAvatar
               src={avatar}
-              alt="الأفاتار"
+              alt={t("preview.avatarAlt")}
               wrapperClassName="block size-20 overflow-hidden rounded-full border-4 border-card bg-muted"
               imageClassName="size-full object-cover"
               fallbackClassName="grid size-full place-items-center text-lg font-semibold text-muted-foreground"
@@ -226,7 +248,7 @@ export function BotLivePreview({
               {displayName}
             </p>
             <p className="text-sm text-muted-foreground">
-              عضو في <span className="text-foreground">{guildName}</span>
+              {t("preview.memberOf")} <span className="text-foreground">{guildName}</span>
             </p>
           </div>
 
@@ -243,7 +265,7 @@ export function BotLivePreview({
        * The member list — where the per-guild values are what people see.
        * ---------------------------------------------------------------- */}
       <div className="rounded-xl border border-border bg-card p-3">
-        <p className="mb-2 text-xs font-medium text-muted-foreground">كما يظهر في قائمة أعضاء «{guildName}»</p>
+        <p className="mb-2 text-xs font-medium text-muted-foreground">{t("preview.inMemberList", { guild: guildName })}</p>
         <div className="flex items-center gap-2 rounded-md bg-accent/40 px-2 py-1.5">
           <PreviewAvatar
             src={avatar}
@@ -258,7 +280,7 @@ export function BotLivePreview({
           {profile.roleIconUrl ? (
             <PreviewAvatar
               src={profile.roleIconUrl}
-              alt="أيقونة الرتبة"
+              alt={t("preview.roleIconAlt")}
               wrapperClassName="block size-4 shrink-0 overflow-hidden rounded-full bg-muted"
               imageClassName="size-full object-cover"
               fallbackClassName="grid size-full place-items-center text-[8px] font-semibold text-muted-foreground"
@@ -266,7 +288,7 @@ export function BotLivePreview({
             />
           ) : null}
           <span className="ms-auto shrink-0 text-xs text-muted-foreground">
-            {memberCount === null ? "" : `${memberCount} عضو`}
+            {memberCount === null ? "" : t("preview.memberCount", { count: memberCount })}
           </span>
         </div>
       </div>
@@ -281,34 +303,34 @@ export function BotLivePreview({
        * viewport has nowhere to stick.
        * ---------------------------------------------------------------- */}
       <div className="rounded-xl border border-border bg-card px-3 py-1">
-        <InfoRow label="الاسم الظاهر">{displayName}</InfoRow>
-        <InfoRow label="النبذة">{bio ? "محفوظة" : <span className="text-muted-foreground">لا توجد</span>}</InfoRow>
-        <InfoRow label="الصورة">
+        <InfoRow label={t("preview.displayName")}>{displayName}</InfoRow>
+        <InfoRow label={t("preview.bio")}>{bio ? t("preview.saved") : <span className="text-muted-foreground">{t("preview.none")}</span>}</InfoRow>
+        <InfoRow label={t("preview.image")}>
           {serverAvatar ? (
-            "صورة هذا السيرفر"
+            t("preview.serverAvatar")
           ) : profile.accountAvatarUrl ? (
-            <span className="text-muted-foreground">الصورة الأساسية للبوت</span>
+            <span className="text-muted-foreground">{t("preview.accountAvatar")}</span>
           ) : (
-            <span className="text-muted-foreground">الافتراضية</span>
+            <span className="text-muted-foreground">{t("preview.defaultAvatar")}</span>
           )}
         </InfoRow>
-        <InfoRow label="الغلاف">
+        <InfoRow label={t("preview.banner")}>
           {serverBanner ? (
-            "غلاف هذا السيرفر"
+            t("preview.serverBanner")
           ) : profile.accountBannerUrl ? (
-            <span className="text-muted-foreground">الغلاف الأساسي للبوت</span>
+            <span className="text-muted-foreground">{t("preview.accountBanner")}</span>
           ) : (
-            <span className="text-muted-foreground">لا يوجد</span>
+            <span className="text-muted-foreground">{t("preview.none")}</span>
           )}
         </InfoRow>
-        <InfoRow label="لون الرتبة">
+        <InfoRow label={t("preview.roleColor")}>
           {roleColor ? (
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block size-3 rounded-full border border-border" style={{ backgroundColor: roleColor }} />
               <span dir="ltr">{roleColor}</span>
             </span>
           ) : (
-            <span className="text-muted-foreground">الافتراضي</span>
+            <span className="text-muted-foreground">{t("preview.default")}</span>
           )}
         </InfoRow>
       </div>

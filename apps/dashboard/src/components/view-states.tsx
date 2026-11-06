@@ -13,13 +13,15 @@
 import { Loader2, RotateCw } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/lib/i18n";
 
 /** One labelled spinner, for the moment between the fetch and the answer. */
-export function LoadingRow({ label = "جارٍ التحميل" }: { label?: string }) {
+export function LoadingRow({ label }: { label?: string }) {
+  const { t } = useI18n();
   return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground">
       <Loader2 className="size-4 animate-spin" />
-      {label}
+      {label ?? t("common.loading")}
     </div>
   );
 }
@@ -38,12 +40,13 @@ export function LoadingRow({ label = "جارٍ التحميل" }: { label?: stri
  * an error screen has no unsaved state to lose.
  */
 export function LoadError({ message, onRetry = () => window.location.reload() }: { message: string; onRetry?: () => void }) {
+  const { t } = useI18n();
   return (
     <Alert variant="destructive" className="flex flex-wrap items-center justify-between gap-3">
       <AlertDescription>{message}</AlertDescription>
       <Button size="sm" variant="outline" onClick={onRetry} className="shrink-0">
         <RotateCw />
-        أعد المحاولة
+        {t("common.retry")}
       </Button>
     </Alert>
   );

@@ -43,6 +43,7 @@ import { RoleSwatch } from "@/components/role-swatch";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { SaveBar } from "@/components/save-bar";
 import { useDraftForm } from "@/lib/use-draft-form";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -87,6 +88,7 @@ import { type ChannelOption, type CommandCategory, type CommandDuration, type Co
  *    cards below it down.
  */
 export function CommandsView({ guild }: { guild: Guild }) {
+  const { t } = useI18n();
   const [data, setData] = useState<{
     commands: CommandFlag[];
     categories: { id: CommandCategory; label: string; description: string }[];
@@ -117,7 +119,7 @@ export function CommandsView({ guild }: { guild: Guild }) {
           .then(resolved => !cancelled && setMembers(resolved.members))
           .catch(() => undefined);
       })
-      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
+      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : t("commands.loadFailed")));
     return () => {
       cancelled = true;
     };
@@ -134,8 +136,8 @@ export function CommandsView({ guild }: { guild: Guild }) {
     return (
       <EmptyState
         icon={SquareTerminal}
-        title="لا توجد أوامر مسجّلة"
-        description="من سجل الأوامر. أعد تشغيل البوت بعد الإضافة."
+        title={t("commands.emptyTitle")}
+        description={t("commands.emptyBody")}
       />
     );
   }
@@ -161,10 +163,10 @@ export function CommandsView({ guild }: { guild: Guild }) {
 /** The filter over the command list. Composes with the section and the search. */
 type StatusFilter = "all" | "enabled" | "disabled";
 
-const statusFilters: { id: StatusFilter; label: string }[] = [
-  { id: "all", label: "الكل" },
-  { id: "enabled", label: "مفعّل" },
-  { id: "disabled", label: "معطّل" }
+const statusFilters: { id: StatusFilter; label: TranslationKey }[] = [
+  { id: "all", label: "commands.status.all" },
+  { id: "enabled", label: "commands.status.enabled" },
+  { id: "disabled", label: "commands.status.disabled" }
 ];
 
 /**
@@ -220,6 +222,7 @@ export function CommandsBoard({
   /** Re-reads the stored configuration after a save, so the draft is rebased. */
   onSaved: () => Promise<CommandFlag[]>;
 }) {
+  const { t } = useI18n();
   const { saved, draft, dirty, setDraft, reset, commit } = useDraftForm(commands, commandsEqual);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -348,6 +351,8 @@ export function CommandsBoard({
   };
 
   const activeSection = section === "all" ? null : categories.find(category => category.id === section) ?? null;
+  const categoryLabel = (id: CommandCategory) => t(`commands.category.${id}` as TranslationKey);
+  const categoryDescription = (id: CommandCategory) => t(`commands.categoryDesc.${id}` as TranslationKey);
 
   return (
     <>
@@ -364,10 +369,10 @@ export function CommandsBoard({
          * height by default — without it there is nothing for `sticky` to
          * travel inside and the nav would scroll away with the cards.
          * ---------------------------------------------------------------- */}
-      <nav aria-label="أقسام الأوامر" className="min-w-0 lg:sticky lg:top-6 lg:self-start">
+      <nav aria-label={t("commands.sectionsAria")} className="min-w-0 lg:sticky lg:top-6 lg:self-start">
         <div className="flex flex-wrap gap-1 pb-2 lg:flex-col lg:flex-nowrap lg:overflow-visible lg:pb-0">
           <SectionButton
-            label="كل الأوامر"
+            label={t("commands.allCommands")}
             icon={SquareTerminal}
             total={stats.total}
             enabled={stats.enabled}
@@ -379,7 +384,7 @@ export function CommandsBoard({
             return (
               <SectionButton
                 key={category.id}
-                label={category.label}
+                label={categoryLabel(category.id)}
                 icon={categoryIcons[category.id]}
                 total={count.total}
                 enabled={count.enabled}
@@ -406,13 +411,13 @@ export function CommandsBoard({
             <Input
               value={query}
               onChange={event => setQuery(event.target.value)}
-              placeholder="ابحث عن أمر... 🔍"
-              aria-label="ابحث عن أمر"
+              placeholder={t("commands.searchPlaceholder")}
+              aria-label={t("commands.searchAria")}
               className="ps-8"
             />
           </div>
 
-          <div role="group" aria-label="تصفية حسب الحالة" className="flex items-center gap-1 rounded-md border border-border p-0.5">
+          <div role="group" aria-label={t("commands.filterAria")} className="flex items-center gap-1 rounded-md border border-border p-0.5">
             {statusFilters.map(filter => (
               <Button
                 key={filter.id}
@@ -421,28 +426,28 @@ export function CommandsBoard({
                 aria-pressed={status === filter.id}
                 onClick={() => setStatus(filter.id)}
               >
-                {filter.label}
+                {t(filter.label)}
               </Button>
             ))}
           </div>
 
           <Button variant="outline" size="sm" onClick={() => patchVisible({ enabled: true })}>
-            تفعيل الكل
+            {t("commands.enableAll")}
           </Button>
           <Button variant="outline" size="sm" onClick={() => patchVisible({ enabled: false })}>
-            تعطيل الكل
+            {t("commands.disableAll")}
           </Button>
         </div>
 
         {activeSection && (
           <div className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{activeSection.label}</p>
-              <p className="truncate text-xs text-muted-foreground">{activeSection.description}</p>
+              <p className="truncate text-sm font-medium">{categoryLabel(activeSection.id)}</p>
+              <p className="truncate text-xs text-muted-foreground">{categoryDescription(activeSection.id)}</p>
             </div>
             <Button variant="ghost" size="sm" className="gap-1" onClick={() => setSection("all")}>
               <X className="size-3.5" />
-              عرض كل الأقسام
+              {t("commands.showAll")}
             </Button>
           </div>
         )}
@@ -450,8 +455,10 @@ export function CommandsBoard({
         {visible.length === 0 && (
           <p className="rounded-md border border-border px-3 py-6 text-center text-sm text-muted-foreground">
             {activeSection && !query.trim() && status === "all"
-              ? "لا توجد أوامر في هذا القسم."
-              : `لا يوجد أمر يطابق عوامل التصفية الحالية${query.trim() ? ` «${query.trim()}»` : ""}.`}
+              ? t("commands.emptySection")
+              : query.trim()
+                ? t("commands.noMatchQuery", { query: query.trim() })
+                : t("commands.noMatch")}
           </p>
         )}
 
@@ -461,12 +468,12 @@ export function CommandsBoard({
           return (
             <section key={category.id} className="space-y-2">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold">{category.label}</h3>
+                <h2 className="text-sm font-semibold">{categoryLabel(category.id)}</h2>
                 {/* What this heading counts: the commands *shown* here, and how
                     many of them are enabled. The section nav on the left counts
                     the whole draft, so the two numbers are about different
                     things - and each says which it is. */}
-                <Badge variant="secondary" className="tabular" title="المعروض والمفعّل من هذه المجموعة">
+                <Badge variant="secondary" className="tabular" title={t("commands.shownBadge")}>
                   {items.filter(command => command.enabled).length}/{items.length}
                 </Badge>
               </div>
@@ -489,7 +496,7 @@ export function CommandsBoard({
         })}
 
         <p className="text-xs text-muted-foreground">
-          إيقاف الأمر يمنع تنفيذه فوراً؛ القيود تُفحص على الخادم.
+          {t("commands.footer")}
         </p>
       </div>
     </div>
@@ -502,7 +509,7 @@ export function CommandsBoard({
       */}
       {dirty && (
         <SaveBar
-          message={`${changes.length} تغيير غير محفوظ`}
+          message={t("commands.unsaved", { count: changes.length })}
           onCancel={reset}
           onSave={async () => {
             await onSave(changes);
@@ -557,7 +564,10 @@ function SectionButton({
           label keeps min-w-0 so a long Arabic section name truncates instead
           of pushing the strip wider than the screen. */}
       <span className="min-w-0 max-w-[12rem] flex-1 truncate lg:max-w-none">{label}</span>
-      <span className={`tabular text-xs ${total === 0 ? "text-muted-foreground/60" : ""}`}>
+      {/* This counter is small text. The accent on the active tab and a faded
+          muted grey elsewhere both measured below 4.5:1 in the live axe pass,
+          so the number uses the undimmed palette in both modes. */}
+      <span className={`tabular text-xs ${active ? "text-foreground" : "text-muted-foreground"}`}>
         {enabled}/{total}
       </span>
     </button>
@@ -668,7 +678,10 @@ function CommandCard({
   permissionLabels: Record<string, string>;
   onPatch: (next: Partial<CommandFlag>) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const descriptionKey = `commands.cmd.${command.name}` as TranslationKey;
+  const translatedDescription = t(descriptionKey);
 
   /**
    * Which of the role fields this command owns, asked of core rather than
@@ -724,18 +737,20 @@ function CommandCard({
               </p>
               {customised && (
                 <Badge variant="outline" className="text-[10px]">
-                  مخصّص
+                  {t("commands.customised")}
                 </Badge>
               )}
             </div>
-            <p className="truncate text-xs text-muted-foreground">{command.description}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {translatedDescription === descriptionKey ? command.description : translatedDescription}
+            </p>
           </div>
           <Badge variant={permission ? "secondary" : "outline"} className="shrink-0 text-[10px]">
-            {permission ? `يتطلب: ${permission}` : "متاح للجميع"}
+            {permission ? t("commands.requires", { permission }) : t("commands.availableToAll")}
           </Badge>
           <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="gap-1" aria-label={`إعدادات ${command.name}`}>
-              <span className="text-xs">إعدادات</span>
+            <Button variant="ghost" size="sm" className="gap-1" aria-label={t("commands.settingsAria", { name: command.name })}>
+              <span className="text-xs">{t("commands.settings")}</span>
               <ChevronDown className={`size-4 transition-transform ${open ? "rotate-180" : ""}`} />
             </Button>
           </CollapsibleTrigger>
@@ -746,63 +761,63 @@ function CommandCard({
             {/* -------------------------------------------------------- *
              * (أ) الصلاحيات — six closed selectors, two columns of three
              * -------------------------------------------------------- */}
-            <SectionTitle>الصلاحيات</SectionTitle>
+            <SectionTitle>{t("commands.section.permissions")}</SectionTitle>
 
             <div className="grid gap-3 lg:grid-cols-2">
               <ScopeSelector
-                label="الرتب المسموحة"
-                emptyLabel="الكل مسموح"
-                hint="من يحمل إحدى هذه الرتب يستطيع تنفيذ الأمر دون ترقيته في كل الأوامر."
+                label={t("commands.allowedRoles")}
+                emptyLabel={t("commands.scope.allowAll")}
+                hint={t("commands.allowedRolesHint")}
                 items={roles.map(role => ({ id: role.id, name: role.name, color: role.color }))}
                 selected={command.allowedRoleIds}
-                noneLabel="لا توجد رتب"
-                noun="رتب"
+                noneLabel={t("commands.scope.noRoles")}
+                noun={t("commands.scope.roles")}
                 onChange={ids => onPatch({ allowedRoleIds: ids })}
               />
               <ScopeSelector
-                label="الرتب الممنوعة"
-                emptyLabel="بدون"
-                hint="الحظر يتقدّم على السماح: من يحمل رتبة ممنوعة لا يستطيع التنفيذ مهما كانت رتبته."
+                label={t("commands.deniedRoles")}
+                emptyLabel={t("commands.scope.none")}
+                hint={t("commands.deniedRolesHint")}
                 items={roles.map(role => ({ id: role.id, name: role.name, color: role.color }))}
                 selected={command.deniedRoleIds}
-                noneLabel="لا توجد رتب"
-                noun="رتب"
+                noneLabel={t("commands.scope.noRoles")}
+                noun={t("commands.scope.roles")}
                 onChange={ids => onPatch({ deniedRoleIds: ids })}
               />
               <MemberScopeSelector
-                label="الأشخاص المصرحين"
-                emptyLabel="الكل مسموح"
-                hint="استثناء شخصي حين لا تكفي رتبة."
+                label={t("commands.allowedPeople")}
+                emptyLabel={t("commands.scope.allowAll")}
+                hint={t("commands.allowedPeopleHint")}
                 selected={command.allowedUserIds}
                 memberById={memberById}
                 onChange={ids => onPatch({ allowedUserIds: ids })}
               />
               <MemberScopeSelector
-                label="الأشخاص الممنوعين"
-                emptyLabel="بدون"
-                hint="الحظر يتقدم على السماح."
+                label={t("commands.deniedPeople")}
+                emptyLabel={t("commands.scope.none")}
+                hint={t("commands.deniedPeopleHint")}
                 selected={command.deniedUserIds}
                 memberById={memberById}
                 onChange={ids => onPatch({ deniedUserIds: ids })}
               />
               <ScopeSelector
-                label="القنوات المسموحة"
-                emptyLabel="الكل مسموح"
-                hint="الفراغ = كل القنوات."
+                label={t("commands.allowedChannels")}
+                emptyLabel={t("commands.scope.allowAll")}
+                hint={t("commands.allowedChannelsHint")}
                 items={channels.map(channel => ({ id: channel.id, name: channel.name, type: channel.type }))}
                 selected={command.allowedChannelIds}
-                noneLabel="لا توجد قنوات"
-                noun="قنوات"
+                noneLabel={t("commands.scope.noChannels")}
+                noun={t("commands.scope.channels")}
                 onChange={ids => onPatch({ allowedChannelIds: ids })}
               />
               <ScopeSelector
-                label="القنوات الممنوعة"
-                emptyLabel="بدون"
-                hint="تُستثنى دائماً، حتى لو كانت ضمن القنوات المسموحة."
+                label={t("commands.deniedChannels")}
+                emptyLabel={t("commands.scope.none")}
+                hint={t("commands.deniedChannelsHint")}
                 items={channels.map(channel => ({ id: channel.id, name: channel.name, type: channel.type }))}
                 selected={command.deniedChannelIds}
-                noneLabel="لا توجد قنوات"
-                noun="قنوات"
+                noneLabel={t("commands.scope.noChannels")}
+                noun={t("commands.scope.channels")}
                 onChange={ids => onPatch({ deniedChannelIds: ids })}
               />
             </div>
@@ -812,7 +827,7 @@ function CommandCard({
             {/* -------------------------------------------------------- *
              * (ب) الاختصارات
              * -------------------------------------------------------- */}
-            <SectionTitle>الاختصارات</SectionTitle>
+            <SectionTitle>{t("commands.section.aliases")}</SectionTitle>
             <AliasEditor
               command={command}
               aliasOwner={aliasOwner}
@@ -824,14 +839,14 @@ function CommandCard({
             {/* -------------------------------------------------------- *
              * (ج) السلوك والمؤقتات
              * -------------------------------------------------------- */}
-            <SectionTitle>السلوك والمؤقتات</SectionTitle>
+            <SectionTitle>{t("commands.section.behavior")}</SectionTitle>
 
             <div className="grid gap-4 lg:grid-cols-3">
               {supportsLeaveRetraction && (
                 <ToggleField
                   id={`retract-${command.name}`}
-                  label="حذف عند مغادرة العضو"
-                  hint="يُسحب رد البوت تلقائياً إذا غادر العضو المستهدف السيرفر خلال 15 دقيقة."
+                  label={t("commands.retract")}
+                  hint={t("commands.retractHint")}
                   checked={command.deleteResponseOnLeave}
                   onChange={deleteResponseOnLeave => onPatch({ deleteResponseOnLeave })}
                 />
@@ -839,9 +854,9 @@ function CommandCard({
 
               <ToggleNumberField
                 id={`autodelete-${command.name}`}
-                label="حذف الرد تلقائياً"
-                unit="ثوانٍ"
-                hint={`عند التشغيل يُحذف رد البوت بعد هذه المدة. 0 = إبقاء الرد، والحد ${MAX_AUTO_DELETE_SECONDS}.`}
+                label={t("commands.autoDelete")}
+                unit={t("commands.seconds")}
+                hint={t("commands.autoDeleteHint", { max: MAX_AUTO_DELETE_SECONDS })}
                 enabled={command.autoDeleteResponseSeconds > 0}
                 value={command.autoDeleteResponseSeconds}
                 max={MAX_AUTO_DELETE_SECONDS}
@@ -851,9 +866,9 @@ function CommandCard({
 
               <NumberField
                 id={`cooldown-${command.name}`}
-                label="فترة الانتظار (Cooldown)"
-                unit="ثوانٍ"
-                hint={`بين كل استخدامين لنفس العضو. 0 = بلا انتظار، والحد ${MAX_COOLDOWN_SECONDS}.`}
+                label={t("commands.cooldown")}
+                unit={t("commands.seconds")}
+                hint={t("commands.cooldownHint", { max: MAX_COOLDOWN_SECONDS })}
                 value={command.cooldownSeconds}
                 max={MAX_COOLDOWN_SECONDS}
                 onChange={seconds => onPatch({ cooldownSeconds: seconds })}
@@ -863,9 +878,9 @@ function CommandCard({
             {command.supportsPurge && (
               <NumberField
                 id={`purge-${command.name}`}
-                label="حذف رسائل العضو عند التنفيذ"
-                unit="أيام"
-                hint={`0 = بلا حذف، والحد ${MAX_PURGE_DAYS} أيام.`}
+                label={t("commands.purge")}
+                unit={t("commands.days")}
+                hint={t("commands.purgeHint", { max: MAX_PURGE_DAYS })}
                 value={command.deleteMessageDays}
                 max={MAX_PURGE_DAYS}
                 onChange={days => onPatch({ deleteMessageDays: days })}
@@ -875,7 +890,7 @@ function CommandCard({
             {command.supportsNotify && (
               <ToggleField
                 id={`notify-${command.name}`}
-                label="إرسال رسالة خاصة للعضو عند تنفيذ الإجراء"
+                label={t("commands.notify")}
                 checked={command.dmOnAction}
                 onChange={dmOnAction => onPatch({ dmOnAction })}
               />
@@ -888,7 +903,7 @@ function CommandCard({
               <>
                 <Separator />
                 <div className="flex flex-wrap items-center gap-2">
-                  <SectionTitle>إعدادات العقوبات</SectionTitle>
+                  <SectionTitle>{t("commands.section.penalty")}</SectionTitle>
                   {/*
                    * The permission model, stated rather than implied.
                    *
@@ -900,15 +915,15 @@ function CommandCard({
                    */}
                   <Badge variant="secondary" className="gap-1 text-[10px]">
                     <ShieldCheck className="size-3" aria-hidden />
-                    وضع الصلاحيات: صلاحيات ديسكورد
+                    {t("commands.permissionMode")}
                   </Badge>
                 </div>
 
                 <div className="space-y-3 rounded-md border border-border p-3">
                   <ToggleField
                     id={`require-reason-${command.name}`}
-                    label="السبب مطلوب"
-                    hint="يُرفض الأمر بدون سبب مسجل (فحص على الخادم)."
+                    label={t("commands.requireReason")}
+                    hint={t("commands.requireReasonHint")}
                     checked={command.requireReason}
                     onChange={requireReason => onPatch({ requireReason })}
                   />
@@ -918,8 +933,8 @@ function CommandCard({
                   {command.presetReasons.length > 0 && (
                     <ToggleField
                       id={`custom-reason-${command.name}`}
-                      label="السماح بكتابة سبب مخصص"
-                      hint="عند الإيقاف تُقبل الأسباب الجاهزة فقط."
+                      label={t("commands.allowCustomReason")}
+                      hint={t("commands.allowCustomReasonHint")}
                       checked={command.allowCustomReason}
                       onChange={allowCustomReason => onPatch({ allowCustomReason })}
                     />
@@ -927,24 +942,24 @@ function CommandCard({
 
                   {command.supportsDuration && (
                     <div className="space-y-1.5">
-                      <Label htmlFor={`duration-${command.name}`}>المدة الافتراضية</Label>
+                      <Label htmlFor={`duration-${command.name}`}>{t("commands.defaultDuration")}</Label>
                       <Select
                         value={command.defaultDuration}
                         onValueChange={value => onPatch({ defaultDuration: value as CommandDuration })}
                       >
-                        <SelectTrigger id={`duration-${command.name}`} aria-label="المدة الافتراضية" className="w-full max-w-sm">
+                        <SelectTrigger id={`duration-${command.name}`} aria-label={t("commands.defaultDuration")} className="w-full max-w-sm">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           {commandDurations.map(option => (
                             <SelectItem key={option.value} value={option.value}>
-                              {option.label}
+                              {t(`commands.duration.${option.value}` as TranslationKey)}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                       <p className="text-xs text-muted-foreground">
-                        تُطبَّق عندما لا يحدّد المشرف مدة.
+                        {t("commands.defaultDurationHint")}
                       </p>
                     </div>
                   )}
@@ -966,14 +981,14 @@ function CommandCard({
             {ownsRoleField && (
               <>
                 <Separator />
-                <SectionTitle>الأدوار الخاصة</SectionTitle>
+                <SectionTitle>{t("commands.section.specialRoles")}</SectionTitle>
                 <div className="grid gap-3 lg:grid-cols-2">
                   {owns("mutedRoleId") && (
                     <SingleChoiceField
                       id={`muted-role-${command.name}`}
-                      label="رتبة المكتوم"
-                      noneLabel="بلا رتبة — الأمر لا ينفّذ"
-                      hint="رتبة /mute. أنشئها في Discord بصلاحياتها — البوت لا ينشئ رتباً."
+                      label={t("commands.mutedRole")}
+                      noneLabel={t("commands.mutedRoleNone")}
+                      hint={t("commands.mutedRoleHint")}
                       items={roles.map(role => ({ id: role.id, name: role.name }))}
                       value={command.mutedRoleId}
                       onChange={mutedRoleId => onPatch({ mutedRoleId })}
@@ -983,9 +998,9 @@ function CommandCard({
                   {owns("prisonRoleId") && (
                     <SingleChoiceField
                       id={`prison-role-${command.name}`}
-                      label="رتبة السجن"
-                      noneLabel="بلا رتبة — الأمر لا ينفّذ"
-                      hint="رتبة /prison. يحفظ البوت الرتب السابقة ويعيدها عند /unprison."
+                      label={t("commands.prisonRole")}
+                      noneLabel={t("commands.prisonRoleNone")}
+                      hint={t("commands.prisonRoleHint")}
                       items={roles.map(role => ({ id: role.id, name: role.name }))}
                       value={command.prisonRoleId}
                       onChange={prisonRoleId => onPatch({ prisonRoleId })}
@@ -995,9 +1010,9 @@ function CommandCard({
                   {owns("prisonChannelId") && (
                     <SingleChoiceField
                       id={`prison-channel-${command.name}`}
-                      label="قناة السجن الصوتية"
-                      noneLabel="بلا قناة — لا نقل"
-                      hint="قناة السجن الصوتية. بدونها يبقى السجن رتبة فقط."
+                      label={t("commands.prisonChannel")}
+                      noneLabel={t("commands.prisonChannelNone")}
+                      hint={t("commands.prisonChannelHint")}
                       items={channels.filter(channel => channel.type === "voice").map(channel => ({ id: channel.id, name: channel.name }))}
                       value={command.prisonChannelId}
                       onChange={prisonChannelId => onPatch({ prisonChannelId })}
@@ -1006,39 +1021,39 @@ function CommandCard({
 
                   {owns("blacklistRoleIds") && (
                     <ScopeSelector
-                      label="رتب البلاك ليست"
-                      emptyLabel="بدون"
-                      hint="الرتب التي يمنحها /blacklist ويسحبها /unblacklist — واحدة على الأقل."
+                      label={t("commands.blacklistRoles")}
+                      emptyLabel={t("commands.scope.none")}
+                      hint={t("commands.blacklistRolesHint")}
                       items={roles.map(role => ({ id: role.id, name: role.name, color: role.color }))}
                       selected={command.blacklistRoleIds}
-                      noneLabel="لا توجد رتب"
-                      noun="رتب"
+                      noneLabel={t("commands.scope.noRoles")}
+                      noun={t("commands.scope.roles")}
                       onChange={blacklistRoleIds => onPatch({ blacklistRoleIds })}
                     />
                   )}
 
                   {owns("adminRoleIdsToStrip") && (
                     <ScopeSelector
-                      label="الرتب الإدارية"
-                      emptyLabel="كل رتبة ذات صلاحيات"
-                      hint="الرتب التي يسحبها /down. الفراغ = كل الرتب الإدارية. الاستعادة تعيد ما سُحب فعلاً."
+                      label={t("commands.adminRoles")}
+                      emptyLabel={t("commands.adminRolesEmpty")}
+                      hint={t("commands.adminRolesHint")}
                       items={roles.map(role => ({ id: role.id, name: role.name, color: role.color }))}
                       selected={command.adminRoleIdsToStrip}
-                      noneLabel="لا توجد رتب"
-                      noun="رتب"
+                      noneLabel={t("commands.scope.noRoles")}
+                      noun={t("commands.scope.roles")}
                       onChange={adminRoleIdsToStrip => onPatch({ adminRoleIdsToStrip })}
                     />
                   )}
 
                   {owns("blockableRoleIds") && (
                     <ScopeSelector
-                      label="رتب البلوك"
-                      emptyLabel="بدون"
-                      hint="الرتب التي يقبلها /block. خارجها يُرفض."
+                      label={t("commands.blockableRoles")}
+                      emptyLabel={t("commands.scope.none")}
+                      hint={t("commands.blockableRolesHint")}
                       items={roles.map(role => ({ id: role.id, name: role.name, color: role.color }))}
                       selected={command.blockableRoleIds}
-                      noneLabel="لا توجد رتب"
-                      noun="رتب"
+                      noneLabel={t("commands.scope.noRoles")}
+                      noun={t("commands.scope.roles")}
                       onChange={blockableRoleIds => onPatch({ blockableRoleIds })}
                     />
                   )}
@@ -1095,6 +1110,7 @@ function SingleChoiceField({
   noneLabel: string;
   onChange: (id: string | null) => void;
 }) {
+  const { t } = useI18n();
   const missing = value !== null && !items.some(item => item.id === value);
 
   return (
@@ -1111,7 +1127,7 @@ function SingleChoiceField({
               {item.name}
             </SelectItem>
           ))}
-          {missing && <SelectItem value={value}>{`${value} — لم تُعد موجودة`}</SelectItem>}
+          {missing && <SelectItem value={value}>{t("commands.missingChoice", { value })}</SelectItem>}
         </SelectContent>
       </Select>
       <p className="text-xs text-muted-foreground">{hint}</p>
@@ -1328,11 +1344,11 @@ export function ScopeSelector({
   items,
   selected,
   noneLabel,
-  noun = "عنصر",
+  noun,
   onChange
 }: {
   label: string;
-  /** What an empty selection means here: "الكل مسموح" for an allow-list, "بدون" for a deny-list. */
+  /** What an empty selection means here: "Everything allowed" for an allow-list, "None" for a deny-list. */
   emptyLabel: string;
   hint: string;
   items: { id: string; name: string; color?: number; type?: string }[];
@@ -1341,6 +1357,7 @@ export function ScopeSelector({
   noun?: string;
   onChange: (ids: string[]) => void;
 }) {
+  const { t } = useI18n();
   const [filter, setFilter] = useState("");
   const needle = filter.trim().toLowerCase();
   const visible = needle ? items.filter(item => item.name.toLowerCase().includes(needle)) : items;
@@ -1349,20 +1366,20 @@ export function ScopeSelector({
   return (
     <div className="space-y-1.5">
       <Label>{label}</Label>
-      <ScopeTrigger label={label} summary={summarise(selectedNames, emptyLabel, noun)} count={selected.length}>
+      <ScopeTrigger label={label} summary={summarise(selectedNames, emptyLabel, noun ?? t("commands.scope.item"))} count={selected.length}>
         {items.length > 8 && (
           <Input
             value={filter}
             onChange={event => setFilter(event.target.value)}
-            placeholder="تصفية..."
-            aria-label={`تصفية ${label}`}
+            placeholder={t("commands.filterPlaceholder")}
+            aria-label={t("commands.scopeFilterAria", { label })}
             className="mb-1 h-8"
           />
         )}
 
         <div className="max-h-56 overflow-y-auto">
           {visible.length === 0 && (
-            <p className="px-1 py-2 text-xs text-muted-foreground">{items.length === 0 ? noneLabel : "لا نتائج"}</p>
+            <p className="px-1 py-2 text-xs text-muted-foreground">{items.length === 0 ? noneLabel : t("commands.noResults")}</p>
           )}
           {visible.map(item => (
             <label key={item.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 text-sm hover:bg-accent">
@@ -1380,7 +1397,7 @@ export function ScopeSelector({
         {selected.length > 0 && (
           <Button variant="ghost" size="sm" className="mt-1 w-full justify-center gap-1" onClick={() => onChange([])}>
             <X className="size-3.5" />
-            مسح الاختيار
+            {t("commands.clearSelection")}
           </Button>
         )}
       </ScopeTrigger>
@@ -1413,6 +1430,7 @@ export function MemberScopeSelector({
   memberById: Map<string, ScopedMember>;
   onChange: (ids: string[]) => void;
 }) {
+  const { t } = useI18n();
   const [entry, setEntry] = useState("");
   const trimmed = entry.trim();
   // A mention is what the operator has to hand — they copy it from Discord —
@@ -1432,7 +1450,7 @@ export function MemberScopeSelector({
   return (
     <div className="space-y-1.5">
       <Label>{label}</Label>
-      <ScopeTrigger label={label} summary={summarise(names, emptyLabel, "أعضاء")} count={selected.length}>
+      <ScopeTrigger label={label} summary={summarise(names, emptyLabel, t("commands.scope.members"))} count={selected.length}>
         <div className="flex items-center gap-2">
           <Input
             value={entry}
@@ -1443,23 +1461,23 @@ export function MemberScopeSelector({
                 add();
               }
             }}
-            placeholder="المعرّف أو الإشارة"
+            placeholder={t("commands.memberPlaceholder")}
             aria-label={label}
             dir="ltr"
             className="h-8"
           />
           <Button variant="outline" size="sm" className="gap-1" disabled={!valid || duplicate} onClick={add}>
             <Plus className="size-3.5" />
-            إضافة
+            {t("commands.add")}
           </Button>
         </div>
 
         <p className="mt-1 px-1 text-[10px] text-muted-foreground">
           {trimmed && !valid
-            ? "المعرّف يجب أن يكون من 17 إلى 20 رقماً."
+            ? t("commands.memberInvalid")
             : duplicate
-              ? "هذا العضو مضاف بالفعل."
-              : "انسخ الإشارة أو المعرّف من ديسكورد والصقه هنا."}
+              ? t("commands.memberDuplicate")
+              : t("commands.memberHint")}
         </p>
 
         {selected.length > 0 && (
@@ -1478,7 +1496,7 @@ export function MemberScopeSelector({
                   </span>
                   <button
                     type="button"
-                    aria-label={`إزالة ${member?.name ?? id}`}
+                    aria-label={t("commands.memberRemove", { name: member?.name ?? id })}
                     className="rounded-full p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
                     onClick={() => onChange(selected.filter(value => value !== id))}
                   >
@@ -1517,6 +1535,7 @@ function AliasEditor({
   aliasOwner: Map<string, string>;
   onChange: (aliases: string[]) => void;
 }) {
+  const { t } = useI18n();
   const [entry, setEntry] = useState("");
   const candidate = entry.trim().toLowerCase();
   const owner = candidate ? aliasOwner.get(candidate) : undefined;
@@ -1525,15 +1544,15 @@ function AliasEditor({
   const problem = !candidate
     ? null
     : !isUsableAlias(candidate)
-      ? "أحرف وأرقام و - و _ فقط، بحروف صغيرة، حتى 32 حرفاً."
+      ? t("commands.aliasInvalid")
       : taken.has(candidate)
-        ? "هذا اسم أمر منشور في AL AI، فلا يمكن استخدامه كاختصار."
+        ? t("commands.aliasTakenCommand")
         : owner === command.name
-          ? "هذا الاختصار مضاف بالفعل."
+          ? t("commands.aliasAlready")
           : owner
-            ? `هذا الاختصار مستخدم في /${owner}.`
+            ? t("commands.aliasUsedBy", { owner })
             : command.aliases.length >= MAX_ALIASES_PER_COMMAND
-              ? `الحد الأقصى ${MAX_ALIASES_PER_COMMAND} اختصارات للأمر الواحد.`
+              ? t("commands.aliasMax", { max: MAX_ALIASES_PER_COMMAND })
               : null;
 
   const add = () => {
@@ -1545,7 +1564,7 @@ function AliasEditor({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
-        <Label htmlFor={`alias-${command.name}`}>اختصارات إضافية</Label>
+        <Label htmlFor={`alias-${command.name}`}>{t("commands.aliasLabel")}</Label>
         <span className="tabular text-[10px] text-muted-foreground">
           {command.aliases.length}/{MAX_ALIASES_PER_COMMAND}
         </span>
@@ -1562,13 +1581,13 @@ function AliasEditor({
               add();
             }
           }}
-          placeholder="اكتب اختصار..."
+          placeholder={t("commands.aliasPlaceholder")}
           dir="ltr"
           className="h-8 max-w-xs"
         />
         <Button variant="outline" size="sm" className="gap-1" disabled={!candidate || Boolean(problem)} onClick={add}>
           <Plus className="size-3.5" />
-          إضافة
+          {t("commands.add")}
         </Button>
       </div>
 
@@ -1583,7 +1602,7 @@ function AliasEditor({
               </span>
               <button
                 type="button"
-                aria-label={`إزالة الاختصار ${alias}`}
+                aria-label={t("commands.aliasRemove", { alias })}
                 className="rounded-full p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
                 onClick={() => onChange(command.aliases.filter(value => value !== alias))}
               >
@@ -1595,11 +1614,7 @@ function AliasEditor({
       )}
 
       <p className="text-xs text-muted-foreground">
-        يُنشَر كأمر حقيقي ويحتاج نشراً للسيرفر عبر
-        <span className="mx-1 font-mono text-[11px]" dir="ltr">
-          deploy-commands --guild &lt;id&gt;
-        </span>
-        ليظهر فوراً.
+        {t("commands.aliasFooter", { code: "deploy-commands --guild <id>" })}
       </p>
     </div>
   );
@@ -1613,13 +1628,14 @@ function AliasEditor({
  * and then ignored, and the bot would have to pretend otherwise.
  */
 export function PresetReasons({ command, onChange }: { command: CommandFlag; onChange: (presets: PresetReason[]) => void }) {
+  const { t } = useI18n();
   const update = (id: string, next: Partial<PresetReason>) =>
     onChange(command.presetReasons.map(preset => (preset.id === id ? { ...preset, ...next } : preset)));
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
-        <Label>أسباب جاهزة تظهر في ديسكورد</Label>
+        <Label>{t("commands.presetsTitle")}</Label>
         <Button
           variant="outline"
           size="sm"
@@ -1628,12 +1644,12 @@ export function PresetReasons({ command, onChange }: { command: CommandFlag; onC
           onClick={() => onChange([...command.presetReasons, { id: newPresetId(), label: "", duration: command.supportsDuration ? "permanent" : null }])}
         >
           <Plus className="size-3.5" />
-          إضافة سبب
+          {t("commands.presetAdd")}
         </Button>
       </div>
 
       {command.presetReasons.length === 0 && (
-        <p className="text-xs text-muted-foreground">لا توجد أسباب جاهزة. يكتب المشرف السبب يدوياً.</p>
+        <p className="text-xs text-muted-foreground">{t("commands.presetEmpty")}</p>
       )}
 
       <div className="space-y-2">
@@ -1642,21 +1658,21 @@ export function PresetReasons({ command, onChange }: { command: CommandFlag; onC
             <Input
               value={preset.label}
               onChange={event => update(preset.id, { label: event.target.value })}
-              placeholder="نص السبب، مثل: سبام"
-              aria-label="نص السبب"
+              placeholder={t("commands.presetPlaceholder")}
+              aria-label={t("commands.presetAria")}
             />
             {command.supportsDuration && (
               <Select
                 value={preset.duration ?? "permanent"}
                 onValueChange={value => update(preset.id, { duration: value as CommandDuration })}
               >
-                <SelectTrigger className="w-36" aria-label="المدة المقترنة بالسبب">
+                <SelectTrigger className="w-36" aria-label={t("commands.presetDurationAria")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {commandDurations.map(option => (
                     <SelectItem key={option.value} value={option.value}>
-                      {option.label}
+                      {t(`commands.duration.${option.value}` as TranslationKey)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1665,7 +1681,7 @@ export function PresetReasons({ command, onChange }: { command: CommandFlag; onC
             <Button
               variant="ghost"
               size="icon"
-              aria-label="حذف السبب"
+              aria-label={t("commands.presetDelete")}
               onClick={() => onChange(command.presetReasons.filter(entry => entry.id !== preset.id))}
             >
               <Trash2 className="size-4" />
@@ -1676,8 +1692,7 @@ export function PresetReasons({ command, onChange }: { command: CommandFlag; onC
 
       {command.presetReasons.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          تظهر هذه الأسباب كاقتراحات في حقل السبب داخل ديسكورد
-          {command.supportsDuration ? "، وعند اختيار سبب بمدة مقترنة تُطبَّق ما لم يحدّد المشرف مدة." : "."}
+          {command.supportsDuration ? t("commands.presetFooterDuration") : t("commands.presetFooter")}
         </p>
       )}
     </div>

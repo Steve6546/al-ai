@@ -11,12 +11,12 @@ export function initials(name?: string | null): string {
   return name.trim().slice(0, 2).toUpperCase();
 }
 
-/** Arabic-locale date/time, or a dash when the value is missing or unparseable. */
-export function formatDateTime(value?: string | null): string {
+/** Locale date/time (Arabic by default), or a dash when the value is unparseable. */
+export function formatDateTime(value?: string | null, language: "ar" | "en" = "ar"): string {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("ar", { dateStyle: "short", timeStyle: "short" });
+  return date.toLocaleString(language === "en" ? "en" : "ar", { dateStyle: "short", timeStyle: "short" });
 }
 
 /** Trims a long identifier for display while keeping both ends recognisable. */
@@ -35,10 +35,14 @@ export function shortId(id: string, keep = 6): string {
  * `null` means the count is not knowable (the bot is not in the guild), which is
  * a different statement from "nobody is in it" and must not be rendered as 0.
  */
-export function formatMemberCount(count: number | null | undefined): string {
-  if (count === null || count === undefined) return "غير محدد";
-  if (!Number.isFinite(count) || count < 0) return "غير محدد";
+export function formatMemberCount(count: number | null | undefined, language: "ar" | "en" = "ar"): string {
+  if (count === null || count === undefined) return language === "en" ? "Unknown" : "غير محدد";
+  if (!Number.isFinite(count) || count < 0) return language === "en" ? "Unknown" : "غير محدد";
   const value = Math.trunc(count);
+  if (language === "en") {
+    if (value === 1) return "1 member";
+    return `${value.toLocaleString("en")} members`;
+  }
   if (value === 0) return "لا أعضاء";
   if (value === 1) return "عضو واحد";
   if (value === 2) return "عضوان";

@@ -1,7 +1,17 @@
 import { useState, type ReactNode } from "react";
 import { SmilePlus } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { WELCOME_MESSAGE_TOKENS, WELCOME_TOKEN_LABELS_AR } from "@al-ai/core/browser";
+import { WELCOME_MESSAGE_TOKENS } from "@al-ai/core/browser";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
+
+export const TOKEN_KEYS: Record<(typeof WELCOME_MESSAGE_TOKENS)[number], TranslationKey> = {
+  "{user}": "welcome.token.user",
+  "{username}": "welcome.token.username",
+  "{server}": "welcome.token.server",
+  "{memberCount}": "welcome.token.memberCount",
+  "{inviter}": "welcome.token.inviter",
+  "{joinDate}": "welcome.token.joinDate"
+};
 
 /**
  * Shared editing pieces for the welcome-messages screen: the token strip that
@@ -39,14 +49,15 @@ export function insertAtCursor(
 
 /** The variable strip: every token, labelled, one click to insert. */
 export function TokenStrip({ onInsert }: { onInsert: (token: string) => void }) {
+  const { t } = useI18n();
   return (
-    <div className="flex flex-wrap gap-1.5" role="group" aria-label="المتغيرات المتاحة">
+    <div className="flex flex-wrap gap-1.5" role="group" aria-label={t("welcome.tokensGroup")}>
       {WELCOME_MESSAGE_TOKENS.map(token => (
         <button
           key={token}
           type="button"
           dir="ltr"
-          title={WELCOME_TOKEN_LABELS_AR[token as keyof typeof WELCOME_TOKEN_LABELS_AR]}
+          title={t(TOKEN_KEYS[token])}
           className="rounded-md border border-border/80 bg-muted/40 px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary sm:px-2 sm:py-0.5"
           onClick={() => onInsert(token)}
         >

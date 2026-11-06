@@ -235,6 +235,74 @@ export type SessionInfo = {
     expiresAt: string;
     isPlatformOwner?: boolean;
   } | null;
+  /**
+   * Present when `GET /api/session` reports a pending admin login: OAuth has
+   * identified the operator but no session cookie has been issued yet, so the
+   * second factor must be cleared first. `required === true` is the gate the
+   * SPA uses to show the 2FA screen instead of the login screen; `enrolled`
+   * decides whether that screen must also set up an authenticator, and
+   * `expiresAt` bounds the short-lived pending login.
+   */
+  secondFactor?: {
+    required: boolean;
+    enrolled: boolean;
+    expiresAt: string;
+  };
+};
+
+/**
+ * The one-time enrolment payload for `GET /api/2fa/enrollment`.
+ *
+ * When `enrolled === false`, `secret` is the base32 TOTP key and `otpauthUri`
+ * the `otpauth://` URI the admin adds to their authenticator app by hand, and
+ * `recoveryCodes` holds ten single-use codes shown exactly once. When
+ * `enrolled === true` the secret and URI are null and the codes are empty, but
+ * `expiresAt` is always present so the pending login can be counted down in
+ * both states.
+ */
+export type TwoFactorEnrollment = {
+  enrolled: boolean;
+  secret: string | null;
+  otpauthUri: string | null;
+  recoveryCodes: string[];
+  expiresAt: string;
+};
+
+/** The interface language. Arabic is the default; English is the alternative. */
+export type Language = "ar" | "en";
+
+export type UserPreferences = { language: Language };
+
+/**
+ * A new authenticator's one-time material, from `POST /api/me/2fa/setup`.
+ * Like the login payload it is shown exactly once: confirming or cancelling
+ * deletes the server-side copy.
+ */
+export type TwoFactorSetup = {
+  secret: string;
+  otpauthUri: string;
+  recoveryCodes: string[];
+  expiresAt: string;
+  replacing: boolean;
+};
+
+/** One live sign-in for the account, as the security screen lists it. */
+export type SecuritySession = {
+  current: boolean;
+  userAgent: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+};
+
+export type SecurityOverview = {
+  twoFactor: {
+    enrolled: boolean;
+    confirmedAt: string | null;
+    recoveryCodesRemaining: number;
+  };
+  sessions: SecuritySession[];
+  platformOwner: boolean;
 };
 
 /** What `GET /api/network` answers with — the deployment's current reach. */

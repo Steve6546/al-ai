@@ -6,9 +6,11 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { GuildSelector } from "@/components/guild-selector";
 import { InviteBotPanel } from "@/components/invite-bot";
 import { LoginScreen } from "@/components/login-screen";
+import { TwoFactorScreen } from "@/components/two-factor-screen";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { translate, useI18n, type TranslationKey } from "@/lib/i18n";
 import { guildPath, guildsPath, navigate, useRoute } from "@/lib/router";
-import { AuditView, BotPresenceView, CommandsView, CustomizationView, DashboardView, InvitesView, LevelsView, LogsView, NetworkView, RolesView, SecurityView, WelcomeMessagesView, WelcomeView } from "@/views";
+import { AuditView, BotPresenceView, CommandsView, CustomizationView, DashboardView, InvitesView, LevelsView, LogsView, NetworkView, RolesView, SecurityView, SettingsView, WelcomeMessagesView, WelcomeView } from "@/views";
 import type { Guild, HealthSnapshot, SessionInfo } from "@/types";
 
 /**
@@ -29,15 +31,26 @@ import type { Guild, HealthSnapshot, SessionInfo } from "@/types";
  * with nothing announced: the list of their own servers already says the sign-in
  * worked, and a box above the search field read as a second, empty input.
  */
-const authMessages: Record<string, string> = {
-  bot_added: "تمت إضافة AL AI إلى السيرفر.",
-  denied: "لا تملك رتبة إدارية في أي سيرفر مضاف.",
-  state_mismatch: "فشل التحقق من حالة OAuth.",
-  failed: "تعذّر إكمال تسجيل الدخول."
+const authMessages: Record<string, TranslationKey> = {
+  bot_added: "auth.botAdded",
+  denied: "auth.denied",
+  "2fa_required": "auth.twoFactorRequired",
+  state_mismatch: "auth.stateMismatch",
+  failed: "auth.failed"
 };
 
 /** Shown when a link points at a guild this account cannot administer. */
-const NO_ACCESS_NOTICE = "لا تملك صلاحية الوصول إلى هذا السيرفر. اختر سيرفراً من القائمة.";
+const NO_ACCESS_NOTICE: TranslationKey = "auth.noAccess";
+
+/**
+ * The signed-out state, with `secondFactor` cleared explicitly.
+ *
+ * A pending admin login is announced only by `secondFactor.required` on the
+ * session. Every path that drops back to an unauthenticated state must build a
+ * fresh object with that flag absent, otherwise a stale `required` would keep
+ * the 2FA screen on screen after a logout or a cancelled/expired login.
+ */
+const signedOut: SessionInfo = { authenticated: false, user: null, secondFactor: undefined };
 
 /**
  * How often the header status strip re-reads `/api/health`.
@@ -50,6 +63,7 @@ const HEALTH_POLL_MS = 20_000;
 
 export function App() {
   const route = useRoute();
+  const { t, language, setLanguage } = useI18n();
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [guilds, setGuilds] = useState<Guild[]>([]);
   const [health, setHealth] = useState<HealthSnapshot | null>(null);
@@ -57,6 +71,11 @@ export function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // The boot-time hand-back is translated once; a later language switch must
+  // not re-read (and re-announce) a URL parameter that is already gone.
+  const languageRef = useRef(language);
+  languageRef.current = language;
 
   /**
    * The message the sign-in leg brought back, kept apart from `notice`.
@@ -96,28 +115,51 @@ export function App() {
       const switched = accountRef.current !== null && accountRef.current !== userId;
       if (switched) {
         setGuilds([]);
-        setNotice("تم تسجيل الدخول بحساب مختلف. حُدِّثت قائمة السيرفرات.");
+        setNotice(translate(languageRef.current, "auth.accountSwitched"));
         navigate(guildsPath(), { replace: true });
       }
       accountRef.current = userId;
+
+      // The account's language wins across devices. It is applied only after
+      // the server answered, so a stored device choice is never overwritten by
+      // a stale response from a previous account.
+      void api
+        .preferences()
+        .then(next => {
+          if (accountRef.current === userId) setLanguage(next.language);
+        })
+        .catch(() => undefined);
 
       const result = await api.guilds();
       setGuilds(result.guilds);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) {
         accountRef.current = null;
-        setSession({ authenticated: false, user: null });
+        setSession(signedOut);
         setGuilds([]);
       } else {
-        setError(cause instanceof Error ? cause.message : "تعذّر تحميل البيانات.");
+        setError(cause instanceof Error ? cause.message : translate(languageRef.current, "auth.loadFailed"));
       }
     }
-  }, []);
+  }, [setLanguage]);
+
+  /**
+   * Abandon a pending second-factor login and return to the sign-in screen.
+   *
+   * Clearing the session first drops the stale `secondFactor` flag immediately;
+   * re-loading `/api/session` then confirms the server really let the pending
+   * login go rather than trusting the client to have done it.
+   */
+  const resetSecondFactor = useCallback(() => {
+    setSession(signedOut);
+    void load();
+  }, [load]);
 
   useEffect(() => {
     const auth = new URLSearchParams(window.location.search).get("auth");
     if (auth) {
-      const message = authMessages[auth] ?? null;
+      const key = authMessages[auth];
+      const message = key ? translate(languageRef.current, key) : null;
       setNotice(message);
       setAuthNotice(message);
       // Drop the query so a refresh does not re-announce a sign-in that already
@@ -173,9 +215,9 @@ export function App() {
    */
   useEffect(() => {
     if (booting || !routeGuildId || guild) return;
-    setNotice(NO_ACCESS_NOTICE);
+    setNotice(t(NO_ACCESS_NOTICE));
     navigate(guildsPath(), { replace: true });
-  }, [booting, routeGuildId, guild]);
+  }, [booting, routeGuildId, guild, t]);
 
   // An unrecognised path is a broken link, not a crash.
   useEffect(() => {
@@ -213,7 +255,7 @@ export function App() {
   async function logout() {
     await api.logout().catch(() => undefined);
     accountRef.current = null;
-    setSession({ authenticated: false, user: null });
+    setSession(signedOut);
     setGuilds([]);
     setNotice(null);
     navigate(guildsPath(), { replace: true });
@@ -223,8 +265,23 @@ export function App() {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="size-4 animate-spin" />
-        جارٍ التحميل
+        {t("common.loading")}
       </div>
+    );
+  }
+
+  // A pending admin login has passed OAuth but has NOT been issued a session
+  // cookie yet. The BFF marks it with `secondFactor.required`, so the second
+  // factor comes before the login screen (which would only restart OAuth).
+  if (!session?.authenticated && session?.secondFactor?.required) {
+    return (
+      <TwoFactorScreen
+        enrolled={session.secondFactor.enrolled}
+        notice={authNotice ?? error}
+        onVerified={() => void load()}
+        onCancelled={resetSecondFactor}
+        onExpired={resetSecondFactor}
+      />
     );
   }
 
@@ -259,6 +316,7 @@ export function App() {
       onBrowseAll={() => navigate(guildsPath())}
       view={view}
       onView={key => navigate(guildPath(guild.id, key))}
+      onOpenSettings={() => navigate(guildPath(guild.id, "settings"))}
       health={health}
       user={session.user}
       refreshing={refreshing}
@@ -271,9 +329,14 @@ export function App() {
         </Alert>
       )}
 
-      {/* The bot leaving mid-session is not an error: the guild is still
-          administrable, it simply has nothing to configure until AL AI returns. */}
-      {!guild.botPresent ? (
+      {/* The account settings centre is not a guild section: it must stay
+          reachable even when AL AI is not in this server, because identity,
+          language and account security have nothing to do with the bot. */}
+      {view === "settings" ? (
+        <ErrorBoundary resetKey={`${guild.id}:settings`} scope={viewTitle("settings")}>
+          <SettingsView user={session.user} guild={guild} />
+        </ErrorBoundary>
+      ) : !guild.botPresent ? (
         <InviteBotPanel guild={guild} refreshing={refreshing} onRefresh={() => void refresh()} />
       ) : (
         /* A render error inside one screen used to unmount the entire app and

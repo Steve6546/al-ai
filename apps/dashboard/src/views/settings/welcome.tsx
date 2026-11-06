@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useI18n } from "@/lib/i18n";
 import type { DiscordRole, Guild, WelcomeSettings } from "@/types";
 
 /** The picker value that means "no role for this kind of arrival". */
@@ -37,6 +38,7 @@ const NONE = "__none__";
  * that cannot work.
  */
 export function WelcomeView({ guild }: { guild: Guild }) {
+  const { t } = useI18n();
   const [settings, setSettings] = useState<WelcomeSettings | null>(null);
   const [roles, setRoles] = useState<DiscordRole[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -54,11 +56,11 @@ export function WelcomeView({ guild }: { guild: Guild }) {
         setSettings(result.settings);
         setRoles(result.roles);
       })
-      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
+      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : t("welcome.loadFailed")));
     return () => {
       cancelled = true;
     };
-  }, [guild.id]);
+  }, [guild.id, t]);
 
   if (error) {
     return <LoadError message={error} />;
@@ -82,13 +84,13 @@ export function WelcomeView({ guild }: { guild: Guild }) {
     <div data-heroui className="space-y-4">
       <ModuleStatusCard
         icon={Shield}
-        title="منح الرتب تلقائياً"
-        description="تُمنح عند الانضمام."
+        title={t("welcome.moduleTitle")}
+        description={t("welcome.moduleBody")}
         enabled={draft.enabled}
         onToggle={enabled => patch({ enabled })}
-        toggleLabel="تفعيل الرتبة التلقائية"
-        disabledHint="الوحدة متوقفة. فعّلها لبدء منح الرتب — إعداداتك المحفوظة تبقى كما هي."
-        enableLabel="تفعيل الوحدة"
+        toggleLabel={t("welcome.moduleToggle")}
+        disabledHint={t("welcome.moduleDisabled")}
+        enableLabel={t("welcome.moduleEnable")}
       />
 
       {draft.enabled ? (
@@ -97,12 +99,12 @@ export function WelcomeView({ guild }: { guild: Guild }) {
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="flex flex-col">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">رتبة العضو الجديد</CardTitle>
-            <CardDescription>تُمنح عند انضمام عضو.</CardDescription>
+            <CardTitle className="text-base">{t("welcome.memberRole")}</CardTitle>
+            <CardDescription>{t("welcome.memberRoleBody")}</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 space-y-1.5">
             <Label className="text-xs text-muted-foreground" htmlFor="welcome-member-role">
-              الرتبة
+              {t("welcome.role")}
             </Label>
             <Select
               value={draft.memberRoleId ?? NONE}
@@ -112,7 +114,7 @@ export function WelcomeView({ guild }: { guild: Guild }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={NONE}>بدون رتبة</SelectItem>
+                <SelectItem value={NONE}>{t("welcome.noRole")}</SelectItem>
                 {roles.map(role => roleOption(role))}
               </SelectContent>
             </Select>
@@ -121,12 +123,12 @@ export function WelcomeView({ guild }: { guild: Guild }) {
 
         <Card className="flex flex-col">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">رتبة البوت الجديد</CardTitle>
-            <CardDescription>تُمنح عند إضافة بوت.</CardDescription>
+            <CardTitle className="text-base">{t("welcome.botRole")}</CardTitle>
+            <CardDescription>{t("welcome.botRoleBody")}</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 space-y-1.5">
             <Label className="text-xs text-muted-foreground" htmlFor="welcome-bot-role">
-              الرتبة
+              {t("welcome.role")}
             </Label>
             <Select
               value={draft.botRoleId ?? NONE}
@@ -136,7 +138,7 @@ export function WelcomeView({ guild }: { guild: Guild }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={NONE}>بدون رتبة</SelectItem>
+                <SelectItem value={NONE}>{t("welcome.noRole")}</SelectItem>
                 {roles.map(role => roleOption(role))}
               </SelectContent>
             </Select>
@@ -146,13 +148,13 @@ export function WelcomeView({ guild }: { guild: Guild }) {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">التوقيت</CardTitle>
-          <CardDescription>0 يعني فوراً؛ والتأخير يمنح العضو وقتاً للاستقرار.</CardDescription>
+          <CardTitle className="text-base">{t("welcome.timing")}</CardTitle>
+          <CardDescription>{t("welcome.timingBody")}</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground" htmlFor="welcome-delay">
-              التأخير بالثواني
+              {t("welcome.delay")}
             </Label>
             <div className="flex items-center gap-2" dir="ltr">
               <Input
@@ -164,14 +166,14 @@ export function WelcomeView({ guild }: { guild: Guild }) {
                 onChange={event => patch({ delaySeconds: Number(event.target.value) })}
                 className="w-28 text-center"
               />
-              <Badge variant="secondary">ثانية</Badge>
+              <Badge variant="secondary">{t("welcome.second")}</Badge>
             </div>
           </div>
         </CardContent>
       </Card>
 
           <p className="text-xs text-muted-foreground">
-            الرتب فوق رتبة البوت لا يمكن منحها — يتحقق البوت عند كل انضمام.
+            {t("welcome.roleCeiling")}
           </p>
         </>
       ) : null}
@@ -181,9 +183,9 @@ export function WelcomeView({ guild }: { guild: Guild }) {
 
       {dirty && (
         <SaveBar
-          message="تغييرات غير محفوظة"
-          saveLabel="حفظ التعديلات"
-          cancelLabel="إلغاء"
+          message={t("invites.unsaved")}
+          saveLabel={t("invites.save")}
+          cancelLabel={t("common.cancel")}
           onCancel={reset}
           onSave={async () => {
             const result = await api.saveWelcome(guild.id, draft);

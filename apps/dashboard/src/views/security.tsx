@@ -17,16 +17,15 @@ import {
   ANTI_NUKE_LIMIT_KEYS,
   ANTI_NUKE_WINDOW_MS,
   NUKE_FAMILIES,
-  NUKE_FAMILY_LABELS,
   NUKE_PROTECTIONS,
   activeProtectionCount,
-  discordPermissionLabels,
   protectionEnabled,
   protectionsInFamily,
   type NukeFamily,
   type NukeProtection
 } from "@al-ai/core/browser";
 import { formatDateTime } from "@/lib/format";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import type { AntiNukeConfig, AntiNukeSettings, Guild, SecurityEvent } from "@/types";
 
 /**
@@ -39,6 +38,7 @@ import type { AntiNukeConfig, AntiNukeSettings, Guild, SecurityEvent } from "@/t
  * agree. An empty feed is the healthy state.
  */
 export function SecurityView({ guild }: { guild: Guild }) {
+  const { t, language } = useI18n();
   const [events, setEvents] = useState<SecurityEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,11 +49,11 @@ export function SecurityView({ guild }: { guild: Guild }) {
     api
       .security(guild.id)
       .then(result => !cancelled && setEvents(result.events))
-      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
+      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : t("security.loadFailed")));
     return () => {
       cancelled = true;
     };
-  }, [guild.id]);
+  }, [guild.id, t]);
 
   if (error) {
     return <LoadError message={error} />;
@@ -70,8 +70,8 @@ export function SecurityView({ guild }: { guild: Guild }) {
               <ShieldCheck className="size-5" />
             </div>
             <div>
-              <p className="text-sm font-medium">لا توجد محاولات مرصودة</p>
-              <p className="text-xs text-muted-foreground">تُكتب هنا وفي سجل التدقيق.</p>
+              <p className="text-sm font-medium">{t("security.noneTitle")}</p>
+              <p className="text-xs text-muted-foreground">{t("security.noneBody")}</p>
             </div>
           </CardContent>
         </Card>
@@ -80,7 +80,7 @@ export function SecurityView({ guild }: { guild: Guild }) {
       {events && events.length > 0 && (
         <Card>
           <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
-            <CardTitle className="min-w-0 text-base">الأحداث المرصودة</CardTitle>
+            <CardTitle className="min-w-0 text-base">{t("security.events")}</CardTitle>
             <Badge variant="destructive" className="tabular shrink-0">
               {events.length}
             </Badge>
@@ -105,7 +105,7 @@ export function SecurityView({ guild }: { guild: Guild }) {
                       </p>
                     )}
                     <p className="mt-1 text-[11px] text-muted-foreground">
-                      {event.sourceLayer} · {formatDateTime(event.createdAt)}
+                      {event.sourceLayer} · {formatDateTime(event.createdAt, language)}
                     </p>
                   </div>
                 </div>
@@ -118,7 +118,7 @@ export function SecurityView({ guild }: { guild: Guild }) {
       {!events && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
-          جارٍ التحميل
+          {t("common.loading")}
         </div>
       )}
     </div>
@@ -137,10 +137,10 @@ const NO_ROLE = "__none__";
  * control that would look configurable and do nothing.
  */
 const securityTabs = [
-  { key: "punish", label: "تحديد العقوبة", icon: Gavel },
-  { key: "instant", label: "عقوبة فورية", icon: Zap },
-  { key: "detect", label: "كشف فقط", icon: Eye },
-  { key: "selfdef", label: "الدفاع الذاتي للبوت", icon: Bot }
+  { key: "punish", labelKey: "security.tab.punish", icon: Gavel },
+  { key: "instant", labelKey: "security.tab.instant", icon: Zap },
+  { key: "detect", labelKey: "security.tab.detect", icon: Eye },
+  { key: "selfdef", labelKey: "security.tab.selfdef", icon: Bot }
 ] as const;
 
 type SecurityTab = (typeof securityTabs)[number]["key"];
@@ -154,10 +154,10 @@ const familyIcons: Record<NukeFamily, typeof Hash> = {
 };
 
 /** The honest sentence for a section whose controls are not built yet. */
-const pendingSections: Record<Exclude<SecurityTab, "punish">, string> = {
-  instant: "لم تُضبط هذه الإعدادات بعد. المحرّك يعمل الآن بإعدادات قسم «تحديد العقوبة».",
-  detect: "لم تُضبط هذه الإعدادات بعد. كل إجراء مرصود يُسجَّل حاليًا في سجل التدقيق وفي قائمة الأحداث.",
-  selfdef: "لم تُضبط هذه الإعدادات بعد. المحرّك يستثني رتبته هو ولا يعاقب نفسه."
+const pendingSections: Record<Exclude<SecurityTab, "punish">, TranslationKey> = {
+  instant: "security.pending.instant",
+  detect: "security.pending.detect",
+  selfdef: "security.pending.selfdef"
 };
 
 /**
@@ -170,6 +170,7 @@ const pendingSections: Record<Exclude<SecurityTab, "punish">, string> = {
  * operator has turned it off.
  */
 function AntiNukePanel({ guild }: { guild: Guild }) {
+  const { t } = useI18n();
   const [loaded, setLoaded] = useState<AntiNukeSettings | null>(null);
   const [config, setConfig] = useState<AntiNukeConfig | null>(null);
   const { saved, draft, dirty, setDraft, reset, commit } = useDraftForm(config);
@@ -189,11 +190,11 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
         setLoaded(result);
         setConfig(result.config);
       })
-      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
+      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : t("security.loadFailed")));
     return () => {
       cancelled = true;
     };
-  }, [guild.id]);
+  }, [guild.id, t]);
 
   if (error) {
     return <LoadError message={error} />;
@@ -202,7 +203,7 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
     return (
       <Card>
         <CardContent className="p-5">
-          <LoadingRow label="جارٍ تحميل إعدادات الأمان" />
+          <LoadingRow label={t("security.loading")} />
         </CardContent>
       </Card>
     );
@@ -227,7 +228,9 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
    * as the no-role case — which is what mitigation does in that situation.
    */
   const quarantineRole = draft.quarantineRoleId ? loaded.roles.find(role => role.id === draft.quarantineRoleId) : undefined;
-  const punishmentLabel = quarantineRole ? `سحب الرتب ← ${quarantineRole.name}` : "بدون رتبة حجر";
+  const punishmentLabel = quarantineRole
+    ? t("security.strippedRoles", { role: quarantineRole.name })
+    : t("security.quarantineNone");
   /**
    * Live for this guild right now: armed, switched on, and counted by the engine.
    *
@@ -258,17 +261,17 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
         <div className="min-w-0 space-y-1">
           <CardTitle className="flex items-center gap-2 text-base">
             {draft.enabled ? <ShieldCheck className="size-4 text-success" /> : <ShieldOff className="size-4" />}
-            محرّك مضاد التخريب
+            {t("security.engineTitle")}
           </CardTitle>
           <CardDescription>
-            يراقب الإجراءات التدميرية ويحتويها عند تجاوز الحد.
+            {t("security.engineBody")}
           </CardDescription>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Switch
             checked={draft.enabled}
             disabled={!canEdit}
-            aria-label="تفعيل نظام حماية الإشراف التلقائي"
+            aria-label={t("security.enableAria")}
             onCheckedChange={enabled => setDraft({ ...draft, enabled })}
           />
         </div>
@@ -279,7 +282,7 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
           <Alert>
             <ShieldOff />
             <AlertDescription>
-              الحماية متوقفة. لن يُرصد تخريب حتى تعيد التفعيل.
+              {t("security.off")}
             </AlertDescription>
           </Alert>
         )}
@@ -287,7 +290,7 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
         {/* Segmented navigation: one pill strip, active tab in primary. */}
         <nav
           role="tablist"
-          aria-label="أقسام الحماية"
+          aria-label={t("security.tabsAria")}
           className="scrollbar-none inline-flex max-w-full flex-wrap items-center gap-1 rounded-2xl border border-border/80 bg-card/70 p-1.5 backdrop-blur-md"
         >
           {securityTabs.map(entry => {
@@ -306,7 +309,7 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
                 }
               >
                 <Icon className="size-4" aria-hidden />
-                {entry.label}
+                {t(entry.labelKey)}
               </button>
             );
           })}
@@ -315,7 +318,7 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
         {tab !== "punish" && (
           <Alert>
             <ShieldAlert />
-            <AlertDescription>{pendingSections[tab]}</AlertDescription>
+            <AlertDescription>{t(pendingSections[tab])}</AlertDescription>
           </Alert>
         )}
 
@@ -323,7 +326,7 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
           <>
             <nav
               role="tablist"
-              aria-label="عائلات الحماية"
+              aria-label={t("security.familiesAria")}
               className="scrollbar-none inline-flex max-w-full flex-wrap items-center gap-1 rounded-2xl border border-border/80 bg-background/60 p-1.5"
             >
               {NUKE_FAMILIES.map(entry => {
@@ -344,8 +347,8 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
                     }
                   >
                     <Icon className="size-3.5" aria-hidden />
-                    {NUKE_FAMILY_LABELS[entry]}
-                    <span className="tabular text-[11px] opacity-80">
+                    {t(`security.family.${entry}` as TranslationKey)}
+                    <span className="tabular text-[11px]">
                       {live}/{rows.length}
                     </span>
                   </button>
@@ -355,20 +358,26 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
 
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 space-y-1">
-                <p className="text-sm font-medium">تعيين حد وعقوبة لكل إجراء</p>
+                <p className="text-sm font-medium">{t("security.punish.title")}</p>
                 <p className="text-xs text-muted-foreground">
-                  الحد يشمل القيمة نفسها: حد «3» يسمح بثلاث عمليات ويحتوي الرابعة.
+                  {t("security.punish.body")}
                 </p>
               </div>
               <Badge variant={draft.enabled ? "secondary" : "destructive"} className="tabular shrink-0">
-                {activeProtectionCount(draft.enabled, draft.protections)}/{NUKE_PROTECTIONS.length} مفعّل
+                {t("security.activeCount", {
+                  active: activeProtectionCount(draft.enabled, draft.protections),
+                  total: NUKE_PROTECTIONS.length
+                })}
               </Badge>
             </div>
 
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-medium">{NUKE_FAMILY_LABELS[family]}</p>
+              <p className="text-sm font-medium">{t(`security.family.${family}` as TranslationKey)}</p>
               <span className="tabular text-xs text-muted-foreground">
-                {protectionsInFamily(family).filter(isActive).length}/{protectionsInFamily(family).length} مفعّل
+                {t("security.activeCount", {
+                  active: protectionsInFamily(family).filter(isActive).length,
+                  total: protectionsInFamily(family).length
+                })}
               </span>
             </div>
 
@@ -402,24 +411,24 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
 
             {family === "roles" && (
               <p className="text-xs text-muted-foreground">
-                إنشاء الرتب وحذفها يُحتسبان في ميزانية واحدة: الحد يظهر في السطرين لأنهما يقرآن رقمًا واحدًا.
+                {t("security.rolesShared")}
               </p>
             )}
 
             <Separator />
 
             <div className="space-y-2">
-              <Label htmlFor="quarantine-role">رتبة الحجر</Label>
+              <Label htmlFor="quarantine-role">{t("security.quarantine")}</Label>
               <Select
                 value={draft.quarantineRoleId ?? NO_ROLE}
                 disabled={!canEdit}
                 onValueChange={value => setDraft({ ...draft, quarantineRoleId: value === NO_ROLE ? null : value })}
               >
                 <SelectTrigger id="quarantine-role" className="w-full">
-                  <SelectValue placeholder="بدون رتبة حجر" />
+                  <SelectValue placeholder={t("security.quarantineNone")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={NO_ROLE}>بدون رتبة حجر</SelectItem>
+                  <SelectItem value={NO_ROLE}>{t("security.quarantineNone")}</SelectItem>
                   {loaded.roles.map(role => (
                     <SelectItem key={role.id} value={role.id}>
                       {role.name}
@@ -429,8 +438,8 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
               </Select>
               <p className="text-xs text-muted-foreground">
                 {draft.quarantineRoleId
-                  ? "عند تجاوز الحد تُسحب رتب العضو وتُمنح رتبة الحجر."
-                  : "بدون رتبة حجر: يُبلَّغ المالك ويُسجَّل الحدث، دون سحب رتب."}
+                  ? t("security.quarantineOn")
+                  : t("security.quarantineOff")}
               </p>
             </div>
           </>
@@ -482,19 +491,26 @@ function ProtectionCard({
   onToggle: (enabled: boolean) => void;
   onLimitChange: (value: number) => void;
 }) {
+  const { t } = useI18n();
   const [showExceptions, setShowExceptions] = useState(false);
 
   return (
     <div className="rounded-2xl border border-border/80 bg-background/40 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <p className="text-sm font-medium">{protection.label}</p>
-          <p className="text-xs text-muted-foreground">{protection.description}</p>
-          <p className="font-mono text-[11px] text-muted-foreground/80" dir="ltr">
+          <p className="text-sm font-medium">
+            {t(`security.protection.${protection.key}.label` as TranslationKey)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t(`security.protection.${protection.key}.description` as TranslationKey)}
+          </p>
+          <p className="font-mono text-[11px] text-muted-foreground" dir="ltr">
             {protection.auditEvents.join(" · ")}
           </p>
           <p className="text-[11px] text-muted-foreground">
-            يتطلب صلاحية: {discordPermissionLabels[protection.permission] ?? protection.permission}
+            {t("security.requiresPermission", {
+              permission: t(`security.permission.${protection.permission}` as TranslationKey)
+            })}
           </p>
         </div>
 
@@ -502,12 +518,12 @@ function ProtectionCard({
           <Switch
             checked={enabled && enforced}
             disabled={!canEdit}
-            aria-label={`تفعيل ${protection.label}`}
+            aria-label={t(`security.protection.${protection.key}.label` as TranslationKey)}
             onCheckedChange={onToggle}
           />
           {!enforced && (
             <Badge variant="outline" className="text-[10px]">
-              غير موصولة بالمحرّك بعد
+              {t("security.notWired")}
             </Badge>
           )}
         </div>
@@ -520,7 +536,7 @@ function ProtectionCard({
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor={`limit-${protection.key}`} className="text-xs font-normal text-muted-foreground">
-                الحد المسموح
+                {t("security.limit")}
               </Label>
               <LimitStepper
                 id={`limit-${protection.key}`}
@@ -533,12 +549,17 @@ function ProtectionCard({
             </div>
 
             <div className="space-y-1.5">
-              <span className="text-xs font-normal text-muted-foreground">العقوبة</span>
+              <span className="text-xs font-normal text-muted-foreground">{t("security.punishment")}</span>
               {/* Disabled on purpose: mitigation is one sequence for the whole
                   engine (strip roles → quarantine → notify owner), not a choice
                   per action yet. The value shown is the real one. */}
               <Select value="quarantine" disabled>
-                <SelectTrigger aria-label={`عقوبة ${protection.label}`} className="w-full">
+                <SelectTrigger
+                  aria-label={t("security.punishmentAria", {
+                    protection: t(`security.protection.${protection.key}.label` as TranslationKey)
+                  })}
+                  className="w-full"
+                >
                   <SelectValue>{punishmentLabel}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -549,7 +570,7 @@ function ProtectionCard({
 
             <div className="space-y-1.5">
               <Label htmlFor={`window-${protection.key}`} className="text-xs font-normal text-muted-foreground">
-                نفاذة الوقت (ثانية)
+                {t("security.window")}
               </Label>
               <LimitStepper
                 id={`window-${protection.key}`}
@@ -568,20 +589,19 @@ function ProtectionCard({
                 aria-expanded={showExceptions}
                 className="flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
-                استثناءات خاصة بهذه الحماية
+                {t("security.exceptions")}
                 <ChevronDown className={`size-3.5 transition-transform ${showExceptions ? "rotate-180" : ""}`} aria-hidden />
               </button>
               {showExceptions && (
                 <p className="rounded-lg border border-dashed border-border/70 px-3 py-2 text-[11px] text-muted-foreground">
-                  قائمة مستثنيين لكل حماية لم تُوصَل بالمحرّك بعد؛ المحرّك الآن يستثني نفسه فقط.
+                  {t("security.exceptionsBody")}
                 </p>
               )}
             </div>
           </div>
 
           <p className="mt-3 text-[11px] text-muted-foreground">
-            الحد يقرؤه المحرّك الآن. العقوبة والنافذة والاستثناءات تُطبَّق على كل المحرّك: العقوبة هي رتبة الحجر،
-            والنافذة {windowSeconds} ثانية ثابتة.
+            {t("security.engineNote", { seconds: windowSeconds })}
           </p>
         </>
       )}
@@ -612,12 +632,13 @@ function LimitStepper({
   disabled: boolean;
   onChange: (value: number) => void;
 }) {
+  const { t } = useI18n();
   const step = (delta: number) => onChange(Math.min(max, Math.max(min, Math.trunc(value + delta))));
 
   return (
     <div className="flex items-center gap-1.5">
       {value > min && (
-        <Button type="button" size="icon" variant="outline" className="size-8 shrink-0 rounded-lg" disabled={disabled} onClick={() => step(-1)} aria-label="إنقاص الحد">
+        <Button type="button" size="icon" variant="outline" className="size-8 shrink-0 rounded-lg" disabled={disabled} onClick={() => step(-1)} aria-label={t("security.decrease")}>
           <Minus className="size-3.5" />
         </Button>
       )}
@@ -633,7 +654,7 @@ function LimitStepper({
         onChange={event => onChange(Number(event.target.value))}
       />
       {value < max && (
-        <Button type="button" size="icon" variant="outline" className="size-8 shrink-0 rounded-lg" disabled={disabled} onClick={() => step(1)} aria-label="زيادة الحد">
+        <Button type="button" size="icon" variant="outline" className="size-8 shrink-0 rounded-lg" disabled={disabled} onClick={() => step(1)} aria-label={t("security.increase")}>
           <Plus className="size-3.5" />
         </Button>
       )}

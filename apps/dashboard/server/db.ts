@@ -989,11 +989,13 @@ export function createDatabase(pool: pg.Pool) {
       discordAvatar?: string | null;
       accessTokenCiphertext: string;
       scopes: string;
+      /** A display hint for the security screen; never used for authorisation. */
+      userAgent?: string | null;
     }) {
       const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000);
       await pool.query(
-        `INSERT INTO oauth_sessions (id, discord_user_id, discord_username, discord_handle, discord_avatar, access_token_ciphertext, scopes, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        `INSERT INTO oauth_sessions (id, discord_user_id, discord_username, discord_handle, discord_avatar, access_token_ciphertext, scopes, user_agent, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [
           input.id,
           input.discordUserId,
@@ -1002,6 +1004,7 @@ export function createDatabase(pool: pg.Pool) {
           input.discordAvatar ?? null,
           input.accessTokenCiphertext,
           input.scopes,
+          input.userAgent ?? null,
           expiresAt
         ]
       );
@@ -1048,6 +1051,63 @@ export function createDatabase(pool: pg.Pool) {
     async purgeExpiredSessions() {
       const { rowCount } = await pool.query(`DELETE FROM oauth_sessions WHERE expires_at <= now()`);
       return rowCount ?? 0;
+    },
+
+    /**
+     * Every live session for one account, newest activity first.
+     *
+     * The session *id* is deliberately not returned: it is the cookie value,
+     * so handing it back in JSON would turn a read into a credential. The
+     * current session is marked by comparing against the requesting id in the
+     * route, and revocation is by "all except mine" rather than by id.
+     */
+    async listSessions(discordUserId: string) {
+      const { rows } = await pool.query<{
+        id: string;
+        user_agent: string | null;
+        created_at: Date;
+        last_seen_at: Date;
+        expires_at: Date;
+      }>(
+        `SELECT id, user_agent, created_at, last_seen_at, expires_at
+         FROM oauth_sessions
+         WHERE discord_user_id = $1 AND expires_at > now()
+         ORDER BY last_seen_at DESC`,
+        [discordUserId]
+      );
+      return rows.map(row => ({
+        id: row.id,
+        userAgent: row.user_agent,
+        createdAt: row.created_at,
+        lastSeenAt: row.last_seen_at,
+        expiresAt: row.expires_at
+      }));
+    },
+
+    /** Signs out every other browser for this account, keeping the caller's. */
+    async deleteOtherSessions(discordUserId: string, keepSessionId: string) {
+      const { rowCount } = await pool.query(
+        `DELETE FROM oauth_sessions WHERE discord_user_id = $1 AND id <> $2`,
+        [discordUserId, keepSessionId]
+      );
+      return rowCount ?? 0;
+    },
+
+    async getPreferences(discordUserId: string): Promise<{ language: "ar" | "en" }> {
+      const { rows } = await pool.query(`SELECT language FROM user_preferences WHERE discord_user_id = $1`, [
+        discordUserId
+      ]);
+      return { language: rows[0]?.language === "en" ? "en" : "ar" };
+    },
+
+    async savePreferences(discordUserId: string, language: "ar" | "en"): Promise<void> {
+      await pool.query(
+        `INSERT INTO user_preferences (discord_user_id, language)
+         VALUES ($1, $2)
+         ON CONFLICT (discord_user_id)
+         DO UPDATE SET language = EXCLUDED.language, updated_at = now()`,
+        [discordUserId, language]
+      );
     },
 
     /**

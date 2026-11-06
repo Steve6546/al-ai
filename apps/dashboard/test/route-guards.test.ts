@@ -113,33 +113,47 @@ test("every guild-scoped write requires the admin tier, not merely access", () =
  * with no way back to the sign-in screen; `/api/guilds` did exactly that, while
  * the per-guild guards handled the same failure correctly.
  *
- * So the read has exactly one call site, inside `loadUserGuilds`, which clears
- * the dead session and answers 401. A second call site is a route that will
- * answer 500 on a dead token.
+ * So the guarded route read has exactly one call site, inside
+ * `loadUserGuilds`, which clears the dead session and answers 401. Any other
+ * call site is a route that will answer 500 on a dead token — unless it has
+ * its own, explicit error policy.
  *
- * The call goes through `fetchUserGuildsCached` so the same list is not pulled
- * from Discord once per guarded route — but the cached wrapper must still be
- * reached only from here, or the first failure mode returns along with the
- * second. Both spellings are matched, because the invariant is "one guarded call
- * site", not "one particular identifier".
+ * There is one such reader: the OAuth callback asks the same cached list
+ * whether this sign-in is administrative, and therefore owes a second factor.
+ * It has no session to destroy and no 401 to answer — its policy is to **fail
+ * closed**: a failed read returns null and `requiresSecondFactor` demands the
+ * second factor rather than skipping it. This test pins that policy, so adding
+ * a third reader (or dropping the `.catch`) still fails here. Both spellings
+ * are matched, because the invariant is "a guarded call site", not one
+ * particular identifier.
  */
-test("the caller's guild list is read only through loadUserGuilds", () => {
+test("the caller's guild list is read only through two guarded readers", () => {
   const callSites = lines
     .map((line, index) => ({ number: index + 1, text: line }))
     .filter(entry => /fetchUserGuilds(Cached)?\(/.test(entry.text));
 
   assert.equal(
     callSites.length,
-    1,
-    `expected exactly one fetchUserGuilds call site, found ${callSites.length} (lines ${callSites.map(s => s.number).join(", ")})`
+    2,
+    `expected exactly two fetchUserGuilds call sites (routes + sign-in), found ${callSites.length} (lines ${callSites.map(s => s.number).join(", ")})`
   );
 
   const owner = lines.findIndex(line => /function loadUserGuilds\b/.test(line)) + 1;
+  const callback = lines.findIndex(line => /app\.get\("\/auth\/discord\/callback"/.test(line)) + 1;
   assert.ok(owner > 0, "loadUserGuilds is defined");
+  assert.ok(callback > 0, "the OAuth callback is defined");
   assert.ok(
-    callSites[0]!.number > owner,
-    `the only fetchUserGuilds call (line ${callSites[0]!.number}) must live inside loadUserGuilds (line ${owner}), which maps a rejected token to 401 rather than a 500`
+    callSites[0]!.number > owner && callSites[0]!.number < callback,
+    `the route read (line ${callSites[0]!.number}) must live inside loadUserGuilds (line ${owner}), which maps a rejected token to 401 rather than a 500`
   );
+  assert.ok(
+    callSites[1]!.number > callback,
+    `the sign-in read (line ${callSites[1]!.number}) must live inside the OAuth callback (line ${callback}), after the token exchange`
+  );
+
+  const signInRead = lines.slice(callSites[1]!.number - 1, callSites[1]!.number + 4).join("\n");
+  assert.match(signInRead, /\.catch\(/, "a failed guild read at sign-in must be caught, not escape as a 500");
+  assert.match(signInRead, /return null/, "a failed guild read at sign-in must fail closed");
 });
 
 /* ------------------------------------------------------------------ *

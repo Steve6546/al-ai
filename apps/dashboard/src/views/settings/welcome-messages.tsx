@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Image as ImageIcon, Info, Plus, Trash2, X } from "lucide-react";
 import { api } from "@/api";
+import { useI18n, type Translate, type TranslationKey } from "@/lib/i18n";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { SaveBar } from "@/components/save-bar";
@@ -34,31 +35,27 @@ type Selection =
   | { kind: "custom"; id: string }
   | null;
 
-const IMAGE_SEND_LABELS: Record<WelcomeMessageSettings["imageMode"], string> = {
-  with_message: "مع رسالة الترحيب",
-  before_message: "قبل رسالة الترحيب",
-  separate_channel: "إلى قناة منفصلة"
-};
-
 const NONE = "__none__";
 
-/** Reads an image file into a capped data URL, or fails with an Arabic reason. */
-function readImageAsDataUrl(file: File): Promise<string> {
+const IMAGE_SEND_MODES: WelcomeMessageSettings["imageMode"][] = ["with_message", "before_message", "separate_channel"];
+
+/** Reads an image file into a capped data URL, or fails with a translated reason. */
+function readImageAsDataUrl(file: File, t: Translate): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!/^image\/(png|jpeg|jpg|webp|gif)$/.test(file.type)) {
-      reject(new Error("صيغة الصورة غير مدعومة. استخدم PNG أو JPEG أو WEBP أو GIF."));
+      reject(new Error(t("welcome.imageBadType")));
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = String(reader.result);
       if (dataUrl.length > MAX_IMAGE_BYTES) {
-        reject(new Error("حجم الصورة يتجاوز الحد المسموح (500 كيلوبايت تقريباً). صغّرها ثم أعد المحاولة."));
+        reject(new Error(t("welcome.imageTooLarge")));
         return;
       }
       resolve(dataUrl);
     };
-    reader.onerror = () => reject(new Error("تعذّر قراءة الصورة."));
+    reader.onerror = () => reject(new Error(t("customization.imageReadFailed")));
     reader.readAsDataURL(file);
   });
 }
@@ -81,6 +78,7 @@ export type WelcomeSample = { name: string; avatarUrl: string | null };
  * other settings screen keeps.
  */
 export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: WelcomeSample | null }) {
+  const { t, language } = useI18n();
   const [tab, setTab] = useState<Tab>("settings");
   const [settings, setSettings] = useState<WelcomeMessageSettings | null>(null);
   const [channels, setChannels] = useState<ChannelOption[]>([]);
@@ -122,7 +120,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
         setChannels(result.channels);
         setChannelsError(result.channelsError === true);
       })
-      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
+      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : t("welcome.messagesLoadFailed")));
     // The bot's own picture and name in this guild, for the preview. The same
     // read the identity screen uses, so the preview shows the bot the members
     // of *this* server see - and a read that fails leaves the preview with a
@@ -138,7 +136,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
     return () => {
       cancelled = true;
     };
-  }, [guild.id]);
+  }, [guild.id, t]);
 
   const sampleValues = useMemo(
     () => ({
@@ -150,9 +148,9 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
       server: guild.name,
       memberCount: guild.memberCount ?? null,
       inviterMention: sample ? `@${sample.name}` : "{inviter}",
-      joinDate: new Date().toLocaleDateString("ar", { year: "numeric", month: "long", day: "numeric" })
+      joinDate: new Date().toLocaleDateString(language === "ar" ? "ar" : "en-GB", { year: "numeric", month: "long", day: "numeric" })
     }),
-    [guild.name, guild.memberCount, sample]
+    [guild.name, guild.memberCount, sample, language]
   );
 
   /** The chosen channel's name, for the preview's header. */
@@ -200,17 +198,17 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
   const imageChannelRequired =
     draft.enabled && draft.imageEnabled && draft.imageMode === "separate_channel" && !draft.imageChannelId;
   const blockedReason = channelRequired
-    ? "اختر قناة الترحيب أولاً."
+    ? t("welcome.blockedChannel")
     : imageChannelRequired
-      ? "اختر قناة الصورة أولاً، ثم احفظ."
+      ? t("welcome.blockedImageChannel")
       : channelsError
-        ? "تعذّر جلب قنوات السيرفر من ديسكورد — أعد المحاولة قبل الحفظ."
+        ? t("welcome.blockedChannelsError")
         : null;
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: "settings", label: "الإعدادات" },
-    { key: "message", label: "الرسالة" },
-    { key: "image", label: "الصورة" }
+    { key: "settings", label: t("welcome.tab.settings") },
+    { key: "message", label: t("welcome.tab.message") },
+    { key: "image", label: t("welcome.tab.image") }
   ];
 
   /* ---------------- embed helpers ---------------- */
@@ -218,7 +216,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
 
   const addField = () => {
     if (draft.embed.fields.length >= 10) {
-      push({ title: "الحد الأعلى 10 حقول للإيمبد الواحد.", tone: "error" });
+      push({ title: t("welcome.maxFields"), tone: "error" });
       return;
     }
     patchEmbed({
@@ -239,7 +237,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
   const onFileChosen = async (file: File | undefined) => {
     if (!file) return;
     try {
-      const dataUrl = await readImageAsDataUrl(file);
+      const dataUrl = await readImageAsDataUrl(file, t);
       if (imageInputTarget.current === "background") {
         patchImage({ ...draft.image, background: { ...draft.image.background, type: "image", imageDataUrl: dataUrl } });
         setFileNames(current => ({ ...current, background: file.name }));
@@ -248,7 +246,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
         setFileNames(current => ({ ...current, embed: file.name }));
       }
     } catch (cause) {
-      push({ title: cause instanceof Error ? cause.message : "تعذّر قراءة الصورة.", tone: "error" });
+      push({ title: cause instanceof Error ? cause.message : t("customization.imageReadFailed"), tone: "error" });
     }
   };
 
@@ -270,13 +268,13 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
 
   const addCustomText = () => {
     if (draft.image.customTexts.length >= MAX_WELCOME_CUSTOM_TEXTS) {
-      push({ title: `الحد الأعلى ${MAX_WELCOME_CUSTOM_TEXTS} نصوص مخصصة.`, tone: "error" });
+      push({ title: t("welcome.maxCustomTexts", { max: MAX_WELCOME_CUSTOM_TEXTS }), tone: "error" });
       return;
     }
     const id = `text-${Date.now()}`;
     const layer: WelcomeTextLayer = {
       id,
-      text: "نص جديد",
+      text: t("welcome.newText"),
       x: Math.round(draft.image.width / 2),
       y: Math.round(draft.image.height / 2),
       fontFamily: "IBM Plex Sans Arabic",
@@ -293,11 +291,11 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
   const selectedCustom = selection?.kind === "custom" ? draft.image.customTexts.find(layer => layer.id === selection.id) ?? null : null;
 
   const canvasPanels: { key: CanvasPanel; label: string }[] = [
-    { key: "background", label: "الخلفية" },
-    { key: "avatar", label: "الصورة الرمزية" },
-    { key: "username", label: "اسم المستخدم" },
-    { key: "custom", label: "نص مخصص" },
-    { key: "canvas-settings", label: "الإعدادات" }
+    { key: "background", label: t("welcome.canvas.background") },
+    { key: "avatar", label: t("welcome.canvas.avatar") },
+    { key: "username", label: t("welcome.canvas.username") },
+    { key: "custom", label: t("welcome.canvas.custom") },
+    { key: "canvas-settings", label: t("welcome.canvas.settings") }
   ];
 
   return (
@@ -323,7 +321,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
       {/* Tab strip. Five tabs wrap instead of scrolling: a hidden-scrollbar
           scroller gave no affordance and read as cut-off on a phone, and two
           wrapped rows cost less than a swipe the operator cannot see. */}
-      <div role="tablist" aria-label="أقسام رسائل الترحيب" className="flex flex-wrap gap-1 rounded-xl border border-border/80 bg-card/70 p-1.5">
+      <div role="tablist" aria-label={t("welcome.tabsLabel")} className="flex flex-wrap gap-1 rounded-xl border border-border/80 bg-card/70 p-1.5">
         {tabs.map(entry => (
           <button
             key={entry.key}
@@ -349,24 +347,24 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
             <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-2">
               <span className="flex items-center gap-2 text-sm">
                 <Info className="size-3.5 text-muted-foreground" aria-hidden />
-                تفعيل رسالة الترحيب
+                {t("welcome.enable")}
               </span>
-              <Switch checked={draft.enabled} onCheckedChange={enabled => patch({ enabled })} aria-label="تفعيل رسالة الترحيب" />
+              <Switch checked={draft.enabled} onCheckedChange={enabled => patch({ enabled })} aria-label={t("welcome.enable")} />
             </label>
 
             <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-2">
               <span className="flex items-center gap-2 text-sm">
                 <Info className="size-3.5 text-muted-foreground" aria-hidden />
-                تفعيل صورة الترحيب
+                {t("welcome.enableImage")}
               </span>
-              <Switch checked={draft.imageEnabled} onCheckedChange={imageEnabled => patch({ imageEnabled })} aria-label="تفعيل صورة الترحيب" />
+              <Switch checked={draft.imageEnabled} onCheckedChange={imageEnabled => patch({ imageEnabled })} aria-label={t("welcome.enableImage")} />
             </label>
 
             {draft.imageEnabled && (
               <Alert>
                 <Info className="size-4" />
                 <AlertDescription>
-                  الصورة تُرسل مع الإيمبد.
+                  {t("welcome.imageWithEmbed")}
                 </AlertDescription>
               </Alert>
             )}
@@ -378,18 +376,18 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                     trigger is a `<button role="combobox">`, which axe then
                     reads as a nameless button. Each picker on this tab carries
                     its own `aria-label`, worded as its visible label. */}
-                <FieldRow label="إرسال الصورة:">
+                <FieldRow label={t("welcome.imageSend")}>
                   <Select
                     value={draft.imageMode}
                     onValueChange={value => patch({ imageMode: value as WelcomeMessageSettings["imageMode"], imageChannelId: value === "separate_channel" ? draft.imageChannelId : null })}
                   >
-                    <SelectTrigger className="w-full" aria-label="إرسال الصورة">
+                    <SelectTrigger className="w-full" aria-label={t("welcome.imageSendAria")}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {(Object.keys(IMAGE_SEND_LABELS) as WelcomeMessageSettings["imageMode"][]).map(mode => (
+                      {(Object.keys(IMAGE_SEND_MODES) as WelcomeMessageSettings["imageMode"][]).map(mode => (
                         <SelectItem key={mode} value={mode}>
-                          {IMAGE_SEND_LABELS[mode]}
+                          {t(`welcome.imageMode.${mode}` as TranslationKey)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -397,20 +395,20 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                 </FieldRow>
 
                 {draft.imageMode === "separate_channel" && (
-                  <FieldRow label="اختر قناة الصورة:">
+                  <FieldRow label={t("welcome.chooseImageChannel")}>
                     <Select
                       value={draft.imageChannelId ?? NONE}
                       onValueChange={value => patch({ imageChannelId: channelSelect(value) })}
                     >
                       <SelectTrigger
                         className="w-full"
-                        aria-label="اختر قناة الصورة"
+                        aria-label={t("welcome.chooseImageChannelAria")}
                         aria-invalid={imageChannelRequired || imageChannelMissing}
                       >
-                        <SelectValue placeholder="اختر قناة..." />
+                        <SelectValue placeholder={t("welcome.chooseChannelPlaceholder")} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={NONE}>بدون قناة</SelectItem>
+                        <SelectItem value={NONE}>{t("welcome.noChannel")}</SelectItem>
                         {channels.map(channel => (
                           <SelectItem key={channel.id} value={channel.id}>
                             #{channel.name}
@@ -418,17 +416,17 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                         ))}
                         {imageChannelMissing && draft.imageChannelId && (
                           <SelectItem value={draft.imageChannelId}>
-                            {`#${draft.imageChannelId} — لم تعد موجودة`}
+                            {t("welcome.channelGone", { id: draft.imageChannelId })}
                           </SelectItem>
                         )}
                       </SelectContent>
                     </Select>
                     {imageChannelRequired && (
-                      <p className="text-[11px] text-destructive">اختر قناة الصورة، أو اجعل الصورة داخل الرسالة نفسها.</p>
+                      <p className="text-[11px] text-destructive">{t("welcome.imageChannelRequired")}</p>
                     )}
                     {imageChannelMissing && !imageChannelRequired && (
                       <p className="text-[11px] text-destructive">
-                        القناة المحفوظة لم تعد موجودة في السيرفر. اختر قناة أخرى.
+                        {t("welcome.savedChannelGone")}
                       </p>
                     )}
                   </FieldRow>
@@ -436,27 +434,27 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
               </>
             )}
 
-            <FieldRow label={draft.enabled ? "قناة الترحيب (مطلوبة)" : "قناة الترحيب"}>
+            <FieldRow label={draft.enabled ? t("welcome.channelLabelRequired") : t("welcome.channelLabel")}>
               <Select value={draft.channelId ?? NONE} onValueChange={value => patch({ channelId: channelSelect(value) })}>
                 <SelectTrigger
                   className="w-full"
-                  aria-label="قناة الترحيب"
+                  aria-label={t("welcome.channelAria")}
                   aria-invalid={channelRequired || welcomeChannelMissing}
                   aria-describedby="welcome-channel-hint"
                 >
-                  <SelectValue placeholder="اختر قناة..." />
+                  <SelectValue placeholder={t("welcome.chooseChannelPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   {/* The sentinel needs an option of its own: a value with no
                       item has no label, and Radix then draws an empty box. */}
-                  <SelectItem value={NONE}>بدون قناة</SelectItem>
+                  <SelectItem value={NONE}>{t("welcome.noChannel")}</SelectItem>
                   {channels.map(channel => (
                     <SelectItem key={channel.id} value={channel.id}>
                       #{channel.name}
                     </SelectItem>
                   ))}
                   {welcomeChannelMissing && draft.channelId && (
-                    <SelectItem value={draft.channelId}>{`#${draft.channelId} — لم تعد موجودة`}</SelectItem>
+                    <SelectItem value={draft.channelId}>{t("welcome.channelGone", { id: draft.channelId })}</SelectItem>
                   )}
                 </SelectContent>
               </Select>
@@ -465,10 +463,10 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
               {(channelRequired || welcomeChannelMissing || channelsError) && (
                 <p id="welcome-channel-hint" className="text-[11px] text-destructive">
                   {channelRequired
-                    ? "الترحيب مفعَّل بلا قناة: اختر القناة التي تُرسَل إليها الرسالة."
+                    ? t("welcome.channelRequiredHint")
                     : welcomeChannelMissing
-                      ? "القناة المحفوظة لم تعد موجودة في السيرفر. اختر قناة أخرى."
-                      : "تعذّر جلب قنوات السيرفر من ديسكورد. أعد المحاولة، أو أعد تحميل الصفحة."}
+                      ? t("welcome.savedChannelGone")
+                      : t("welcome.channelsErrorHint")}
                 </p>
               )}
             </FieldRow>
@@ -489,7 +487,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                 draft.mode === "text" ? "bg-primary font-medium text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
               )}
             >
-              نص فقط
+              {t("welcome.textOnly")}
             </button>
             <button
               type="button"
@@ -500,7 +498,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                 draft.mode === "embed" ? "bg-primary font-medium text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
               )}
             >
-              رسالة Embed
+              {t("welcome.embedMode")}
             </button>
           </div>
 
@@ -508,8 +506,8 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
             <div className="grid gap-4 lg:grid-cols-[1fr_22rem]">
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">نص الرسالة</CardTitle>
-                  <CardDescription>ما يصل العضو الجديد. المتغيرات تُدرج عند المؤشر.</CardDescription>
+                  <CardTitle className="text-base">{t("welcome.messageText")}</CardTitle>
+                  <CardDescription>{t("welcome.messageTextBody")}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {/* The emoji trigger sits in its own row above the field.
@@ -517,9 +515,9 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                       underneath it on a phone, which read as clipped text. */}
                   <div className="flex items-center justify-between gap-2">
                     <span className="min-w-0 text-[11px] text-muted-foreground">
-                      الإيموجي والمتغيرات تُدرج عند موضع المؤشر.
+                      {t("welcome.insertHint")}
                     </span>
-                    <EmojiPicker label="إدراج إيموجي" onPick={emoji => patch({ text: insertAtCursor(textRef.current, draft.text, emoji) })} />
+                    <EmojiPicker label={t("welcome.insertEmoji")} onPick={emoji => patch({ text: insertAtCursor(textRef.current, draft.text, emoji) })} />
                   </div>
                   <Textarea
                     ref={textRef}
@@ -530,7 +528,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                     className="min-h-24 rounded-xl text-sm [overflow-wrap:anywhere]"
                   />
                   <div className="space-y-1">
-                    <span className="text-[11px] text-muted-foreground">المتغيرات المتاحة:</span>
+                    <span className="text-[11px] text-muted-foreground">{t("welcome.availableVariables")}</span>
                     <TokenStrip onInsert={token => patch({ text: insertAtCursor(textRef.current, draft.text, token) })} />
                   </div>
                 </CardContent>
@@ -550,9 +548,9 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
           ) : (
             <Card className="border-primary/20 bg-card/70 shadow-lg shadow-primary/5 backdrop-blur-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">المعاينة الحية — محرر موضعي</CardTitle>
+                <CardTitle className="text-base">{t("welcome.previewEditorTitle")}</CardTitle>
                 <CardDescription>
-                  حرّر البطاقة كما سيراها العضو. زر العين للمعاينة النظيفة.
+                  {t("welcome.previewEditorBody")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -593,8 +591,8 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                 >
                   {welcomeEmbedReady(draft.embed) ? <CheckCircle2 className="size-4" /> : <AlertCircle className="size-4" />}
                   {welcomeEmbedReady(draft.embed)
-                    ? "جاهز للحفظ والإرسال"
-                    : "أضف عنواناً أو وصفاً أو حقلاً حتى يصبح الإيمبد جاهزاً"}
+                    ? t("welcome.embedReady")
+                    : t("welcome.embedNotReady")}
                 </div>
               </CardContent>
             </Card>
@@ -609,16 +607,16 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
             <Alert>
               <Info className="size-4" />
               <AlertDescription>
-                الصورة معطّلة — التصميم يُحفظ ويُطبّق عند التفعيل.
+                {t("welcome.imageDisabled")}
               </AlertDescription>
             </Alert>
           )}
 
           <Card className="border-primary/20 bg-card/70 shadow-lg shadow-primary/5 backdrop-blur-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">مصمم صورة الترحيب</CardTitle>
+              <CardTitle className="text-base">{t("welcome.designerTitle")}</CardTitle>
               <CardDescription>
-                اسحب الطبقات، والمقبض لتغيير الحجم. الوجه هنا عيّنة بحسابك — العضو الحقيقي يظهر تلقائياً عند الترحيب.
+                {t("welcome.designerBody")}
               </CardDescription>
             </CardHeader>
             <CardContent className="px-2 pb-4 pt-0 sm:px-5 sm:pb-5">
@@ -659,7 +657,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
             <CardContent className="space-y-3 pt-6">
               {canvasPanel === "background" && (
                 <>
-                  <FieldRow label="نوع الخلفية">
+                  <FieldRow label={t("welcome.backgroundType")}>
                     <Select
                       value={draft.image.background.type}
                       onValueChange={value =>
@@ -679,10 +677,10 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="transparent">شفاف</SelectItem>
-                        <SelectItem value="color">لون صلب</SelectItem>
-                        <SelectItem value="gradient">تدرّج لوني</SelectItem>
-                        <SelectItem value="image">صورة مخصّصة</SelectItem>
+                        <SelectItem value="transparent">{t("welcome.bg.transparent")}</SelectItem>
+                        <SelectItem value="color">{t("welcome.bg.color")}</SelectItem>
+                        <SelectItem value="gradient">{t("welcome.bg.gradient")}</SelectItem>
+                        <SelectItem value="image">{t("welcome.bg.image")}</SelectItem>
                       </SelectContent>
                     </Select>
                   </FieldRow>
@@ -692,12 +690,12 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                       value={draft.image.background.color ?? "#0b1020"}
                       onChange={event => patchImage({ ...draft.image, background: { ...draft.image.background, color: event.target.value } })}
                       className="h-9 w-full cursor-pointer rounded-md border border-input bg-background"
-                      aria-label="لون الخلفية"
+                      aria-label={t("welcome.bgColor")}
                     />
                   )}
                   {draft.image.background.type === "gradient" && (
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <FieldRow label="من لون">
+                      <FieldRow label={t("welcome.gradientFrom")}>
                         <input
                           type="color"
                           value={draft.image.background.gradientFrom ?? "#1d4ed8"}
@@ -708,10 +706,10 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                             })
                           }
                           className="h-9 w-full cursor-pointer rounded-md border border-input bg-background"
-                          aria-label="لون التدرّج الأول"
+                          aria-label={t("welcome.gradientFromAria")}
                         />
                       </FieldRow>
-                      <FieldRow label="إلى لون">
+                      <FieldRow label={t("welcome.gradientTo")}>
                         <input
                           type="color"
                           value={draft.image.background.gradientTo ?? "#7c3aed"}
@@ -722,13 +720,13 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                             })
                           }
                           className="h-9 w-full cursor-pointer rounded-md border border-input bg-background"
-                          aria-label="لون التدرّج الثاني"
+                          aria-label={t("welcome.gradientToAria")}
                         />
                       </FieldRow>
                     </div>
                   )}
                   {draft.image.background.type !== "transparent" && (
-                    <FieldRow label={`الشفافية: ${Math.round((draft.image.background.opacity ?? 1) * 100)}%`}>
+                    <FieldRow label={t("welcome.opacity", { percent: Math.round((draft.image.background.opacity ?? 1) * 100) })}>
                       <input
                         type="range"
                         min={0}
@@ -741,7 +739,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                           })
                         }
                         className="w-full accent-primary"
-                        aria-label="شفافية الخلفية"
+                        aria-label={t("welcome.opacityAria")}
                       />
                     </FieldRow>
                   )}
@@ -753,12 +751,12 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" dir="ltr">
                           {fileNames.background ?? "background.png"}
                         </span>
-                        <Button variant="outline" size="sm" onClick={() => pickImage("background")}>استبدال</Button>
+                        <Button variant="outline" size="sm" onClick={() => pickImage("background")}>{t("welcome.replace")}</Button>
                         <Button
                           variant="ghost"
                           size="icon"
                           className="size-8 hover:text-destructive"
-                          aria-label="إزالة صورة الخلفية"
+                          aria-label={t("welcome.removeBgImage")}
                           onClick={() => patchImage({ ...draft.image, background: { ...draft.image.background, type: "transparent", imageDataUrl: null } })}
                         >
                           <X />
@@ -777,7 +775,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                         }}
                       >
                         <ImageIcon className="size-5 text-muted-foreground" aria-hidden />
-                        <span className="text-sm font-medium">رفع صورة الخلفية</span>
+                        <span className="text-sm font-medium">{t("welcome.uploadBg")}</span>
                       </button>
                     )
                   )}
@@ -787,15 +785,15 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
               {canvasPanel === "avatar" && (
                 <>
                   <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-2">
-                    <span className="text-xs">إظهار الصورة الرمزية</span>
+                    <span className="text-xs">{t("welcome.showAvatar")}</span>
                     <Switch
                       checked={draft.image.avatar.enabled}
                       onCheckedChange={enabled => patchImage({ ...draft.image, avatar: { ...draft.image.avatar, enabled } })}
-                      aria-label="إظهار الصورة الرمزية"
+                      aria-label={t("welcome.showAvatar")}
                     />
                   </label>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <FieldRow label={`الحجم: ${draft.image.avatar.size}px`}>
+                    <FieldRow label={t("welcome.avatarSize", { px: draft.image.avatar.size })}>
                       <input
                         type="range"
                         min={16}
@@ -805,28 +803,28 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                         className="w-full accent-primary"
                       />
                     </FieldRow>
-                    <FieldRow label={`X: ${draft.image.avatar.x} · Y: ${draft.image.avatar.y}`}>
+                    <FieldRow label={t("welcome.avatarPosition", { x: draft.image.avatar.x, y: draft.image.avatar.y })}>
                       <div className="flex gap-2">
-                        <Input type="number" min={0} max={draft.image.width} value={draft.image.avatar.x} onChange={event => patchImage({ ...draft.image, avatar: { ...draft.image.avatar, x: Number(event.target.value) } })} aria-label="الموضع الأفقي" />
-                        <Input type="number" min={0} max={draft.image.height} value={draft.image.avatar.y} onChange={event => patchImage({ ...draft.image, avatar: { ...draft.image.avatar, y: Number(event.target.value) } })} aria-label="الموضع الرأسي" />
+                        <Input type="number" min={0} max={draft.image.width} value={draft.image.avatar.x} onChange={event => patchImage({ ...draft.image, avatar: { ...draft.image.avatar, x: Number(event.target.value) } })} aria-label={t("welcome.horizontal")} />
+                        <Input type="number" min={0} max={draft.image.height} value={draft.image.avatar.y} onChange={event => patchImage({ ...draft.image, avatar: { ...draft.image.avatar, y: Number(event.target.value) } })} aria-label={t("welcome.vertical")} />
                       </div>
                     </FieldRow>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-2 text-xs">
-                      قص دائري
-                      <Switch checked={draft.image.avatar.circular} onCheckedChange={circular => patchImage({ ...draft.image, avatar: { ...draft.image.avatar, circular } })} aria-label="قص دائري" />
+                      {t("welcome.circular")}
+                      <Switch checked={draft.image.avatar.circular} onCheckedChange={circular => patchImage({ ...draft.image, avatar: { ...draft.image.avatar, circular } })} aria-label={t("welcome.circular")} />
                     </label>
-                    <FieldRow label="لون الحلقة">
+                    <FieldRow label={t("welcome.ringColor")}>
                       <input
                         type="color"
                         value={draft.image.avatar.strokeColor ?? "#3b82f6"}
                         onChange={event => patchImage({ ...draft.image, avatar: { ...draft.image.avatar, strokeColor: event.target.value } })}
                         className="h-9 w-full cursor-pointer rounded-md border border-input bg-background"
-                        aria-label="لون حلقة الصورة"
+                        aria-label={t("welcome.ringColorAria")}
                       />
                     </FieldRow>
-                    <FieldRow label={`سماكة الحلقة: ${draft.image.avatar.strokeWidth}px`}>
+                    <FieldRow label={t("welcome.ringWidth", { px: draft.image.avatar.strokeWidth })}>
                       <input
                         type="range"
                         min={0}
@@ -838,7 +836,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                     </FieldRow>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <FieldRow label="لون التوهّج">
+                    <FieldRow label={t("welcome.glowColor")}>
                       <input
                         type="color"
                         value={draft.image.avatar.glowColor ?? "#3b82f6"}
@@ -846,10 +844,10 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                           patchImage({ ...draft.image, avatar: { ...draft.image.avatar, glowColor: event.target.value } })
                         }
                         className="h-9 w-full cursor-pointer rounded-md border border-input bg-background"
-                        aria-label="لون توهّج الصورة"
+                        aria-label={t("welcome.glowColorAria")}
                       />
                     </FieldRow>
-      <FieldRow label={`حجم التوهّج: ${draft.image.avatar.glowSize ?? 0}px`}>
+      <FieldRow label={t("welcome.glowSize", { px: draft.image.avatar.glowSize ?? 0 })}>
                         <input
                           type="range"
                           min={0}
@@ -868,7 +866,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                             })
                           }
                           className="w-full accent-primary"
-                          aria-label="حجم توهّج الصورة"
+                          aria-label={t("welcome.glowSizeAria")}
                         />
                       </FieldRow>
                   </div>
@@ -877,13 +875,13 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
 
               {canvasPanel === "username" && (
                 <div className="space-y-3">
-                  <FieldRow label="النص (يدعم المتغيرات)">
+                  <FieldRow label={t("welcome.usernameText")}>
                     <Input value={draft.image.username.text} onChange={event => patchTextLayer(draft.image.username.id, { text: event.target.value })} />
                   </FieldRow>
                   <TextStyleFields
                     layer={draft.image.username}
                     canvas={draft.image}
-                    colourLabel="لون اسم المستخدم"
+                    colourLabel={t("welcome.usernameColor")}
                     onPatch={patch => patchTextLayer(draft.image.username.id, patch)}
                   />
                 </div>
@@ -892,17 +890,17 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
               {canvasPanel === "custom" && (
                 <div className="space-y-3">
                   <Button type="button" variant="outline" size="sm" onClick={addCustomText}>
-                    <Plus /> إضافة نص مخصص
+                    <Plus /> {t("welcome.addCustomText")}
                   </Button>
                   {selectedCustom ? (
                     <div className="space-y-3 rounded-lg border border-border/80 p-3">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium">النص المحدد (يدعم المتغيرات)</span>
+                        <span className="text-xs font-medium">{t("welcome.selectedText")}</span>
                         <Button
                           variant="ghost"
                           size="icon"
                           className="size-8 hover:text-destructive"
-                          aria-label="حذف النص المحدد"
+                          aria-label={t("welcome.deleteSelected")}
                           onClick={() => {
                             patchImage({ ...draft.image, customTexts: draft.image.customTexts.filter(layer => layer.id !== selectedCustom.id) });
                             setSelection(null);
@@ -915,13 +913,13 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                       <TextStyleFields
                         layer={selectedCustom}
                         canvas={draft.image}
-                        colourLabel="لون النص"
+                        colourLabel={t("welcome.customTextColor")}
                         onPatch={patch => patchTextLayer(selectedCustom.id, patch)}
                       />
                     </div>
                   ) : (
                     <p className="rounded-lg border border-dashed border-border/80 px-3 py-4 text-center text-xs text-muted-foreground">
-                      اختر نصاً من اللوحة أو أضف نصاً جديداً لتحريره.
+                      {t("welcome.selectLayerHint")}
                     </p>
                   )}
                 </div>
@@ -929,7 +927,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
 
               {canvasPanel === "canvas-settings" && (
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <FieldRow label={`العرض: ${draft.image.width}px`}>
+                  <FieldRow label={t("welcome.width", { px: draft.image.width })}>
                     <input
                       type="range"
                       min={128}
@@ -940,7 +938,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                       className="w-full accent-primary"
                     />
                   </FieldRow>
-                  <FieldRow label={`الارتفاع: ${draft.image.height}px`}>
+                  <FieldRow label={t("welcome.height", { px: draft.image.height })}>
                     <input
                       type="range"
                       min={128}
@@ -951,7 +949,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                       className="w-full accent-primary"
                     />
                   </FieldRow>
-                  <FieldRow label={`جودة التصدير: ${Math.round(draft.image.quality * 100)}%`}>
+                  <FieldRow label={t("welcome.quality", { percent: Math.round(draft.image.quality * 100) })}>
                     <input
                       type="range"
                       min={50}
@@ -964,8 +962,8 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                   </FieldRow>
                   <p className="self-center text-[11px] text-muted-foreground">
                     {draft.image.background.type === "transparent"
-                      ? "الخلفية الشفافة تُصدَّر PNG دائماً — الجودة تنطبق على الخلفيات المعبأة (JPEG)."
-                      : "الخلفية المعبأة تُصدَّر JPEG بهذه الجودة."}
+                      ? t("welcome.transparentExport")
+                      : t("welcome.filledExport")}
                   </p>
                 </div>
               )}
@@ -980,16 +978,16 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
 
       {dirty && (
         <SaveBar
-          message="تغييرات غير محفوظة"
-          saveLabel="حفظ التغييرات"
-          cancelLabel="تجاهل"
+          message={t("welcome.unsaved")}
+          saveLabel={t("welcome.save")}
+          cancelLabel={t("welcome.discard")}
           canSave={blockedReason === null}
           blockedMessage={blockedReason}
           onCancel={reset}
           onSave={async () => {
             const result = await api.saveWelcomeMessages(guild.id, draft);
             commit(result.settings);
-            push({ title: "تم حفظ إعدادات الترحيب — الرسالة جاهزة عند وصول عضو جديد.", tone: "success" });
+            push({ title: t("welcome.saved"), tone: "success" });
           }}
         />
       )}
@@ -1020,9 +1018,10 @@ function TextStyleFields({
   colourLabel: string;
   onPatch: (patch: Partial<WelcomeTextLayer>) => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      <FieldRow label="الخط">
+      <FieldRow label={t("welcome.font")}>
         <Select value={layer.fontFamily} onValueChange={value => onPatch({ fontFamily: value })}>
           <SelectTrigger className="w-full">
             <SelectValue />
@@ -1036,7 +1035,7 @@ function TextStyleFields({
           </SelectContent>
         </Select>
       </FieldRow>
-      <FieldRow label={`الحجم: ${layer.fontSize}px`}>
+      <FieldRow label={t("welcome.fontSize", { px: layer.fontSize })}>
         <input
           type="range"
           min={8}
@@ -1044,22 +1043,22 @@ function TextStyleFields({
           value={layer.fontSize}
           onChange={event => onPatch({ fontSize: Number(event.target.value) })}
           className="w-full accent-primary"
-          aria-label="حجم الخط"
+          aria-label={t("welcome.fontSizeAria")}
         />
       </FieldRow>
-      <FieldRow label="المحاذاة">
+      <FieldRow label={t("welcome.align")}>
         <Select value={layer.align} onValueChange={value => onPatch({ align: value as WelcomeTextLayer["align"] })}>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="start">بداية</SelectItem>
-            <SelectItem value="center">وسط</SelectItem>
-            <SelectItem value="end">نهاية</SelectItem>
+            <SelectItem value="start">{t("welcome.align.start")}</SelectItem>
+            <SelectItem value="center">{t("welcome.align.center")}</SelectItem>
+            <SelectItem value="end">{t("welcome.align.end")}</SelectItem>
           </SelectContent>
         </Select>
       </FieldRow>
-      <FieldRow label="اللون">
+      <FieldRow label={t("welcome.color")}>
         <input
           type="color"
           value={layer.color}
@@ -1068,33 +1067,33 @@ function TextStyleFields({
           aria-label={colourLabel}
         />
       </FieldRow>
-      <FieldRow label="الوزن">
+      <FieldRow label={t("welcome.weight")}>
         <Select value={layer.weight} onValueChange={value => onPatch({ weight: value as WelcomeTextLayer["weight"] })}>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="normal">عادي</SelectItem>
-            <SelectItem value="bold">عريض</SelectItem>
+            <SelectItem value="normal">{t("welcome.weight.normal")}</SelectItem>
+            <SelectItem value="bold">{t("welcome.weight.bold")}</SelectItem>
           </SelectContent>
         </Select>
       </FieldRow>
-      <FieldRow label={`X: ${layer.x} · Y: ${layer.y}`}>
+      <FieldRow label={t("welcome.positionXy", { x: layer.x, y: layer.y })}>
         <div className="flex gap-2">
-          <Input type="number" min={0} max={canvas.width} value={layer.x} onChange={event => onPatch({ x: Number(event.target.value) })} aria-label="الموضع الأفقي" />
-          <Input type="number" min={0} max={canvas.height} value={layer.y} onChange={event => onPatch({ y: Number(event.target.value) })} aria-label="الموضع الرأسي" />
+          <Input type="number" min={0} max={canvas.width} value={layer.x} onChange={event => onPatch({ x: Number(event.target.value) })} aria-label={t("welcome.horizontal")} />
+          <Input type="number" min={0} max={canvas.height} value={layer.y} onChange={event => onPatch({ y: Number(event.target.value) })} aria-label={t("welcome.vertical")} />
         </div>
       </FieldRow>
-      <FieldRow label="لون حدّ النص">
+      <FieldRow label={t("welcome.strokeColor")}>
         <input
           type="color"
           value={layer.strokeColor ?? "#000000"}
           onChange={event => onPatch({ strokeColor: event.target.value })}
           className="h-9 w-full cursor-pointer rounded-md border border-input bg-background"
-          aria-label="لون حدّ النص"
+          aria-label={t("welcome.strokeColor")}
         />
       </FieldRow>
-      <FieldRow label={`سماكة الحدّ: ${layer.strokeWidth ?? 0}px`}>
+      <FieldRow label={t("welcome.strokeWidth", { px: layer.strokeWidth ?? 0 })}>
         <input
           type="range"
           min={0}
@@ -1109,19 +1108,19 @@ function TextStyleFields({
             })
           }
           className="w-full accent-primary"
-          aria-label="سماكة حدّ النص"
+          aria-label={t("welcome.strokeWidthAria")}
         />
       </FieldRow>
-      <FieldRow label="لون الظل">
+      <FieldRow label={t("welcome.shadowColor")}>
         <input
           type="color"
           value={layer.shadowColor ?? "#000000"}
           onChange={event => onPatch({ shadowColor: event.target.value })}
           className="h-9 w-full cursor-pointer rounded-md border border-input bg-background"
-          aria-label="لون ظلّ النص"
+          aria-label={t("welcome.shadowColorAria")}
         />
       </FieldRow>
-      <FieldRow label={`حجم الظل: ${layer.shadowSize ?? 0}px`}>
+      <FieldRow label={t("welcome.shadowSize", { px: layer.shadowSize ?? 0 })}>
         <input
           type="range"
           min={0}
@@ -1134,10 +1133,10 @@ function TextStyleFields({
             })
           }
           className="w-full accent-primary"
-          aria-label="حجم ظلّ النص"
+          aria-label={t("welcome.shadowSizeAria")}
         />
       </FieldRow>
-      <FieldRow label={`تباعد الحروف: ${layer.letterSpacing ?? 0}px`}>
+      <FieldRow label={t("welcome.letterSpacing", { px: layer.letterSpacing ?? 0 })}>
         <input
           type="range"
           min={-20}
@@ -1145,7 +1144,7 @@ function TextStyleFields({
           value={layer.letterSpacing ?? 0}
           onChange={event => onPatch({ letterSpacing: Number(event.target.value) })}
           className="w-full accent-primary"
-          aria-label="تباعد الحروف"
+          aria-label={t("welcome.letterSpacingAria")}
         />
       </FieldRow>
     </div>

@@ -11,8 +11,9 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCopy } from "@/lib/use-copy";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { remoteAccessDescriptions, remoteAccessLabels, type NetworkSnapshot } from "@/types";
+import type { NetworkSnapshot } from "@/types";
 
 /**
  * The «الوصول للشبكة» screen — where the deployment's reach is chosen.
@@ -27,11 +28,14 @@ import { remoteAccessDescriptions, remoteAccessLabels, type NetworkSnapshot } fr
  * the tunnel URL appears the moment ngrok assigns it.
  */
 
-const tunnelStatusCopy: Record<NetworkSnapshot["tunnelStatus"], { label: string; tone: "secondary" | "outline" | "destructive" } | null> = {
+const tunnelStatusCopy: Record<
+  NetworkSnapshot["tunnelStatus"],
+  { labelKey: TranslationKey; tone: "secondary" | "outline" | "destructive" } | null
+> = {
   off: null,
-  starting: { label: "جارٍ التشغيل…", tone: "secondary" },
-  running: { label: "يعمل", tone: "secondary" },
-  error: { label: "خطأ", tone: "destructive" }
+  starting: { labelKey: "network.starting", tone: "secondary" },
+  running: { labelKey: "network.running", tone: "secondary" },
+  error: { labelKey: "network.error", tone: "destructive" }
 };
 
 /**
@@ -56,6 +60,7 @@ const TUNNEL_POLL_MS = 2_000;
 const MODE_SWITCH_LOCK_MS = 1_000;
 
 export function NetworkView() {
+  const { t } = useI18n();
   const [snapshot, setSnapshot] = useState<NetworkSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState<RemoteAccessMode | null>(null);
@@ -83,11 +88,11 @@ export function NetworkView() {
     api
       .network()
       .then(result => !cancelled && setSnapshot(result))
-      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
+      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : t("network.loadFailed")));
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   /**
    * Keeps the screen honest while a tunnel is being created — and afterwards.
@@ -129,11 +134,11 @@ export function NetworkView() {
     setCooldown(true);
     try {
       setSnapshot(await api.saveNetwork(mode));
-      push({ title: "تم الحفظ", description: remoteAccessLabels[mode], tone: "success" });
+      push({ title: t("network.saved"), description: t(`network.mode.${mode}` as TranslationKey), tone: "success" });
     } catch (cause) {
       push({
-        title: "تعذّر التغيير",
-        description: cause instanceof Error ? cause.message : "حاول مرة أخرى.",
+        title: t("network.changeFailed"),
+        description: cause instanceof Error ? cause.message : t("network.tryAgain"),
         tone: "error"
       });
     } finally {
@@ -152,14 +157,14 @@ export function NetworkView() {
       const next = domainDraft.trim();
       setSnapshot(await api.saveNetwork(snapshot.mode, next === "" ? null : next));
       push({
-        title: next ? "حُفظ النطاق الثابت" : "أُلغي النطاق الثابت",
-        description: next ? "سيُستخدم بعد إعادة تشغيل النفق." : "سيعود النفق إلى رابط مؤقت.",
+        title: next ? t("network.domainSaved") : t("network.domainCleared"),
+        description: next ? t("network.domainSavedBody") : t("network.domainClearedBody"),
         tone: "success"
       });
     } catch (cause) {
       push({
-        title: "تعذّر حفظ النطاق",
-        description: cause instanceof Error ? cause.message : "حاول مرة أخرى.",
+        title: t("network.domainSaveFailed"),
+        description: cause instanceof Error ? cause.message : t("network.tryAgain"),
         tone: "error"
       });
     } finally {
@@ -174,7 +179,7 @@ export function NetworkView() {
   // which. The address stays in the row so it stays identifiable at a glance.
   const lanUrls = snapshot.machineHosts.map(({ host, label }) => ({
     url: `http://${host}:${snapshot.port}`,
-    label: `شبكة محلية · ${label}`
+    label: t("network.localLabel", { label })
   }));
   const tunnelUrl = snapshot.tunnelUrl;
   const status = tunnelStatusCopy[snapshot.tunnelStatus];
@@ -212,8 +217,8 @@ export function NetworkView() {
         variant="ghost"
         size="icon"
         className="size-7"
-        aria-label={`نسخ ${label}`}
-        onClick={async () => (await copy(value, value)) && push({ title: "نُسخ الرابط", tone: "success" })}
+        aria-label={t("network.copyLabel", { label })}
+        onClick={async () => (await copy(value, value)) && push({ title: t("network.copied"), tone: "success" })}
       >
         {copied === value ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
       </Button>
@@ -232,11 +237,11 @@ export function NetworkView() {
               {/* The mode itself is named by the selected option in the list
                   below, so this heading carries the *scope* instead: the one
                   fact that is not visible in the list. */}
-              <p className="text-base font-bold">مدى الوصول</p>
-              <p className="text-xs text-muted-foreground">إعداد عام لهذه النسخة — ينطبق على كل السيرفرات</p>
+              <p className="text-base font-bold">{t("network.accessScope")}</p>
+              <p className="text-xs text-muted-foreground">{t("network.accessScopeBody")}</p>
             </div>
           </div>
-          {applying && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="جارٍ التطبيق" />}
+          {applying && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label={t("network.applying")} />}
         </CardHeader>
         <CardContent className="space-y-2">
           {REMOTE_ACCESS_MODES.map(mode => {
@@ -266,14 +271,14 @@ export function NetworkView() {
                   {selected && <Check className="size-2.5" />}
                 </span>
                 <span className="min-w-0">
-                  <span className="block text-sm font-medium">{remoteAccessLabels[mode]}</span>
-                  <span className="block text-xs text-muted-foreground">{remoteAccessDescriptions[mode]}</span>
+                  <span className="block text-sm font-medium">{t(`network.mode.${mode}` as TranslationKey)}</span>
+                  <span className="block text-xs text-muted-foreground">{t(`network.mode.${mode}Body` as TranslationKey)}</span>
                 </span>
               </button>
             );
           })}
           <p className="pt-1 text-xs text-muted-foreground">
-            يبقى الإعداد محفوظاً بعد إعادة التشغيل.
+            {t("network.persisted")}
           </p>
         </CardContent>
       </Card>
@@ -286,31 +291,31 @@ export function NetworkView() {
                 <Globe className="size-5" aria-hidden />
               </span>
               <div className="min-w-0">
-                <p className="text-base font-bold">النفق العام</p>
-                <p className="text-xs text-muted-foreground">رابط آمن من أي جهاز — عبر ngrok.</p>
+                <p className="text-base font-bold">{t("network.publicTunnel")}</p>
+                <p className="text-xs text-muted-foreground">{t("network.publicTunnelBody")}</p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={snapshot.tunnelStable ? "secondary" : "outline"}>
-                {snapshot.tunnelStable ? "رابط ثابت" : "رابط مؤقت"}
+                {snapshot.tunnelStable ? t("network.stable") : t("network.temporary")}
               </Badge>
-              {status && <Badge variant={status.tone}>{status.label}</Badge>}
+              {status && <Badge variant={status.tone}>{t(status.labelKey)}</Badge>}
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
             {snapshot.mode !== "tunnel" ? (
-              <p className="text-sm text-muted-foreground">اختر «عبر الإنترنت» أعلاه لتشغيل النفق.</p>
+              <p className="text-sm text-muted-foreground">{t("network.chooseTunnel")}</p>
             ) : null}
             {tunnelUrl ? (
-              <div>{copyRow("الرابط العام", tunnelUrl)}</div>
+              <div>{copyRow(t("network.publicUrl"), tunnelUrl)}</div>
             ) : (
               <p className="text-sm text-muted-foreground">
-                {snapshot.tunnelStatus === "starting" ? "جارٍ إنشاء الرابط…" : "لا يوجد رابط بعد."}
+                {snapshot.tunnelStatus === "starting" ? t("network.creating") : t("network.noUrl")}
               </p>
             )}
             {snapshot.tunnelStatus === "starting" ? (
               <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" /> ينشئ ngrok الرابط خلال ثوانٍ…
+                <Loader2 className="size-3.5 animate-spin" /> {t("network.creatingBody")}
               </p>
             ) : null}
             {snapshot.tunnelStatus === "error" && snapshot.tunnelError ? (
@@ -320,15 +325,15 @@ export function NetworkView() {
             <form onSubmit={saveDomain} className="space-y-2 rounded-xl border border-border/80 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <Label htmlFor="ngrok-domain" className="text-xs">
-                  النطاق الثابت
+                  {t("network.fixedDomain")}
                 </Label>
                 <a
                   href="https://dashboard.ngrok.com/domains"
                   target="_blank"
                   rel="noreferrer"
-                  className="text-[11px] text-primary underline-offset-2 hover:underline"
+                  className="text-[11px] text-primary underline underline-offset-2 dark:text-foreground"
                 >
-                  لوحة ngrok
+                  {t("network.ngrokDashboard")}
                 </a>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
@@ -342,11 +347,11 @@ export function NetworkView() {
                   disabled={savingDomain}
                 />
                 <Button type="submit" size="sm" loading={savingDomain} disabled={savingDomain || cooldown} className="shrink-0">
-                  حفظ النطاق
+                  {t("network.saveDomain")}
                 </Button>
               </div>
               <p className="text-[11px] leading-relaxed text-muted-foreground">
-                الثابت يبقى بعد إعادة التشغيل؛ المؤقت يتغير. احجز نطاقاً من لوحة ngrok ثم الصقه هنا.
+                {t("network.domainHint")}
               </p>
             </form>
           </CardContent>
@@ -356,12 +361,12 @@ export function NetworkView() {
       <Card>
         <CardHeader className="flex-col gap-2 space-y-0 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <p className="text-base font-bold">روابط محلية</p>
-            <p className="text-xs text-muted-foreground">هذا الجهاز والشبكة المحلية.</p>
+            <p className="text-base font-bold">{t("network.localLinks")}</p>
+            <p className="text-xs text-muted-foreground">{t("network.localLinksBody")}</p>
           </div>
         </CardHeader>
         <CardContent className="space-y-2">
-          {copyRow("هذا الجهاز", `http://localhost:${snapshot.port}`)}
+          {copyRow(t("network.thisDevice"), `http://localhost:${snapshot.port}`)}
           {/*
             One row per network address, named by the address itself. Naming
             every LAN row «الشبكة المحلية» made several adapters
@@ -374,7 +379,7 @@ export function NetworkView() {
             <div key={url}>{copyRow(label, url)}</div>
           ))}
           <p className="text-xs text-muted-foreground">
-            إن لم يفتح من جهاز آخر: اسمح بالمنفذ {snapshot.port} في جدار الحماية أو استخدم النفق.
+            {t("network.firewallHint", { port: snapshot.port })}
           </p>
         </CardContent>
       </Card>
@@ -387,20 +392,20 @@ export function NetworkView() {
                 <ShieldAlert className="size-5" aria-hidden />
               </span>
               <div>
-                <p className="text-base font-bold">خطوة واحدة في Discord</p>
+                <p className="text-base font-bold">{t("network.callbackTitle")}</p>
                 <p className="text-xs text-muted-foreground">
-                  ديسكورد يقبل HTTPS فقط خارج هذا الجهاز — سجّل رابط النفق في Developer Portal ← OAuth2 ← Redirects.
+                  {t("network.callbackBody")}
                 </p>
               </div>
             </div>
             <Button variant="outline" size="sm" asChild>
               <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">
-                <ExternalLink className="size-3.5" /> فتح البورتال
+                <ExternalLink className="size-3.5" /> {t("network.openPortal")}
               </a>
             </Button>
           </CardHeader>
           <CardContent className="space-y-2">
-            {copyRow("رابط الرجوع", `${tunnelUrl}/auth/discord/callback`)}
+            {copyRow(t("network.callbackUrl"), `${tunnelUrl}/auth/discord/callback`)}
           </CardContent>
         </Card>
       )}

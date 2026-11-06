@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * The one activation badge, used everywhere a system or option has a master
@@ -8,13 +9,14 @@ import { Badge } from "@/components/ui/badge";
  */
 export function StateBadge({
   enabled,
-  enabledLabel = "مُفعّل",
-  disabledLabel = "مُعطّل"
+  enabledLabel,
+  disabledLabel
 }: {
   enabled: boolean;
   enabledLabel?: string;
   disabledLabel?: string;
 }) {
+  const { t } = useI18n();
   return (
     <Badge
       variant="outline"
@@ -29,7 +31,7 @@ export function StateBadge({
         className="me-1 inline-block size-1.5 rounded-full"
         style={{ background: enabled ? "#34d399" : "#71717a" }}
       />
-      {enabled ? enabledLabel : disabledLabel}
+      {enabled ? (enabledLabel ?? t("common.enabled")) : (disabledLabel ?? t("common.disabled"))}
     </Badge>
   );
 }

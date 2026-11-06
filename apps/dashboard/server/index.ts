@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
 import { join } from "node:path";
@@ -15,6 +15,9 @@ import {
   commandCategoryDescriptions,
   commandCategoryLabels,
   decryptSecret,
+  encryptSecret,
+  buildOtpauthUri,
+  generateRecoveryCodes,
   DEFAULT_EMBED_COLOR,
   DEFAULT_LOGGING_MODE,
   describeVerification,
@@ -57,6 +60,7 @@ import {
   SESSION_COOKIE_NAME,
   summarisePunishments,
   verifyLayerRequest,
+  verifyTotpCode,
   widgetOnlineNote,
   type ActivityEntry,
   type AntiNukeConfig,
@@ -123,6 +127,28 @@ import {
   type DiscordApiError,
   type DiscordRole
 } from "./discord.js";
+import {
+  SECOND_FACTOR_COOKIE_NAME,
+  SECOND_FACTOR_ISSUER,
+  SECOND_FACTOR_MAX_ATTEMPTS,
+  SECOND_FACTOR_PENDING_SECONDS,
+  SECOND_FACTOR_SETUP_SECONDS,
+  attemptsRemaining,
+  clearedPendingCookieHeader,
+  createSecondFactorStore,
+  decodeEnrollment,
+  encodeEnrollment,
+  enrolledView,
+  enrollmentView,
+  isTotpShaped,
+  matchPendingRecoveryCode,
+  newEnrollmentPayload,
+  pendingCookieHeader,
+  recoveryCodeHash,
+  requiresSecondFactor,
+  type EnrollmentPayload,
+  type PendingLogin
+} from "./two-factor.js";
 import { clientKey, RequestThrottle } from "./cache.js";
 import { describeGuildAccess, isAdministrable } from "./guild-access.js";
 import { checkWelcomeChannels } from "./welcome-channels.js";
@@ -148,6 +174,20 @@ import {
 const env = loadEnv();
 const pool = createPool(env.databaseUrl);
 const db = createDatabase(pool);
+const secondFactor = createSecondFactorStore(pool);
+
+/** A pending second-factor login is addressed by a UUID cookie, never by a user id. */
+const PENDING_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function pendingLoginId(request: FastifyRequest): string | null {
+  const id = parseCookies(request.headers.cookie)[SECOND_FACTOR_COOKIE_NAME];
+  return id && PENDING_ID_PATTERN.test(id) ? id : null;
+}
+
+async function pendingLogin(request: FastifyRequest): Promise<PendingLogin | null> {
+  const id = pendingLoginId(request);
+  return id ? await secondFactor.getPending(id) : null;
+}
 
 /**
  * Trust forwarded headers only from the peer that actually proxies to us —
@@ -390,12 +430,13 @@ app.addHook("onRequest", async (request, reply) => {
     return reply.code(403).send(refusal);
   }
 
-  // Rule 2: a write that carries the session cookie has to say where it came
-  // from. Without the cookie there is nothing to forge - the route's own
-  // authentication answers - so the request is left alone.
+  // Rule 2: a write that carries the session cookie — or the pending 2FA
+  // cookie, which is a credential for the three /api/2fa routes — has to say
+  // where it came from. Without either cookie there is nothing to forge: the
+  // route's own authentication answers, so the request is left alone.
   if (origin === null && referer === null) {
     const cookies = parseCookies(request.headers.cookie);
-    if (cookies[SESSION_COOKIE_NAME]) {
+    if (cookies[SESSION_COOKIE_NAME] || cookies[SECOND_FACTOR_COOKIE_NAME]) {
       return reply.code(403).send(refusal);
     }
   }
@@ -845,7 +886,25 @@ const OAUTH_ORIGIN_PAGE = `<!doctype html><html lang="ar" dir="rtl"><head><meta 
 
 app.get("/api/session", async request => {
   const session = await readSession(db, request as unknown as { headers: Record<string, unknown> });
-  if (!session) return { authenticated: false, user: null };
+  if (!session) {
+    /**
+     * A pending admin login has cleared Discord OAuth but has NOT been given a
+     * session cookie. The SPA needs to know that the sign-in screen is the
+     * wrong next step — restarting OAuth would loop — so the verdict is
+     * published here, and only the verdict: no name, no user id, no token.
+     */
+    const pending = await pendingLogin(request);
+    if (!pending) return { authenticated: false, user: null };
+    return {
+      authenticated: false,
+      user: null,
+      secondFactor: {
+        required: true,
+        enrolled: await secondFactor.isEnrolled(pending.discordUserId),
+        expiresAt: new Date(pending.expiresAt).toISOString()
+      }
+    };
+  }
   return {
     authenticated: true,
     user: {
@@ -1091,15 +1150,21 @@ app.get("/auth/discord/callback", async (request, reply) => {
       }
     }
 
-    const { id } = await issueSession(db, env, {
+    /**
+     * Administrative sign-ins must clear a second factor BEFORE a session is
+     * minted. The verdict is Discord's own — the configured platform owner, or
+     * anyone who owns or may administer a guild — through the same cached guild
+     * read the selector uses. A failed read fails closed: an outage must not
+     * switch the second factor off for whoever happens to sign in during it.
+     */
+    const adminGuilds = await fetchUserGuildsCached(tokens.access_token).catch(error => {
+      app.log.warn({ err: error }, "Could not read the operator's guilds at sign-in; requiring the second factor");
+      return null;
+    });
+    const needsSecondFactor = requiresSecondFactor({
+      ownerId: env.ownerId,
       discordUserId: identity.id,
-      discordUsername: identity.globalName ?? identity.username,
-      // The @handle beside the display name: the account menu shows both, and
-      // they are genuinely different names on Discord.
-      discordHandle: identity.username,
-      discordAvatar: identity.avatar,
-      accessToken: tokens.access_token,
-      scopes: tokens.scope
+      guilds: adminGuilds
     });
 
     // A code exchanged through this origin is proof its redirect URI is
@@ -1109,8 +1174,43 @@ app.get("/auth/discord/callback", async (request, reply) => {
     // `markOriginVerified` for why the login is the check rather than an API.
     if (origin) network.markOriginVerified(origin);
 
-    // Two cookies on the way out: the new session and the state clearance.
-    reply.header("Set-Cookie", [sessionCookieHeader(id), clearStateCookie]);
+    if (needsSecondFactor) {
+      // A new OAuth leg always replaces the previous pending login. Nothing
+      // that authenticates a route is issued here: just the short-lived cookie
+      // that addresses the encrypted row.
+      const previousPendingId = pendingLoginId(request);
+      if (previousPendingId) await secondFactor.deletePending(previousPendingId);
+      const pendingId = randomUUID();
+      await secondFactor.createPending({
+        id: pendingId,
+        discordUserId: identity.id,
+        discordUsername: identity.globalName ?? identity.username,
+        discordHandle: identity.username,
+        discordAvatar: identity.avatar,
+        accessTokenCiphertext: encryptSecret(tokens.access_token, env.encryptionKey),
+        scopes: tokens.scope,
+        enrollmentCiphertext: null,
+        expiresAt: new Date(Date.now() + SECOND_FACTOR_PENDING_SECONDS * 1000)
+      });
+      reply.header("Set-Cookie", [pendingCookieHeader(pendingId), clearStateCookie]);
+      return reply.redirect("/?auth=2fa_required");
+    }
+
+    const { id } = await issueSession(db, env, {
+      discordUserId: identity.id,
+      discordUsername: identity.globalName ?? identity.username,
+      // The @handle beside the display name: the account menu shows both, and
+      // they are genuinely different names on Discord.
+      discordHandle: identity.username,
+      discordAvatar: identity.avatar,
+      accessToken: tokens.access_token,
+      scopes: tokens.scope,
+      userAgent: safeUserAgent(request.headers["user-agent"])
+    });
+
+    // The session, the state clearance, and a cleared pending cookie (a
+    // non-admin must not inherit an earlier admin's half-finished login).
+    reply.header("Set-Cookie", [sessionCookieHeader(id), clearStateCookie, clearedPendingCookieHeader()]);
     return reply.redirect("/?auth=ok");
   } catch (error) {
     app.log.error(error, "Discord OAuth callback failed");
@@ -1120,8 +1220,434 @@ app.get("/auth/discord/callback", async (request, reply) => {
 
 app.post("/auth/logout", async (request, reply) => {
   await destroySession(db, request as unknown as { headers: Record<string, unknown> });
-  reply.header("Set-Cookie", clearedCookieHeader());
+  // A half-finished admin login is not a session, but leaving its cookie behind
+  // would let the next person at this browser pick the pending login back up.
+  const pendingId = pendingLoginId(request);
+  if (pendingId) await secondFactor.deletePending(pendingId);
+  reply.header("Set-Cookie", [clearedCookieHeader(), clearedPendingCookieHeader()]);
   return { ok: true };
+});
+
+/* ------------------------------------------------------------------ *
+ * Admin second factor
+ *
+ * Three routes, and the one rule that matters: **no session cookie is issued
+ * by any of them until the code has been verified**. A pending login is a
+ * short-lived row addressed by an httpOnly UUID cookie; it holds the encrypted
+ * OAuth token, not a credential the browser can read.
+ *
+ * Invalid codes are counted on the row itself (an atomic UPDATE, not a
+ * client-side counter), a replayed TOTP is refused by its counter, and a
+ * recovery code is spent with DELETE ... RETURNING so two concurrent requests
+ * cannot both win. The fifth wrong code destroys the pending login.
+ * ------------------------------------------------------------------ */
+
+/** No pending row: it expired, was cancelled, was spent, or never existed. */
+function expiredPending(reply: FastifyReply) {
+  return reply.code(401).send({
+    error: "PENDING_EXPIRED",
+    message: "انتهت صلاحية طلب الدخول المعلّق. عُد إلى تسجيل الدخول وابدأ من جديد."
+  });
+}
+
+/** One wrong code; at the ceiling the pending login is destroyed, not locked. */
+async function refuseSecondFactor(
+  reply: FastifyReply,
+  pending: PendingLogin,
+  message = "الرمز غير صحيح. تحقّق من تطبيق المصادقة أو استخدم رمز استرداد."
+) {
+  const { attempts, expired } = await secondFactor.recordFailedAttempt(pending.id);
+  if (expired || attempts >= SECOND_FACTOR_MAX_ATTEMPTS) {
+    await secondFactor.deletePending(pending.id);
+    reply.header("Set-Cookie", clearedPendingCookieHeader());
+    return reply.code(expired ? 401 : 403).send({
+      error: expired ? "PENDING_EXPIRED" : "TOO_MANY_ATTEMPTS",
+      message: expired
+        ? "انتهت صلاحية طلب الدخول المعلّق. عُد إلى تسجيل الدخول وابدأ من جديد."
+        : "تجاوزت عدد المحاولات المسموح بها. أعد تسجيل الدخول من جديد."
+    });
+  }
+  return reply.code(400).send({
+    error: "INVALID_CODE",
+    message,
+    attemptsRemaining: attemptsRemaining(attempts)
+  });
+}
+
+/**
+ * The one-time enrolment material. COALESCE in the store keeps the *first*
+ * secret and recovery codes, so the screen's retry button cannot invalidate
+ * what the operator already copied into their authenticator.
+ */
+app.get("/api/2fa/enrollment", async (request, reply) => {
+  const pending = await pendingLogin(request);
+  if (!pending) return expiredPending(reply);
+  const expiresAt = new Date(pending.expiresAt).toISOString();
+  if (await secondFactor.isEnrolled(pending.discordUserId)) return enrolledView(expiresAt);
+  try {
+    const envelope = await secondFactor.ensureEnrollment(
+      pending.id,
+      encodeEnrollment(newEnrollmentPayload(), env.encryptionKey)
+    );
+    const payload = decodeEnrollment(envelope, env.encryptionKey);
+    return enrollmentView(
+      payload,
+      `${SECOND_FACTOR_ISSUER}:${pending.discordHandle ?? pending.discordUsername}`,
+      expiresAt
+    );
+  } catch (error) {
+    // A rotated ENCRYPTION_KEY makes an old envelope unreadable. That is a
+    // reason to sign in again, never a 500 and never a new secret mid-login.
+    app.log.warn({ err: error }, "Second-factor enrolment material could not be read");
+    await secondFactor.deletePending(pending.id);
+    reply.header("Set-Cookie", clearedPendingCookieHeader());
+    return expiredPending(reply);
+  }
+});
+
+app.post("/api/2fa/verify", async (request, reply) => {
+  const pending = await pendingLogin(request);
+  if (!pending) return expiredPending(reply);
+  const body = request.body as { code?: unknown } | null;
+  const code = typeof body?.code === "string" ? body.code.trim() : "";
+  if (!code || code.length > 128) {
+    return await refuseSecondFactor(reply, pending, "أدخل رمز التحقق أو رمز الاسترداد.");
+  }
+
+  try {
+    const enrolled = await secondFactor.isEnrolled(pending.discordUserId);
+
+    if (!enrolled) {
+      // First sign-in: confirm the key with its first generated code, or with
+      // one of the recovery codes shown on the same screen. A recovery code
+      // used here is left OUT of the stored hashes, so it stays single-use.
+      const envelope = await secondFactor.ensureEnrollment(
+        pending.id,
+        encodeEnrollment(newEnrollmentPayload(), env.encryptionKey)
+      );
+      const payload = decodeEnrollment(envelope, env.encryptionKey);
+      let counter: number | null = null;
+      let consumedRecovery: string | null = null;
+      let accepted = false;
+      if (isTotpShaped(code)) {
+        counter = verifyTotpCode(payload.secret, code, Date.now());
+        accepted = counter !== null;
+      } else {
+        consumedRecovery = matchPendingRecoveryCode(code, payload.recoveryCodes);
+        accepted = consumedRecovery !== null;
+      }
+      if (!accepted) return await refuseSecondFactor(reply, pending);
+
+      const recoveryHashes = payload.recoveryCodes
+        .filter(candidate => candidate !== consumedRecovery)
+        .map(candidate => recoveryCodeHash(candidate, env));
+      await secondFactor.confirmEnrollment({
+        discordUserId: pending.discordUserId,
+        secretCiphertext: encryptSecret(payload.secret, env.encryptionKey),
+        recoveryHashes,
+        lastCounter: counter
+      });
+    } else {
+      const credential = await secondFactor.credential(pending.discordUserId);
+      if (!credential) {
+        app.log.error({ userId: pending.discordUserId }, "Second-factor credential row is missing");
+        return reply.code(409).send({
+          error: "ENROLLMENT_INCONSISTENT",
+          message: "تعذّر قراءة إعداد التحقق بخطوتين. أعد تسجيل الدخول من جديد."
+        });
+      }
+      let accepted = false;
+      if (isTotpShaped(code)) {
+        const secret = decryptSecret(credential.secretCiphertext, env.encryptionKey);
+        const counter = verifyTotpCode(secret, code, Date.now());
+        // A valid-but-old code reports a non-increasing counter, which the
+        // conditional UPDATE turns into a detected replay instead of a login.
+        accepted = counter !== null && (await secondFactor.consumeTotpCounter(pending.discordUserId, counter));
+      } else {
+        accepted = await secondFactor.consumeRecoveryCode(pending.discordUserId, recoveryCodeHash(code, env));
+      }
+      if (!accepted) return await refuseSecondFactor(reply, pending);
+    }
+  } catch (error) {
+    app.log.warn({ err: error }, "Second-factor verification could not read its material");
+    await secondFactor.deletePending(pending.id);
+    reply.header("Set-Cookie", clearedPendingCookieHeader());
+    return expiredPending(reply);
+  }
+
+  // Only now does the OAuth exchange become a session. The token never left
+  // the server: it was an AES envelope in the pending row from the callback.
+  let accessToken: string;
+  try {
+    accessToken = decryptSecret(pending.accessTokenCiphertext, env.encryptionKey);
+  } catch {
+    await secondFactor.deletePending(pending.id);
+    reply.header("Set-Cookie", clearedPendingCookieHeader());
+    return expiredPending(reply);
+  }
+  const { id } = await issueSession(db, env, {
+    discordUserId: pending.discordUserId,
+    discordUsername: pending.discordUsername,
+    discordHandle: pending.discordHandle,
+    discordAvatar: pending.discordAvatar,
+    accessToken,
+    scopes: pending.scopes,
+    userAgent: safeUserAgent(request.headers["user-agent"])
+  });
+  await secondFactor.deletePending(pending.id);
+  reply.header("Set-Cookie", [sessionCookieHeader(id), clearedPendingCookieHeader()]);
+  return { ok: true };
+});
+
+app.post("/api/2fa/cancel", async (request, reply) => {
+  const id = pendingLoginId(request);
+  if (id) await secondFactor.deletePending(id);
+  reply.header("Set-Cookie", clearedPendingCookieHeader());
+  return { ok: true };
+});
+
+/* ------------------------------------------------------------------ *
+ * The account settings surface
+ *
+ * These routes answer questions about the signed-in account, not about a
+ * guild, so none of them carries a `:guildId`. Every one of them starts with
+ * `requireSession`, and every sensitive change re-verifies a CURRENT code
+ * (TOTP or recovery) before replacing anything. There is no separate
+ * "re-auth cookie": a short-lived proof that can be replayed is a second
+ * credential to steal, while a live code is checked against the same secret
+ * the login gate uses and is consumed exactly once.
+ * ------------------------------------------------------------------ */
+
+/** A display hint, never a credential; the client turns it into a device line. */
+function safeUserAgent(value: string | string[] | undefined): string | null {
+  const text = Array.isArray(value) ? value[0] : value;
+  return text ? text.slice(0, 400) : null;
+}
+
+/**
+ * Checks a code against the account's ACTUAL credential and consumes it.
+ *
+ * A TOTP is consumed through the same counter compare-and-set as a login, so
+ * a code observed while changing settings cannot be replayed at the login
+ * gate. A recovery code is removed with DELETE, so re-verification cannot be
+ * farmed from the same code twice.
+ */
+async function verifyCurrentSecondFactor(
+  discordUserId: string,
+  code: string
+): Promise<"ok" | "not-enrolled" | "invalid"> {
+  const credential = await secondFactor.credential(discordUserId);
+  if (!credential) return "not-enrolled";
+  try {
+    if (isTotpShaped(code)) {
+      const secret = decryptSecret(credential.secretCiphertext, env.encryptionKey);
+      const counter = verifyTotpCode(secret, code, Date.now());
+      if (counter === null) return "invalid";
+      return (await secondFactor.consumeTotpCounter(discordUserId, counter)) ? "ok" : "invalid";
+    }
+    return (await secondFactor.consumeRecoveryCode(discordUserId, recoveryCodeHash(code, env))) ? "ok" : "invalid";
+  } catch (error) {
+    app.log.warn({ err: error }, "A settings code could not be read");
+    return "invalid";
+  }
+}
+
+function codeFromBody(body: unknown): string {
+  const value = (body as { code?: unknown } | null)?.code;
+  return typeof value === "string" ? value.trim().slice(0, 128) : "";
+}
+
+const REAUTH_REQUIRED = {
+  error: "REAUTH_REQUIRED",
+  message: "أكّد هويتك برمز من تطبيق المصادقة أو برمز استرداد قبل هذا التغيير."
+};
+
+app.get("/api/me/preferences", async (request, reply) => {
+  const session = await requireSession(request, reply);
+  if (!session) return;
+  return db.getPreferences(session.discordUserId);
+});
+
+app.put("/api/me/preferences", async (request, reply) => {
+  const session = await requireSession(request, reply);
+  if (!session) return;
+  const language = (request.body as { language?: unknown } | null)?.language;
+  if (language !== "ar" && language !== "en") {
+    return reply.code(400).send({ error: "INVALID_LANGUAGE", message: "اللغة المطلوبة غير مدعومة." });
+  }
+  await db.savePreferences(session.discordUserId, language);
+  return { language };
+});
+
+app.get("/api/me/security", async (request, reply) => {
+  const session = await requireSession(request, reply);
+  if (!session) return;
+  const [twoFactor, sessions] = await Promise.all([
+    secondFactor.status(session.discordUserId),
+    db.listSessions(session.discordUserId)
+  ]);
+  return {
+    twoFactor,
+    sessions: sessions.map(item => ({
+      current: item.id === session.id,
+      userAgent: item.userAgent,
+      createdAt: item.createdAt.toISOString(),
+      lastSeenAt: item.lastSeenAt.toISOString(),
+      expiresAt: item.expiresAt.toISOString()
+    })),
+    platformOwner: Boolean(env.ownerId && env.ownerId === session.discordUserId)
+  };
+});
+
+app.post("/api/me/sessions/revoke-others", async (request, reply) => {
+  const session = await requireSession(request, reply);
+  if (!session) return;
+  const revoked = await db.deleteOtherSessions(session.discordUserId, session.id);
+  if (revoked > 0) {
+    await appendAudit(db, env, {
+      guildId: null,
+      eventId: "security.revoked-credential",
+      actorId: session.discordUserId,
+      payload: { credentialType: "session", reason: "user-revoked-others", count: revoked }
+    }).catch(error => app.log.warn({ err: error }, "Could not audit the session revocation"));
+  }
+  return { ok: true, revoked };
+});
+
+/**
+ * Starts a NEW authenticator. The first enrolment needs no current code (there
+ * is nothing to verify); replacing an existing one does, because otherwise a
+ * stolen session could quietly swap the second factor to an attacker's phone.
+ */
+app.post("/api/me/2fa/setup", async (request, reply) => {
+  const session = await requireSession(request, reply);
+  if (!session) return;
+
+  const enrolled = await secondFactor.isEnrolled(session.discordUserId);
+  if (enrolled) {
+    const outcome = await verifyCurrentSecondFactor(session.discordUserId, codeFromBody(request.body));
+    if (outcome !== "ok") {
+      return reply.code(403).send(REAUTH_REQUIRED);
+    }
+  }
+
+  const payload = newEnrollmentPayload();
+  const expiresAt = new Date(Date.now() + SECOND_FACTOR_SETUP_SECONDS * 1000);
+  await secondFactor.beginSetup(
+    session.discordUserId,
+    encodeEnrollment(payload, env.encryptionKey),
+    expiresAt
+  );
+  const label = `${SECOND_FACTOR_ISSUER}:${session.discordHandle ?? session.discordUsername}`;
+  return {
+    secret: payload.secret,
+    otpauthUri: buildOtpauthUri({ secret: payload.secret, issuer: SECOND_FACTOR_ISSUER, label }),
+    recoveryCodes: payload.recoveryCodes,
+    expiresAt: expiresAt.toISOString(),
+    replacing: enrolled
+  };
+});
+
+app.post("/api/me/2fa/confirm", async (request, reply) => {
+  const session = await requireSession(request, reply);
+  if (!session) return;
+  const code = codeFromBody(request.body);
+  if (!code) {
+    return reply.code(400).send({ error: "CODE_REQUIRED", message: "أدخل الرمز الذي يعرضه التطبيق الجديد." });
+  }
+
+  const setup = await secondFactor.getSetup(session.discordUserId);
+  if (!setup) {
+    return reply.code(409).send({
+      error: "SETUP_EXPIRED",
+      message: "انتهت مدة إعداد التطبيق. ابدأ إعداد التطبيق من جديد."
+    });
+  }
+
+  let payload: EnrollmentPayload;
+  try {
+    payload = decodeEnrollment(setup.envelope, env.encryptionKey);
+  } catch (error) {
+    app.log.warn({ err: error }, "The pending authenticator setup could not be read");
+    await secondFactor.deleteSetup(session.discordUserId);
+    return reply.code(409).send({
+      error: "SETUP_EXPIRED",
+      message: "انتهت مدة إعداد التطبيق. ابدأ إعداد التطبيق من جديد."
+    });
+  }
+
+  let counter: number | null = null;
+  let consumedRecovery: string | null = null;
+  if (isTotpShaped(code)) {
+    counter = verifyTotpCode(payload.secret, code, Date.now());
+    if (counter === null) {
+      return reply.code(400).send({ error: "INVALID_CODE", message: "الرمز غير صحيح. تأكّد من التطبيق وحاول مرة أخرى." });
+    }
+  } else {
+    consumedRecovery = matchPendingRecoveryCode(code, payload.recoveryCodes);
+    if (!consumedRecovery) {
+      return reply.code(400).send({ error: "INVALID_CODE", message: "رمز الاسترداد غير صحيح." });
+    }
+  }
+
+  const remaining = payload.recoveryCodes.filter(candidate => candidate !== consumedRecovery);
+  await secondFactor.confirmSetup({
+    discordUserId: session.discordUserId,
+    secretCiphertext: encryptSecret(payload.secret, env.encryptionKey),
+    recoveryHashes: remaining.map(candidate => recoveryCodeHash(candidate, env)),
+    lastCounter: counter
+  });
+  await appendAudit(db, env, {
+    guildId: null,
+    eventId: "security.revoked-credential",
+    actorId: session.discordUserId,
+    payload: { credentialType: "totp", reason: "authenticator-replaced" }
+  }).catch(error => app.log.warn({ err: error }, "Could not audit the authenticator change"));
+
+  return { ok: true, recoveryCodesRemaining: remaining.length };
+});
+
+app.post("/api/me/2fa/disable", async (request, reply) => {
+  const session = await requireSession(request, reply);
+  if (!session) return;
+  const outcome = await verifyCurrentSecondFactor(session.discordUserId, codeFromBody(request.body));
+  if (outcome === "not-enrolled") {
+    return reply.code(409).send({ error: "NOT_ENROLLED", message: "التحقق بخطوتين غير مفعّل على هذا الحساب." });
+  }
+  if (outcome !== "ok") return reply.code(403).send(REAUTH_REQUIRED);
+
+  await secondFactor.deleteEnrollment(session.discordUserId);
+  await secondFactor.deleteSetup(session.discordUserId);
+  await appendAudit(db, env, {
+    guildId: null,
+    eventId: "security.revoked-credential",
+    actorId: session.discordUserId,
+    payload: { credentialType: "totp", reason: "user-disabled" }
+  }).catch(error => app.log.warn({ err: error }, "Could not audit the second-factor disable"));
+  return { ok: true, enrolled: false };
+});
+
+app.post("/api/me/2fa/recovery-codes", async (request, reply) => {
+  const session = await requireSession(request, reply);
+  if (!session) return;
+  const outcome = await verifyCurrentSecondFactor(session.discordUserId, codeFromBody(request.body));
+  if (outcome === "not-enrolled") {
+    return reply.code(409).send({ error: "NOT_ENROLLED", message: "التحقق بخطوتين غير مفعّل على هذا الحساب." });
+  }
+  if (outcome !== "ok") return reply.code(403).send(REAUTH_REQUIRED);
+
+  const recoveryCodes = generateRecoveryCodes();
+  await secondFactor.replaceRecoveryCodes(
+    session.discordUserId,
+    recoveryCodes.map(code => recoveryCodeHash(code, env))
+  );
+  await appendAudit(db, env, {
+    guildId: null,
+    eventId: "security.revoked-credential",
+    actorId: session.discordUserId,
+    payload: { credentialType: "recovery-codes", reason: "regenerated" }
+  }).catch(error => app.log.warn({ err: error }, "Could not audit the recovery-code change"));
+  return { ok: true, recoveryCodes };
 });
 
 /* ------------------------------------------------------------------ *
@@ -3182,7 +3708,13 @@ const housekeeping = setInterval(async () => {
     throttle.sweep(Date.now());
     const sessions = await db.purgeExpiredSessions();
     const nonces = await db.purgeExpiredNonces();
-    if (sessions || nonces) app.log.info(`Purged ${sessions} expired sessions and ${nonces} expired nonces.`);
+    const pendingLogins = await secondFactor.purgeExpiredPending();
+    const pendingSetups = await secondFactor.purgeExpiredSetups();
+    if (sessions || nonces || pendingLogins || pendingSetups) {
+      app.log.info(
+        `Purged ${sessions} expired sessions, ${nonces} expired nonces, ${pendingLogins} expired second-factor logins and ${pendingSetups} expired authenticator setups.`
+      );
+    }
   } catch (error) {
     app.log.error(error, "Housekeeping failed");
   }

@@ -108,14 +108,21 @@ export function applyThemePrefs(prefs: ThemePrefs, root: HTMLElement | null = do
   return theme;
 }
 
+const THEME_CHANGE_EVENT = "al-ai:appearance-changed";
+
 function writeThemePrefs(prefs: ThemePrefs, storage: Pick<Storage, "setItem"> | null = safeStorage()) {
-  if (!storage) return;
-  try {
-    storage.setItem(THEME_STORAGE_KEY, JSON.stringify(prefs));
-  } catch {
-    // A full or blocked storage must not break the change: the palette is
-    // already applied, it just will not survive a reload.
+  if (storage) {
+    try {
+      storage.setItem(THEME_STORAGE_KEY, JSON.stringify(prefs));
+    } catch {
+      // A full or blocked storage must not break the change: the palette is
+      // already applied, it just will not survive a reload.
+    }
   }
+  // Every hook instance (the header menu, the sidebar menu and the settings
+  // panel) reads its own state. The event keeps them in agreement without
+  // turning a two-value preference into a provider.
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(THEME_CHANGE_EVENT));
 }
 
 /**
@@ -147,6 +154,14 @@ export function useThemePrefs() {
     query.addEventListener("change", onChange);
     return () => query.removeEventListener("change", onChange);
   }, [prefs]);
+
+  // Another mounted menu or the settings panel may have written a new value.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sync = () => setPrefs(readThemePrefs());
+    window.addEventListener(THEME_CHANGE_EVENT, sync);
+    return () => window.removeEventListener(THEME_CHANGE_EVENT, sync);
+  }, []);
 
   return { prefs, setMode, setAccent };
 }

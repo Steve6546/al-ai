@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { initials } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import type { Guild } from "@/types";
 
 /**
@@ -14,6 +15,7 @@ import type { Guild } from "@/types";
  * the bot is present would let the operator save settings that never take effect.
  */
 export function InviteBotPanel({ guild, refreshing, onRefresh }: { guild: Guild; refreshing: boolean; onRefresh: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="mx-auto max-w-2xl space-y-4">
       <Card>
@@ -24,18 +26,18 @@ export function InviteBotPanel({ guild, refreshing, onRefresh }: { guild: Guild;
           </Avatar>
           <div className="min-w-0 flex-1">
             <CardTitle className="truncate text-base">{guild.name}</CardTitle>
-            <p className="text-xs text-muted-foreground">البوت غير مضاف إلى هذا السيرفر بعد</p>
+            <p className="text-xs text-muted-foreground">{t("inviteBot.notAdded")}</p>
           </div>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           <p className="text-muted-foreground">
-            أضف AL AI إلى هذا السيرفر لفتح الإعدادات. الرابط مثبّت على هذا السيرفر وحده.
+            {t("inviteBot.body")}
           </p>
 
           <div className="space-y-2">
-            <Step label="إضافة البوت بصلاحيات Administrator" />
-            <Step label="إنشاء رتبة AL AI وإسنادها للبوت" />
-            <Step label="فتح أقسام الإعدادات والسجلات" />
+            <Step label={t("inviteBot.step1")} />
+            <Step label={t("inviteBot.step2")} />
+            <Step label={t("inviteBot.step3")} />
           </div>
 
           <Separator />
@@ -44,18 +46,18 @@ export function InviteBotPanel({ guild, refreshing, onRefresh }: { guild: Guild;
             <Button asChild>
               <a href={`/api/guilds/${guild.id}/invite`}>
                 <CirclePlus />
-                إضافة AL AI إلى هذا السيرفر
+                {t("inviteBot.add")}
               </a>
             </Button>
             <Button variant="outline" onClick={onRefresh} disabled={refreshing}>
               <RefreshCw className={refreshing ? "animate-spin" : undefined} />
-              تحقّق من الإضافة
+              {t("inviteBot.check")}
             </Button>
           </div>
 
           <p className="flex items-center gap-2 pt-1 text-xs text-muted-foreground">
             <ShieldCheck className="size-3.5" />
-            بعد الإضافة اضغط «تحقّق من الإضافة» ليظهر البوت دون إعادة تسجيل الدخول.
+            {t("inviteBot.after")}
           </p>
         </CardContent>
       </Card>
@@ -64,12 +66,12 @@ export function InviteBotPanel({ guild, refreshing, onRefresh }: { guild: Guild;
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Bot className="size-4" />
-            ما الذي يعمل الآن؟
+            {t("inviteBot.workingTitle")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           <p className="text-muted-foreground">
-            سجل التدقيق وكشف الاختراق وإدارة التوكنات متاحة دون إضافة البوت.
+            {t("inviteBot.workingBody")}
           </p>
         </CardContent>
       </Card>

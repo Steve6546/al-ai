@@ -7,6 +7,7 @@
 export { AuditView } from "./audit";
 export { DashboardView } from "./dashboard";
 export { SecurityView } from "./security";
+export { SettingsView } from "./account-settings";
 
 export { CommandsView } from "./settings/commands";
 export { CustomizationView } from "./settings/customization";

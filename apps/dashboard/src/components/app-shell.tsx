@@ -19,6 +19,7 @@ import {
   Radio,
   RefreshCw,
   ScrollText,
+  Settings,
   ShieldAlert,
   SquareTerminal,
   Trophy,
@@ -48,6 +49,7 @@ import { PageHeader } from "@/components/page-header";
 import { BrandMark } from "@/components/brand-mark";
 import { ServerSettingsDialog, type ServerSettingEntry } from "@/components/server-settings-dialog";
 import { initials } from "@/lib/format";
+import { navText, useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { type Guild, type HealthSnapshot, type SessionInfo } from "@/types";
 
@@ -69,7 +71,8 @@ export type ViewKey =
   | "logs"
   | "audit"
   | "security"
-  | "network";
+  | "network"
+  | "settings";
 
 /**
  * Every view key, in one place.
@@ -92,7 +95,8 @@ const viewKeys: readonly ViewKey[] = [
   "logs",
   "audit",
   "security",
-  "network"
+  "network",
+  "settings"
 ] as const;
 
 export function isViewKey(value: unknown): value is ViewKey {
@@ -269,8 +273,22 @@ const navSections: { id: string; title: string | null; items: NavItem[] }[] = [
   }
 ];
 
+/**
+ * Settings is an ACCOUNT surface reached from the account menu, not a guild
+ * section in the sidebar. It still needs a header title and a route, so it is
+ * added to the flat lookup without being advertised as a guild section.
+ */
+const settingsNavItem: NavItem = {
+  key: "settings",
+  label: "الإعدادات",
+  hint: "حسابك ولغتك وأمانك",
+  icon: Settings
+};
+
 /** Flat lookup used by the header title. */
-const navIndex = new Map(navSections.flatMap(section => section.items).map(item => [item.key, item]));
+const navIndex = new Map(
+  [...navSections.flatMap(section => section.items), settingsNavItem].map(item => [item.key, item])
+);
 
 type ShellProps = {
   guilds: Guild[];
@@ -281,6 +299,8 @@ type ShellProps = {
   onBrowseAll: () => void;
   view: ViewKey;
   onView: (view: ViewKey) => void;
+  /** Opens the signed-in account's own settings screen. */
+  onOpenSettings?: () => void;
   health: HealthSnapshot | null;
   user: SessionInfo["user"];
   refreshing: boolean;
@@ -299,6 +319,7 @@ export function AppShell({
   onBrowseAll,
   view,
   onView,
+  onOpenSettings,
   health,
   user,
   refreshing,
@@ -306,6 +327,7 @@ export function AppShell({
   onLogout,
   children
 }: ShellProps) {
+  const { t } = useI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -345,9 +367,9 @@ export function AppShell({
   };
 
   const denyReason = (item: NavItem) => {
-    if (item.ownerOnly && !isOwner) return "ميزات مالك المنصة فقط.";
-    if (item.requiresBot && !guild.botPresent) return "أضف AL AI إلى هذا السيرفر أولاً.";
-    if (!allowed(item)) return "رتبتك لا تسمح بهذا القسم.";
+    if (item.ownerOnly && !isOwner) return t("nav.denyOwner");
+    if (item.requiresBot && !guild.botPresent) return t("nav.denyBot");
+    if (!allowed(item)) return t("nav.denyTier");
     return null;
   };
 
@@ -376,20 +398,26 @@ export function AppShell({
    */
   const openGuildSettings = () => setSettingsOpen(true);
 
+  const sectionTitle = (section: { id: string; title: string | null }) =>
+    section.id === "home" ? t("nav.section.general") : t(`nav.section.${section.id}` as "nav.section.server");
+
   const settingsEntries: ServerSettingEntry[] = navSections
     .filter(section => section.id !== "home" && section.id !== "system")
     .flatMap(section =>
       section.items
         .filter(item => item.key !== "audit")
-        .map(item => ({
-          key: item.key,
-          label: item.label,
-          hint: item.hint,
-          group: section.title ?? "عام",
-          icon: item.icon,
-          disabled: !allowed(item),
-          reason: denyReason(item)
-        }))
+        .map(item => {
+          const text = navText(t, item.key);
+          return {
+            key: item.key,
+            label: text.label,
+            hint: text.hint,
+            group: sectionTitle(section),
+            icon: item.icon,
+            disabled: !allowed(item),
+            reason: denyReason(item)
+          };
+        })
     );
 
   return (
@@ -431,7 +459,7 @@ export function AppShell({
           {!collapsed ? (
             <div className="min-w-0 leading-tight">
               <p className="truncate text-sm font-semibold">AL AI</p>
-              <p className="truncate text-[11px] text-muted-foreground">إدارة ديسكورد</p>
+              <p className="truncate text-[11px] text-muted-foreground">{t("login.subtitle")}</p>
             </div>
           ) : null}
         </div>
@@ -454,6 +482,7 @@ export function AppShell({
               user={user}
               guild={guild}
               onLogout={onLogout}
+              onOpenSettings={onOpenSettings}
               onOpenGuildSettings={openGuildSettings}
               variant="compact"
             />
@@ -462,6 +491,7 @@ export function AppShell({
               user={user}
               guild={guild}
               onLogout={onLogout}
+              onOpenSettings={onOpenSettings}
               onOpenGuildSettings={openGuildSettings}
               className="flex-1"
             />
@@ -472,7 +502,7 @@ export function AppShell({
             variant="ghost"
             size="icon"
             onClick={() => setCollapsed(value => !value)}
-            aria-label={collapsed ? "توسيع القائمة" : "طيّ القائمة"}
+            aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}
             className="size-9 text-muted-foreground"
           >
             {collapsed ? <PanelRightOpen className="size-4" /> : <PanelRightClose className="size-4" />}
@@ -494,7 +524,7 @@ export function AppShell({
           {/* Mobile navigation: the sidebar is desktop-only. */}
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="lg:hidden" aria-label="القائمة">
+              <Button variant="ghost" size="icon" className="lg:hidden" aria-label={t("nav.menu")}>
                 <Menu />
               </Button>
             </SheetTrigger>
@@ -542,6 +572,10 @@ export function AppShell({
                     user={user}
                     guild={guild}
                     onLogout={onLogout}
+                    onOpenSettings={() => {
+                      setMobileOpen(false);
+                      onOpenSettings?.();
+                    }}
                     onOpenGuildSettings={() => {
                       setMobileOpen(false);
                       openGuildSettings();
@@ -557,12 +591,12 @@ export function AppShell({
               lives in the content area, not here - two titles for one page is
               one too many. */}
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <nav aria-label="مسار التنقل" className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <nav aria-label={t("nav.breadcrumb")} className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
               {/* Below `sm` the view label is the useful half of the path; the
                   server name is already in the drawer and the page content. */}
               <span className="hidden min-w-0 truncate sm:inline">{guild.name}</span>
               <span aria-hidden="true" className="hidden sm:inline">/</span>
-              <span className="min-w-0 truncate text-foreground">{navIndex.get(view)?.label ?? "لوحة التحكم"}</span>
+              <span className="min-w-0 truncate text-foreground">{navText(t, view).label}</span>
             </nav>
           </div>
 
@@ -581,11 +615,11 @@ export function AppShell({
             onClick={onRefresh}
             disabled={refreshing}
             loading={refreshing}
-            aria-label="تحديث البيانات"
+            aria-label={t("nav.refreshData")}
             className="gap-2"
           >
             <RefreshCw className={cn(refreshing && "animate-spin")} />
-            <span className="hidden sm:inline">تحديث</span>
+            <span className="hidden sm:inline">{t("nav.refresh")}</span>
           </Button>
 
           {/* The account menu lives in the sidebar on the desktop; on a phone
@@ -595,6 +629,7 @@ export function AppShell({
               user={user}
               guild={guild}
               onLogout={onLogout}
+              onOpenSettings={onOpenSettings}
               onOpenGuildSettings={openGuildSettings}
               variant="compact"
             />
@@ -611,14 +646,18 @@ export function AppShell({
          * panel stretched across a 4K monitor reads as scattered stripes, not
          * as a dashboard.
          */}
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-3 pb-24 sm:p-4 lg:p-6">
+        {/* The one scroll container is a tab stop: a keyboard user on a screen
+            with no interactive content (the audit trail, for one) must still be
+            able to scroll it. This is the fix axe asks for, and it changes no
+            layout class the scrolling guard asserts. */}
+        <main tabIndex={0} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-3 pb-24 sm:p-4 lg:p-6">
           <div className="mx-auto w-full max-w-6xl px-0.5 py-2 sm:px-1 lg:px-4 lg:py-3">
             {/* The screen's own title and one line of context, taken from the
                 navigation so the menu and the page can never describe the same
                 screen differently. */}
             <PageHeader
-              title={navIndex.get(view)?.label ?? "لوحة التحكم"}
-              description={navIndex.get(view)?.hint}
+              title={navText(t, view).label}
+              description={navText(t, view).hint}
             />
             {children}
           </div>
@@ -662,6 +701,7 @@ function GuildSwitcher({
   inviteUrl: string;
   collapsed: boolean;
 }) {
+  const { t } = useI18n();
   // The same predicate the selector uses: `botPresent` is the whole test for
   // "there is something here to switch to".
   const switchable = splitGuilds(guilds).active;
@@ -701,7 +741,7 @@ function GuildSwitcher({
               </Avatar>
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium">{guild.name}</span>
-                <span className="block truncate text-[11px] text-muted-foreground">السيرفر المحدد</span>
+                <span className="block truncate text-[11px] text-muted-foreground">{t("nav.guildSelected")}</span>
               </span>
             </span>
             <ChevronsUpDown className="size-4 shrink-0 opacity-60" />
@@ -712,10 +752,10 @@ function GuildSwitcher({
               nothing to show yet, and the selector is where they are invited.
               The trigger stays enabled on an empty list — «كل السيرفرات» and the
               invite row below are the way out of a guild without AL AI. */}
-          <DropdownMenuLabel>السيرفرات</DropdownMenuLabel>
+          <DropdownMenuLabel>{t("nav.guilds")}</DropdownMenuLabel>
           {switchable.length === 0 && (
             <DropdownMenuItem disabled className="gap-2 text-muted-foreground">
-              لا يوجد سيرفر أضفت إليه AL AI بعد
+              {t("nav.noBotGuild")}
             </DropdownMenuItem>
           )}
           {switchable.map(item => (
@@ -731,12 +771,12 @@ function GuildSwitcher({
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={onBrowseAll} className="gap-2">
             <LayoutGrid className="size-4" />
-            كل السيرفرات
+            {t("nav.allGuilds")}
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
             <a href={inviteUrl} className="gap-2">
               <CirclePlus className="size-4" />
-              إضافة AL AI إلى هذا السيرفر
+              {t("nav.addBotHere")}
             </a>
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -769,6 +809,7 @@ function SidebarNav({
     logs: true,
     system: true
   });
+  const { t } = useI18n();
 
   if (collapsed) {
     // The rail shows the same screens as icons, in the same order, so the
@@ -778,13 +819,14 @@ function SidebarNav({
         {navSections.flatMap(section => section.items).filter(item => !hide(item)).map(item => {
           const disabled = !allowed(item);
           const reason = denyReason(item);
+          const label = navText(t, item.key).label;
           const button = (
             <button
               type="button"
               onClick={() => onView(item.key)}
               disabled={disabled}
               aria-current={view === item.key ? "page" : undefined}
-              aria-label={item.label}
+              aria-label={label}
               className={cn(
                 "grid size-9 place-items-center rounded-lg transition-ui",
                 view === item.key
@@ -821,7 +863,7 @@ function SidebarNav({
           .map(item => (
             <NavButton
               key={item.key}
-              label={item.label}
+              label={navText(t, item.key).label}
               icon={item.icon}
               active={view === item.key}
               disabled={!allowed(item)}
@@ -847,7 +889,7 @@ function SidebarNav({
           >
             <CollapsibleTrigger asChild>
               <button className="flex w-full items-center justify-between rounded-md px-3 py-2 text-[11px] font-semibold tracking-wide text-muted-foreground transition-ui hover:text-foreground">
-                {section.title}
+                {t(`nav.section.${section.id}` as "nav.section.server")}
                 <ChevronsUpDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
               </button>
             </CollapsibleTrigger>
@@ -858,7 +900,7 @@ function SidebarNav({
 
       {!guild.botPresent ? (
         <p className="px-3 pt-3 text-[11px] leading-relaxed text-muted-foreground">
-          أقسام الإعدادات تُفتح بعد إضافة AL AI إلى السيرفر.
+          {t("nav.settingsAfterBot")}
         </p>
       ) : null}
     </nav>
@@ -932,6 +974,7 @@ function NavButton({
  * health payload the server actually returns.
  */
 function StatusChips({ health }: { health: HealthSnapshot | null }) {
+  const { t } = useI18n();
   if (!health) {
     return (
       <Badge variant="secondary" className="hidden gap-1.5 sm:inline-flex">
@@ -950,30 +993,39 @@ function StatusChips({ health }: { health: HealthSnapshot | null }) {
         <TooltipTrigger asChild>
           <Badge variant="outline" className="h-6 gap-1.5 px-2 text-[11px]">
             <Activity className={cn("size-3", health.status === "healthy" ? "text-success" : "text-warning")} />
-            اللوحة
+            {t("nav.statusDashboard")}
           </Badge>
         </TooltipTrigger>
-        <TooltipContent>لوحة التحكم {health.status === "healthy" ? "تعمل" : "متعثرة"}</TooltipContent>
+        <TooltipContent>
+          {t("nav.statusDashboard")} {health.status === "healthy" ? t("nav.statusHealthy") : t("nav.statusDegraded")}
+        </TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
           <Badge variant="outline" className="h-6 gap-1.5 px-2 text-[11px]">
             <span className={cn("size-2 rounded-full", botConnected ? "bg-success" : "bg-muted-foreground/40")} />
-            البوت
+            {t("nav.statusBot")}
           </Badge>
         </TooltipTrigger>
         <TooltipContent>
-          البوت {botConnected ? "متصل بديسكورد" : health.bot === "configured" ? "مهيأ لكنه غير متصل" : "غير مهيأ"}
+          {t("nav.statusBot")}{" "}
+          {botConnected
+            ? t("nav.statusConnected")
+            : health.bot === "configured"
+              ? t("nav.statusConfigured")
+              : t("nav.statusNotConfigured")}
         </TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
           <Badge variant="outline" className="h-6 gap-1.5 px-2 text-[11px]">
             <Database className={cn("size-3", databaseUp ? "text-success" : "text-destructive")} />
-            قاعدة البيانات
+            {t("nav.statusDatabase")}
           </Badge>
         </TooltipTrigger>
-        <TooltipContent>قاعدة البيانات {databaseUp ? "متاحة" : "غير متاحة"}</TooltipContent>
+        <TooltipContent>
+          {t("nav.statusDatabase")} {databaseUp ? t("nav.statusReachable") : t("nav.statusUnreachable")}
+        </TooltipContent>
       </Tooltip>
     </div>
   );

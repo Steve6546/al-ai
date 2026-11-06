@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type FocusEvent } from "react";
 import { Check, Eye, Image as ImageIcon, Link2, Pencil, Plus, SmilePlus, Trash2, Upload, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { EMOJI_SET, insertAtCursor } from "./welcome-messages-parts";
+import { EMOJI_SET, TOKEN_KEYS, insertAtCursor } from "./welcome-messages-parts";
 import { cn } from "@/lib/utils";
-import { WELCOME_MESSAGE_TOKENS, WELCOME_TOKEN_LABELS_AR, type WelcomeEmbed } from "@al-ai/core/browser";
+import { useI18n } from "@/lib/i18n";
+import { WELCOME_MESSAGE_TOKENS, type WelcomeEmbed } from "@al-ai/core/browser";
 import type { WelcomeEmbedField } from "@/types";
 
 /**
@@ -111,6 +112,7 @@ function EmojiButton({ label, onPick, className }: { label: string; onPick: (emo
 /** The floating token strip: inserts into whichever field held focus last. */
 function FocusTokenStrip({ targetRef }: { targetRef: { current: ((token: string) => void) | null } }) {
   const [open, setOpen] = useState(false);
+  const { t } = useI18n();
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-2">
       <button
@@ -122,7 +124,7 @@ function FocusTokenStrip({ targetRef }: { targetRef: { current: ((token: string)
         )}
         onClick={() => setOpen(value => !value)}
       >
-        {"{ }"} المتغيرات
+        {"{ }"} {t("welcome.embed.variablesButton")}
       </button>
       {open &&
         WELCOME_MESSAGE_TOKENS.map(token => (
@@ -130,7 +132,7 @@ function FocusTokenStrip({ targetRef }: { targetRef: { current: ((token: string)
             key={token}
             type="button"
             dir="ltr"
-            title={WELCOME_TOKEN_LABELS_AR[token as keyof typeof WELCOME_TOKEN_LABELS_AR]}
+            title={t(TOKEN_KEYS[token])}
             className="rounded-md border border-border/80 bg-muted/40 px-2 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
             onClick={() => {
               targetRef.current?.(token);
@@ -140,7 +142,7 @@ function FocusTokenStrip({ targetRef }: { targetRef: { current: ((token: string)
             {token}
           </button>
         ))}
-      <span className="text-[10px] text-muted-foreground">تُدرج عند مؤشر الكتابة في آخر حقل لمسته</span>
+      <span className="text-[10px] text-muted-foreground">{t("welcome.embed.insertHint")}</span>
     </div>
   );
 }
@@ -160,6 +162,7 @@ function FocusTokenStrip({ targetRef }: { targetRef: { current: ((token: string)
  * operator finds out from a silent greeting.
  */
 function RemoteImage({ url, className, label }: { url: string | null; className: string; label: string }) {
+  const { t } = useI18n();
   const [failed, setFailed] = useState(false);
   const trimmed = (url ?? "").trim();
   useEffect(() => setFailed(false), [trimmed]);
@@ -167,14 +170,14 @@ function RemoteImage({ url, className, label }: { url: string | null; className:
   if (!/^https?:\/\/.+/i.test(trimmed)) {
     return (
       <p className="px-1 text-[10px] text-[#949ba4]">
-        {label}: الرابط يجب أن يكون صورة مباشرة (ينتهي بـ JPG أو PNG أو GIF) — ديسكورد لا يفتح صفحات المشاركة.
+        {t("welcome.embed.invalidUrl", { label })}
       </p>
     );
   }
   if (failed) {
     return (
       <p className="rounded border border-dashed border-border/60 px-2 py-1 text-[10px] text-[#949ba4]">
-        {label}: هذا الرابط لا يعرض صورة، وديسكورد لن يرفعه بالرسالة.
+        {t("welcome.embed.failedUrl", { label })}
       </p>
     );
   }
@@ -194,7 +197,7 @@ export type EmbedEditorProps = {
   /**
    * A real face for the `member_avatar` thumbnail slot. The bot substitutes the
    * joiner's own picture at send time; the editor borrows one it can actually
-   * reach, so the slot shows a face instead of the words «صورة العضو».
+   * reach, so the slot shows a face instead of the words “member picture”.
    */
   memberAvatarUrl: string | null;
   embed: WelcomeEmbed;
@@ -226,6 +229,7 @@ export function EmbedEditor({
   onPatchField,
   onRemoveField
 }: EmbedEditorProps) {
+  const { t, language } = useI18n();
   // The eye on the action bar hides every editing affordance: the card reads
   // exactly like the message a member receives. `editing` is the single source
   // of that decision - it used to be spelled `chrome(true)` at some call sites
@@ -279,7 +283,7 @@ export function EmbedEditor({
         </span>
         <button
           type="button"
-          aria-label={editing ? "معاينة نظيفة بدون أدوات التحرير" : "العودة إلى أدوات التحرير"}
+          aria-label={editing ? t("welcome.embed.cleanPreview") : t("welcome.embed.backToEdit")}
           aria-pressed={!editing}
           className={cn(
             "grid size-7 place-items-center rounded-md border transition-colors",
@@ -293,7 +297,7 @@ export function EmbedEditor({
           <PopoverTrigger asChild>
             <button
               type="button"
-              aria-label="لون الشريط الجانبي"
+              aria-label={t("welcome.embed.sidebarColor")}
               className="grid size-7 place-items-center overflow-hidden rounded-md border border-border/80 shadow-inner transition-transform hover:scale-105"
             >
               <span className="size-full" style={{ background: accent }} aria-hidden />
@@ -305,7 +309,7 @@ export function EmbedEditor({
               value={accent}
               onChange={event => onEmbedChange({ color: event.target.value })}
               className="h-8 w-full cursor-pointer rounded-md border border-input bg-background"
-              aria-label="منتقي لون الشريط"
+              aria-label={t("welcome.embed.sidebarPicker")}
             />
             <input
               dir="ltr"
@@ -314,7 +318,7 @@ export function EmbedEditor({
               placeholder="#3b82f6"
               maxLength={7}
               className="w-full rounded-lg border border-input bg-background px-2 py-1 font-mono text-xs"
-              aria-label="اللون بصيغة HEX"
+              aria-label={t("welcome.embed.hex")}
             />
           </PopoverContent>
         </Popover>
@@ -333,7 +337,7 @@ export function EmbedEditor({
           {/* The card is Discord's layout, so it stays LTR — but the words are
               the ones the operator's own Arabic client prints. */}
           <span className="text-[11px] text-[#949ba4]">
-            اليوم في {now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+            {t("welcome.embed.today", { time: now.toLocaleTimeString(language === "ar" ? "ar" : "en-GB", { hour: "2-digit", minute: "2-digit" }) })}
           </span>
         </div>
 
@@ -342,11 +346,11 @@ export function EmbedEditor({
             <AutoTextarea
               value={embed.content}
               onValueChange={content => onEmbedChange({ content })}
-              placeholder={editing ? "نص عادي فوق الإيمبد (اختياري)…" : undefined}
+              placeholder={editing ? t("welcome.embed.contentPlaceholder") : undefined}
               maxLength={2000}
               readOnly={!editing}
               inputRef={contentRef}
-              aria-label="نص فوق الإيمبد"
+              aria-label={t("welcome.embed.contentAria")}
               onFocus={event => {
                 const element = event.currentTarget;
                 insertTarget.current = token =>
@@ -368,11 +372,11 @@ export function EmbedEditor({
                     <AutoTextarea
                       value={embed.title}
                       onValueChange={title => onEmbedChange({ title })}
-                      placeholder={editing ? "عنوان الإيمبد…" : undefined}
+                      placeholder={editing ? t("welcome.embed.titlePlaceholder") : undefined}
                       maxLength={256}
                       readOnly={!editing}
                       inputRef={titleRef}
-                      aria-label="عنوان الإيمبد"
+                      aria-label={t("welcome.embed.titleAria")}
                       onFocus={event => {
                         const element = event.currentTarget;
                         insertTarget.current = token =>
@@ -382,7 +386,7 @@ export function EmbedEditor({
                     />
                     <button
                       type="button"
-                      aria-label="رابط العنوان"
+                      aria-label={t("welcome.embed.titleLink")}
                       aria-expanded={titleLinkOpen}
                       className={cn(
                         "grid size-8 shrink-0 place-items-center rounded text-[#949ba4] transition-colors hover:bg-black/30 hover:text-white",
@@ -407,7 +411,7 @@ export function EmbedEditor({
                     <div className="animate-in fade-in slide-in-from-bottom-1 flex items-center gap-1.5 rounded-lg border border-border/60 bg-black/30 p-1.5">
                       <button
                         type="button"
-                        aria-label="تأكيد الرابط"
+                        aria-label={t("welcome.embed.confirmLink")}
                         className="grid size-6 shrink-0 place-items-center rounded bg-primary text-primary-foreground transition-colors hover:bg-primary/90"
                         onClick={() => {
                           const url = titleLinkDraft.trim();
@@ -423,10 +427,10 @@ export function EmbedEditor({
                         placeholder="https://..."
                         maxLength={512}
                         className="min-w-0 flex-1 rounded bg-transparent px-1 text-xs text-[#dbdee1] outline-none placeholder:text-[#6d6f78] focus-visible:ring-1 focus-visible:ring-ring"
-                        aria-label="رابط العنوان"
+                        aria-label={t("welcome.embed.titleLink")}
                       />
                       {embed.titleUrl ? (
-                        <span className="shrink-0 text-[10px] text-success" aria-label="الرابط مفعّل">✓</span>
+                        <span className="shrink-0 text-[10px] text-success" aria-label={t("welcome.embed.linkOn")}>✓</span>
                       ) : null}
                     </div>
                   )}
@@ -437,11 +441,11 @@ export function EmbedEditor({
                   <AutoTextarea
                     value={embed.description}
                     onValueChange={description => onEmbedChange({ description })}
-                    placeholder={editing ? "وصف الإيمبد…" : undefined}
+                    placeholder={editing ? t("welcome.embed.descriptionPlaceholder") : undefined}
                     maxLength={4000}
                     readOnly={!editing}
                     inputRef={descriptionRef}
-                    aria-label="وصف الإيمبد"
+                    aria-label={t("welcome.embed.descriptionAria")}
                     onFocus={event => {
                       const element = event.currentTarget;
                       insertTarget.current = token =>
@@ -452,7 +456,7 @@ export function EmbedEditor({
                   {editing && (
                     <div className="flex justify-end">
                       <EmojiButton
-                        label="إدراج إيموجي في الوصف"
+                        label={t("welcome.embed.emojiInDescription")}
                         onPick={emoji =>
                           onEmbedChange({
                             description: insertAtCursor(descriptionRef.current, embed.description, emoji)
@@ -486,8 +490,8 @@ export function EmbedEditor({
                             maxLength={256}
                             dir="auto"
                             readOnly={!editing}
-                            placeholder={editing ? "اسم الحقل" : undefined}
-                            aria-label={`اسم الحقل ${field.name || ""}`}
+                            placeholder={editing ? t("welcome.embed.fieldName") : undefined}
+                            aria-label={t("welcome.embed.fieldNameAria", { name: field.name || "" })}
                             onFocus={event => {
                               const element = event.currentTarget;
                               insertTarget.current = token =>
@@ -498,7 +502,7 @@ export function EmbedEditor({
                           />
                           {editing && (
                             <>
-                            <label className="flex shrink-0 cursor-pointer items-center gap-1 text-[10px] text-[#949ba4]" title="قسمي الصف">
+                            <label className="flex shrink-0 cursor-pointer items-center gap-1 text-[10px] text-[#949ba4]" title={t("welcome.embed.inline")}>
                               <input
                                 type="checkbox"
                                 checked={field.inline}
@@ -509,7 +513,7 @@ export function EmbedEditor({
                             </label>
                             <button
                               type="button"
-                              aria-label={`حذف حقل ${field.name || "فارغ"}`}
+                              aria-label={t("welcome.embed.deleteField", { name: field.name || t("welcome.embed.empty") })}
                               className="grid size-8 shrink-0 place-items-center rounded text-[#949ba4] opacity-100 transition-all hover:bg-black/30 hover:text-destructive sm:opacity-0 sm:group-hover/field:opacity-100 sm:group-focus-within/field:opacity-100"
                               onClick={() => onRemoveField(field.id)}
                             >
@@ -523,8 +527,8 @@ export function EmbedEditor({
                           maxLength={1024}
                           dir="auto"
                           readOnly={!editing}
-                          placeholder={editing ? "قيمة الحقل" : undefined}
-                          aria-label={`قيمة الحقل ${field.name || ""}`}
+                          placeholder={editing ? t("welcome.embed.fieldValue") : undefined}
+                          aria-label={t("welcome.embed.fieldValueAria", { name: field.name || "" })}
                           onFocus={event => {
                             const element = event.currentTarget;
                             insertTarget.current = token =>
@@ -543,7 +547,7 @@ export function EmbedEditor({
                     onClick={onAddField}
                     className="flex items-center gap-1 text-xs font-medium text-[#00a8fc] transition-colors hover:text-[#3b9dff]"
                   >
-                    <Plus className="size-3.5" /> إضافة حقل جديد
+                    <Plus className="size-3.5" /> {t("welcome.embed.addField")}
                   </button>
                 )}
 
@@ -568,7 +572,7 @@ export function EmbedEditor({
                     <img src={memberAvatarUrl} alt="" className="size-14 rounded object-cover sm:size-20" />
                   ) : (
                     <span className="grid size-14 place-items-center rounded border border-dashed border-border/60 bg-black/30 text-[10px] text-[#949ba4] sm:size-20">
-                      {embed.thumbnailMode === "member_avatar" ? "صورة العضو" : "المصغرة"}
+                      {embed.thumbnailMode === "member_avatar" ? t("welcome.embed.memberAvatar") : t("welcome.embed.thumbnail")}
                     </span>
                   )}
                   {editing && (
@@ -585,7 +589,7 @@ export function EmbedEditor({
                         onEmbedChange({ thumbnailMode: embed.thumbnailMode === "member_avatar" ? "custom" : "member_avatar" })
                       }
                     >
-                      {embed.thumbnailMode === "member_avatar" ? "✓ صورة العضو" : "صورة العضو"}
+                      {embed.thumbnailMode === "member_avatar" ? `✓ ${t("welcome.embed.memberAvatar")}` : t("welcome.embed.memberAvatar")}
                     </button>
                   )}
                   {editing && embed.thumbnailMode === "custom" && (
@@ -595,7 +599,7 @@ export function EmbedEditor({
                       onChange={event => onEmbedChange({ thumbnailUrl: event.target.value })}
                       placeholder="https://..."
                       maxLength={512}
-                      aria-label="رابط الصورة المصغرة"
+                      aria-label={t("welcome.embed.thumbnailUrl")}
                       className="w-full rounded border border-border/60 bg-black/30 px-1 py-0.5 text-[10px] text-[#dbdee1] outline-none focus:border-primary/50"
                     />
                   )}
@@ -618,9 +622,9 @@ export function EmbedEditor({
             {editing && (
               <div className="flex flex-wrap items-center gap-1 px-2.5 pt-2 sm:px-3">
                 {([
-                  ["none", "بدون صورة"],
-                  ["upload", "رفع صورة"],
-                  ["url", "رابط صورة"]
+                  ["none", t("welcome.embed.noImage")],
+                  ["upload", t("welcome.embed.uploadImage")],
+                  ["url", t("welcome.embed.imageUrl")]
                 ] as const).map(([mode, label]) => (
                   <button
                     key={mode}
@@ -655,18 +659,18 @@ export function EmbedEditor({
                         {imageUpload.fileName}
                       </span>
                     ) : (
-                      <span className="min-w-0 flex-1 text-[11px] text-[#949ba4]">صورة محفوظة من جلسة سابقة</span>
+                      <span className="min-w-0 flex-1 text-[11px] text-[#949ba4]">{t("welcome.embed.savedImage")}</span>
                     )}
                     <button
                       type="button"
                       onClick={imageUpload.onPickFile}
                       className="shrink-0 rounded-md border border-border/60 px-2 py-0.5 text-[11px] text-[#dbdee1] transition-colors hover:border-primary/50 hover:text-primary"
                     >
-                      استبدال
+                      {t("welcome.replace")}
                     </button>
                     <button
                       type="button"
-                      aria-label="إزالة الصورة"
+                      aria-label={t("welcome.embed.removeImage")}
                       onClick={imageUpload.onRemove}
                       className="grid size-5 shrink-0 place-items-center rounded text-[#949ba4] hover:bg-black/30 hover:text-destructive"
                     >
@@ -689,8 +693,8 @@ export function EmbedEditor({
                   }}
                 >
                   <Upload className="size-4 text-[#949ba4]" aria-hidden />
-                  <span className="text-xs font-medium text-[#dbdee1]">اضغط للرفع أو اسحب الصورة هنا</span>
-                  <span className="text-[10px] text-[#949ba4]">صورة الإيمبد الكبيرة — يتم تحسين ملفات JPG و PNG تلقائياً</span>
+                  <span className="text-xs font-medium text-[#dbdee1]">{t("welcome.embed.uploadHint")}</span>
+                  <span className="text-[10px] text-[#949ba4]">{t("welcome.embed.uploadBody")}</span>
                 </button>
               )
             ) : null}
@@ -704,11 +708,11 @@ export function EmbedEditor({
                     onChange={event => onEmbedChange({ imageUrl: event.target.value })}
                     placeholder="https://..."
                     maxLength={512}
-                    aria-label="رابط صورة الإيمبد"
+                    aria-label={t("welcome.embed.imageUrlAria")}
                     className="w-full rounded border border-border/60 bg-black/30 px-2 py-1 text-xs text-[#dbdee1] outline-none focus:border-primary/50"
                   />
                 )}
-                <RemoteImage url={embed.imageUrl} className="max-h-80 w-full rounded-lg object-cover" label="صورة الإيمبد" />
+                <RemoteImage url={embed.imageUrl} className="max-h-80 w-full rounded-lg object-cover" label={t("welcome.embed.imageAlt")} />
               </div>
             ) : null}
 
@@ -728,11 +732,11 @@ export function EmbedEditor({
                     <AutoTextarea
                       value={embed.footer}
                       onValueChange={footer => onEmbedChange({ footer })}
-                      placeholder={editing ? "نتمنى لك وقتاً ممتعاً" : undefined}
+                      placeholder={editing ? t("welcome.embed.footerPlaceholder") : undefined}
                       maxLength={2048}
                       readOnly={!editing}
                       inputRef={footerRef}
-                      aria-label="نص التذييل"
+                      aria-label={t("welcome.embed.footerAria")}
                       onFocus={event => {
                         const element = event.currentTarget;
                         insertTarget.current = token =>
@@ -747,7 +751,7 @@ export function EmbedEditor({
                     <div className="animate-in fade-in flex items-center gap-1.5">
                     <button
                       type="button"
-                      aria-label="تأكيد أيقونة التذييل"
+                      aria-label={t("welcome.embed.confirmFooterIcon")}
                       className="grid size-5 shrink-0 place-items-center rounded bg-primary text-primary-foreground"
                       onClick={() => {
                         const url = footerIconDraft.trim();
@@ -760,16 +764,16 @@ export function EmbedEditor({
                       dir="ltr"
                       value={footerIconDraft}
                       onChange={event => setFooterIconDraft(event.target.value)}
-                      placeholder="https://... (أيقونة التذييل)"
+                      placeholder={t("welcome.embed.footerIconPlaceholder")}
                       maxLength={512}
                       className="min-w-0 flex-1 rounded border border-border/60 bg-black/30 px-1 py-0.5 text-[10px] text-[#dbdee1] outline-none focus:border-primary/50"
-                      aria-label="رابط أيقونة التذييل"
+                      aria-label={t("welcome.embed.footerIconUrl")}
                     />
                     </div>
                     {/* The same check the big image gets: an address that is not
                         a picture is said here, not discovered in a greeting that
                         arrives without one. */}
-                    <RemoteImage url={embed.footerIconUrl} className="size-8 rounded object-cover" label="أيقونة التذييل" />
+                    <RemoteImage url={embed.footerIconUrl} className="size-8 rounded object-cover" label={t("welcome.embed.footerIcon")} />
                   </div>
                 )}
               </div>
@@ -777,7 +781,7 @@ export function EmbedEditor({
                 {editing && (
                   <button
                     type="button"
-                    aria-label="أيقونة التذييل"
+                    aria-label={t("welcome.embed.footerIcon")}
                     aria-pressed={embed.footerIconUrl !== null}
                     className={cn(
                       "grid size-6 place-items-center rounded text-[#949ba4] transition-colors hover:bg-black/30 hover:text-white",
@@ -803,7 +807,7 @@ export function EmbedEditor({
                   )}
                   onClick={() => onEmbedChange({ timestamp: !embed.timestamp })}
                 >
-                  الوقت
+                  {t("welcome.embed.time")}
                 </button>
                 {embed.timestamp ? (
                   <span className="whitespace-nowrap text-[11px] text-[#949ba4]" dir="ltr">
@@ -814,7 +818,7 @@ export function EmbedEditor({
             </div>
           </div>
         ) : (
-          <p className="rounded bg-[#2f3136] p-3 text-xs text-[#949ba4]">الإيمبد فارغ — اكتب عنواناً أو وصفاً لتبدأ.</p>
+          <p className="rounded bg-[#2f3136] p-3 text-xs text-[#949ba4]">{t("welcome.embed.emptyEmbed")}</p>
         )}
 
         <div className="pt-2">

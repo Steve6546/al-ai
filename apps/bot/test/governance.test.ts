@@ -310,11 +310,16 @@ test("the shared contract imports nothing but node:crypto", () => {
     )
   );
 
-  // `security.ts` is the one exception, and it is a node builtin rather than a
-  // package. It is also excluded from `browser.ts`, so the SPA never sees it.
+  // `security.ts` (AES/HMAC envelopes) and `two-factor.ts` (RFC 6238, base32,
+  // recovery hashes) are the only core modules that reach outside themselves,
+  // and both reach for a node builtin rather than a package. Both are excluded
+  // from `browser.ts`, so the SPA never bundles Node's crypto either.
   assert.deepEqual(
-    found,
-    ["packages/core/src/security.ts -> node:crypto"],
+    found.sort(),
+    [
+      "packages/core/src/security.ts -> node:crypto",
+      "packages/core/src/two-factor.ts -> node:crypto"
+    ],
     "an npm dependency in core would be bundled into the dashboard whether it is used or not"
   );
 });

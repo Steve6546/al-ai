@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Modal as HeroModal } from "@heroui/react"
+import { Modal as HeroModal, ModalHeading as HeroModalHeading } from "@heroui/react"
 
 import { cn } from "@/lib/utils"
 
@@ -110,7 +110,7 @@ const DialogTitle = React.forwardRef<
   HTMLHeadingElement,
   React.HTMLAttributes<HTMLHeadingElement>
 >(({ className, ...props }, ref) => (
-  <h2
+  <HeroModalHeading
     ref={ref}
     className={cn(
       "text-lg font-semibold leading-none tracking-tight",

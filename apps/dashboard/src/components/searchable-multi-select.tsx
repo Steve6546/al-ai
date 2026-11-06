@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * A searchable multi-select dropdown for the ignore lists (channels, roles).
@@ -33,6 +34,7 @@ export function SearchableMultiSelect({
   selected: string[];
   onChange: (next: string[]) => void;
 }) {
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [openUp, setOpenUp] = useState(false);
@@ -84,7 +86,7 @@ export function SearchableMultiSelect({
               <span className="max-w-32 truncate">{name}</span>
               <button
                 type="button"
-                aria-label={`إزالة ${name}`}
+                aria-label={t("common.removeItem", { name })}
                 className="rounded p-0.5 hover:bg-muted"
                 onClick={() => toggle(optionId, false)}
               >
@@ -106,7 +108,7 @@ export function SearchableMultiSelect({
           role="combobox"
           aria-expanded={open}
           aria-controls={`${id}-listbox`}
-          placeholder="ابحث وانقر للاختيار..."
+          placeholder={t("common.searchAndChoose")}
           value={query}
           onFocus={openDropdown}
           onClick={openDropdown}
@@ -133,7 +135,7 @@ export function SearchableMultiSelect({
             <div className="max-h-56 overflow-y-auto p-1.5">
               {filtered.length === 0 ? (
                 <p className="p-2 text-xs text-muted-foreground">
-                  {options.length === 0 ? "لا توجد خيارات." : "لا نتائج مطابقة للبحث."}
+                  {options.length === 0 ? t("common.noOptions") : t("common.noMatches")}
                 </p>
               ) : (
                 <div className="space-y-0.5">
@@ -186,7 +188,7 @@ export function SearchableMultiSelect({
             className="h-auto p-0 ps-1 text-xs"
             onClick={() => onChange([])}
           >
-            مسح الكل
+            {t("common.clearAll")}
           </Button>
         )}
       </p>

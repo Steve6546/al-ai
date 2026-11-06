@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * Global toast stack.
@@ -57,6 +58,7 @@ export function Toaster({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id
 }
 
 function ToastRow({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
+  const { t } = useI18n();
   const { wrapper, Icon } = TONE_STYLES[toast.tone];
 
   useEffect(() => {
@@ -83,7 +85,7 @@ function ToastRow({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) 
       <button
         type="button"
         onClick={() => onDismiss(toast.id)}
-        aria-label="إغلاق الإشعار"
+        aria-label={t("common.closeToast")}
         className="shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100"
       >
         <X className="size-4" />

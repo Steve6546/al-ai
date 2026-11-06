@@ -14,7 +14,8 @@ import { RoleSwatch } from "@/components/role-swatch";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { commandsUnlockedBy, type Tier } from "@al-ai/core/browser";
-import { tierDescriptions, tierLabels, type DiscordRole, type Guild, type TierConfig, type TierRoles } from "@/types";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
+import type { DiscordRole, Guild, TierConfig, TierRoles } from "@/types";
 import { EMPTY_TIER_ROLES } from "@al-ai/core/browser";
 
 /**
@@ -31,6 +32,7 @@ import { EMPTY_TIER_ROLES } from "@al-ai/core/browser";
  * already selected.
  */
 export function RolesView({ guild }: { guild: Guild }) {
+  const { t } = useI18n();
   const [config, setConfig] = useState<TierConfig | null>(null);
   const { draft, dirty, reset, commit, setDraft } = useDraftForm(
     config?.configured ?? EMPTY_TIER_ROLES,
@@ -46,7 +48,7 @@ export function RolesView({ guild }: { guild: Guild }) {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذّر التحميل.");
     }
-  }, [guild.id]);
+  }, [guild.id, t]);
 
   useEffect(() => {
     setConfig(null);
@@ -118,12 +120,11 @@ export function RolesView({ guild }: { guild: Guild }) {
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-base font-semibold leading-snug">رتبة المالك</p>
-              <Badge variant="secondary" className="text-[10px]">تلقائي</Badge>
+              <p className="text-base font-semibold leading-snug">{t("roles.owner")}</p>
+              <Badge variant="secondary" className="text-[10px]">{t("roles.auto")}</Badge>
             </div>
             <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-              تحكم كامل. تُمنح تلقائياً لمالك السيرفر وأي عضو يملك صلاحية{" "}
-              <span dir="ltr" className="font-medium text-foreground">Administrator</span>.
+              {t("roles.ownerBody")}
             </p>
           </div>
         </div>
@@ -139,14 +140,14 @@ export function RolesView({ guild }: { guild: Guild }) {
         <Alert variant="destructive">
           <TriangleAlert />
           <AlertDescription>
-            تعذّر قراءة رتب السيرفر. تأكّد من أن AL AI مضاف إلى السيرفر وأنه يملك صلاحية إدارة الرتب.
+            {t("roles.readFailed")}
           </AlertDescription>
         </Alert>
       ) : (
         <div className="grid gap-3 lg:grid-cols-2">
           <RolePicker
-            title={tierLabels.admin}
-            description={tierDescriptions.admin}
+            title={t("roles.tier.admin")}
+            description={t("roles.tier.adminBody")}
             roles={config.roles}
             selected={draft.adminRoleIds}
             unassignable={unassignable}
@@ -156,8 +157,8 @@ export function RolesView({ guild }: { guild: Guild }) {
             onToggle={(roleId, checked) => assign("adminRoleIds", roleId, checked)}
           />
           <RolePicker
-            title={tierLabels.moderator}
-            description={tierDescriptions.moderator}
+            title={t("roles.tier.moderator")}
+            description={t("roles.tier.moderatorBody")}
             roles={config.roles}
             selected={draft.moderatorRoleIds}
             unassignable={unassignable}
@@ -171,7 +172,7 @@ export function RolesView({ guild }: { guild: Guild }) {
 
       <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
         <Info className="mt-0.5 size-3.5 shrink-0" />
-        الرتب تُقرأ من Discord وتُفحص على الخادم. ما يعلو رتبة البوت لا يُمنح.
+        {t("roles.discordNote")}
       </p>
 
 
@@ -232,6 +233,12 @@ function RolePicker({
   onSuggest: () => void;
   onToggle: (roleId: string, checked: boolean) => void;
 }) {
+  const { t } = useI18n();
+  const powerLabel = (key: string, fallback: string) => {
+    const translationKey = `roles.power.${key}` as TranslationKey;
+    const value = t(translationKey);
+    return value === translationKey ? fallback : value;
+  };
   const chosen = new Set(selected);
   const byId = new Map(roles.map(role => [role.id, role] as const));
   const chosenRoles = selected
@@ -254,7 +261,7 @@ function RolePicker({
             {/* The size of the choice. Counted from the command registry the bot
                 actually serves, so it cannot disagree with it. */}
             <Badge variant="outline" className="tabular text-[10px] text-muted-foreground">
-              {unlocked} أمرًا
+              {t("roles.unlocked", { count: unlocked })}
             </Badge>
           </div>
           <CardDescription className="mt-0.5 text-xs">{description}</CardDescription>
@@ -262,7 +269,7 @@ function RolePicker({
         {suggestionIsUseful ? (
           <Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={onSuggest}>
             <Sparkles className="size-3.5" aria-hidden />
-            اقترح ({suggested.length})
+            {t("roles.suggest", { count: suggested.length })}
           </Button>
         ) : null}
       </CardHeader>
@@ -276,8 +283,8 @@ function RolePicker({
         */}
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           {chosenRoles.length
-            ? `كل من يمسك إحدى هذه الرتب يملك: ${description}`
-            : "لم تختر أي رتبة — هذه الصلاحيات الآن لمالك السيرفر ولمن يملك صلاحية Administrator في ديسكورد فقط."}
+            ? t("roles.everyoneHas", { description })
+            : t("roles.noRoles")}
         </p>
 
         {/* The selection, out of the list and where it can be read at a glance.
@@ -290,7 +297,7 @@ function RolePicker({
                 key={role.id}
                 type="button"
                 onClick={() => onToggle(role.id, false)}
-                aria-label={`إزالة ${role.name} من ${title}`}
+                aria-label={t("roles.remove", { role: role.name, title })}
                 className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] transition-colors hover:border-destructive/60 hover:text-destructive"
               >
                 <RoleSwatch color={role.color} />
@@ -336,17 +343,17 @@ function RolePicker({
                               power.tier === "admin" ? "bg-primary/15 text-primary" : "bg-accent text-accent-foreground"
                             )}
                           >
-                            {power.label}
+                            {powerLabel(power.key, power.label)}
                           </span>
                         ))}
                       </span>
                     ) : (
-                      <span className="block text-[10px] text-muted-foreground">لا صلاحيات إشراف في ديسكورد</span>
+                      <span className="block text-[10px] text-muted-foreground">{t("roles.noModPowers")}</span>
                     )}
                   </span>
                   {blocked && (
                     <Badge variant="destructive" className="shrink-0 text-[10px]">
-                      أعلى من رتبة البوت
+                      {t("roles.aboveBot")}
                     </Badge>
                   )}
                 </label>

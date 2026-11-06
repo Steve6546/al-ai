@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { StateBadge } from "@/components/state-badge";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * The master switch of a module, and the one place its state is stated.
@@ -28,7 +29,7 @@ export function ModuleStatusCard({
   onToggle,
   toggleLabel,
   disabledHint,
-  enableLabel = "تفعيل",
+  enableLabel,
   extra,
   className
 }: {
@@ -47,6 +48,7 @@ export function ModuleStatusCard({
   extra?: ReactNode;
   className?: string;
 }) {
+  const { t } = useI18n();
   return (
     <Card className={cn("overflow-hidden", className)}>
       <div className="flex items-start gap-3 p-4 sm:p-5">
@@ -75,7 +77,7 @@ export function ModuleStatusCard({
         <div className="flex flex-col gap-3 border-t border-border/70 bg-muted/20 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <p className="min-w-0 text-sm leading-relaxed text-muted-foreground">{disabledHint}</p>
           <Button size="sm" onClick={() => onToggle(true)} className="w-full shrink-0 sm:w-auto">
-            {enableLabel}
+            {enableLabel ?? t("common.enable")}
           </Button>
         </div>
       ) : null}

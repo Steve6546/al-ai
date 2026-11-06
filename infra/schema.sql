@@ -227,7 +227,11 @@ CREATE TABLE IF NOT EXISTS oauth_sessions (
 ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS discord_avatar TEXT;
 -- Idempotent upgrade for databases created before the @handle was stored.
 ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS discord_handle TEXT;
+-- The browser that opened the session, so the security screen can show a
+-- recognisable device list. It is a display hint, never used for authorisation.
+ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS user_agent TEXT;
 CREATE INDEX IF NOT EXISTS oauth_sessions_expires_idx ON oauth_sessions (expires_at);
+CREATE INDEX IF NOT EXISTS oauth_sessions_user_idx ON oauth_sessions (discord_user_id);
 
 -- Append-only. Payloads are AES-256-GCM encrypted before they land here.
 CREATE TABLE IF NOT EXISTS audit_trail (
@@ -916,6 +920,73 @@ UPDATE bot_identity SET activity_text = 'سيرفرات ديسكورد' WHERE id
 -- unused credential store is a liability, not a spare part.
 DROP TABLE IF EXISTS bot_token_guilds;
 DROP TABLE IF EXISTS bot_tokens;
+
+-- Admin second factor. A pending login is the short window between a
+-- successful Discord OAuth exchange and a verified TOTP/recovery code; NO
+-- session cookie is issued until that verification succeeds.
+CREATE TABLE IF NOT EXISTS admin_two_factor (
+  discord_user_id TEXT PRIMARY KEY,
+  -- AES-256-GCM envelope of the base32 TOTP secret. Re-encrypted by
+  -- scripts/rotate-encryption-key.mts when ENCRYPTION_KEY changes.
+  secret_ciphertext TEXT NOT NULL,
+  -- Last accepted RFC 6238 counter. A replayed code reports a non-increasing
+  -- counter, so the conditional UPDATE that consumes it refuses the replay.
+  last_counter BIGINT,
+  confirmed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Recovery codes are stored only as keyed HMACs. Spending one is a DELETE,
+-- which is atomic when two requests submit the same code in the same tick.
+CREATE TABLE IF NOT EXISTS admin_two_factor_recovery (
+  code_hash TEXT PRIMARY KEY,
+  discord_user_id TEXT NOT NULL REFERENCES admin_two_factor(discord_user_id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS admin_two_factor_recovery_user_idx ON admin_two_factor_recovery (discord_user_id);
+
+CREATE TABLE IF NOT EXISTS admin_two_factor_pending (
+  id UUID PRIMARY KEY,
+  discord_user_id TEXT NOT NULL,
+  discord_username TEXT NOT NULL,
+  discord_handle TEXT,
+  discord_avatar TEXT,
+  -- The OAuth access token, under the same envelope as oauth_sessions.
+  access_token_ciphertext TEXT NOT NULL,
+  scopes TEXT NOT NULL,
+  -- Encrypted JSON {secret, recoveryCodes}; NULL once the account is enrolled.
+  enrollment_ciphertext TEXT,
+  expires_at TIMESTAMPTZ NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS admin_two_factor_pending_expires_idx ON admin_two_factor_pending (expires_at);
+
+-- The short-lived material for a NEW authenticator, started from the account
+-- settings screen. Kept apart from `admin_two_factor_pending` because that row
+-- is a half-finished LOGIN (it carries an OAuth token); this one only carries
+-- the secret and recovery codes that will replace the current enrolment once
+-- the operator proves they can read a code from the new app.
+CREATE TABLE IF NOT EXISTS admin_two_factor_setup (
+  discord_user_id TEXT PRIMARY KEY,
+  -- Encrypted JSON {secret, recoveryCodes}. Never served twice: confirming or
+  -- cancelling the change deletes the row.
+  enrollment_ciphertext TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS admin_two_factor_setup_expires_idx ON admin_two_factor_setup (expires_at);
+
+-- Per-account preferences that are not device-local. Only what the server
+-- genuinely needs to know lives here; the appearance stays on the device.
+CREATE TABLE IF NOT EXISTS user_preferences (
+  discord_user_id TEXT PRIMARY KEY,
+  -- The interface language. Arabic is the product's default and the value a
+  -- row without an explicit choice receives.
+  language TEXT NOT NULL DEFAULT 'ar' CHECK (language IN ('ar', 'en')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- GOVERNANCE rule 10: the audit trail is append-only.
 -- This is enforced by the database itself, so no code path can rewrite history.

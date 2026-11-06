@@ -232,11 +232,12 @@ test("the commands board drops the totals cards and lifts the filter row to the 
 
   // "Rose to the top" has to mean something in markup, or it is a claim about a
   // screenshot. The content column's own first heading now follows the filter
-  // row. The `</h3>` anchor matters: the section *nav* renders the same labels
+  // row. The `</h2>` anchor matters: the section *nav* renders the same labels
   // as buttons, and it precedes the column, so a bare label search would match
-  // the sidebar and prove nothing.
+  // the sidebar and prove nothing. h2 (not h3) keeps the outline h1 -> h2
+  // unbroken, which the live axe sweep asserts.
   const search = html.indexOf("ابحث عن أمر");
-  const firstHeading = html.indexOf(">الأوامر الأساسية</h3>");
+  const firstHeading = html.indexOf(">الأوامر الأساسية</h2>");
   assert.ok(search >= 0, "the instant search is present");
   assert.ok(firstHeading > search, "the filter row sits above the first section heading");
 

@@ -104,6 +104,7 @@ import {
 import { api } from "@/api";
 import { setOrDeleteKey } from "@/lib/records";
 import { useDraftForm } from "@/lib/use-draft-form";
+import { useI18n, type Translate, type TranslationKey } from "@/lib/i18n";
 import { ColorPicker } from "@/components/color-picker";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { SaveBar } from "@/components/save-bar";
@@ -455,6 +456,35 @@ export const eventHints: Record<string, string> = {
   "stage.request-speak": "عند طلب عضو التحدث."
 };
 
+/**
+ * The server and core ship Arabic labels; these three helpers lay the selected
+ * language over them by id and fall back to the original when a key is absent,
+ * so an untranslated event still reads as a sentence rather than an id.
+ */
+export function eventLabel(t: Translate, id: string, fallback: string): string {
+  const key = `logs.event.${id}` as TranslationKey;
+  const value = t(key);
+  return value === key ? fallback : value;
+}
+
+export function categoryLabel(t: Translate, id: string, fallback: string): string {
+  const key = `logs.category.${id}` as TranslationKey;
+  const value = t(key);
+  return value === key ? fallback : value;
+}
+
+export function categoryDescription(t: Translate, id: string, fallback: string): string {
+  const key = `logs.categoryDesc.${id}` as TranslationKey;
+  const value = t(key);
+  return value === key ? fallback : value;
+}
+
+export function eventHint(t: Translate, id: string): string | undefined {
+  const key = `logs.hint.${id}` as TranslationKey;
+  const value = t(key);
+  return value === key ? eventHints[id] : value;
+}
+
 /** Formats a remaining cooldown as mm:ss — the badge the operator watches. */
 function formatCooldown(ms: number): string {
   const total = Math.ceil(ms / 1000);
@@ -491,6 +521,7 @@ function formatCooldown(ms: number): string {
  * section carries a badge marking it as a special tier.
  */
 export function LogsView({ guild }: { guild: Guild }) {
+  const { t } = useI18n();
   const [settings, setSettings] = useState<LoggingSettings | null>(null);
   const { saved, draft, dirty, patch, reset, commit } = useDraftForm(settings);
   const [channels, setChannels] = useState<ChannelOption[]>([]);
@@ -515,11 +546,11 @@ export function LogsView({ guild }: { guild: Guild }) {
         if (cancelled) return;
         setSettings(result.settings);
       })
-      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر التحميل."));
+      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : t("logs.loadFailed")));
     api
       .channels(guild.id)
       .then(result => !cancelled && setChannels(result.channels))
-      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : "تعذّر قراءة القنوات."));
+      .catch(cause => !cancelled && setError(cause instanceof Error ? cause.message : t("logs.channelsLoadFailed")));
     // The role list is only needed for the ignore picker, so a failure here must
     // not take the whole screen down — the log settings are still usable.
     api
@@ -604,17 +635,17 @@ export function LogsView({ guild }: { guild: Guild }) {
       if (result.failed.length > 0) {
         push({
           tone: "error",
-          title: "لم تُنشأ بعض القنوات",
-          description: result.failed.map(entry => `${entry.name ?? "قناة"}: ${entry.message}`).join(" — ")
+          title: t("logs.toast.partialCreate"),
+          description: result.failed.map(entry => `${entry.name ?? t("logs.record.channel")}: ${entry.message}`).join(" — ")
         });
       } else {
         push({
           tone: "success",
-          title: mode === "normal" ? "تم إنشاء قنوات الأقسام وربطها" : "تم إنشاء قنوات السجلات المفصلة وربطها"
+          title: mode === "normal" ? t("logs.toast.createdNormal") : t("logs.toast.createdDetailed")
         });
       }
     } catch (cause) {
-      push({ tone: "error", title: "تعذّر إنشاء القنوات", description: cause instanceof Error ? cause.message : undefined });
+      push({ tone: "error", title: t("logs.toast.createFailed"), description: cause instanceof Error ? cause.message : undefined });
     } finally {
       setChannelAction(null);
       setCooldownEndsAt(Date.now() + CHANNEL_ACTION_COOLDOWN_MS);
@@ -632,14 +663,14 @@ export function LogsView({ guild }: { guild: Guild }) {
       if (result.failed.length > 0) {
         push({
           tone: "error",
-          title: "لم تُحذف بعض القنوات",
+          title: t("logs.toast.partialDelete"),
           description: result.failed.map(entry => entry.message).join(" — ")
         });
       } else {
-        push({ tone: "success", title: "تم حذف قنوات السجلات وتعطيل التسجيل" });
+        push({ tone: "success", title: t("logs.toast.deleted") });
       }
     } catch (cause) {
-      push({ tone: "error", title: "تعذّر حذف القنوات", description: cause instanceof Error ? cause.message : undefined });
+      push({ tone: "error", title: t("logs.toast.deleteFailed"), description: cause instanceof Error ? cause.message : undefined });
     } finally {
       setChannelAction(null);
       setCooldownEndsAt(Date.now() + CHANNEL_ACTION_COOLDOWN_MS);
@@ -666,7 +697,8 @@ export function LogsView({ guild }: { guild: Guild }) {
   const visibleRecords = needle
     ? allRecords.filter(
         record =>
-          record.event.label.toLowerCase().includes(needle) || record.event.id.includes(needle)
+          eventLabel(t, record.event.id, record.event.label).toLowerCase().includes(needle) ||
+          record.event.id.includes(needle)
       )
     : allRecords.filter(record => record.category.id === selection);
   const filteredRecords = visibleRecords.filter(record =>
@@ -699,12 +731,12 @@ export function LogsView({ guild }: { guild: Guild }) {
         * binds - the number the teardown dialog is about to act on.
       */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-card px-4 py-3">
-        <StatPill icon={CheckCircle2} tone="text-success" label="أحداث مفعّلة" value={`${enabledCount} من ${allRecords.length}`} />
-        <StatPill icon={Hash} tone="text-primary" label="قنوات مربوطة" value={channelsInUse} />
+        <StatPill icon={CheckCircle2} tone="text-success" label={t("logs.stat.enabled")} value={t("logs.stat.enabledValue", { enabled: enabledCount, total: allRecords.length })} />
+        <StatPill icon={Hash} tone="text-primary" label={t("logs.stat.channels")} value={channelsInUse} />
         {coolingDown ? (
           <Badge variant="outline" className="gap-1.5 border-warning/40 text-warning" dir="ltr">
             <Settings className="size-3" />
-            إعداد القنوات متاح بعد قليل
+            {t("logs.channelCooldown")}
           </Badge>
         ) : null}
       </div>
@@ -723,8 +755,8 @@ export function LogsView({ guild }: { guild: Guild }) {
                 <Settings className="size-5" aria-hidden />
               </span>
               <div className="min-w-0">
-                <p className="text-base font-bold">إعداد تلقائي للقنوات</p>
-                <p className="text-xs text-muted-foreground">إنشاء قنوات السجلات لكل الأقسام بضغطة.</p>
+                <p className="text-base font-bold">{t("logs.autoSetup.title")}</p>
+                <p className="text-xs text-muted-foreground">{t("logs.autoSetup.body")}</p>
               </div>
             </div>
             {coolingDown && (
@@ -737,22 +769,22 @@ export function LogsView({ guild }: { guild: Guild }) {
 
           <div className="grid gap-3 sm:grid-cols-3">
             <ChannelActionButton
-              title="إنشاء قنوات عادية"
-              description="قناة واحدة لكل قسم (أعضاء، رسائل، أدوار…) — مناسب لأغلب السيرفرات."
+              title={t("logs.action.normal.title")}
+              description={t("logs.action.normal.description")}
               busy={channelAction === "setup-normal"}
               disabled={channelAction !== null || coolingDown}
               onClick={() => void runSetup("normal")}
             />
             <ChannelActionButton
-              title="إنشاء قنوات مفصلة"
-              description="قناة منفصلة لكل نوع سجل — للسيرفرات الكبيرة."
+              title={t("logs.action.detailed.title")}
+              description={t("logs.action.detailed.description")}
               busy={channelAction === "setup-detailed"}
               disabled={channelAction !== null || coolingDown}
               onClick={() => void runSetup("detailed")}
             />
             <ChannelActionButton
-              title="حذف قنوات السجلات"
-              description="حذف فئة السجلات وجميع القنوات بداخلها وتعطيل السجلات."
+              title={t("logs.action.teardown.title")}
+              description={t("logs.action.teardown.description")}
               destructive
               busy={channelAction === "teardown"}
               disabled={channelAction !== null || (boundChannelCount === 0 && !draft.enabled)}
@@ -767,12 +799,12 @@ export function LogsView({ guild }: { guild: Guild }) {
             reading's natural "first" position. Each row carries the section's
             icon and its enabled/total count, so an operator can see at a glance
             which sections are doing work. */}
-        <nav aria-label="أقسام السجلات" className="lg:w-60 lg:shrink-0">
+        <nav aria-label={t("logs.sidebarAria")} className="lg:w-60 lg:shrink-0">
           <Card className="overflow-hidden">
             <NavButton active={selection === GENERAL} onClick={() => setSelection(GENERAL)}>
               <span className="flex items-center gap-2">
                 <Settings className="size-4" aria-hidden />
-                <span className="text-sm font-medium">إعدادات عامة</span>
+                <span className="text-sm font-medium">{t("logs.sidebar.general")}</span>
               </span>
             </NavButton>
             {logCategories.map(category => {
@@ -785,7 +817,7 @@ export function LogsView({ guild }: { guild: Guild }) {
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     <Icon className="size-4 shrink-0" aria-hidden />
-                    <span className="truncate text-sm">{category.label}</span>
+                    <span className="truncate text-sm">{categoryLabel(t, category.id, category.label)}</span>
                   </span>
                   <Badge variant="secondary" className="shrink-0 tabular-nums" dir="ltr">
                     {`${enabledInSection(category.id)}/${category.events.length}`}
@@ -811,8 +843,8 @@ export function LogsView({ guild }: { guild: Guild }) {
                 type="search"
                 value={query}
                 onChange={event => setQuery(event.target.value)}
-                placeholder="ابحث عن سجل..."
-                aria-label="ابحث عن سجل"
+                placeholder={t("logs.search.placeholder")}
+                aria-label={t("logs.search.aria")}
                 className="pe-9"
               />
             </div>
@@ -821,7 +853,13 @@ export function LogsView({ guild }: { guild: Guild }) {
                 <FilterTab
                   key={value}
                   active={filter === value}
-                  label={value === "all" ? "الكل" : value === "enabled" ? "المفعلة" : "المعطلة"}
+                  label={
+                    value === "all"
+                      ? t("logs.filter.all")
+                      : value === "enabled"
+                        ? t("logs.filter.enabled")
+                        : t("logs.filter.disabled")
+                  }
                   onClick={() => setFilter(value)}
                 />
               ))}
@@ -830,7 +868,7 @@ export function LogsView({ guild }: { guild: Guild }) {
 
           {showSearchResults ? (
             <RecordList
-              heading={`نتائج البحث (${filteredRecords.length})`}
+              heading={t("logs.searchResults", { count: filteredRecords.length })}
               records={filteredRecords}
               eventFlags={draft.eventFlags}
               eventChannels={draft.eventChannels ?? {}}
@@ -851,12 +889,12 @@ export function LogsView({ guild }: { guild: Guild }) {
           ) : selection === GENERAL ? (
             <Card>
               <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
-                <CardTitle className="min-w-0 text-base">التسجيل المركزي</CardTitle>
+                <CardTitle className="min-w-0 text-base">{t("logs.general.title")}</CardTitle>
                 <div className="flex shrink-0 items-center gap-2">
                   <StateBadge enabled={draft.enabled} />
                   <Switch
                     checked={draft.enabled}
-                    aria-label="تفعيل السجلات"
+                    aria-label={t("logs.general.toggleAria")}
                     onCheckedChange={enabled => patch({ enabled })}
                   />
                 </div>
@@ -864,38 +902,38 @@ export function LogsView({ guild }: { guild: Guild }) {
               {draft.enabled ? (
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label>وضع التوزيع</Label>
+                  <Label>{t("logs.general.mode")}</Label>
                   <div className="flex gap-2">
                     <ModeButton
                       active={draft.mode === "normal"}
-                      title="عادية"
-                      hint="قناة واحدة لكل قسم"
+                      title={t("logs.general.normal")}
+                      hint={t("logs.general.normalHint")}
                       onClick={() => patch({ mode: "normal" })}
                     />
                     <ModeButton
                       active={draft.mode === "detailed"}
-                      title="مفصلة"
-                      hint="قناة لكل سجل"
+                      title={t("logs.general.detailed")}
+                      hint={t("logs.general.detailedHint")}
                       onClick={() => patch({ mode: "detailed" })}
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    «عادية»: قناة لكل قسم. «مفصلة»: قناة لكل سجل.
+                    {t("logs.general.modeHint")}
                   </p>
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>القناة العامة</Label>
+                    <Label>{t("logs.general.channel")}</Label>
                     <Select
                       value={draft.globalChannelId ?? INHERIT}
                       onValueChange={value => patch({ globalChannelId: value === INHERIT ? null : value })}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="بدون قناة عامة" />
+                        <SelectValue placeholder={t("logs.general.noChannel")} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={INHERIT}>بدون قناة عامة</SelectItem>
+                        <SelectItem value={INHERIT}>{t("logs.general.noChannel")}</SelectItem>
                         {textChannels.map(channel => (
                           <SelectItem key={channel.id} value={channel.id}>
                             #{channel.name}
@@ -904,15 +942,15 @@ export function LogsView({ guild }: { guild: Guild }) {
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
-                      الوجهة الاحتياطية لأي قسم أو سجل لم يُحدّد قنته الخاصة.
+                      {t("logs.general.channelHint")}
                     </p>
                   </div>
 
                   <ColorField
-                    label="لون الـ Embed"
+                    label={t("logs.general.embedColor")}
                     value={draft.embedColor}
                     onChange={value => patch({ embedColor: value })}
-                    ariaLabel="لون الـ Embed"
+                    ariaLabel={t("logs.general.embedColor")}
                   />
                 </div>
 
@@ -921,9 +959,9 @@ export function LogsView({ guild }: { guild: Guild }) {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <SearchableMultiSelect
                     id="logs-ignored-channels"
-                    label="القنوات المستثناة"
+                    label={t("logs.general.ignoredChannels")}
                     kind="text"
-                    hint="لا يُسجَّل أي حدث يقع داخل هذه القنوات."
+                    hint={t("logs.general.ignoredChannelsHint")}
                     options={textChannels}
                     selected={draft.ignoredChannelIds}
                     onChange={ignoredChannelIds => patch({ ignoredChannelIds })}
@@ -931,9 +969,9 @@ export function LogsView({ guild }: { guild: Guild }) {
 
                   <SearchableMultiSelect
                     id="logs-ignored-roles"
-                    label="الرتب المستثناة"
+                    label={t("logs.general.ignoredRoles")}
                     kind="role"
-                    hint="الرتب التي لا تظهر في السجلات (الفاعل أو المتأثر)."
+                    hint={t("logs.general.ignoredRolesHint")}
                     options={roles}
                     selected={draft.ignoredRoleIds}
                     onChange={ignoredRoleIds => patch({ ignoredRoleIds })}
@@ -943,7 +981,7 @@ export function LogsView({ guild }: { guild: Guild }) {
               ) : (
                 <CardContent className="pt-0">
                   <p className="py-4 text-center text-sm text-muted-foreground">
-                    السجلات مُعطّلة — فعّلها من المفتاح أعلى البطاقة.
+                    {t("logs.general.disabled")}
                   </p>
                 </CardContent>
               )}
@@ -992,7 +1030,7 @@ export function LogsView({ guild }: { guild: Guild }) {
 
           <Alert>
             <AlertDescription className="text-xs">
-              سجلات البوت الداخلية وأحداث الأمان تُرسَل إلى Webhook المطوّر ولا تُسكت.
+              {t("logs.developerAlert")}
             </AlertDescription>
           </Alert>
         </div>
@@ -1001,17 +1039,20 @@ export function LogsView({ guild }: { guild: Guild }) {
       <Dialog open={confirmTeardown} onOpenChange={setConfirmTeardown}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>حذف قنوات السجلات</DialogTitle>
+            <DialogTitle>{t("logs.teardown.title")}</DialogTitle>
             <DialogDescription>
-              سيُحذف {boundChannelCount} {boundChannelCount === 1 ? "قناة" : "قنوات"} وفئة السجلات، ويُعطَّل التسجيل. لا رجوع.
+              {t("logs.teardown.body", {
+                count: boundChannelCount,
+                channels: boundChannelCount === 1 ? t("logs.teardown.channelOne") : t("logs.teardown.channels")
+              })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmTeardown(false)}>
-              إلغاء
+              {t("logs.cancel")}
             </Button>
             <Button variant="destructive" disabled={channelAction === "teardown"} onClick={() => void runTeardown()}>
-              {channelAction === "teardown" ? "جارٍ الحذف…" : "حذف"}
+              {channelAction === "teardown" ? t("logs.teardown.deleting") : t("logs.teardown.confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1046,8 +1087,8 @@ function NavButton({
       type="button"
       onClick={onClick}
       aria-current={active ? "page" : undefined}
-      className={`flex w-full items-center justify-between gap-2 border-b border-border/60 px-3 py-2.5 text-start transition-colors last:border-b-0 ${
-        active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent/50"
+      className={`flex w-full items-center justify-between gap-2 border-b border-border/60 px-3 py-2.5 text-start text-foreground transition-colors last:border-b-0 ${
+        active ? "bg-primary/10" : "hover:bg-accent/50"
       }`}
     >
       {children}
@@ -1146,6 +1187,7 @@ function ChannelActionButton({
   disabled: boolean;
   onClick: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <button
       type="button"
@@ -1158,7 +1200,7 @@ function ChannelActionButton({
       }`}
     >
       <span className={`block text-sm font-bold ${destructive ? "text-destructive" : ""}`}>{title}</span>
-      <span className="mt-1 block text-xs text-muted-foreground">{busy ? "جارٍ التنفيذ…" : description}</span>
+      <span className="mt-1 block text-xs text-muted-foreground">{busy ? t("logs.busy") : description}</span>
     </button>
   );
 }
@@ -1183,6 +1225,7 @@ function ColorField({
   resetLabel?: string;
   ariaLabel: string;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   return (
     <div className="space-y-2">
@@ -1200,7 +1243,7 @@ function ColorField({
           <PopoverContent className="w-72" align="start">
             <ColorPicker
               value={value}
-              unsetLabel={resetLabel ?? "اللون الافتراضي"}
+              unsetLabel={resetLabel ?? t("logs.color.default")}
               onChange={hex => {
                 if (hex === null) {
                   onReset?.();
@@ -1259,8 +1302,9 @@ function RecordCard({
   onColorChange: (value: string) => void;
   onColorReset: () => void;
 }) {
+  const { t } = useI18n();
   const Icon = eventIcons[eventId] ?? CircleUserRound;
-  const hint = eventHints[eventId];
+  const hint = eventHint(t, eventId);
   const inheritedName = channels.find(channel => channel.id === inheritedChannelId)?.name;
 
   return (
@@ -1299,17 +1343,19 @@ function RecordCard({
           >
             <div className="mt-3 grid gap-3 border-t border-border pt-3 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label className="text-xs">قناة السجل</Label>
+                <Label className="text-xs">{t("logs.record.channel")}</Label>
                 <Select
                   value={ownChannelId ?? INHERIT}
                   onValueChange={value => onChannelChange(value === INHERIT ? null : value)}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="اختر قناة السجلات" />
+                    <SelectValue placeholder={t("logs.record.channelPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={INHERIT}>
-                      {inheritedName ? `وراثة القسم (#${inheritedName})` : "وراثة القسم"}
+                      {inheritedName
+                        ? t("logs.record.inheritSectionNamed", { name: inheritedName })
+                        : t("logs.record.inheritSection")}
                     </SelectItem>
                     {channels.map(channel => (
                       <SelectItem key={channel.id} value={channel.id}>
@@ -1321,12 +1367,12 @@ function RecordCard({
               </div>
 
               <ColorField
-                label="لون السجل"
+                label={t("logs.record.color")}
                 value={color}
                 onChange={onColorChange}
                 onReset={colorOverridden ? onColorReset : undefined}
-                resetLabel="وراثة القسم"
-                ariaLabel={`لون ${label}`}
+                resetLabel={t("logs.record.inheritSection")}
+                ariaLabel={t("logs.record.colorAria", { label })}
               />
             </div>
           </motion.div>
@@ -1370,10 +1416,11 @@ function RecordList({
   onEventColorChange: (eventId: string, value: string) => void;
   onEventColorReset: (eventId: string) => void;
 }) {
+  const { t } = useI18n();
   if (records.length === 0) {
     return (
       <Card>
-        <CardContent className="p-6 text-center text-sm text-muted-foreground">لا توجد سجلات مطابقة.</CardContent>
+        <CardContent className="p-6 text-center text-sm text-muted-foreground">{t("logs.list.empty")}</CardContent>
       </Card>
     );
   }
@@ -1388,8 +1435,8 @@ function RecordList({
           <RecordCard
             key={event.id}
             eventId={event.id}
-            label={event.label}
-            sectionLabel={category.label}
+            label={eventLabel(t, event.id, event.label)}
+            sectionLabel={categoryLabel(t, category.id, category.label)}
             enabled={isEventEnabled(eventFlags, category.id, event.id)}
             ownChannelId={eventChannels[event.id] ?? null}
             inheritedChannelId={categoryChannels[category.id] ?? globalChannelId ?? null}
@@ -1451,7 +1498,9 @@ function SectionCard({
   onEventColorChange: (eventId: string, value: string) => void;
   onEventColorReset: (eventId: string) => void;
 }) {
+  const { t } = useI18n();
   const Icon = sectionIcons[category.id];
+  const siblingLabel = categoryLabel(t, category.id, category.label);
   const muted = category.events.filter(event => !isEventEnabled(eventFlags, category.id, event.id)).length;
   const channelId = categoryChannels[category.id] ?? null;
   const color = categoryColors[category.id] ?? embedColor;
@@ -1473,15 +1522,17 @@ function SectionCard({
           </span>
           <div className="min-w-0">
             <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-              {category.label}
-              {muted > 0 && <Badge variant="secondary">{`${muted} مكتوم`}</Badge>}
+              {siblingLabel}
+              {muted > 0 && <Badge variant="secondary">{t("logs.section.muted", { count: muted })}</Badge>}
             </CardTitle>
-            <p className="text-xs text-muted-foreground">{category.description}</p>
+            <p className="text-xs text-muted-foreground">
+              {categoryDescription(t, category.id, category.description)}
+            </p>
           </div>
         </div>
         <Switch
           checked={isCategoryEnabled(eventFlags, category.id)}
-          aria-label={category.label}
+          aria-label={siblingLabel}
           onCheckedChange={onToggleCategory}
           className="shrink-0 self-start sm:self-auto"
         />
@@ -1497,19 +1548,19 @@ function SectionCard({
         */}
         <div className="space-y-3 rounded-lg border border-border p-3">
           <div>
-            <p className="text-sm font-bold">إعدادات القسم</p>
-            <p className="text-xs text-muted-foreground">طبّق نفس الإعدادات على جميع السجلات المفعلة</p>
+            <p className="text-sm font-bold">{t("logs.section.defaultsTitle")}</p>
+            <p className="text-xs text-muted-foreground">{t("logs.section.defaultsHint")}</p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 sm:gap-4">
             <div className="space-y-1.5">
-              <Label className="text-xs">القناة الافتراضية</Label>
+              <Label className="text-xs">{t("logs.section.defaultChannel")}</Label>
               <Select value={channelId ?? INHERIT} onValueChange={value => onChannelChange(value === INHERIT ? null : value)}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="اختر قناة للقسم" />
+                  <SelectValue placeholder={t("logs.section.channelPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={INHERIT}>القناة العامة</SelectItem>
+                  <SelectItem value={INHERIT}>{t("logs.section.globalChannel")}</SelectItem>
                   {channels.map(channel => (
                     <SelectItem key={channel.id} value={channel.id}>
                       #{channel.name}
@@ -1517,16 +1568,16 @@ function SectionCard({
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">يُرسَل إليها كل سجل مفعول في هذا القسم ليس له قناته الخاصة.</p>
+              <p className="text-xs text-muted-foreground">{t("logs.section.channelHint")}</p>
             </div>
 
             <ColorField
-              label="اللون الافتراضي"
+              label={t("logs.section.defaultColor")}
               value={color}
               onChange={onColorChange}
               onReset={colorOverridden ? onColorReset : undefined}
-              resetLabel="اللون العام"
-              ariaLabel={`لون ${category.label}`}
+              resetLabel={t("logs.section.globalColor")}
+              ariaLabel={t("logs.section.colorAria", { label: siblingLabel })}
             />
           </div>
 
@@ -1536,10 +1587,10 @@ function SectionCard({
               if (colorOverridden) onEventColorChange(event.id, color);
             });
           }}>
-            تطبيق على جميع السجلات المفعلة
+            {t("logs.section.apply")}
           </Button>
           <p className="text-xs text-muted-foreground">
-            يكتب قناة القسم ولونه في كل سجل مفعول ({enabledEvents.length}) دفعة واحدة.
+            {t("logs.section.applyHint", { count: enabledEvents.length })}
           </p>
         </div>
 
@@ -1557,14 +1608,14 @@ function SectionCard({
             className="flex-1 bg-success text-white hover:bg-success/85"
             onClick={onEnableAll}
           >
-            تفعيل الكل
+            {t("logs.section.enableAll")}
           </Button>
           <Button
             size="sm"
             className="flex-1 bg-destructive text-white hover:bg-destructive/85"
             onClick={onDisableAll}
           >
-            تعطيل الكل
+            {t("logs.section.disableAll")}
           </Button>
         </div>
 
@@ -1574,7 +1625,7 @@ function SectionCard({
         */}
         {visibleRecords.length === 0 ? (
           <p className="rounded-md border border-border p-4 text-center text-xs text-muted-foreground">
-            لا توجد سجلات مطابقة في هذا القسم.
+            {t("logs.section.empty")}
           </p>
         ) : (
           <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 sm:gap-4">
@@ -1584,7 +1635,7 @@ function SectionCard({
                 <RecordCard
                   key={event.id}
                   eventId={event.id}
-                  label={event.label}
+                  label={eventLabel(t, event.id, event.label)}
                   enabled={isEventEnabled(eventFlags, category.id, event.id)}
                   ownChannelId={eventChannels[event.id] ?? null}
                   inheritedChannelId={channelId ?? globalChannelId ?? null}

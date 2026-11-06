@@ -22,7 +22,6 @@
 
 import {
   botStatusDurations,
-  botStatusLabels,
   botStatuses,
   isTimedBotStatus,
   type BotStatus,
@@ -39,6 +38,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 /**
@@ -53,15 +53,6 @@ export const STATUS_COLORS: Record<BotStatus, string> = {
   idle: "#f0b232",
   dnd: "#f23f43",
   invisible: "#80848e"
-};
-
-/** How a status is described in the menu, the way Discord's own status menu
- * carries a one-line explanation under each name. */
-const STATUS_DESCRIPTIONS: Record<BotStatus, string> = {
-  online: "ستظهر متصلاً للجميع",
-  idle: "ستظهر خائماً، بجانب اسمك هلال أصفر",
-  dnd: "لن تصلك إشعارات سطح المكتب",
-  invisible: "ستظهر غير متصل للجميع"
 };
 
 /**
@@ -162,6 +153,8 @@ export function StatusPicker({
   const pick = (nextStatus: BotStatus, nextDuration: BotStatusDuration | null = null) =>
     onChange({ status: nextStatus, duration: nextStatus === "online" ? null : nextDuration });
 
+  const { t } = useI18n();
+
   // `forever` is "timed, no expiry"; any other value is a real countdown.
   const activeDuration: BotStatusDuration | null = status === "online" ? null : duration;
 
@@ -169,7 +162,7 @@ export function StatusPicker({
     <DropdownMenu>
       <DropdownMenuTrigger
         disabled={disabled}
-        aria-label="حالة البوت"
+        aria-label={t("presence.status")}
         className={cn(
           // `h-9` is the design system's control height — input, select and the
           // default button all share it, and this trigger sits beside a Select
@@ -189,17 +182,17 @@ export function StatusPicker({
             values since Tailwind 4 — wrapping them in hsl() produced an invalid
             colour and a black bite. */}
         <StatusDot status={status} />
-        <span>{botStatusLabels[status]}</span>
+        <span>{t(`presence.status.${status}` as TranslationKey)}</span>
         {activeDuration ? (
           <span className="text-xs text-muted-foreground">
-            {botStatusDurations.find(entry => entry.id === activeDuration)?.label}
+            {t(`presence.duration.${activeDuration}` as TranslationKey)}
           </span>
         ) : null}
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="start" className="w-64">
         {botStatuses.map(candidate => {
-          const description = STATUS_DESCRIPTIONS[candidate];
+          const description = t(`presence.describe.${candidate}` as TranslationKey);
           // Two-line rows, the way Discord's own status menu draws them: the
           // name, and the explanation underneath rather than hidden in a
           // tooltip the operator has to hover to discover.
@@ -209,7 +202,7 @@ export function StatusPicker({
                 <StatusDot status={candidate} size={12} />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium leading-tight">{botStatusLabels[candidate]}</span>
+                <span className="block text-sm font-medium leading-tight">{t(`presence.status.${candidate}` as TranslationKey)}</span>
                 <span className="block text-xs leading-snug text-muted-foreground">{description}</span>
               </span>
             </>
@@ -239,7 +232,7 @@ export function StatusPicker({
                 {botStatusDurations.map(entry => (
                   <DurationItem
                     key={entry.id}
-                    label={entry.label}
+                    label={t(`presence.duration.${entry.id}` as TranslationKey)}
                     selected={status === candidate && activeDuration === entry.id}
                     onSelect={() => pick(candidate, entry.id)}
                   />

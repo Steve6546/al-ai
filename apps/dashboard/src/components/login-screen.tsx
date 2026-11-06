@@ -1,9 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { BrandMark } from "@/components/brand-mark";
+import { useI18n } from "@/lib/i18n";
 import { LogIn, ShieldCheck } from "lucide-react";
 
 export function LoginScreen({ notice }: { notice: string | null }) {
+  const { t } = useI18n();
   return (
     /*
      * The document no longer scrolls, so this screen scrolls itself.
@@ -19,18 +21,18 @@ export function LoginScreen({ notice }: { notice: string | null }) {
         <CardHeader className="items-center text-center">
           <BrandMark className="mx-auto mb-2 size-14 text-primary" />
           <CardTitle className="text-2xl">AL AI</CardTitle>
-          <CardDescription>إدارة ديسكورد</CardDescription>
+          <CardDescription>{t("login.subtitle")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Button asChild className="w-full" size="lg">
             <a href="/auth/discord/login">
               <LogIn />
-              تسجيل الدخول عبر Discord
+              {t("login.button")}
             </a>
           </Button>
           <p className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
             <ShieldCheck className="size-3.5" />
-            الدخول مقصور على من يملك رتبة إدارية
+            {t("login.restricted")}
           </p>
           {notice && <p className="text-center text-xs text-destructive">{notice}</p>}
         </CardContent>

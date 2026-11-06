@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * The one confirmation before a session ends.
@@ -29,21 +30,20 @@ export function LogoutConfirm({
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>تسجيل الخروج؟</DialogTitle>
-          <DialogDescription>
-            ستنتهي الجلسة الحالية، ولن تُحفظ أي تغييرات غير محفوظة.
-          </DialogDescription>
+          <DialogTitle>{t("account.logoutTitle")}</DialogTitle>
+          <DialogDescription>{t("account.logoutBody")}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            إلغاء
+            {t("common.cancel")}
           </Button>
           <Button variant="destructive" onClick={onConfirm}>
-            تسجيل الخروج
+            {t("common.signOut")}
           </Button>
         </DialogFooter>
       </DialogContent>

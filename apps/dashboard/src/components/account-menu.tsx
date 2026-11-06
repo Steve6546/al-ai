@@ -30,14 +30,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
+import { useI18n } from "@/lib/i18n";
 import { initials } from "@/lib/format";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
-import { tierLabels, type Guild, type SessionInfo } from "@/types";
+import type { Guild, SessionInfo } from "@/types";
 
 export type AccountMenuProps = {
   user: SessionInfo["user"];
   guild: Guild;
+  /** Opens the signed-in account's own settings screen. */
+  onOpenSettings?: () => void;
   /** Opens the selected guild's own settings screen. */
   onOpenGuildSettings?: () => void;
   onLogout: () => void;
@@ -49,15 +52,17 @@ export type AccountMenuProps = {
 export function AccountMenu({
   user,
   guild,
+  onOpenSettings,
   onOpenGuildSettings,
   onLogout,
   variant = "row",
   className
 }: AccountMenuProps) {
+  const { t } = useI18n();
   const { copied, copy } = useCopy();
   const [confirmLogout, setConfirmLogout] = useState(false);
   const isOwner = user?.isPlatformOwner === true;
-  const role = guild.tier ? tierLabels[guild.tier] : "لا توجد رتبة في هذا السيرفر";
+  const role = guild.tier ? t(`tier.${guild.tier}` as "tier.owner") : t("tier.member");
 
   const trigger =
     variant === "compact" ? (
@@ -68,7 +73,7 @@ export function AccountMenu({
           "flex size-9 items-center justify-center rounded-full transition-ui hover:bg-accent",
           className
         )}
-        aria-label="حساب المستخدم"
+        aria-label={t("account.menuLabel")}
       >
         <Avatar className="size-8">
           {user?.avatarUrl && <AvatarImage src={user.avatarUrl} alt="" />}
@@ -129,7 +134,7 @@ export function AccountMenu({
               type="button"
               onClick={() => void copy(user?.id ?? "", "discord-id")}
               className="rounded p-0.5 transition-ui hover:bg-accent hover:text-accent-foreground"
-              aria-label="نسخ معرّف Discord"
+              aria-label={t("account.copyId")}
             >
               {copied === "discord-id" ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
             </button>
@@ -145,14 +150,21 @@ export function AccountMenu({
             className="gap-2"
           >
             <ExternalLink className="size-4" />
-            فتح الحساب في Discord
+            {t("account.openDiscord")}
           </a>
         </DropdownMenuItem>
+
+        {onOpenSettings ? (
+          <DropdownMenuItem onSelect={onOpenSettings} className="gap-2">
+            <Settings className="size-4" />
+            {t("nav.settings.label")}
+          </DropdownMenuItem>
+        ) : null}
 
         {onOpenGuildSettings ? (
           <DropdownMenuItem onSelect={onOpenGuildSettings} className="gap-2">
             <Settings className="size-4" />
-            إعدادات هذا السيرفر
+            {t("account.guildSettings")}
           </DropdownMenuItem>
         ) : null}
 
@@ -161,7 +173,7 @@ export function AccountMenu({
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <ShieldCheck className="size-3.5" />
-              مالك المنصة
+              {t("account.ownerArea")}
             </DropdownMenuLabel>
           </>
         ) : null}
@@ -169,7 +181,7 @@ export function AccountMenu({
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => setConfirmLogout(true)} className="gap-2 text-destructive focus:text-destructive">
           <LogOut className="size-4" />
-          تسجيل الخروج
+          {t("account.signOut")}
         </DropdownMenuItem>
       </DropdownMenuContent>
       </DropdownMenu>
@@ -193,6 +205,7 @@ export function AccountMenu({
  * what destroys the session and clears the cookie.
  */
 export function SignOutButton({ onLogout }: { onLogout: () => void }) {
+  const { t } = useI18n();
   const [confirmLogout, setConfirmLogout] = useState(false);
   return (
     <>
@@ -201,10 +214,10 @@ export function SignOutButton({ onLogout }: { onLogout: () => void }) {
         size="sm"
         onClick={() => setConfirmLogout(true)}
         className="gap-2 px-2 sm:px-3"
-        aria-label="تسجيل الخروج"
+        aria-label={t("common.signOut")}
       >
         <LogOut className="size-4" />
-        <span className="hidden sm:inline">تسجيل الخروج</span>
+        <span className="hidden sm:inline">{t("common.signOut")}</span>
       </Button>
       <LogoutConfirm
         open={confirmLogout}
