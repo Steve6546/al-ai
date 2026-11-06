@@ -248,8 +248,8 @@ export function TwoFactorScreen({
            * ---------------------------------------------------------- */}
           <div className="relative flex flex-col justify-between gap-6 border-b border-white/10 bg-[#060a08] p-6 sm:p-8 lg:border-b-0 lg:border-e">
             <div className="flex items-center gap-2.5">
-              <span className="grid size-9 place-items-center rounded-xl bg-[#6ee7b7] text-[#04110b]">
-                <BrandMark className="size-5" />
+              <span className="grid size-10 place-items-center rounded-xl bg-[#6ee7b7] text-[#04110b]">
+                <BrandMark className="size-6" />
               </span>
               <div className="leading-tight">
                 <p className="text-sm font-semibold text-white">AL AI</p>
@@ -269,9 +269,9 @@ export function TwoFactorScreen({
                 </div>
               </div>
             ) : (
-              <div className="relative mx-auto grid size-40 place-items-center sm:size-48">
+              <div className="relative mx-auto grid size-36 place-items-center sm:size-44">
                 <span aria-hidden className="absolute inset-0 rounded-full border border-[#6ee7b7]/20" />
-                <span aria-hidden className="absolute inset-5 rounded-full border border-[#6ee7b7]/30" />
+                <span aria-hidden className="absolute inset-6 rounded-full border border-[#6ee7b7]/30" />
                 <span aria-hidden className="absolute inset-0 rounded-full bg-[#6ee7b7]/10 blur-2xl" />
                 <div className="relative grid size-24 place-items-center rounded-2xl border border-[#6ee7b7]/30 bg-[#0b1411] text-[#8ff0c5] shadow-[0_0_50px_rgba(110,231,183,0.20)] sm:size-28">
                   <LockKeyhole className="size-10" aria-hidden />
@@ -284,7 +284,13 @@ export function TwoFactorScreen({
                 <ShieldCheck className="size-3" aria-hidden />
                 {t("twoFactor.title")}
               </p>
-              <p className="text-[11px] leading-relaxed text-white/35">{t("twoFactor.guideBody")}</p>
+              {/* The QR / manual-key instructions belong to enrolment only. Once
+                  an authenticator is confirmed, the sign-in step is just the
+                  code field — showing "scan the QR" beside it reads as a task
+                  the operator has already done. */}
+              {!enrolled && (
+                <p className="text-[11px] leading-relaxed text-white/35">{t("twoFactor.guideBody")}</p>
+              )}
             </div>
           </div>
 
