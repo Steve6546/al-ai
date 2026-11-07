@@ -305,37 +305,48 @@ function GuildSection({
 function GuildCard({ guild, action }: { guild: Guild; action: ReactNode }) {
   const { t, language } = useI18n();
   return (
-    <Card className="transition-colors hover:border-primary/40">
-      <CardContent className="space-y-3 p-4">
-        <div className="flex items-start gap-3">
-          <Avatar className="size-11 rounded-xl">
-            {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
-            <AvatarFallback className="rounded-xl">{initials(guild.name)}</AvatarFallback>
-          </Avatar>
-
-          <div className="min-w-0 flex-1 space-y-1">
-            <p className="truncate text-sm font-medium" title={guild.name}>
-              {guild.name}
-            </p>
-            <p className="text-xs text-muted-foreground">{formatMemberCount(guild.memberCount, language)}</p>
-          </div>
-
-          {/* Present means manageable; absent means invitable. The badge states
-              which, so the action below it is never a surprise. */}
+    <Card className="overflow-hidden transition-colors hover:border-primary/40">
+      {/* The banner strip: the guild's own icon, blurred, over a brand gradient
+          — a header that reads as "this server" without inventing a field the
+          summary does not carry. */}
+      <div className="relative h-24 w-full overflow-hidden bg-gradient-to-br from-primary/40 via-primary/20 to-accent/30">
+        {guild.iconUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={guild.iconUrl} alt="" className="size-full scale-125 object-cover opacity-35 blur-md" />
+        ) : null}
+        <div className="absolute end-3 top-3">
           {guild.botPresent ? (
-            <Badge className="shrink-0 gap-1 border-transparent bg-success/15 text-success">
+            <Badge className="gap-1 border-transparent bg-card/90 text-success backdrop-blur">
               <ShieldCheck className="size-3" />
               {t("guilds.activeBadge")}
             </Badge>
           ) : (
-            <Badge variant="outline" className="shrink-0 gap-1 text-warning">
+            <Badge className="gap-1 border-transparent bg-card/90 text-warning backdrop-blur">
               {t("guilds.missingBadge")}
             </Badge>
           )}
         </div>
+      </div>
 
-        {action}
-      </CardContent>
+      <div className="px-4 pb-4">
+        {/* The icon overlaps the banner, ringed in the card's own background so
+            it reads as one piece rather than a pasted-on circle. */}
+        <div className="-mt-8 flex justify-center">
+          <Avatar className="size-16 rounded-2xl ring-4 ring-card">
+            {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
+            <AvatarFallback className="rounded-2xl text-lg">{initials(guild.name)}</AvatarFallback>
+          </Avatar>
+        </div>
+
+        <div className="mt-2 space-y-0.5 text-center">
+          <p className="truncate text-sm font-medium" title={guild.name}>
+            {guild.name}
+          </p>
+          <p className="text-xs text-muted-foreground">{formatMemberCount(guild.memberCount, language)}</p>
+        </div>
+
+        <div className="mt-3">{action}</div>
+      </div>
     </Card>
   );
 }
