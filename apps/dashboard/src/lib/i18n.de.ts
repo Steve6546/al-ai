@@ -1642,4 +1642,11 @@ export const de: Record<TranslationKey, string> = {
   "twoFactor.savedRequired": "Bestätigen Sie zunächst, dass Sie die Wiederherstellungscodes gespeichert haben.",
   "settings.language.german": "Deutsch",
   "settings.language.germanHint": "Schnittstelle von links nach rechts",
+  "security.punishmentKind.ban": "Bannen",
+  "security.punishmentKind.kick": "Kicken",
+  "security.punishmentKind.timeout": "Timeout",
+  "security.punishmentKind.remove-roles": "Rollen entfernen",
+  "security.punishmentKind.warn": "Verwarnen",
+  "security.windowHint": "{minutes} Min.",
+  "security.timeoutSeconds": "Timeout-Dauer (Sekunden)",
 };

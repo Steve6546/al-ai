@@ -18,11 +18,13 @@ import {
   ANTI_NUKE_WINDOW_MS,
   NUKE_FAMILIES,
   NUKE_PROTECTIONS,
+  PROTECTION_PUNISHMENTS,
   activeProtectionCount,
   protectionEnabled,
   protectionsInFamily,
   type NukeFamily,
-  type NukeProtection
+  type NukeProtection,
+  type ProtectionPunishment
 } from "@al-ai/core/browser";
 import { formatDateTime } from "@/lib/format";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
@@ -385,6 +387,12 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
               {protectionsInFamily(family).map(protection => {
                 const limitKey = protection.limitKey;
                 const enforced = limitKey !== undefined && watchedLimits.has(limitKey);
+                const current = draft.protections[protection.key];
+                const patchProtection = (next: Partial<typeof current>) =>
+                  setDraft({
+                    ...draft,
+                    protections: { ...draft.protections, [protection.key]: { ...current, ...next } }
+                  });
                 return (
                   <ProtectionCard
                     key={protection.key}
@@ -393,17 +401,16 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
                     canEdit={canEdit && enforced}
                     enabled={protectionEnabled(draft.protections, protection.key)}
                     limitValue={limitKey ? draft.limits[limitKey] : protection.limit.default}
-                    punishmentLabel={punishmentLabel}
-                    windowSeconds={ANTI_NUKE_WINDOW_MS / 1000}
-                    onToggle={enabled =>
-                      setDraft({
-                        ...draft,
-                        protections: { ...draft.protections, [protection.key]: { enabled } }
-                      })
-                    }
+                    punishment={current.punishment}
+                    timeoutSeconds={current.timeoutSeconds}
+                    windowSeconds={current.windowSeconds}
+                    onToggle={enabled => patchProtection({ enabled })}
                     onLimitChange={value => {
                       if (limitKey) setLimit(limitKey, value);
                     }}
+                    onPunishmentChange={punishment => patchProtection({ punishment })}
+                    onTimeoutChange={timeoutSeconds => patchProtection({ timeoutSeconds })}
+                    onWindowChange={windowSeconds => patchProtection({ windowSeconds })}
                   />
                 );
               })}
@@ -475,10 +482,14 @@ function ProtectionCard({
   canEdit,
   enabled,
   limitValue,
-  punishmentLabel,
+  punishment,
+  timeoutSeconds,
   windowSeconds,
   onToggle,
-  onLimitChange
+  onLimitChange,
+  onPunishmentChange,
+  onTimeoutChange,
+  onWindowChange
 }: {
   protection: NukeProtection;
   /** Whether the engine counts this action at all. */
@@ -486,10 +497,14 @@ function ProtectionCard({
   canEdit: boolean;
   enabled: boolean;
   limitValue: number;
-  punishmentLabel: string;
+  punishment: ProtectionPunishment;
+  timeoutSeconds: number;
   windowSeconds: number;
   onToggle: (enabled: boolean) => void;
   onLimitChange: (value: number) => void;
+  onPunishmentChange: (value: ProtectionPunishment) => void;
+  onTimeoutChange: (value: number) => void;
+  onWindowChange: (value: number) => void;
 }) {
   const { t } = useI18n();
   const [showExceptions, setShowExceptions] = useState(false);
@@ -550,20 +565,25 @@ function ProtectionCard({
 
             <div className="space-y-1.5">
               <span className="text-xs font-normal text-muted-foreground">{t("security.punishment")}</span>
-              {/* Disabled on purpose: mitigation is one sequence for the whole
-                  engine (strip roles → quarantine → notify owner), not a choice
-                  per action yet. The value shown is the real one. */}
-              <Select value="quarantine" disabled>
+              <Select
+                value={punishment}
+                disabled={!canEdit}
+                onValueChange={value => onPunishmentChange(value as ProtectionPunishment)}
+              >
                 <SelectTrigger
                   aria-label={t("security.punishmentAria", {
                     protection: t(`security.protection.${protection.key}.label` as TranslationKey)
                   })}
                   className="w-full"
                 >
-                  <SelectValue>{punishmentLabel}</SelectValue>
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="quarantine">{punishmentLabel}</SelectItem>
+                  {PROTECTION_PUNISHMENTS.map(kind => (
+                    <SelectItem key={kind} value={kind}>
+                      {t(`security.punishmentKind.${kind}` as TranslationKey)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -575,12 +595,29 @@ function ProtectionCard({
               <LimitStepper
                 id={`window-${protection.key}`}
                 value={windowSeconds}
-                min={windowSeconds}
-                max={windowSeconds}
-                disabled
-                onChange={() => {}}
+                min={10}
+                max={3600}
+                disabled={!canEdit}
+                onChange={onWindowChange}
               />
+              <p className="text-[10px] text-muted-foreground">{t("security.windowHint", { minutes: Math.round(windowSeconds / 60) })}</p>
             </div>
+
+            {punishment === "timeout" && (
+              <div className="space-y-1.5">
+                <Label htmlFor={`timeout-${protection.key}`} className="text-xs font-normal text-muted-foreground">
+                  {t("security.timeoutSeconds")}
+                </Label>
+                <LimitStepper
+                  id={`timeout-${protection.key}`}
+                  value={timeoutSeconds}
+                  min={60}
+                  max={2419200}
+                  disabled={!canEdit}
+                  onChange={onTimeoutChange}
+                />
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <button
