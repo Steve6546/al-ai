@@ -24,7 +24,7 @@ const ACTOR = "111111111111111111";
 const OTHER = "222222222222222222";
 const QUARANTINE_ROLE = "333333333333333333";
 
-const limits = { channelDeletesPerMinute: 2, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, bansPerMinute: 3, roleChangesPerMinute: 2 };
+const limits = { channelDeletesPerMinute: 2, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, channelOverwritesPerMinute: 5, bansPerMinute: 3, roleChangesPerMinute: 2 };
 
 const armed: AntiNukeConfig = {
   enabled: true,

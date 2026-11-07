@@ -209,7 +209,7 @@ test("a guild with no security row reads as armed at the defaults", { skip }, as
   const config = await db!.getSecurity(GUILD_ID);
 
   assert.equal(config.enabled, true, "a guild without a saved row is protected, not exposed");
-  assert.deepEqual(config.limits, { channelDeletesPerMinute: 3, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, bansPerMinute: 5, roleChangesPerMinute: 3 });
+  assert.deepEqual(config.limits, { channelDeletesPerMinute: 3, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, channelOverwritesPerMinute: 5, bansPerMinute: 5, roleChangesPerMinute: 3 });
   assert.equal(config.quarantineRoleId, null);
 });
 
@@ -218,7 +218,7 @@ test("security settings survive a round trip", { skip }, async () => {
 
   const written = {
     enabled: true,
-    limits: { channelDeletesPerMinute: 7, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, bansPerMinute: 12, roleChangesPerMinute: 4 },
+    limits: { channelDeletesPerMinute: 7, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, channelOverwritesPerMinute: 5, bansPerMinute: 12, roleChangesPerMinute: 4 },
     protections: DEFAULT_PROTECTION_SETTINGS,
     quarantineRoleId: "1540515175826985080"
   };
@@ -230,7 +230,7 @@ test("saving twice updates rather than duplicating", { skip }, async () => {
   await pool!.query("DELETE FROM guild_security WHERE guild_id = $1", [GUILD_ID]);
   const base = {
     enabled: false,
-    limits: { channelDeletesPerMinute: 3, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, bansPerMinute: 5, roleChangesPerMinute: 3 },
+    limits: { channelDeletesPerMinute: 3, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, channelOverwritesPerMinute: 5, bansPerMinute: 5, roleChangesPerMinute: 3 },
     protections: DEFAULT_PROTECTION_SETTINGS,
     quarantineRoleId: null
   };

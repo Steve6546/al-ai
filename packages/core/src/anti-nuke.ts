@@ -17,7 +17,7 @@ import {
  * mitigation; this file only answers "has this crossed the line?".
  */
 
-export type NukeAction = "channel-delete" | "channel-create" | "channel-update" | "ban" | "role-change";
+export type NukeAction = "channel-delete" | "channel-create" | "channel-update" | "channel-permissions" | "ban" | "role-change";
 
 export type AntiNukeLimits = {
   /** Channels one actor may delete inside the window. */
@@ -26,6 +26,8 @@ export type AntiNukeLimits = {
   channelCreatesPerMinute: number;
   /** Channels one actor may edit inside the window. */
   channelUpdatesPerMinute: number;
+  /** Permission overwrites one actor may change inside the window. */
+  channelOverwritesPerMinute: number;
   /** Members one actor may ban inside the window. */
   bansPerMinute: number;
   /** Roles one actor may create or delete inside the window, counted together. */
@@ -64,13 +66,14 @@ export type AntiNukeConfig = {
 
 export const ANTI_NUKE_WINDOW_MS = 60_000;
 
-export const ANTI_NUKE_ACTIONS: readonly NukeAction[] = ["channel-delete", "channel-create", "channel-update", "ban", "role-change"] as const;
+export const ANTI_NUKE_ACTIONS: readonly NukeAction[] = ["channel-delete", "channel-create", "channel-update", "channel-permissions", "ban", "role-change"] as const;
 
 /** Which limit governs which action. Kept explicit so a new action cannot be added without a limit. */
 export const ANTI_NUKE_LIMIT_KEYS: Record<NukeAction, keyof AntiNukeLimits> = {
   "channel-delete": "channelDeletesPerMinute",
   "channel-create": "channelCreatesPerMinute",
   "channel-update": "channelUpdatesPerMinute",
+  "channel-permissions": "channelOverwritesPerMinute",
   ban: "bansPerMinute",
   "role-change": "roleChangesPerMinute"
 };
@@ -80,6 +83,7 @@ export const ANTI_NUKE_ACTION_LABELS: Record<NukeAction, string> = {
   "channel-delete": "حذف القنوات",
   "channel-create": "إنشاء القنوات",
   "channel-update": "تعديل القنوات",
+  "channel-permissions": "صلاحيات القنوات",
   ban: "حظر الأعضاء",
   "role-change": "إنشاء الرتب وحذفها"
 };
@@ -88,6 +92,7 @@ export const DEFAULT_ANTI_NUKE_LIMITS: AntiNukeLimits = {
   channelDeletesPerMinute: 3,
   channelCreatesPerMinute: 5,
   channelUpdatesPerMinute: 5,
+  channelOverwritesPerMinute: 5,
   bansPerMinute: 5,
   roleChangesPerMinute: 3
 };
@@ -152,6 +157,7 @@ export function normaliseAntiNukeConfig(value: unknown): AntiNukeConfig {
       channelDeletesPerMinute: clampLimit(limits.channelDeletesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.channelDeletesPerMinute),
       channelCreatesPerMinute: clampLimit(limits.channelCreatesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.channelCreatesPerMinute),
       channelUpdatesPerMinute: clampLimit(limits.channelUpdatesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.channelUpdatesPerMinute),
+      channelOverwritesPerMinute: clampLimit(limits.channelOverwritesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.channelOverwritesPerMinute),
       bansPerMinute: clampLimit(limits.bansPerMinute, DEFAULT_ANTI_NUKE_LIMITS.bansPerMinute),
       roleChangesPerMinute: clampLimit(limits.roleChangesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.roleChangesPerMinute)
     },

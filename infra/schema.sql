@@ -578,6 +578,7 @@ CREATE TABLE IF NOT EXISTS guild_security (
   channel_deletes_per_minute SMALLINT NOT NULL DEFAULT 3,
   channel_creates_per_minute SMALLINT NOT NULL DEFAULT 5,
   channel_updates_per_minute SMALLINT NOT NULL DEFAULT 5,
+  channel_overwrites_per_minute SMALLINT NOT NULL DEFAULT 5,
   bans_per_minute SMALLINT NOT NULL DEFAULT 5,
   role_changes_per_minute SMALLINT NOT NULL DEFAULT 3,
   quarantine_role_id TEXT,
@@ -588,6 +589,7 @@ CREATE TABLE IF NOT EXISTS guild_security (
   CONSTRAINT guild_security_channel_deletes_check CHECK (channel_deletes_per_minute BETWEEN 1 AND 100),
   CONSTRAINT guild_security_channel_creates_check CHECK (channel_creates_per_minute BETWEEN 1 AND 100),
   CONSTRAINT guild_security_channel_updates_check CHECK (channel_updates_per_minute BETWEEN 1 AND 100),
+  CONSTRAINT guild_security_channel_overwrites_check CHECK (channel_overwrites_per_minute BETWEEN 1 AND 100),
   CONSTRAINT guild_security_bans_check CHECK (bans_per_minute BETWEEN 1 AND 100),
   CONSTRAINT guild_security_role_changes_check CHECK (role_changes_per_minute BETWEEN 1 AND 100)
 );
@@ -607,6 +609,9 @@ ALTER TABLE guild_security DROP CONSTRAINT IF EXISTS guild_security_channel_crea
 ALTER TABLE guild_security ADD CONSTRAINT guild_security_channel_creates_check CHECK (channel_creates_per_minute BETWEEN 1 AND 100);
 ALTER TABLE guild_security DROP CONSTRAINT IF EXISTS guild_security_channel_updates_check;
 ALTER TABLE guild_security ADD CONSTRAINT guild_security_channel_updates_check CHECK (channel_updates_per_minute BETWEEN 1 AND 100);
+ALTER TABLE guild_security ADD COLUMN IF NOT EXISTS channel_overwrites_per_minute SMALLINT NOT NULL DEFAULT 5;
+ALTER TABLE guild_security DROP CONSTRAINT IF EXISTS guild_security_channel_overwrites_check;
+ALTER TABLE guild_security ADD CONSTRAINT guild_security_channel_overwrites_check CHECK (channel_overwrites_per_minute BETWEEN 1 AND 100);
 
 -- Per-protection switches, as one JSON object keyed by the registry's names.
 --

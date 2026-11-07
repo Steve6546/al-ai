@@ -128,7 +128,8 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
     description: "منع تعديل أذونات القنوات (Allow/Deny/Overwrites) لعزل الأعضاء.",
     auditEvents: ["ChannelOverwriteCreate", "ChannelOverwriteUpdate", "ChannelOverwriteDelete"],
     permission: "MANAGE_CHANNELS",
-    limit: { min: 1, max: 100, default: 5 }
+    limit: { min: 1, max: 100, default: 5 },
+    limitKey: "channelOverwritesPerMinute"
   },
 
   /* ---------------- Roles ----------------
@@ -341,13 +342,14 @@ export const PROTECTION_KEYS_BY_ACTION: Record<NukeAction, readonly NukeProtecti
   "channel-delete": ["channel-delete"],
   "channel-create": ["channel-create"],
   "channel-update": ["channel-update"],
+  "channel-permissions": ["channel-permissions"],
   ban: ["member-ban"],
   "role-change": ["role-create", "role-delete"]
 };
 
 /** The single protection an observed event belongs to, or null if the engine ignores it. */
 export function protectionKeyForEvent(
-  event: "server.channel-delete" | "server.channel-create" | "server.channel-update" | "moderation.ban" | "role.create" | "role.delete"
+  event: "server.channel-delete" | "server.channel-create" | "server.channel-update" | "channel.permission-update" | "moderation.ban" | "role.create" | "role.delete"
 ): NukeProtectionKey {
   switch (event) {
     case "server.channel-delete":
@@ -356,6 +358,8 @@ export function protectionKeyForEvent(
       return "channel-create";
     case "server.channel-update":
       return "channel-update";
+    case "channel.permission-update":
+      return "channel-permissions";
     case "moderation.ban":
       return "member-ban";
     case "role.create":

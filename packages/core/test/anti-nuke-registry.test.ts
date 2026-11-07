@@ -102,7 +102,7 @@ test("the badge counts what the engine actually enforces", () => {
   // A per-protection switch only changes the count when it lands on a protection
   // the engine counts. Turning off something already unenforced must not move a
   // number that was never claiming to include it.
-  const offUnenforced = { "channel-permissions": { enabled: false } };
+  const offUnenforced = { "role-update": { enabled: false } };
   assert.equal(activeProtectionCount(true, offUnenforced), enforced, "switching an unenforced protection off changes nothing");
   const offEnforced = { "channel-delete": { enabled: false } };
   assert.equal(activeProtectionCount(true, offEnforced), enforced - 1, "switching an enforced protection off is visible");
