@@ -17,11 +17,15 @@ import {
  * mitigation; this file only answers "has this crossed the line?".
  */
 
-export type NukeAction = "channel-delete" | "ban" | "role-change";
+export type NukeAction = "channel-delete" | "channel-create" | "channel-update" | "ban" | "role-change";
 
 export type AntiNukeLimits = {
   /** Channels one actor may delete inside the window. */
   channelDeletesPerMinute: number;
+  /** Channels one actor may create inside the window. */
+  channelCreatesPerMinute: number;
+  /** Channels one actor may edit inside the window. */
+  channelUpdatesPerMinute: number;
   /** Members one actor may ban inside the window. */
   bansPerMinute: number;
   /** Roles one actor may create or delete inside the window, counted together. */
@@ -60,11 +64,13 @@ export type AntiNukeConfig = {
 
 export const ANTI_NUKE_WINDOW_MS = 60_000;
 
-export const ANTI_NUKE_ACTIONS: readonly NukeAction[] = ["channel-delete", "ban", "role-change"] as const;
+export const ANTI_NUKE_ACTIONS: readonly NukeAction[] = ["channel-delete", "channel-create", "channel-update", "ban", "role-change"] as const;
 
 /** Which limit governs which action. Kept explicit so a new action cannot be added without a limit. */
 export const ANTI_NUKE_LIMIT_KEYS: Record<NukeAction, keyof AntiNukeLimits> = {
   "channel-delete": "channelDeletesPerMinute",
+  "channel-create": "channelCreatesPerMinute",
+  "channel-update": "channelUpdatesPerMinute",
   ban: "bansPerMinute",
   "role-change": "roleChangesPerMinute"
 };
@@ -72,12 +78,16 @@ export const ANTI_NUKE_LIMIT_KEYS: Record<NukeAction, keyof AntiNukeLimits> = {
 /** Operator-facing names, in the language the dashboard is written in. */
 export const ANTI_NUKE_ACTION_LABELS: Record<NukeAction, string> = {
   "channel-delete": "حذف القنوات",
+  "channel-create": "إنشاء القنوات",
+  "channel-update": "تعديل القنوات",
   ban: "حظر الأعضاء",
   "role-change": "إنشاء الرتب وحذفها"
 };
 
 export const DEFAULT_ANTI_NUKE_LIMITS: AntiNukeLimits = {
   channelDeletesPerMinute: 3,
+  channelCreatesPerMinute: 5,
+  channelUpdatesPerMinute: 5,
   bansPerMinute: 5,
   roleChangesPerMinute: 3
 };
@@ -140,6 +150,8 @@ export function normaliseAntiNukeConfig(value: unknown): AntiNukeConfig {
     enabled: normaliseEnabled(source.enabled),
     limits: {
       channelDeletesPerMinute: clampLimit(limits.channelDeletesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.channelDeletesPerMinute),
+      channelCreatesPerMinute: clampLimit(limits.channelCreatesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.channelCreatesPerMinute),
+      channelUpdatesPerMinute: clampLimit(limits.channelUpdatesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.channelUpdatesPerMinute),
       bansPerMinute: clampLimit(limits.bansPerMinute, DEFAULT_ANTI_NUKE_LIMITS.bansPerMinute),
       roleChangesPerMinute: clampLimit(limits.roleChangesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.roleChangesPerMinute)
     },

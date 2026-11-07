@@ -24,7 +24,7 @@ const ACTOR = "111111111111111111";
 const OTHER = "222222222222222222";
 const QUARANTINE_ROLE = "333333333333333333";
 
-const limits = { channelDeletesPerMinute: 2, bansPerMinute: 3, roleChangesPerMinute: 2 };
+const limits = { channelDeletesPerMinute: 2, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, bansPerMinute: 3, roleChangesPerMinute: 2 };
 
 const armed: AntiNukeConfig = {
   enabled: true,
@@ -161,7 +161,6 @@ test("ordinary events are not treated as destructive", () => {
   for (const event of [
     { type: "member.join", guildId: GUILD, memberId: "m" },
     { type: "message.delete", guildId: GUILD, messageId: "m", channelId: "c" },
-    { type: "server.channel-create", guildId: GUILD, channelId: "c", actorId: ACTOR },
     { type: "client.ready", tag: "AL AI#0001", guildCount: 1 }
   ] as BotEvent[]) {
     assert.equal(nukeActionOf(event), null, `${event.type} must not be watched`);

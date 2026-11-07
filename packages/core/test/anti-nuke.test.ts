@@ -19,7 +19,7 @@ import {
  * armed and is not.
  */
 
-const limits = { channelDeletesPerMinute: 3, bansPerMinute: 5, roleChangesPerMinute: 2 };
+const limits = { channelDeletesPerMinute: 3, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, bansPerMinute: 5, roleChangesPerMinute: 2 };
 
 /* ------------------------------------------------------------------ *
  * The trip decision
@@ -100,7 +100,7 @@ test("an unreadable flag falls back to the default rather than counting as conse
 
 test("limits are clamped to the allowed range", () => {
   const config = normaliseAntiNukeConfig({
-    limits: { channelDeletesPerMinute: 0, bansPerMinute: 10_000, roleChangesPerMinute: -4 }
+    limits: { channelDeletesPerMinute: 0, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, bansPerMinute: 10_000, roleChangesPerMinute: -4 }
   });
   assert.equal(config.limits.channelDeletesPerMinute, 1, "zero would trip on the first action");
   assert.equal(config.limits.bansPerMinute, MAX_ANTI_NUKE_LIMIT, "a huge limit would disable the guard silently");
@@ -133,7 +133,7 @@ test("a malformed quarantine role is dropped rather than stored", () => {
 test("normalisation is idempotent", () => {
   const once = normaliseAntiNukeConfig({
     enabled: true,
-    limits: { channelDeletesPerMinute: 7, bansPerMinute: 2, roleChangesPerMinute: 50 },
+    limits: { channelDeletesPerMinute: 7, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, bansPerMinute: 2, roleChangesPerMinute: 50 },
     quarantineRoleId: "1540515175826985080"
   });
   assert.deepEqual(normaliseAntiNukeConfig(once), once);

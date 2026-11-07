@@ -108,7 +108,8 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
     description: "منع إنشاء قنوات جماعي لتمرير إعلانات مزوّرة.",
     auditEvents: ["ChannelCreate"],
     permission: "MANAGE_CHANNELS",
-    limit: { min: 1, max: 100, default: 5 }
+    limit: { min: 1, max: 100, default: 5 },
+    limitKey: "channelCreatesPerMinute"
   },
   {
     key: "channel-update",
@@ -117,7 +118,8 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
     description: "منع تعديل أسماء القنوات وخصائصها بشكل جماعي.",
     auditEvents: ["ChannelUpdate"],
     permission: "MANAGE_CHANNELS",
-    limit: { min: 1, max: 100, default: 5 }
+    limit: { min: 1, max: 100, default: 5 },
+    limitKey: "channelUpdatesPerMinute"
   },
   {
     key: "channel-permissions",
@@ -337,15 +339,23 @@ export function findProtection(key: NukeProtectionKey): NukeProtection | undefin
  */
 export const PROTECTION_KEYS_BY_ACTION: Record<NukeAction, readonly NukeProtectionKey[]> = {
   "channel-delete": ["channel-delete"],
+  "channel-create": ["channel-create"],
+  "channel-update": ["channel-update"],
   ban: ["member-ban"],
   "role-change": ["role-create", "role-delete"]
 };
 
 /** The single protection an observed event belongs to, or null if the engine ignores it. */
-export function protectionKeyForEvent(event: "server.channel-delete" | "moderation.ban" | "role.create" | "role.delete"): NukeProtectionKey {
+export function protectionKeyForEvent(
+  event: "server.channel-delete" | "server.channel-create" | "server.channel-update" | "moderation.ban" | "role.create" | "role.delete"
+): NukeProtectionKey {
   switch (event) {
     case "server.channel-delete":
       return "channel-delete";
+    case "server.channel-create":
+      return "channel-create";
+    case "server.channel-update":
+      return "channel-update";
     case "moderation.ban":
       return "member-ban";
     case "role.create":

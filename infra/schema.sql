@@ -576,6 +576,8 @@ CREATE TABLE IF NOT EXISTS guild_security (
   -- this file must not silently re-arm a protection somebody switched off.
   enabled BOOLEAN NOT NULL DEFAULT true,
   channel_deletes_per_minute SMALLINT NOT NULL DEFAULT 3,
+  channel_creates_per_minute SMALLINT NOT NULL DEFAULT 5,
+  channel_updates_per_minute SMALLINT NOT NULL DEFAULT 5,
   bans_per_minute SMALLINT NOT NULL DEFAULT 5,
   role_changes_per_minute SMALLINT NOT NULL DEFAULT 3,
   quarantine_role_id TEXT,
@@ -584,6 +586,8 @@ CREATE TABLE IF NOT EXISTS guild_security (
   -- cannot store a limit of 0, which would trip on the first action and read as
   -- "the engine works" while actually blocking all moderation.
   CONSTRAINT guild_security_channel_deletes_check CHECK (channel_deletes_per_minute BETWEEN 1 AND 100),
+  CONSTRAINT guild_security_channel_creates_check CHECK (channel_creates_per_minute BETWEEN 1 AND 100),
+  CONSTRAINT guild_security_channel_updates_check CHECK (channel_updates_per_minute BETWEEN 1 AND 100),
   CONSTRAINT guild_security_bans_check CHECK (bans_per_minute BETWEEN 1 AND 100),
   CONSTRAINT guild_security_role_changes_check CHECK (role_changes_per_minute BETWEEN 1 AND 100)
 );
@@ -593,6 +597,16 @@ CREATE TABLE IF NOT EXISTS guild_security (
 -- a default never rewrites rows, which is what keeps this safe to re-run: a guild
 -- that has explicitly disarmed the engine stays disarmed.
 ALTER TABLE guild_security ALTER COLUMN enabled SET DEFAULT true;
+
+-- The channel-create and channel-update protections are now counted by the
+-- engine, so a database created before them needs their columns and checks.
+-- `IF NOT EXISTS` / `DROP ... IF EXISTS` keep this safe to re-run.
+ALTER TABLE guild_security ADD COLUMN IF NOT EXISTS channel_creates_per_minute SMALLINT NOT NULL DEFAULT 5;
+ALTER TABLE guild_security ADD COLUMN IF NOT EXISTS channel_updates_per_minute SMALLINT NOT NULL DEFAULT 5;
+ALTER TABLE guild_security DROP CONSTRAINT IF EXISTS guild_security_channel_creates_check;
+ALTER TABLE guild_security ADD CONSTRAINT guild_security_channel_creates_check CHECK (channel_creates_per_minute BETWEEN 1 AND 100);
+ALTER TABLE guild_security DROP CONSTRAINT IF EXISTS guild_security_channel_updates_check;
+ALTER TABLE guild_security ADD CONSTRAINT guild_security_channel_updates_check CHECK (channel_updates_per_minute BETWEEN 1 AND 100);
 
 -- Per-protection switches, as one JSON object keyed by the registry's names.
 --

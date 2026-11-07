@@ -327,12 +327,14 @@ export function createDatabase(pool: pg.Pool) {
       const { rows } = await pool.query<{
         enabled: boolean;
         channel_deletes_per_minute: number;
+        channel_creates_per_minute: number;
+        channel_updates_per_minute: number;
         bans_per_minute: number;
         role_changes_per_minute: number;
         quarantine_role_id: string | null;
         protection_settings: unknown;
       }>(
-        `SELECT enabled, channel_deletes_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id, protection_settings
+        `SELECT enabled, channel_deletes_per_minute, channel_creates_per_minute, channel_updates_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id, protection_settings
          FROM guild_security WHERE guild_id = $1`,
         [guildId]
       );
@@ -344,6 +346,8 @@ export function createDatabase(pool: pg.Pool) {
         protections: row.protection_settings,
         limits: {
           channelDeletesPerMinute: row.channel_deletes_per_minute,
+          channelCreatesPerMinute: row.channel_creates_per_minute,
+          channelUpdatesPerMinute: row.channel_updates_per_minute,
           bansPerMinute: row.bans_per_minute,
           roleChangesPerMinute: row.role_changes_per_minute
         }
@@ -352,11 +356,13 @@ export function createDatabase(pool: pg.Pool) {
 
     async saveSecurity(guildId: string, config: AntiNukeConfig) {
       await pool.query(
-        `INSERT INTO guild_security (guild_id, enabled, channel_deletes_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id, protection_settings, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+        `INSERT INTO guild_security (guild_id, enabled, channel_deletes_per_minute, channel_creates_per_minute, channel_updates_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id, protection_settings, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
          ON CONFLICT (guild_id) DO UPDATE
            SET enabled = EXCLUDED.enabled,
                channel_deletes_per_minute = EXCLUDED.channel_deletes_per_minute,
+               channel_creates_per_minute = EXCLUDED.channel_creates_per_minute,
+               channel_updates_per_minute = EXCLUDED.channel_updates_per_minute,
                bans_per_minute = EXCLUDED.bans_per_minute,
                role_changes_per_minute = EXCLUDED.role_changes_per_minute,
                quarantine_role_id = EXCLUDED.quarantine_role_id,
@@ -366,6 +372,8 @@ export function createDatabase(pool: pg.Pool) {
           guildId,
           config.enabled,
           config.limits.channelDeletesPerMinute,
+          config.limits.channelCreatesPerMinute,
+          config.limits.channelUpdatesPerMinute,
           config.limits.bansPerMinute,
           config.limits.roleChangesPerMinute,
           config.quarantineRoleId,

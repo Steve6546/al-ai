@@ -382,7 +382,7 @@ const payloads: [RegExp, unknown][] = [
   [/^\/api\/guilds\/[^/]+\/security\/config$/, {
     config: {
       enabled: true,
-      limits: { channelDeletesPerMinute: 3, bansPerMinute: 5, roleChangesPerMinute: 3 },
+      limits: { channelDeletesPerMinute: 3, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, bansPerMinute: 5, roleChangesPerMinute: 3 },
       protections: DEFAULT_PROTECTION_SETTINGS,
       quarantineRoleId: null
     },

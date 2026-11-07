@@ -231,6 +231,10 @@ export function nukeActionOf(event: BotEvent): NukeObservation | null {
   switch (event.type) {
     case "server.channel-delete":
       return { action: "channel-delete", protectionKey: "channel-delete", guildId: event.guildId, actorId: event.actorId };
+    case "server.channel-create":
+      return { action: "channel-create", protectionKey: "channel-create", guildId: event.guildId, actorId: event.actorId };
+    case "server.channel-update":
+      return { action: "channel-update", protectionKey: "channel-update", guildId: event.guildId, actorId: event.actorId };
     case "moderation.ban":
       return { action: "ban", protectionKey: "member-ban", guildId: event.guildId, actorId: event.actorId };
     case "role.create":
