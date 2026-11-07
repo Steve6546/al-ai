@@ -1649,4 +1649,5 @@ export const de: Record<TranslationKey, string> = {
   "security.punishmentKind.warn": "Verwarnen",
   "security.windowHint": "{minutes} Min.",
   "security.timeoutSeconds": "Timeout-Dauer (Sekunden)",
+  "security.exceptionsSearch": "Mitglied zum Hinzufügen suchen…",
 };

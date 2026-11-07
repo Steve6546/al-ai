@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bot, ChevronDown, Eye, Gavel, Hash, Loader2, MessageSquare, Minus, Plus, ShieldAlert, ShieldCheck, ShieldOff, Users, Webhook, Zap } from "lucide-react";
+import { AlertTriangle, Ban, Bot, ChevronDown, Clock, DoorOpen, Eye, Gavel, Hash, Loader2, MessageSquare, Minus, MinusCircle, Plus, Search, ShieldAlert, ShieldCheck, ShieldOff, Users, Webhook, Zap } from "lucide-react";
 import { api } from "@/api";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { SaveBar } from "@/components/save-bar";
@@ -153,6 +153,15 @@ const familyIcons: Record<NukeFamily, typeof Hash> = {
   members: Users,
   webhooks: Webhook,
   content: MessageSquare
+};
+
+/** Each punishment's icon and tone, so the dropdown reads at a glance. */
+const PUNISHMENT_ICONS: Record<ProtectionPunishment, { icon: typeof Minus; tone: string }> = {
+  ban: { icon: Ban, tone: "text-red-400" },
+  kick: { icon: DoorOpen, tone: "text-orange-400" },
+  timeout: { icon: Clock, tone: "text-amber-400" },
+  "remove-roles": { icon: MinusCircle, tone: "text-blue-400" },
+  warn: { icon: AlertTriangle, tone: "text-muted-foreground" }
 };
 
 /** The honest sentence for a section whose controls are not built yet. */
@@ -579,11 +588,18 @@ function ProtectionCard({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {PROTECTION_PUNISHMENTS.map(kind => (
-                    <SelectItem key={kind} value={kind}>
-                      {t(`security.punishmentKind.${kind}` as TranslationKey)}
-                    </SelectItem>
-                  ))}
+                  {PROTECTION_PUNISHMENTS.map(kind => {
+                    const meta = PUNISHMENT_ICONS[kind];
+                    const Icon = meta.icon;
+                    return (
+                      <SelectItem key={kind} value={kind} className="cursor-pointer">
+                        <span className="flex items-center gap-2">
+                          <Icon className={`size-4 ${meta.tone}`} aria-hidden />
+                          <span className={meta.tone}>{t(`security.punishmentKind.${kind}` as TranslationKey)}</span>
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
@@ -630,9 +646,18 @@ function ProtectionCard({
                 <ChevronDown className={`size-3.5 transition-transform ${showExceptions ? "rotate-180" : ""}`} aria-hidden />
               </button>
               {showExceptions && (
-                <p className="rounded-lg border border-dashed border-border/70 px-3 py-2 text-[11px] text-muted-foreground">
-                  {t("security.exceptionsBody")}
-                </p>
+                <div className="space-y-2">
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">{t("security.exceptionsBody")}</p>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                    <Input
+                      type="search"
+                      placeholder={t("security.exceptionsSearch")}
+                      aria-label={t("security.exceptionsSearch")}
+                      className="h-10 w-full rounded-xl border-2 ps-9 text-sm"
+                    />
+                  </div>
+                </div>
               )}
             </div>
           </div>
@@ -673,10 +698,10 @@ function LimitStepper({
   const step = (delta: number) => onChange(Math.min(max, Math.max(min, Math.trunc(value + delta))));
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-2">
       {value > min && (
-        <Button type="button" size="icon" variant="outline" className="size-8 shrink-0 rounded-lg" disabled={disabled} onClick={() => step(-1)} aria-label={t("security.decrease")}>
-          <Minus className="size-3.5" />
+        <Button type="button" size="icon" variant="outline" className="size-10 shrink-0 rounded-xl border-2" disabled={disabled} onClick={() => step(-1)} aria-label={t("security.decrease")}>
+          <Minus className="size-4" />
         </Button>
       )}
       <Input
@@ -685,14 +710,14 @@ function LimitStepper({
         min={min}
         max={max}
         dir="ltr"
-        className="h-8 w-full tabular text-center"
+        className="h-10 w-full rounded-xl border-2 text-base font-bold tabular text-center"
         disabled={disabled}
         value={value}
         onChange={event => onChange(Number(event.target.value))}
       />
       {value < max && (
-        <Button type="button" size="icon" variant="outline" className="size-8 shrink-0 rounded-lg" disabled={disabled} onClick={() => step(1)} aria-label={t("security.increase")}>
-          <Plus className="size-3.5" />
+        <Button type="button" size="icon" variant="outline" className="size-10 shrink-0 rounded-xl border-2" disabled={disabled} onClick={() => step(1)} aria-label={t("security.increase")}>
+          <Plus className="size-4" />
         </Button>
       )}
     </div>
