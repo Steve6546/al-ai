@@ -274,6 +274,14 @@ export const DISCORD_AUDIT_EVENTS = [
  * `{ "channel-delete": { ... } }` grows without a migration each time. A flat
  * `boolean` map would have to be rewritten the day the second field arrives.
  */
+export type ProtectionPunishment = "ban" | "kick" | "timeout" | "remove-roles" | "warn";
+
+export const PROTECTION_PUNISHMENTS: readonly ProtectionPunishment[] = ["ban", "kick", "timeout", "remove-roles", "warn"] as const;
+
+export function isProtectionPunishment(value: unknown): value is ProtectionPunishment {
+  return typeof value === "string" && (PROTECTION_PUNISHMENTS as readonly string[]).includes(value);
+}
+
 export type ProtectionSettings = {
   /**
    * Off means the engine does not count this action at all for this guild.
@@ -292,6 +300,17 @@ export type ProtectionSettings = {
    * the same action never share a window.
    */
   windowSeconds: number;
+  /**
+   * What happens to the actor when this protection trips. Independent per
+   * protection — changing one must never move another.
+   *
+   * `remove-roles` is the historic behaviour (strip roles, then the quarantine
+   * role); the rest are named Discord actions. Defaulted to `remove-roles` so an
+   * existing row keeps the behaviour it had before this field existed.
+   */
+  punishment: ProtectionPunishment;
+  /** Seconds for the `timeout` punishment. Ignored by every other punishment. */
+  timeoutSeconds: number;
 };
 
 /** Seconds the window may cover: 10..3600, defaulting to 600. */
@@ -301,10 +320,20 @@ function clampWindowSeconds(value: unknown): number {
   return Math.min(3600, Math.max(10, Math.trunc(numeric)));
 }
 
+/** A timeout length: 60s .. 28 days, defaulting to 600s (Discord's ceiling is 28d). */
+function clampTimeoutSeconds(value: unknown): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return 600;
+  return Math.min(2_419_200, Math.max(60, Math.trunc(numeric)));
+}
+
 export type ProtectionSettingsMap = Record<NukeProtectionKey, ProtectionSettings>;
 
 export const DEFAULT_PROTECTION_SETTINGS: ProtectionSettingsMap = Object.fromEntries(
-  NUKE_PROTECTIONS.map(protection => [protection.key, { enabled: true, windowSeconds: 600 }])
+  NUKE_PROTECTIONS.map(protection => [
+    protection.key,
+    { enabled: true, windowSeconds: 600, punishment: "remove-roles" as ProtectionPunishment, timeoutSeconds: 600 }
+  ])
 ) as ProtectionSettingsMap;
 
 /**
@@ -321,7 +350,12 @@ export function normaliseProtectionSettings(value: unknown): ProtectionSettingsM
   for (const [key, raw] of Object.entries(source)) {
     if (!isNukeProtectionKey(key)) continue;
     const settings = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-    result[key] = { enabled: settings.enabled !== false, windowSeconds: clampWindowSeconds(settings.windowSeconds) };
+    result[key] = {
+      enabled: settings.enabled !== false,
+      windowSeconds: clampWindowSeconds(settings.windowSeconds),
+      punishment: isProtectionPunishment(settings.punishment) ? settings.punishment : "remove-roles",
+      timeoutSeconds: clampTimeoutSeconds(settings.timeoutSeconds)
+    };
   }
   return result;
 }
