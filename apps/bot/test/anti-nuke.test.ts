@@ -7,6 +7,7 @@ import {
   mitigateNuke,
   nukeActionOf,
   ownerAlert,
+  type MitigationDeps,
   type NukeIncident
 } from "../src/security/anti-nuke.js";
 import type { BotEvent } from "../src/lib/discord.js";
@@ -194,72 +195,78 @@ test("role.update is observed but never counted as a role change", () => {
  * Mitigation
  * ------------------------------------------------------------------ */
 
-const incident: NukeIncident = { guildId: GUILD, actorId: ACTOR, action: "channel-delete", count: 3, limit: 2 };
+const incident: NukeIncident = { guildId: GUILD, actorId: ACTOR, action: "channel-delete", protectionKey: "channel-delete", count: 3, limit: 2 };
 
-test("the actor is neutralised before the owner is told", () => {
-  // Reversing this leaves the attacker active for a network round trip, which is
-  // exactly when they would delete the rest.
+function deps(overrides: Partial<MitigationDeps> = {}): MitigationDeps {
+  const ok = async () => ({ ok: true, detail: "done" });
+  return { ban: ok, kick: ok, timeout: ok, removeRoles: ok, warn: ok, notifyOwner: async () => true, ...overrides };
+}
+
+test("the actor is acted on before the owner is told", () => {
   const order: string[] = [];
-  return mitigateNuke(incident, armed, {
-    quarantine: async () => {
-      order.push("quarantine");
-      return 4;
-    },
-    notifyOwner: async () => {
-      order.push("notify");
-      return true;
-    }
-  }).then(outcome => {
-    assert.deepEqual(order, ["quarantine", "notify"]);
-    assert.equal(outcome.quarantined, 4);
+  return mitigateNuke(
+    incident,
+    armed,
+    deps({
+      removeRoles: async () => {
+        order.push("punish");
+        return { ok: true, detail: "roles removed" };
+      },
+      notifyOwner: async () => {
+        order.push("notify");
+        return true;
+      }
+    })
+  ).then(outcome => {
+    assert.deepEqual(order, ["punish", "notify"]);
+    assert.equal(outcome.applied, true);
     assert.equal(outcome.ownerNotified, true);
   });
 });
 
-test("a failed quarantine still notifies the owner", () => {
-  return mitigateNuke(incident, armed, {
-    quarantine: async () => null,
-    notifyOwner: async () => true
-  }).then(outcome => {
-    assert.equal(outcome.quarantined, null, "a failed strip must not be reported as a success");
-    assert.equal(outcome.ownerNotified, true, "the owner still needs to know");
-  });
-});
-
-test("a thrown quarantine does not abort the notification", () => {
-  return mitigateNuke(incident, armed, {
-    quarantine: async () => {
-      throw new Error("Discord is down");
-    },
-    notifyOwner: async () => true
-  }).then(outcome => {
-    assert.equal(outcome.quarantined, null);
+test("a refused punishment is not reported as success, and the owner is still told", () => {
+  return mitigateNuke(
+    incident,
+    armed,
+    deps({ removeRoles: async () => ({ ok: false, detail: "hierarchy" }) })
+  ).then(outcome => {
+    assert.equal(outcome.applied, false, "a refused punishment must not be reported as a success");
+    assert.equal(outcome.detail, "hierarchy");
     assert.equal(outcome.ownerNotified, true);
   });
 });
 
-test("without a quarantine role no roles are touched, but the owner is still told", () => {
-  let touched = false;
-  return mitigateNuke(incident, { ...armed, quarantineRoleId: null }, {
-    quarantine: async () => {
-      touched = true;
-      return 1;
-    },
-    notifyOwner: async () => true
-  }).then(outcome => {
-    assert.equal(touched, false, "no role was configured, so none may be stripped");
-    assert.equal(outcome.quarantined, null);
+test("a thrown punishment does not abort the notification", () => {
+  return mitigateNuke(
+    incident,
+    armed,
+    deps({
+      removeRoles: async () => {
+        throw new Error("Discord is down");
+      }
+    })
+  ).then(outcome => {
+    assert.equal(outcome.applied, false);
     assert.equal(outcome.ownerNotified, true);
   });
 });
 
 test("a failed DM is reported rather than thrown", () => {
-  return mitigateNuke(incident, armed, {
-    quarantine: async () => 2,
-    notifyOwner: async () => false
-  }).then(outcome => {
+  return mitigateNuke(incident, armed, deps({ notifyOwner: async () => false })).then(outcome => {
     assert.equal(outcome.ownerNotified, false);
-    assert.equal(outcome.quarantined, 2, "a closed DM must not undo the quarantine");
+    assert.equal(outcome.applied, true, "a closed DM must not undo the punishment");
+  });
+});
+
+test("the punishment is read from the protection that tripped", () => {
+  const cfg = {
+    ...armed,
+    protections: { ...armed.protections, "channel-delete": { ...armed.protections["channel-delete"], punishment: "ban" as const } }
+  };
+  let banned = false;
+  return mitigateNuke(incident, cfg, deps({ ban: async () => { banned = true; return { ok: true, detail: "banned" }; } })).then(outcome => {
+    assert.equal(banned, true, "the ban punishment must run when the protection asks for it");
+    assert.equal(outcome.punishment, "ban");
   });
 });
 
@@ -268,17 +275,22 @@ test("a failed DM is reported rather than thrown", () => {
  * ------------------------------------------------------------------ */
 
 function makeEngine(overrides: Partial<AntiNukeConfig> = {}, deps: Partial<Parameters<typeof createAntiNukeEngine>[0]> = {}) {
-  const calls = { quarantine: 0, notify: 0, report: 0 };
+  const calls = { punish: 0, notify: 0, report: 0 };
   const config: AntiNukeConfig = { ...armed, ...overrides };
   let current = 1_000_000;
+  const punish = async () => {
+    calls.punish += 1;
+    return { ok: true, detail: "done" };
+  };
 
   const engine = createAntiNukeEngine(
     {
       configFor: async () => config,
-      quarantine: async () => {
-        calls.quarantine += 1;
-        return 5;
-      },
+      ban: punish,
+      kick: punish,
+      timeout: punish,
+      removeRoles: punish,
+      warn: punish,
       notifyOwner: async () => {
         calls.notify += 1;
         return true;
@@ -299,7 +311,7 @@ test("a disarmed engine observes but never acts", async () => {
   for (let i = 0; i < 5; i += 1) {
     assert.equal(await engine.observe(channelDelete()), null);
   }
-  assert.deepEqual(calls, { quarantine: 0, notify: 0, report: 0 });
+  assert.deepEqual(calls, { punish: 0, notify: 0, report: 0 });
 });
 
 test("a protection switched off is not counted, while the others keep counting", async () => {
@@ -309,7 +321,7 @@ test("a protection switched off is not counted, while the others keep counting",
   for (let i = 0; i < 6; i += 1) {
     assert.equal(await engine.observe(channelDelete()), null, "channel deletion is off, so nothing accumulates");
   }
-  assert.deepEqual(calls, { quarantine: 0, notify: 0, report: 0 }, "an off protection cannot trip");
+  assert.deepEqual(calls, { punish: 0, notify: 0, report: 0 }, "an off protection cannot trip");
 
   // The gate asks about the *event's* protection, not about the budget it feeds.
   // Turning role creation off must not silence role deletion, which shares that
@@ -332,7 +344,7 @@ test("an armed engine mitigates and reports once the burst crosses the limit", a
   const outcome = await engine.observe(channelDelete());
 
   assert.ok(outcome, "the third crosses a limit of two");
-  assert.equal(calls.quarantine, 1);
+  assert.equal(calls.punish, 1);
   assert.equal(calls.notify, 1);
   assert.equal(calls.report, 1);
 });
@@ -369,7 +381,7 @@ test("an unreadable config leaves the guild unguarded rather than guessed", asyn
     }
   );
   assert.equal(await engine.observe(channelDelete()), null);
-  assert.equal(calls.quarantine, 0, "acting on a guessed config would strip roles for no reason");
+  assert.equal(calls.punish, 0, "acting on a guessed config would strip roles for no reason");
 });
 
 test("a failing report never escapes into the event path", async () => {
@@ -393,17 +405,17 @@ test("a failing report never escapes into the event path", async () => {
  * ------------------------------------------------------------------ */
 
 test("the owner is told what happened and what was done", () => {
-  const message = ownerAlert(incident, { quarantined: 4 });
+  const message = ownerAlert(incident, { punishment: "remove-roles", applied: true, detail: "roles removed" });
   assert.match(message, new RegExp(ACTOR), "the actor is named");
-  assert.match(message, /4/, "how many roles were stripped");
-  assert.match(message, /رتبة الحجر/);
+  assert.match(message, /remove-roles/);
+  assert.match(message, /نُفِّذت/);
 });
 
-test("the owner is told when no quarantine role is configured", () => {
-  // Otherwise a half-configured engine looks identical to a working one.
-  const message = ownerAlert(incident, { quarantined: null });
-  assert.match(message, /لم تُسحب رتبه/);
-  assert.match(message, /رتبة حجر/);
+test("the owner is told when the punishment was refused", () => {
+  const message = ownerAlert(incident, { punishment: "ban", applied: false, detail: "hierarchy" });
+  assert.match(message, /ban/);
+  assert.match(message, /فشلت/);
+  assert.match(message, /hierarchy/);
 });
 
 test("the default config is armed", () => {

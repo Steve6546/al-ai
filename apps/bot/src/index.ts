@@ -18,6 +18,11 @@ import {
   moveMemberToChannel,
   notifyTarget,
   quarantineMember,
+  banNukeTarget,
+  kickNukeTarget,
+  timeoutNukeTarget,
+  removeNukeRoles,
+  warnNukeTarget,
   readBotHighestPosition,
   readColourRoles,
   readMemberPositions,
@@ -335,7 +340,11 @@ async function grantAutoRole(member: GuildMember, roleId: string | null, reason:
 
 const antiNuke = createAntiNukeEngine({
   configFor: guildId => securityConfigs.get(guildId),
-  quarantine: (guildId, actorId, roleId) => quarantineMember(client, guildId, actorId, roleId),
+  ban: (guildId, actorId, reason) => banNukeTarget(client, guildId, actorId, reason),
+  kick: (guildId, actorId, reason) => kickNukeTarget(client, guildId, actorId, reason),
+  timeout: (guildId, actorId, seconds, reason) => timeoutNukeTarget(client, guildId, actorId, seconds, reason),
+  removeRoles: (guildId, actorId, reason) => removeNukeRoles(client, guildId, actorId, reason),
+  warn: (guildId, actorId, reason) => warnNukeTarget(client, guildId, actorId, reason),
   notifyOwner: (guildId, message) => dmGuildOwner(client, guildId, message),
   report: (incident, outcome) =>
     logEvent(
@@ -349,8 +358,10 @@ const antiNuke = createAntiNukeEngine({
           count: incident.count,
           limit: incident.limit,
           // Recorded so the trail shows whether the actor was actually stopped,
-          // not merely detected.
-          quarantined: outcome.quarantined,
+          // not merely detected — and why, when Discord refused.
+          punishment: outcome.punishment,
+          applied: outcome.applied,
+          detail: outcome.detail,
           ownerNotified: outcome.ownerNotified
         }
       },

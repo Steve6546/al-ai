@@ -1342,6 +1342,105 @@ export async function quarantineMember(client: Client, guildId: string, userId: 
 }
 
 /**
+ * The five anti-nuke punishments, each returning Discord's real verdict.
+ *
+ * `ok` is true only after the write resolved — never on the request alone — and
+ * every function refuses the owner, the bot itself, an unknown member, and a
+ * target whose highest role is not below the bot's. The reason is carried back
+ * so the incident log states *why* a punishment did not happen instead of
+ * claiming a success that Discord never confirmed.
+ */
+export type PunishmentResult = { ok: boolean; detail: string };
+
+type PunishTarget = {
+  guild: Guild | null;
+  member: GuildMember | null;
+  reason: string | null;
+};
+
+async function resolvePunishTarget(client: Client, guildId: string, userId: string): Promise<PunishTarget> {
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return { guild: null, member: null, reason: "guild not found" };
+  if (guild.ownerId === userId) return { guild, member: null, reason: "the target is the server owner" };
+  if (client.user?.id === userId) return { guild, member: null, reason: "the target is the bot itself" };
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (!member) return { guild, member: null, reason: "member not found" };
+  const me = guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
+  if (me && member.roles.highest.position >= me.roles.highest.position) {
+    return { guild, member, reason: "role hierarchy: the bot's role is not above the target's" };
+  }
+  return { guild, member, reason: null };
+}
+
+function failure(error: unknown): PunishmentResult {
+  return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+}
+
+export async function banNukeTarget(client: Client, guildId: string, userId: string, reason: string): Promise<PunishmentResult> {
+  const target = await resolvePunishTarget(client, guildId, userId);
+  if (!target.guild || target.reason) return { ok: false, detail: target.reason ?? "not found" };
+  try {
+    await target.guild.bans.create(userId, { reason });
+    return { ok: true, detail: "banned" };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function kickNukeTarget(client: Client, guildId: string, userId: string, reason: string): Promise<PunishmentResult> {
+  const target = await resolvePunishTarget(client, guildId, userId);
+  if (!target.member || target.reason) return { ok: false, detail: target.reason ?? "not found" };
+  try {
+    await target.member.kick(reason);
+    return { ok: true, detail: "kicked" };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function timeoutNukeTarget(
+  client: Client,
+  guildId: string,
+  userId: string,
+  seconds: number,
+  reason: string
+): Promise<PunishmentResult> {
+  const target = await resolvePunishTarget(client, guildId, userId);
+  if (!target.member || target.reason) return { ok: false, detail: target.reason ?? "not found" };
+  try {
+    await target.member.timeout(seconds * 1000, reason);
+    return { ok: true, detail: `timed out for ${seconds}s` };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function removeNukeRoles(client: Client, guildId: string, userId: string, reason: string): Promise<PunishmentResult> {
+  const target = await resolvePunishTarget(client, guildId, userId);
+  if (!target.member || target.reason) return { ok: false, detail: target.reason ?? "not found" };
+  try {
+    // Every role except @everyone; `.set([])` keeps the member in the guild with
+    // no permissions, which is the safe "strip" the engine has always meant.
+    await target.member.roles.set([], reason);
+    return { ok: true, detail: "roles removed" };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function warnNukeTarget(client: Client, guildId: string, userId: string, reason: string): Promise<PunishmentResult> {
+  const target = await resolvePunishTarget(client, guildId, userId);
+  if (!target.member || target.reason) return { ok: false, detail: target.reason ?? "not found" };
+  try {
+    // A real warning is a message the member receives, not a log line.
+    await target.member.send({ content: `⚠️ ${reason}`, allowedMentions: { parse: [] } });
+    return { ok: true, detail: "warned by DM" };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+/**
  * Deployment is intentionally separate from runtime.
  * Calling this from the bot process is a governance violation (rule 9).
  */

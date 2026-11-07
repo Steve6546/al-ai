@@ -6,6 +6,7 @@ import {
   type NukeAction,
   type NukeAssessment,
   type NukeProtectionKey,
+  type ProtectionPunishment,
   protectionEnabled
 } from "@al-ai/core";
 import type { BotEvent } from "../lib/discord.js";
@@ -123,33 +124,108 @@ export type NukeIncident = {
   guildId: string;
   actorId: string;
   action: NukeAction;
+  /** The registry entry whose punishment applies to this incident. */
+  protectionKey: NukeProtectionKey;
   /** How many of this action the actor performed inside the window. */
   count: number;
   limit: number;
 };
 
+/** What a single punishment attempt returned. `ok` is true only on Discord's confirmation. */
+export type PunishmentResult = { ok: boolean; detail: string };
+
 export type MitigationOutcome = {
   incident: NukeIncident;
-  /**
-   * How many roles were stripped and replaced with the quarantine role.
-   *
-   * Null means no quarantine role is configured, so no roles were touched —
-   * distinct from 0, which means the actor held no roles to strip.
-   */
-  quarantined: number | null;
-  /** Whether the owner was reached. False is not a failure of the mitigation itself. */
+  /** The punishment the protection asked for. */
+  punishment: ProtectionPunishment;
+  /** True only when Discord confirmed the punishment actually happened. */
+  applied: boolean;
+  /** What happened, or the real reason it failed. */
+  detail: string;
+  /** Whether the owner was reached. False is not a failure of the punishment itself. */
   ownerNotified: boolean;
 };
 
 export type MitigationDeps = {
-  /**
-   * Replaces every role the member holds with the quarantine role.
-   * Returns how many were stripped, or null when the member could not be changed.
-   */
-  quarantine: (guildId: string, actorId: string, quarantineRoleId: string) => Promise<number | null>;
+  ban: (guildId: string, actorId: string, reason: string) => Promise<PunishmentResult>;
+  kick: (guildId: string, actorId: string, reason: string) => Promise<PunishmentResult>;
+  timeout: (guildId: string, actorId: string, seconds: number, reason: string) => Promise<PunishmentResult>;
+  removeRoles: (guildId: string, actorId: string, reason: string) => Promise<PunishmentResult>;
+  warn: (guildId: string, actorId: string, reason: string) => Promise<PunishmentResult>;
   /** DMs the guild owner with this text. Resolves false when it could not be delivered. */
   notifyOwner: (message: string) => Promise<boolean>;
 };
+
+/**
+ * Runs the punishment the protection chose, then tells the owner.
+ *
+ * The actor is acted on first and the owner told second, for the same reason as
+ * before: an attacker left active for the length of a network round trip is
+ * exactly when the rest of the channels go. The punishment is read from the
+ * incident's own protection, so two protections never share one — and the old
+ * fixed "strip roles then quarantine" sequence is gone; `remove-roles` is now a
+ * punishment an operator picks, not a behaviour that always runs.
+ *
+ * Neither step throws: a DM failure must not abort the punishment, and a
+ * punishment failure must not stop the owner being told. `applied` is true only
+ * when Discord confirmed the write, never on the request alone.
+ */
+export async function mitigateNuke(
+  incident: NukeIncident,
+  config: AntiNukeConfig,
+  deps: MitigationDeps
+): Promise<MitigationOutcome> {
+  const settings = config.protections[incident.protectionKey];
+  const punishment = settings?.punishment ?? "remove-roles";
+  const windowSeconds = settings?.windowSeconds ?? 600;
+  const reason = `AL AI anti-nuke: ${incident.action} ×${incident.count} in ${windowSeconds}s (limit ${incident.limit})`;
+
+  const attempt = async (): Promise<PunishmentResult> => {
+    switch (punishment) {
+      case "ban":
+        return deps.ban(incident.guildId, incident.actorId, reason);
+      case "kick":
+        return deps.kick(incident.guildId, incident.actorId, reason);
+      case "timeout":
+        return deps.timeout(incident.guildId, incident.actorId, settings?.timeoutSeconds ?? 600, reason);
+      case "warn":
+        return deps.warn(incident.guildId, incident.actorId, reason);
+      case "remove-roles":
+      default:
+        return deps.removeRoles(incident.guildId, incident.actorId, reason);
+    }
+  };
+
+  const result = await attempt().catch((error: unknown) => ({
+    ok: false,
+    detail: error instanceof Error ? error.message : String(error)
+  }));
+
+  const ownerNotified = await deps
+    .notifyOwner(ownerAlert(incident, { punishment, applied: result.ok, detail: result.detail }))
+    .catch(() => false);
+
+  return { incident, punishment, applied: result.ok, detail: result.detail, ownerNotified };
+}
+
+/** The Arabic message the owner receives. Kept here so the wording is testable. */
+export function ownerAlert(
+  incident: NukeIncident,
+  outcome: Pick<MitigationOutcome, "punishment" | "applied" | "detail">
+): string {
+  const lines = [
+    "🚨 منع AL AI عملية تخريب في سيرفرك.",
+    "",
+    `العضو: <@${incident.actorId}>`,
+    `الإجراء: ${incident.count} (الحد المسموح ${incident.limit}).`,
+    "",
+    `العقوبة: ${outcome.punishment} — ${outcome.applied ? "نُفِّذت" : "فشلت"}.`,
+    outcome.detail,
+    "",
+    "راجع العضو قبل إعادة رتبه."
+  ];
+  return lines.join("\n");
+}
 
 /**
  * Runs the response to a tripped limit, in the order that matters.
@@ -162,38 +238,6 @@ export type MitigationDeps = {
  * quarantine failure must not stop the owner being told. The caller logs the
  * outcome either way, so a partial mitigation is still on the record.
  */
-export async function mitigateNuke(
-  incident: NukeIncident,
-  config: AntiNukeConfig,
-  deps: MitigationDeps
-): Promise<MitigationOutcome> {
-  let quarantined: number | null = null;
-  if (config.quarantineRoleId) {
-    quarantined = await deps.quarantine(incident.guildId, incident.actorId, config.quarantineRoleId).catch(() => null);
-  }
-
-  const ownerNotified = await deps.notifyOwner(ownerAlert(incident, { quarantined })).catch(() => false);
-
-  return { incident, quarantined, ownerNotified };
-}
-
-/** The Arabic message the owner receives. Kept here so the wording is testable. */
-export function ownerAlert(incident: NukeIncident, outcome: Pick<MitigationOutcome, "quarantined">): string {
-  const lines = [
-    "🚨 منع AL AI عملية تخريب في سيرفرك.",
-    "",
-    `العضو: <@${incident.actorId}>`,
-    `الإجراء: ${incident.count} خلال دقيقة (الحد المسموح ${incident.limit}).`,
-    ""
-  ];
-  lines.push(
-    outcome.quarantined === null
-      ? "لم تُسحب رتبه: لم تُحدَّد رتبة حجر بعد. حدّدها من لوحة التحكم ← الأمان."
-      : `سُحبت رتبه (${outcome.quarantined}) ووُضع في رتبة الحجر.`
-  );
-  lines.push("راجع العضو قبل إعادة رتبه.");
-  return lines.join("\n");
-}
 
 /* ------------------------------------------------------------------ *
  * Event mapping
@@ -254,7 +298,11 @@ export function nukeActionOf(event: BotEvent): NukeObservation | null {
 export type AntiNukeEngineDeps = {
   /** Resolves the guild's configuration, normally through the shared config cache. */
   configFor: (guildId: string) => Promise<AntiNukeConfig>;
-  quarantine: MitigationDeps["quarantine"];
+  ban: MitigationDeps["ban"];
+  kick: MitigationDeps["kick"];
+  timeout: MitigationDeps["timeout"];
+  removeRoles: MitigationDeps["removeRoles"];
+  warn: MitigationDeps["warn"];
   /** Sends the alert to the guild owner. */
   notifyOwner: (guildId: string, message: string) => Promise<boolean>;
   /** Writes `security.nuke-prevented`. Never allowed to throw into the event path. */
@@ -311,12 +359,17 @@ export function createAntiNukeEngine(deps: AntiNukeEngineDeps, options: AntiNuke
           guildId,
           actorId,
           action,
+          protectionKey,
           count: assessment.count,
           limit: assessment.limit
         };
 
         const outcome = await mitigateNuke(incident, config, {
-          quarantine: deps.quarantine,
+          ban: deps.ban,
+          kick: deps.kick,
+          timeout: deps.timeout,
+          removeRoles: deps.removeRoles,
+          warn: deps.warn,
           notifyOwner: message => deps.notifyOwner(guildId, message)
         });
 
