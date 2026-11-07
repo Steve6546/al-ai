@@ -1102,9 +1102,13 @@ test("a locked role icon cannot be picked and is left out of the save", async ()
       nickname!.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
     });
 
-    // Auto-save: wait past the debounce, then let the request settle.
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 900)); });
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 80)); });
+    // The change is a draft; the bar's save is what writes it.
+    const save = [...container.querySelectorAll("button")].find(el => /حفظ التعديلات/.test(el.textContent ?? ""));
+    assert.ok(save, "the unsaved-changes bar appeared once the nickname changed");
+    await act(async () => {
+      (save as HTMLButtonElement).click();
+      await new Promise(resolve => setTimeout(resolve, 80));
+    });
 
     assert.equal(writes.length, 1, "exactly one customization write was sent");
     assert.doesNotMatch(writes[0]!, /roleIconUrl/, "the gated icon was left out of the request");

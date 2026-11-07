@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, IdCard, Loader2, Lock, Palette, Pencil, TriangleAlert, Upload, X } from "lucide-react";
 import {
   DEFAULT_CUSTOMIZATION,
   MAX_BIO_LENGTH,
   MAX_IMAGE_DATA_URL_LENGTH,
-  MAX_NICKNAME_LENGTH
+  MAX_NICKNAME_LENGTH,
+  describeAppearanceResult
 } from "@al-ai/core/browser";
 import { api } from "@/api";
 import { useI18n, type Translate } from "@/lib/i18n";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { cn } from "@/lib/utils";
+import { SaveBar } from "@/components/save-bar";
 import { Toaster, useToasts } from "@/components/toaster";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -21,13 +23,14 @@ import { BotLivePreview } from "@/views/settings/bot-preview";
 import type { CustomizationSettings, Guild, GuildProfileSnapshot, PermissionStatus, RoleIconGate } from "@/types";
 
 /**
- * The bot's profile in ONE server — now an interactive card, not a form.
+ * The bot's profile in ONE server — an interactive card, saved the project's way.
  *
  * The side form is gone. The preview card *is* the editor: an «تعديل» button
  * turns it on, and then the picture and the banner are click targets, the name
  * and the bio are inline fields, and the role colour opens a picker — all in
- * place. Every change is written to the server in the background, debounced, so
- * there is no save bar to forget and no draft to lose.
+ * place. Nothing is written until the operator presses «حفظ التعديلات» on the
+ * same unsaved-changes bar every other settings screen uses, and «إلغاء» puts
+ * the card back. The card is a *draft*; the bar is the commit.
  *
  * What is NOT here is deliberate: the presence lives on the bot's gateway
  * connection and is identical in every server, so it keeps its own screen.
@@ -38,9 +41,6 @@ const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 /** Discord's own minimums, used to *warn* rather than to refuse. */
 const AVATAR_MIN_SIDE = 256;
 const BANNER_MIN_SIZE = { width: 600, height: 240 };
-
-/** How long to wait after the last keystroke before writing. */
-const AUTO_SAVE_MS = 700;
 
 type ReadImage = { dataUrl: string; width: number; height: number };
 
@@ -85,7 +85,6 @@ export function CustomizationView({ guild }: { guild: Guild }) {
   const [permissions, setPermissions] = useState<PermissionStatus[]>([]);
   const [roleIcon, setRoleIcon] = useState<RoleIconGate | null>(null);
 
-  const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [imageWarning, setImageWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -135,62 +134,6 @@ export function CustomizationView({ guild }: { guild: Guild }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guildForm.draft, guildForm.saved, profile]);
 
-  /* ---------------- auto-save ---------------- *
-   * Every hook lives above the loading/error returns: a hook after an early
-   * return is the "rendered more hooks than the previous render" crash, and a
-   * screen with a loading state is exactly where that hides until data lands.
-   */
-  const inFlight = useRef(false);
-  const queued = useRef(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const persist = useCallback(async () => {
-    if (inFlight.current) {
-      queued.current = true;
-      return;
-    }
-    const snapshot = guildForm.draft;
-    if (!snapshot) return;
-    inFlight.current = true;
-    setSaving(true);
-    try {
-      const payload: Partial<CustomizationSettings> = { ...snapshot };
-      // A locked icon is omitted, never echoed: the server reads an absent field
-      // as "leave it alone" and a null as "clear it".
-      if (roleIcon?.locked) delete payload.roleIconUrl;
-      const result = await api.saveCustomization(guild.id, payload);
-      // Rebase the saved value only — a save that resolves mid-edit must not
-      // overwrite what the operator has typed since it was sent.
-      guildForm.rebaseSaved(result.settings);
-      void api
-        .customization(guild.id)
-        .then(next => setProfile(next.profile ?? null))
-        .catch(() => undefined);
-    } catch (cause) {
-      push({
-        tone: "error",
-        title: t("customization.autoSaveFailed"),
-        description: cause instanceof Error ? cause.message : undefined
-      });
-    } finally {
-      inFlight.current = false;
-      setSaving(false);
-      if (queued.current) {
-        queued.current = false;
-        void persist();
-      }
-    }
-  }, [guild.id, guildForm.draft, guildForm.rebaseSaved, roleIcon, push, t]);
-
-  useEffect(() => {
-    if (!guildForm.dirty || saving) return;
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => void persist(), AUTO_SAVE_MS);
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
-  }, [guildForm.draft, guildForm.dirty, saving, persist]);
-
   if (error) {
     return (
       <Alert variant="destructive">
@@ -207,7 +150,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
     );
   }
 
-  const { draft, patch, dirty } = guildForm;
+  const { draft, patch, dirty, reset, commit } = guildForm;
 
   const memberPermission = permissions.find(item => item.key === "change_nickname");
   const memberBlocked = memberPermission?.granted === false;
@@ -247,6 +190,30 @@ export function CustomizationView({ guild }: { guild: Guild }) {
     } catch (cause) {
       push({ tone: "error", title: cause instanceof Error ? cause.message : t("customization.imageReadFailed") });
     }
+  };
+
+  /* ---------------- save (the bar's commit) ---------------- */
+  const save = async () => {
+    const payload: Partial<CustomizationSettings> = { ...draft };
+    // A locked icon is omitted, never echoed: the server reads an absent field
+    // as "leave it alone" and a null as "clear it".
+    if (roleIcon?.locked) delete payload.roleIconUrl;
+    const result = await api.saveCustomization(guild.id, payload);
+    commit(result.settings);
+    // The profile the card falls back to is one save out of date; refetching is
+    // what makes a cleared override fall back to the account picture.
+    void api
+      .customization(guild.id)
+      .then(next => setProfile(next.profile ?? null))
+      .catch(() => undefined);
+    const outcome = describeAppearanceResult(result);
+    if (!outcome.ok) throw new Error(outcome.message);
+    push({ tone: "success", title: t("customization.savedApplied") });
+  };
+
+  const resetAll = () => {
+    reset();
+    setImageWarning(null);
   };
 
   return (
@@ -309,15 +276,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
       {/* The card — the whole page. */}
       <Card className="border-primary/20 bg-card/70 shadow-lg shadow-primary/5 backdrop-blur-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center justify-between gap-2 text-base">
-            <span>{t("customization.previewTitle")}</span>
-            {saving ? (
-              <span className="flex items-center gap-1 text-[11px] font-normal text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" />
-                {t("common.saving")}
-              </span>
-            ) : null}
-          </CardTitle>
+          <CardTitle className="text-base">{t("customization.previewTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
           <BotLivePreview
@@ -409,6 +368,16 @@ export function CustomizationView({ guild }: { guild: Guild }) {
           ) : null}
         </CardContent>
       </Card>
+
+      {dirty ? (
+        <SaveBar
+          message={t("customization.unsaved")}
+          saveLabel={t("customization.save")}
+          cancelLabel={t("customization.discard")}
+          onCancel={resetAll}
+          onSave={save}
+        />
+      ) : null}
     </div>
   );
 }
