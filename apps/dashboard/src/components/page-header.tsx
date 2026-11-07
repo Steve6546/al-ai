@@ -27,7 +27,7 @@ export function PageHeader({
       <div className="min-w-0">
         {/* The page's own heading, so every screen has exactly one `h1` - the
             frame's breadcrumb is a path, not a title. */}
-        <h1 className="break-words text-xl font-semibold leading-tight tracking-tight sm:text-lg">{title}</h1>
+        <h1 className="break-words text-lg font-semibold leading-tight tracking-tight sm:text-xl">{title}</h1>
         {description ? (
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
         ) : null}

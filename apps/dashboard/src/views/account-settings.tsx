@@ -389,8 +389,8 @@ export function SettingsView({
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <nav aria-label={t("settings.title")} className="lg:sticky lg:top-4 lg:self-start">
-          <div className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+        <nav aria-label={t("settings.title")} className="min-w-0 max-w-full lg:sticky lg:top-4 lg:self-start">
+          <div className="scrollbar-none flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
             {sections.map(item => {
               const Icon = item.icon;
               const active = section === item.key;
@@ -859,7 +859,7 @@ export function SettingsView({
                   </div>
                 ) : (
                   <>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-xs text-muted-foreground">
                         {t("settings.sessions.count", { count: sessions.length })}
                       </p>
@@ -868,7 +868,7 @@ export function SettingsView({
                         size="sm"
                         onClick={() => setRevokeOpen(true)}
                         disabled={others === 0 || securityLoading}
-                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive sm:w-auto"
                       >
                         <Power aria-hidden />
                         {t("settings.sessions.revokeOthers")}
