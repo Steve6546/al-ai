@@ -20,15 +20,17 @@
  * of throwing. That keeps the tests that read Arabic copy meaningful.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { de } from "./i18n.de";
 
-export type Language = "ar" | "en";
+export type Language = "ar" | "en" | "de";
 
 export const LANGUAGE_STORAGE_KEY = "al-ai.language";
 export const DEFAULT_LANGUAGE: Language = "ar";
 
 export const LANGUAGES: { value: Language; label: { ar: string; en: string }; dir: "rtl" | "ltr" }[] = [
   { value: "ar", label: { ar: "العربية", en: "Arabic" }, dir: "rtl" },
-  { value: "en", label: { ar: "الإنجليزية", en: "English" }, dir: "ltr" }
+  { value: "en", label: { ar: "الإنجليزية", en: "English" }, dir: "ltr" },
+  { value: "de", label: { ar: "الألمانية", en: "German" }, dir: "ltr" }
 ];
 
 /** English is the key source: `ar` is typed against it below. */
@@ -286,6 +288,8 @@ const en = {
   "settings.language.english": "English",
   "settings.language.arabicHint": "Right-to-left interface",
   "settings.language.englishHint": "Left-to-right interface",
+  "settings.language.german": "German",
+  "settings.language.germanHint": "Left-to-right interface",
   "settings.language.saved": "Language saved to your account.",
   "settings.language.failed": "The language could not be saved to your account. It still applies on this device.",
   "settings.account.handle": "Handle",
@@ -1993,6 +1997,8 @@ const ar: Record<TranslationKey, string> = {
   "settings.language.english": "English",
   "settings.language.arabicHint": "واجهة من اليمين إلى اليسار",
   "settings.language.englishHint": "واجهة من اليسار إلى اليمين",
+  "settings.language.german": "الألمانية",
+  "settings.language.germanHint": "واجهة من اليسار إلى اليمين",
   "settings.language.saved": "حُفظت اللغة في حسابك.",
   "settings.language.failed": "تعذّر حفظ اللغة في حسابك. ستبقى مطبقة على هذا الجهاز.",
   "settings.account.handle": "المعرّف",
@@ -3425,7 +3431,7 @@ const ar: Record<TranslationKey, string> = {
   "twoFactor.savedRequired": "أكّد أولاً أنك حفظت رموز الاسترداد."
 };
 
-export const messages: Record<Language, Record<TranslationKey, string>> = { ar, en };
+export const messages: Record<Language, Record<TranslationKey, string>> = { ar, en, de };
 
 export type Translate = (key: TranslationKey, values?: Record<string, string | number>) => string;
 

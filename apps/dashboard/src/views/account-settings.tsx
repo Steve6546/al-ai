@@ -631,10 +631,10 @@ export function SettingsView({
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2">
                             <Flag value={item.value} className="h-4 w-6 shrink-0 rounded-[2px] shadow-sm ring-1 ring-black/10" />
-                            <span className="block text-sm font-medium">{t(`settings.language.${item.value === "ar" ? "arabic" : "english"}` as "settings.language.arabic")}</span>
+                            <span className="block text-sm font-medium">{t(`settings.language.${item.value === "ar" ? "arabic" : item.value === "en" ? "english" : "german"}` as "settings.language.arabic")}</span>
                           </span>
                           <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                            {t(`settings.language.${item.value === "ar" ? "arabicHint" : "englishHint"}` as "settings.language.arabicHint")}
+                            {t(`settings.language.${item.value === "ar" ? "arabicHint" : item.value === "en" ? "englishHint" : "germanHint"}` as "settings.language.arabicHint")}
                           </span>
                         </span>
                       </button>

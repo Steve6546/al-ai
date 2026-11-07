@@ -1477,7 +1477,7 @@ app.put("/api/me/preferences", async (request, reply) => {
   const session = await requireSession(request, reply);
   if (!session) return;
   const language = (request.body as { language?: unknown } | null)?.language;
-  if (language !== "ar" && language !== "en") {
+  if (language !== "ar" && language !== "en" && language !== "de") {
     return reply.code(400).send({ error: "INVALID_LANGUAGE", message: "اللغة المطلوبة غير مدعومة." });
   }
   await db.savePreferences(session.discordUserId, language);

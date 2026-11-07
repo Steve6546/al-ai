@@ -1093,14 +1093,15 @@ export function createDatabase(pool: pg.Pool) {
       return rowCount ?? 0;
     },
 
-    async getPreferences(discordUserId: string): Promise<{ language: "ar" | "en" }> {
+    async getPreferences(discordUserId: string): Promise<{ language: "ar" | "en" | "de" }> {
       const { rows } = await pool.query(`SELECT language FROM user_preferences WHERE discord_user_id = $1`, [
         discordUserId
       ]);
-      return { language: rows[0]?.language === "en" ? "en" : "ar" };
+      const stored = rows[0]?.language;
+      return { language: stored === "en" ? "en" : stored === "de" ? "de" : "ar" };
     },
 
-    async savePreferences(discordUserId: string, language: "ar" | "en"): Promise<void> {
+    async savePreferences(discordUserId: string, language: "ar" | "en" | "de"): Promise<void> {
       await pool.query(
         `INSERT INTO user_preferences (discord_user_id, language)
          VALUES ($1, $2)

@@ -983,10 +983,15 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   discord_user_id TEXT PRIMARY KEY,
   -- The interface language. Arabic is the product's default and the value a
   -- row without an explicit choice receives.
-  language TEXT NOT NULL DEFAULT 'ar' CHECK (language IN ('ar', 'en')),
+  language TEXT NOT NULL DEFAULT 'ar' CHECK (language IN ('ar', 'en', 'de')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- German was added to the interface; widen the check on databases created
+-- before it existed. `DROP ... IF EXISTS` then `ADD` keeps this idempotent.
+ALTER TABLE user_preferences DROP CONSTRAINT IF EXISTS user_preferences_language_check;
+ALTER TABLE user_preferences ADD CONSTRAINT user_preferences_language_check CHECK (language IN ('ar', 'en', 'de'));
 
 -- GOVERNANCE rule 10: the audit trail is append-only.
 -- This is enforced by the database itself, so no code path can rewrite history.

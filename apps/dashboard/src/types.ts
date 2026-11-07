@@ -269,7 +269,7 @@ export type TwoFactorEnrollment = {
 };
 
 /** The interface language. Arabic is the default; English is the alternative. */
-export type Language = "ar" | "en";
+export type Language = "ar" | "en" | "de";
 
 export type UserPreferences = { language: Language };
 

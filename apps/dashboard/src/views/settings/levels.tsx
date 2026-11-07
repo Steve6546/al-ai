@@ -103,7 +103,7 @@ function kindChip(kind: LevelRewardKind, t: Translate): string {
   return t("levels.chip.text");
 }
 
-function formatWhen(iso: string | null | undefined, language: "ar" | "en"): string {
+function formatWhen(iso: string | null | undefined, language: "ar" | "en" | "de"): string {
   if (!iso) return "—";
   const at = new Date(iso);
   return Number.isNaN(at.getTime()) ? "—" : at.toLocaleString(language === "ar" ? "ar" : "en-GB", { dateStyle: "short", timeStyle: "short" });

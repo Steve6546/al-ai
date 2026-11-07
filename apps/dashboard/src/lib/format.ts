@@ -12,7 +12,7 @@ export function initials(name?: string | null): string {
 }
 
 /** Locale date/time (Arabic by default), or a dash when the value is unparseable. */
-export function formatDateTime(value?: string | null, language: "ar" | "en" = "ar"): string {
+export function formatDateTime(value?: string | null, language: "ar" | "en" | "de" = "ar"): string {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
@@ -35,7 +35,7 @@ export function shortId(id: string, keep = 6): string {
  * `null` means the count is not knowable (the bot is not in the guild), which is
  * a different statement from "nobody is in it" and must not be rendered as 0.
  */
-export function formatMemberCount(count: number | null | undefined, language: "ar" | "en" = "ar"): string {
+export function formatMemberCount(count: number | null | undefined, language: "ar" | "en" | "de" = "ar"): string {
   if (count === null || count === undefined) return language === "en" ? "Unknown" : "غير محدد";
   if (!Number.isFinite(count) || count < 0) return language === "en" ? "Unknown" : "غير محدد";
   const value = Math.trunc(count);
