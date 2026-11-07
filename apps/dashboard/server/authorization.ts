@@ -78,6 +78,11 @@ export async function botIdentityPermissionStatus(botToken: string, guildId: str
       key: "manage_guild",
       label: "إدارة السيرفر",
       granted: bits === null ? null : hasPermission(bits, DISCORD_PERMISSION_BITS.MANAGE_GUILD)
+    },
+    {
+      key: "manage_roles",
+      label: "إدارة الرتب",
+      granted: bits === null ? null : hasPermission(bits, DISCORD_PERMISSION_BITS.MANAGE_ROLES)
     }
   ];
 }

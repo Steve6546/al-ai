@@ -66,6 +66,7 @@ import {
 } from "@/components/two-factor-parts";
 import { formatDateTime, initials } from "@/lib/format";
 import { LANGUAGES, useI18n, type Language } from "@/lib/i18n";
+import { Flag } from "@/components/flag";
 import { ACCENTS, useThemePrefs, type AccentName, type ThemeMode } from "@/lib/theme";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
@@ -628,7 +629,10 @@ export function SettingsView({
                           {active ? <Check className="size-3" /> : null}
                         </span>
                         <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-medium">{t(`settings.language.${item.value === "ar" ? "arabic" : "english"}` as "settings.language.arabic")}</span>
+                          <span className="flex items-center gap-2">
+                            <Flag value={item.value} className="h-4 w-6 shrink-0 rounded-[2px] shadow-sm ring-1 ring-black/10" />
+                            <span className="block text-sm font-medium">{t(`settings.language.${item.value === "ar" ? "arabic" : "english"}` as "settings.language.arabic")}</span>
+                          </span>
                           <span className="mt-0.5 block text-[11px] text-muted-foreground">
                             {t(`settings.language.${item.value === "ar" ? "arabicHint" : "englishHint"}` as "settings.language.arabicHint")}
                           </span>

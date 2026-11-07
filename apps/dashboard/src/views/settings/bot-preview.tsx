@@ -170,7 +170,9 @@ export function BotLivePreview({
   onBioChange,
   onRoleColorChange,
   nicknameMax,
-  bioMax
+  bioMax,
+  roleColorLocked,
+  roleColorReason
 }: {
   profile: PreviewProfile;
   guildName: string;
@@ -192,6 +194,9 @@ export function BotLivePreview({
   onRoleColorChange?: (value: string | null) => void;
   nicknameMax?: number;
   bioMax?: number;
+  /** True when the bot cannot change the role colour here (Manage Roles). */
+  roleColorLocked?: boolean;
+  roleColorReason?: string | null;
 }) {
   const { t } = useI18n();
 
@@ -326,21 +331,31 @@ export function BotLivePreview({
                 </p>
               )}
               {editable ? (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label={t("customization.roleColor")}
-                      title={t("customization.roleColor")}
-                      className="grid size-6 shrink-0 place-items-center rounded-full border border-border bg-background/60"
-                    >
-                      <span className="size-3.5 rounded-full border border-border" style={{ backgroundColor: roleColor ?? "#4e5058" }} />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent align="start" className="w-64 p-3">
-                    <ColorPicker value={profile.roleColor} onChange={value => onRoleColorChange?.(value)} />
-                  </PopoverContent>
-                </Popover>
+                roleColorLocked ? (
+                  <span
+                    title={roleColorReason ?? undefined}
+                    aria-disabled="true"
+                    className="grid size-6 shrink-0 cursor-not-allowed place-items-center rounded-full border border-border bg-background/60 opacity-50"
+                  >
+                    <span className="size-3.5 rounded-full border border-border" style={{ backgroundColor: roleColor ?? "#4e5058" }} />
+                  </span>
+                ) : (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={t("customization.roleColor")}
+                        title={t("customization.roleColor")}
+                        className="grid size-6 shrink-0 place-items-center rounded-full border border-border bg-background/60"
+                      >
+                        <span className="size-3.5 rounded-full border border-border" style={{ backgroundColor: roleColor ?? "#4e5058" }} />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-64 p-3">
+                      <ColorPicker value={profile.roleColor} onChange={value => onRoleColorChange?.(value)} />
+                    </PopoverContent>
+                  </Popover>
+                )
               ) : null}
             </div>
             <p className="text-sm text-muted-foreground">

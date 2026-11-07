@@ -156,6 +156,9 @@ export function CustomizationView({ guild }: { guild: Guild }) {
   const memberBlocked = memberPermission?.granted === false;
   const memberEditable = guild.canManageIdentity && !memberBlocked && draft.enabled;
   const roleEditable = guild.canManageIdentity;
+  // The colour is a role write: without Manage Roles the bot cannot perform it,
+  // so the picker is disabled rather than offering a save the server refuses.
+  const roleColorLocked = permissions.find(item => item.key === "manage_roles")?.granted === false;
   const permissionsUnreadable = permissions.length > 0 && permissions.every(permission => permission.granted === null);
 
   /* ---------------- image picking ---------------- */
@@ -293,6 +296,8 @@ export function CustomizationView({ guild }: { guild: Guild }) {
             onRoleColorChange={value => patch({ roleColor: value })}
             nicknameMax={MAX_NICKNAME_LENGTH}
             bioMax={MAX_BIO_LENGTH}
+            roleColorLocked={roleColorLocked}
+            roleColorReason={t("customization.roleColorLocked")}
           />
           {imageWarning ? (
             <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-[11px] text-warning">
