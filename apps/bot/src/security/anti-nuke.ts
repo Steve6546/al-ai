@@ -53,12 +53,13 @@ export function createAntiNukeTracker(options: AntiNukeTrackerOptions = {}) {
      * quarantined at that point, so re-notifying the owner on every later action
      * would be noise about a fire that is already out.
      */
-    record(input: { guildId: string; actorId: string; action: NukeAction; limits: AntiNukeLimits }): NukeAssessment | null {
+    record(input: { guildId: string; actorId: string; action: NukeAction; limits: AntiNukeLimits; windowMs?: number }): NukeAssessment | null {
       if (latched.has(actorKey(input.guildId, input.actorId))) return null;
 
+      const window = input.windowMs ?? windowMs;
       const key = `${actorKey(input.guildId, input.actorId)}:${input.action}`;
       const current = now();
-      const kept = (hits.get(key) ?? []).filter(at => current - at < windowMs);
+      const kept = (hits.get(key) ?? []).filter(at => current - at < window);
       kept.push(current);
       hits.set(key, kept);
 
@@ -295,7 +296,15 @@ export function createAntiNukeEngine(deps: AntiNukeEngineDeps, options: AntiNuke
         // runs anyway can still trip the shared budget it feeds.
         if (!protectionEnabled(config.protections, protectionKey)) return null;
 
-        const assessment = tracker.record({ guildId, actorId, action, limits: config.limits });
+        const assessment = tracker.record({
+          guildId,
+          actorId,
+          action,
+          limits: config.limits,
+          // The window is per protection: a fast channel purge and a slow role
+          // drip should not share one.
+          windowMs: (config.protections[protectionKey]?.windowSeconds ?? 600) * 1000
+        });
         if (!assessment?.tripped) return null;
 
         const incident: NukeIncident = {

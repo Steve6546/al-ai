@@ -283,12 +283,28 @@ export type ProtectionSettings = {
    * a guild that has never opened the screen, which is the opposite of the truth.
    */
   enabled: boolean;
+  /**
+   * How many seconds the burst window covers for THIS protection.
+   *
+   * Per-protection rather than one engine-wide number: a channel delete storm is
+   * fast and wants a tight window, while a slow role edit drip wants a long one.
+   * Defaults to 600s. The tracker is handed this per call, so two protections on
+   * the same action never share a window.
+   */
+  windowSeconds: number;
 };
+
+/** Seconds the window may cover: 10..3600, defaulting to 600. */
+function clampWindowSeconds(value: unknown): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return 600;
+  return Math.min(3600, Math.max(10, Math.trunc(numeric)));
+}
 
 export type ProtectionSettingsMap = Record<NukeProtectionKey, ProtectionSettings>;
 
 export const DEFAULT_PROTECTION_SETTINGS: ProtectionSettingsMap = Object.fromEntries(
-  NUKE_PROTECTIONS.map(protection => [protection.key, { enabled: true }])
+  NUKE_PROTECTIONS.map(protection => [protection.key, { enabled: true, windowSeconds: 600 }])
 ) as ProtectionSettingsMap;
 
 /**
@@ -305,7 +321,7 @@ export function normaliseProtectionSettings(value: unknown): ProtectionSettingsM
   for (const [key, raw] of Object.entries(source)) {
     if (!isNukeProtectionKey(key)) continue;
     const settings = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-    result[key] = { enabled: settings.enabled !== false };
+    result[key] = { enabled: settings.enabled !== false, windowSeconds: clampWindowSeconds(settings.windowSeconds) };
   }
   return result;
 }

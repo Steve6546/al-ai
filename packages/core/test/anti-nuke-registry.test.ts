@@ -102,9 +102,9 @@ test("the badge counts what the engine actually enforces", () => {
   // A per-protection switch only changes the count when it lands on a protection
   // the engine counts. Turning off something already unenforced must not move a
   // number that was never claiming to include it.
-  const offUnenforced = { "role-update": { enabled: false } };
+  const offUnenforced = { "role-update": { enabled: false, windowSeconds: 600 } };
   assert.equal(activeProtectionCount(true, offUnenforced), enforced, "switching an unenforced protection off changes nothing");
-  const offEnforced = { "channel-delete": { enabled: false } };
+  const offEnforced = { "channel-delete": { enabled: false, windowSeconds: 600 } };
   assert.equal(activeProtectionCount(true, offEnforced), enforced - 1, "switching an enforced protection off is visible");
 });
 
@@ -120,8 +120,8 @@ test("the action → protection map covers every action the engine watches", () 
 
 test("stored settings reject keys the registry does not know", () => {
   const normalised = normaliseProtectionSettings({
-    "channel-delete": { enabled: false },
-    "channel-delet": { enabled: false },
+    "channel-delete": { enabled: false, windowSeconds: 600 },
+    "channel-delet": { enabled: false, windowSeconds: 600 },
     "member-ban": "yes"
   });
   assert.equal(normalised["channel-delete"].enabled, false, "a real opt-out survives");

@@ -303,7 +303,7 @@ test("a disarmed engine observes but never acts", async () => {
 });
 
 test("a protection switched off is not counted, while the others keep counting", async () => {
-  const off = { ...DEFAULT_PROTECTION_SETTINGS, "channel-delete": { enabled: false } };
+  const off = { ...DEFAULT_PROTECTION_SETTINGS, "channel-delete": { enabled: false, windowSeconds: 600 } };
   const { engine, calls } = makeEngine({ protections: off });
 
   for (let i = 0; i < 6; i += 1) {
@@ -314,7 +314,7 @@ test("a protection switched off is not counted, while the others keep counting",
   // The gate asks about the *event's* protection, not about the budget it feeds.
   // Turning role creation off must not silence role deletion, which shares that
   // budget — the operator who disabled one still expects the other caught.
-  const roleOff = { ...DEFAULT_PROTECTION_SETTINGS, "role-create": { enabled: false } };
+  const roleOff = { ...DEFAULT_PROTECTION_SETTINGS, "role-create": { enabled: false, windowSeconds: 600 } };
   const other = makeEngine({ protections: roleOff });
   const roleDelete = (): BotEvent => ({ type: "role.delete", guildId: GUILD, roleId: "r", actorId: ACTOR });
   assert.equal(await other.engine.observe({ type: "role.create", guildId: GUILD, roleId: "r", actorId: ACTOR }), null);
