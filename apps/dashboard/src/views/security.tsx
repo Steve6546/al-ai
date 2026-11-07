@@ -495,13 +495,13 @@ function ProtectionCard({
   const [showExceptions, setShowExceptions] = useState(false);
 
   return (
-    <div className="rounded-2xl border border-border/80 bg-background/40 p-4">
+    <div className="rounded-2xl border border-border/80 bg-background/40 p-5">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <p className="text-sm font-medium">
+        <div className="min-w-0 space-y-1.5">
+          <p className="text-base font-semibold">
             {t(`security.protection.${protection.key}.label` as TranslationKey)}
           </p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {t(`security.protection.${protection.key}.description` as TranslationKey)}
           </p>
           <p className="font-mono text-[11px] text-muted-foreground" dir="ltr">

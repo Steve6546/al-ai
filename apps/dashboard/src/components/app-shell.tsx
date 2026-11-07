@@ -215,7 +215,7 @@ const navSections: { id: string; title: string | null; items: NavItem[] }[] = [
       },
       {
         key: "security",
-        label: "الحماية والأمان",
+        label: "الحماية",
         hint: "حدود الإشراف والحماية التلقائية",
         icon: ShieldAlert
       }
