@@ -47,6 +47,7 @@ import { AccountMenu } from "@/components/account-menu";
 import { AppearanceMenu } from "@/components/appearance-menu";
 import { PageHeader } from "@/components/page-header";
 import { BrandMark } from "@/components/brand-mark";
+import { UpdateBanner } from "@/components/update-banner";
 import { initials } from "@/lib/format";
 import { navText, useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -399,6 +400,7 @@ export function AppShell({
         collapsed ? "lg:grid-cols-[4.75rem_1fr]" : "lg:grid-cols-[16.5rem_1fr]"
       )}
     >
+      <UpdateBanner />
       {/* ---------------------------------------------------------------- *
        * Sidebar (desktop)
        *
@@ -601,7 +603,7 @@ export function AppShell({
             able to scroll it. This is the fix axe asks for, and it changes no
             layout class the scrolling guard asserts. */}
         <main tabIndex={0} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-3 pb-24 sm:p-4 lg:p-6">
-          <div className="mx-auto w-full max-w-6xl px-0.5 py-2 sm:px-1 lg:px-4 lg:py-3">
+          <div className="w-full max-w-7xl px-0.5 py-2 sm:px-1 lg:px-4 lg:py-3">
             {/* The screen's own title and one line of context, taken from the
                 navigation so the menu and the page can never describe the same
                 screen differently. */}

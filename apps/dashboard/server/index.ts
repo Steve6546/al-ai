@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
 import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import {
   assertDisjointTierRoles,
   assertUniqueChannelAssignment,
@@ -3666,6 +3667,27 @@ app.delete("/api/guilds/:guildId/logging/channels", async (request, reply) => {
 /* ------------------------------------------------------------------ *
  * Static dashboard + SPA fallback
  * ------------------------------------------------------------------ */
+/**
+ * The build identity of the SPA the server is currently serving.
+ *
+ * The client polls this and shows a "new version" bar when it changes, so a
+ * visitor with an old tab is told to reload instead of silently running a
+ * stale bundle. The value is the hashed entry script named by `index.html` —
+ * the same name the browser loaded — so a rebuild (which mints a new hash) is
+ * exactly what changes it. Unauthenticated on purpose: the client needs it
+ * before sign-in too, and it is only a filename.
+ */
+app.get("/api/version", async (_request, reply) => {
+  reply.header("Cache-Control", "no-store");
+  try {
+    const html = await readFile(join(process.cwd(), "dist", "index.html"), "utf8");
+    const match = /assets\/index-[A-Za-z0-9_-]+\.js/.exec(html);
+    return { version: match ? match[0] : null };
+  } catch {
+    return { version: null };
+  }
+});
+
 await app.register(fastifyStatic, {
   root: join(process.cwd(), "dist"),
   /**

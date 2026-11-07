@@ -388,7 +388,7 @@ export function SettingsView({
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <nav aria-label={t("settings.title")} className="lg:sticky lg:top-0 lg:self-start">
+        <nav aria-label={t("settings.title")} className="lg:sticky lg:top-4 lg:self-start">
           <div className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
             {sections.map(item => {
               const Icon = item.icon;

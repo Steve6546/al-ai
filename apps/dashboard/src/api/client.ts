@@ -151,6 +151,7 @@ async function request<T>(path: string, init: RequestInit | undefined, mayRetry:
 export const session = () => call<SessionInfo>("/api/session");
 export const logout = () => call<{ ok: boolean }>("/auth/logout", { method: "POST" });
 export const health = () => call<HealthSnapshot>("/api/health");
+export const version = () => call<{ version: string | null }>("/api/version");
 export const guilds = () => call<{ guilds: Guild[] }>("/api/guilds");
 
 /* ------------------------------------------------------------------ *

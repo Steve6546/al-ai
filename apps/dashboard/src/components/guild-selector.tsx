@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { BrandMark } from "@/components/brand-mark";
+import { UpdateBanner } from "@/components/update-banner";
 import { formatMemberCount, initials } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -105,6 +106,7 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
      * reach the bottom of it.
      */
     <div className="flex h-full flex-col bg-background">
+      <UpdateBanner />
       <header className="z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background/85 px-4 backdrop-blur">
         <div className="flex items-center gap-2.5">
           <BrandMark className="size-8 text-primary" />
