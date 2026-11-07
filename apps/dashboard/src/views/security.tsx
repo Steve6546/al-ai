@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Ban, Bot, ChevronDown, Clock, DoorOpen, Eye, Gavel, Hash, Loader2, MessageSquare, Minus, MinusCircle, Plus, Search, ShieldAlert, ShieldCheck, ShieldOff, Users, Webhook, Zap } from "lucide-react";
+import { AlertTriangle, Ban, Bot, Check, ChevronDown, Clock, DoorOpen, Eye, Gavel, Hash, Loader2, MessageSquare, Minus, MinusCircle, Plus, Search, ShieldAlert, ShieldCheck, ShieldOff, Users, Webhook, Zap } from "lucide-react";
 import { api } from "@/api";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { SaveBar } from "@/components/save-bar";
@@ -517,6 +517,8 @@ function ProtectionCard({
 }) {
   const { t } = useI18n();
   const [showExceptions, setShowExceptions] = useState(false);
+  const PunishIcon = PUNISHMENT_ICONS[punishment].icon;
+  const punishTone = PUNISHMENT_ICONS[punishment].tone;
 
   return (
     <div className="rounded-2xl border border-border/80 bg-background/40 p-5">
@@ -583,9 +585,13 @@ function ProtectionCard({
                   aria-label={t("security.punishmentAria", {
                     protection: t(`security.protection.${protection.key}.label` as TranslationKey)
                   })}
-                  className="w-full"
+                  className={`w-full border-2 ${punishTone.replace("text-", "border-")}`}
                 >
-                  <SelectValue />
+                  <span className="flex w-full items-center gap-2">
+                    <PunishIcon className={`size-4 ${punishTone}`} aria-hidden />
+                    <span className={punishTone}>{t(`security.punishmentKind.${punishment}` as TranslationKey)}</span>
+                    <Check className={`ms-auto size-4 ${punishTone}`} aria-hidden />
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
                   {PROTECTION_PUNISHMENTS.map(kind => {
@@ -593,9 +599,10 @@ function ProtectionCard({
                     const Icon = meta.icon;
                     return (
                       <SelectItem key={kind} value={kind} className="cursor-pointer">
-                        <span className="flex items-center gap-2">
+                        <span className="flex w-full items-center gap-2">
                           <Icon className={`size-4 ${meta.tone}`} aria-hidden />
                           <span className={meta.tone}>{t(`security.punishmentKind.${kind}` as TranslationKey)}</span>
+                          {kind === punishment ? <Check className={`ms-auto size-4 ${meta.tone}`} aria-hidden /> : null}
                         </span>
                       </SelectItem>
                     );
