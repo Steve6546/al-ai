@@ -29,4 +29,8 @@ WORKDIR /app/apps/dashboard
 EXPOSE 3000
 # The local `tsx` binary, not `npx` - the same reason as the bot image: `npx`
 # wraps the program, and the wrapper is what receives the stop signal.
+# A heap ceiling, so a leak restarts the container instead of
+# consuming the host's memory.
+ENV NODE_OPTIONS="--max-old-space-size=512"
+
 CMD ["../../node_modules/.bin/tsx", "server/index.ts"]

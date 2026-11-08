@@ -7,7 +7,8 @@ import {
   type NukeAssessment,
   type NukeProtectionKey,
   type ProtectionPunishment,
-  protectionEnabled
+  protectionEnabled,
+  protectionExceptions
 } from "@al-ai/core";
 import type { BotEvent } from "../lib/discord.js";
 
@@ -271,25 +272,59 @@ export type NukeObservation = {
  * Only events Discord attributes to a named actor count. An event with no actor
  * cannot be attributed to a person, and blaming whoever happens to be nearest
  * would be worse than not reacting at all.
+ *
+ * "unknown" is the resolver's word for "the audit log did not name anyone" —
+ * usually a missing VIEW_AUDIT_LOG permission, or a change made by Discord
+ * itself. It is refused here rather than counted, because a counter keyed on
+ * "unknown" would accumulate every unattributable action in the guild and
+ * eventually trip a punishment that Discord would refuse to apply to anybody.
  */
 export function nukeActionOf(event: BotEvent): NukeObservation | null {
+  const observation = (action: NukeAction, protectionKey: NukeProtectionKey, guildId: string, actorId: string | undefined) =>
+    actorId && actorId !== "unknown" ? { action, protectionKey, guildId, actorId } : null;
+
   switch (event.type) {
     case "server.channel-delete":
-      return { action: "channel-delete", protectionKey: "channel-delete", guildId: event.guildId, actorId: event.actorId };
+      return observation("channel-delete", "channel-delete", event.guildId, event.actorId);
     case "server.channel-create":
-      return { action: "channel-create", protectionKey: "channel-create", guildId: event.guildId, actorId: event.actorId };
+      return observation("channel-create", "channel-create", event.guildId, event.actorId);
     case "server.channel-update":
-      return { action: "channel-update", protectionKey: "channel-update", guildId: event.guildId, actorId: event.actorId };
+      return observation("channel-update", "channel-update", event.guildId, event.actorId);
     case "channel.permission-update":
-      return { action: "channel-permissions", protectionKey: "channel-permissions", guildId: event.guildId, actorId: event.actorId };
+      return observation("channel-permissions", "channel-permissions", event.guildId, event.actorId);
     case "moderation.ban":
-      return { action: "ban", protectionKey: "member-ban", guildId: event.guildId, actorId: event.actorId };
+      return observation("ban", "member-ban", event.guildId, event.actorId);
+    case "moderation.kick":
+      return observation("kick", "member-kick", event.guildId, event.actorId);
+    case "moderation.timeout":
+      return observation("timeout", "member-timeout", event.guildId, event.actorId);
     case "role.create":
-      return { action: "role-change", protectionKey: "role-create", guildId: event.guildId, actorId: event.actorId };
+      return observation("role-change", "role-create", event.guildId, event.actorId);
     case "role.delete":
       // Counted with role creation in one budget: swapping roles out is one
       // behaviour, and two separate budgets would quietly double the allowance.
-      return { action: "role-change", protectionKey: "role-delete", guildId: event.guildId, actorId: event.actorId };
+      return observation("role-change", "role-delete", event.guildId, event.actorId);
+    case "role.update":
+      // Its own budget, not the create/delete one: raising a role's permissions
+      // is privilege escalation, and an operator who turned churn off has not
+      // thereby allowed "make this role an administrator".
+      return observation("role-update", "role-update", event.guildId, event.actorId);
+    case "webhook.create":
+      // Its own budget and its own switch: adding a webhook is how a channel is
+      // wired to post somewhere else, and an operator may well allow a trusted
+      // integration to create one while still refusing edits to the server's own.
+      return observation("webhook-create", "webhook-create", event.guildId, event.actorId);
+    case "webhook.update":
+    case "webhook.delete":
+      // Editing and deleting stay together: both change a webhook that already
+      // exists, both need MANAGE_WEBHOOKS, and an edit that points the URL
+      // elsewhere is the same theft as deleting it and creating a new one.
+      return observation("webhook-update", "webhook-update", event.guildId, event.actorId);
+    case "message.bulk-delete":
+      // The purge, not each message: one `/clear` is one act by one person.
+      // Single deletions are never counted — Discord does not audit them, so
+      // they cannot be attributed.
+      return observation("message-bulk-delete", "message-purge", event.guildId, event.actorId);
     default:
       return null;
   }
@@ -343,6 +378,10 @@ export function createAntiNukeEngine(deps: AntiNukeEngineDeps, options: AntiNuke
         // who turned this action off does not want it counted, and a counter that
         // runs anyway can still trip the shared budget it feeds.
         if (!protectionEnabled(config.protections, protectionKey)) return null;
+        // An exempt member is not counted at all, not merely spared the
+        // punishment: a count that still runs would let an exemption trip the
+        // shared budget and land on whoever else acts in the same window.
+        if (protectionExceptions(config.protections, protectionKey).includes(actorId)) return null;
 
         const assessment = tracker.record({
           guildId,

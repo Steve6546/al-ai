@@ -119,7 +119,7 @@ function FocusTokenStrip({ targetRef }: { targetRef: { current: ((token: string)
         type="button"
         aria-expanded={open}
         className={cn(
-          "rounded-md border px-2 py-0.5 font-mono text-[11px] transition-colors",
+          "rounded-md border px-2 py-0.5 font-mono text-mini transition-colors",
           open ? "border-primary/60 bg-primary/10 text-primary" : "border-border/80 text-muted-foreground hover:text-foreground"
         )}
         onClick={() => setOpen(value => !value)}
@@ -133,7 +133,7 @@ function FocusTokenStrip({ targetRef }: { targetRef: { current: ((token: string)
             type="button"
             dir="ltr"
             title={t(TOKEN_KEYS[token])}
-            className="rounded-md border border-border/80 bg-muted/40 px-2 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+            className="rounded-md border border-border/80 bg-muted/40 px-2 py-0.5 font-mono text-mini text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
             onClick={() => {
               targetRef.current?.(token);
               setOpen(false);
@@ -142,7 +142,7 @@ function FocusTokenStrip({ targetRef }: { targetRef: { current: ((token: string)
             {token}
           </button>
         ))}
-      <span className="text-[10px] text-muted-foreground">{t("welcome.embed.insertHint")}</span>
+      <span className="text-micro text-muted-foreground">{t("welcome.embed.insertHint")}</span>
     </div>
   );
 }
@@ -169,14 +169,14 @@ function RemoteImage({ url, className, label }: { url: string | null; className:
 
   if (!/^https?:\/\/.+/i.test(trimmed)) {
     return (
-      <p className="px-1 text-[10px] text-[#949ba4]">
+      <p className="px-1 text-micro text-[#949ba4]">
         {t("welcome.embed.invalidUrl", { label })}
       </p>
     );
   }
   if (failed) {
     return (
-      <p className="rounded border border-dashed border-border/60 px-2 py-1 text-[10px] text-[#949ba4]">
+      <p className="rounded border border-dashed border-border/60 px-2 py-1 text-micro text-[#949ba4]">
         {t("welcome.embed.failedUrl", { label })}
       </p>
     );
@@ -273,7 +273,7 @@ export function EmbedEditor({
     <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:gap-3" dir="ltr">
       {/* -------- Action bar: eye (clean preview) + accent colour swatch -------- */}
       <div className="flex flex-row items-center gap-2 sm:flex-col sm:items-center">
-        <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full bg-[#5865f2]/40 text-[10px] text-[#dbdee1]">
+        <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full bg-[#5865f2]/40 text-micro text-[#dbdee1]">
           {botAvatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={botAvatarUrl} alt="" className="size-full object-cover" />
@@ -336,7 +336,7 @@ export function EmbedEditor({
           <span className="rounded bg-[#5865f2] px-1 py-px text-[9px] font-bold uppercase text-white">Bot</span>
           {/* The card is Discord's layout, so it stays LTR — but the words are
               the ones the operator's own Arabic client prints. */}
-          <span className="text-[11px] text-[#949ba4]">
+          <span className="text-mini text-[#949ba4]">
             {t("welcome.embed.today", { time: now.toLocaleTimeString(language === "ar" ? "ar" : "en-GB", { hour: "2-digit", minute: "2-digit" }) })}
           </span>
         </div>
@@ -430,7 +430,7 @@ export function EmbedEditor({
                         aria-label={t("welcome.embed.titleLink")}
                       />
                       {embed.titleUrl ? (
-                        <span className="shrink-0 text-[10px] text-success" aria-label={t("welcome.embed.linkOn")}>✓</span>
+                        <span className="shrink-0 text-micro text-success" aria-label={t("welcome.embed.linkOn")}>✓</span>
                       ) : null}
                     </div>
                   )}
@@ -502,7 +502,7 @@ export function EmbedEditor({
                           />
                           {editing && (
                             <>
-                            <label className="flex shrink-0 cursor-pointer items-center gap-1 text-[10px] text-[#949ba4]" title={t("welcome.embed.inline")}>
+                            <label className="flex shrink-0 cursor-pointer items-center gap-1 text-micro text-[#949ba4]" title={t("welcome.embed.inline")}>
                               <input
                                 type="checkbox"
                                 checked={field.inline}
@@ -571,7 +571,7 @@ export function EmbedEditor({
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={memberAvatarUrl} alt="" className="size-14 rounded object-cover sm:size-20" />
                   ) : (
-                    <span className="grid size-14 place-items-center rounded border border-dashed border-border/60 bg-black/30 text-[10px] text-[#949ba4] sm:size-20">
+                    <span className="grid size-14 place-items-center rounded border border-dashed border-border/60 bg-black/30 text-micro text-[#949ba4] sm:size-20">
                       {embed.thumbnailMode === "member_avatar" ? t("welcome.embed.memberAvatar") : t("welcome.embed.thumbnail")}
                     </span>
                   )}
@@ -580,7 +580,7 @@ export function EmbedEditor({
                       type="button"
                       aria-pressed={embed.thumbnailMode === "member_avatar"}
                       className={cn(
-                        "w-auto rounded-md border px-2 py-1 text-[10px] transition-colors sm:w-full sm:px-1 sm:py-0.5",
+                        "w-auto rounded-md border px-2 py-1 text-micro transition-colors sm:w-full sm:px-1 sm:py-0.5",
                         embed.thumbnailMode === "member_avatar"
                           ? "border-primary/50 bg-primary/10 text-primary"
                           : "border-border/60 text-[#949ba4] hover:border-primary/40 hover:text-primary"
@@ -600,7 +600,7 @@ export function EmbedEditor({
                       placeholder="https://..."
                       maxLength={512}
                       aria-label={t("welcome.embed.thumbnailUrl")}
-                      className="w-full rounded border border-border/60 bg-black/30 px-1 py-0.5 text-[10px] text-[#dbdee1] outline-none focus:border-primary/50"
+                      className="w-full rounded border border-border/60 bg-black/30 px-1 py-0.5 text-micro text-[#dbdee1] outline-none focus:border-primary/50"
                     />
                   )}
                 </div>
@@ -631,7 +631,7 @@ export function EmbedEditor({
                     type="button"
                     aria-pressed={embed.imageMode === mode}
                     className={cn(
-                      "rounded-md border px-2 py-0.5 text-[10px] transition-colors",
+                      "rounded-md border px-2 py-0.5 text-micro transition-colors",
                       embed.imageMode === mode
                         ? "border-primary/50 bg-primary/10 text-primary"
                         : "border-border/60 text-[#949ba4] hover:border-primary/40 hover:text-primary"
@@ -655,16 +655,16 @@ export function EmbedEditor({
                   <img src={imageUpload.imageDataUrl} alt="" className="max-h-80 w-full object-cover" />
                   <div className="flex items-center gap-2 bg-black/30 p-2">
                     {imageUpload.fileName ? (
-                      <span className="min-w-0 flex-1 truncate text-[11px] text-[#949ba4]" dir="ltr">
+                      <span className="min-w-0 flex-1 truncate text-mini text-[#949ba4]" dir="ltr">
                         {imageUpload.fileName}
                       </span>
                     ) : (
-                      <span className="min-w-0 flex-1 text-[11px] text-[#949ba4]">{t("welcome.embed.savedImage")}</span>
+                      <span className="min-w-0 flex-1 text-mini text-[#949ba4]">{t("welcome.embed.savedImage")}</span>
                     )}
                     <button
                       type="button"
                       onClick={imageUpload.onPickFile}
-                      className="shrink-0 rounded-md border border-border/60 px-2 py-0.5 text-[11px] text-[#dbdee1] transition-colors hover:border-primary/50 hover:text-primary"
+                      className="shrink-0 rounded-md border border-border/60 px-2 py-0.5 text-mini text-[#dbdee1] transition-colors hover:border-primary/50 hover:text-primary"
                     >
                       {t("welcome.replace")}
                     </button>
@@ -694,7 +694,7 @@ export function EmbedEditor({
                 >
                   <Upload className="size-4 text-[#949ba4]" aria-hidden />
                   <span className="text-xs font-medium text-[#dbdee1]">{t("welcome.embed.uploadHint")}</span>
-                  <span className="text-[10px] text-[#949ba4]">{t("welcome.embed.uploadBody")}</span>
+                  <span className="text-micro text-[#949ba4]">{t("welcome.embed.uploadBody")}</span>
                 </button>
               )
             ) : null}
@@ -742,7 +742,7 @@ export function EmbedEditor({
                         insertTarget.current = token =>
                           onEmbedChange({ footer: insertAtCursor(element, embed.footer, token) });
                       }}
-                      className="text-[11px] text-[#949ba4]"
+                      className="text-mini text-[#949ba4]"
                     />
                   </div>
                 </div>
@@ -766,7 +766,7 @@ export function EmbedEditor({
                       onChange={event => setFooterIconDraft(event.target.value)}
                       placeholder={t("welcome.embed.footerIconPlaceholder")}
                       maxLength={512}
-                      className="min-w-0 flex-1 rounded border border-border/60 bg-black/30 px-1 py-0.5 text-[10px] text-[#dbdee1] outline-none focus:border-primary/50"
+                      className="min-w-0 flex-1 rounded border border-border/60 bg-black/30 px-1 py-0.5 text-micro text-[#dbdee1] outline-none focus:border-primary/50"
                       aria-label={t("welcome.embed.footerIconUrl")}
                     />
                     </div>
@@ -799,7 +799,7 @@ export function EmbedEditor({
                   type="button"
                   aria-pressed={embed.timestamp}
                   className={cn(
-                    "rounded-md border px-2 py-0.5 text-[11px] transition-colors",
+                    "rounded-md border px-2 py-0.5 text-mini transition-colors",
                     embed.timestamp
                       ? "border-primary/50 bg-primary/10 text-primary"
                       : "border-border/60 text-[#949ba4] hover:text-foreground",
@@ -810,7 +810,7 @@ export function EmbedEditor({
                   {t("welcome.embed.time")}
                 </button>
                 {embed.timestamp ? (
-                  <span className="whitespace-nowrap text-[11px] text-[#949ba4]" dir="ltr">
+                  <span className="whitespace-nowrap text-mini text-[#949ba4]" dir="ltr">
                     {now.toLocaleDateString("en-GB")} • {now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
                   </span>
                 ) : null}

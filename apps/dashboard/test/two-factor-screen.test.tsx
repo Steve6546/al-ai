@@ -124,7 +124,9 @@ test("an enrolled admin sees the code prompt, and never a secret or recovery cod
   assert.deepEqual(errors.filter(line => /Rendered more hooks|Uncaught/.test(line)), [], "no render failure");
   assert.match(html, /التحقق بخطوتين/);
   assert.match(html, /رمز التحقق من التطبيق/);
-  assert.match(html, /الوقت المتبقّي/, "the pending login is counted down in both states");
+  // The deadline is worded as one ("sign-in expires in …") so it cannot be
+  // read as the 30-second code ring sitting above the boxes.
+  assert.match(html, /تنتهي صلاحية الدخول بعد/, "the pending login is counted down in both states");
   assert.doesNotMatch(html, /المفتاح السري/);
   assert.doesNotMatch(html, /رموز الاسترداد \(/);
   assert.ok(calls.some(call => call.path === "/api/2fa/enrollment"), "the deadline is read from the server even when enrolled");

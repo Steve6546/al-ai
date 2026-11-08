@@ -17,7 +17,19 @@ import {
  * mitigation; this file only answers "has this crossed the line?".
  */
 
-export type NukeAction = "channel-delete" | "channel-create" | "channel-update" | "channel-permissions" | "ban" | "role-change";
+export type NukeAction =
+  | "channel-delete"
+  | "channel-create"
+  | "channel-update"
+  | "channel-permissions"
+  | "ban"
+  | "kick"
+  | "timeout"
+  | "role-change"
+  | "role-update"
+  | "webhook-create"
+  | "webhook-update"
+  | "message-bulk-delete";
 
 export type AntiNukeLimits = {
   /** Channels one actor may delete inside the window. */
@@ -30,8 +42,43 @@ export type AntiNukeLimits = {
   channelOverwritesPerMinute: number;
   /** Members one actor may ban inside the window. */
   bansPerMinute: number;
+  /** Members one actor may kick inside the window. */
+  kicksPerMinute: number;
+  /** Members one actor may time out inside the window. */
+  timeoutsPerMinute: number;
   /** Roles one actor may create or delete inside the window, counted together. */
   roleChangesPerMinute: number;
+  /**
+   * Roles one actor may *edit* inside the window.
+   *
+   * Deliberately its own budget rather than a share of `roleChangesPerMinute`:
+   * creating and deleting are one behaviour (a burst that reshapes the role
+   * list), while raising a role's permissions is privilege escalation — the
+   * quiet attack that needs no new role at all. Counting them together would
+   * let an attacker who only edits roles stay under a budget set for churn.
+   */
+  roleUpdatesPerMinute: number;
+  /**
+   * Webhooks one actor may *create* inside the window.
+   *
+   * Split from editing on purpose: adding a webhook to a channel is how a
+   * message stream is copied out of the server, while editing an existing one is
+   * how the server's own alerts are silenced. They are different attacks by
+   * different hands, and an operator who wants one limited has not thereby asked
+   * for the other to be.
+   */
+  webhookCreatesPerMinute: number;
+  /** Webhooks one actor may edit (or delete) inside the window. */
+  webhookUpdatesPerMinute: number;
+  /**
+   * Bulk message deletes one actor may perform inside the window.
+   *
+   * Counts the purge, not each message: a single `/clear` of 200 messages is
+   * one act by one person, and counting messages would make the limit fire on
+   * the first legitimate cleanup. Single deletions are not counted at all —
+   * Discord's audit log does not record them, so they cannot be attributed.
+   */
+  messageBulkDeletesPerMinute: number;
 };
 
 export type AntiNukeConfig = {
@@ -66,7 +113,20 @@ export type AntiNukeConfig = {
 
 export const ANTI_NUKE_WINDOW_MS = 60_000;
 
-export const ANTI_NUKE_ACTIONS: readonly NukeAction[] = ["channel-delete", "channel-create", "channel-update", "channel-permissions", "ban", "role-change"] as const;
+export const ANTI_NUKE_ACTIONS: readonly NukeAction[] = [
+  "channel-delete",
+  "channel-create",
+  "channel-update",
+  "channel-permissions",
+  "ban",
+  "kick",
+  "timeout",
+  "role-change",
+  "role-update",
+  "webhook-create",
+  "webhook-update",
+  "message-bulk-delete"
+] as const;
 
 /** Which limit governs which action. Kept explicit so a new action cannot be added without a limit. */
 export const ANTI_NUKE_LIMIT_KEYS: Record<NukeAction, keyof AntiNukeLimits> = {
@@ -75,7 +135,13 @@ export const ANTI_NUKE_LIMIT_KEYS: Record<NukeAction, keyof AntiNukeLimits> = {
   "channel-update": "channelUpdatesPerMinute",
   "channel-permissions": "channelOverwritesPerMinute",
   ban: "bansPerMinute",
-  "role-change": "roleChangesPerMinute"
+  kick: "kicksPerMinute",
+  timeout: "timeoutsPerMinute",
+  "role-change": "roleChangesPerMinute",
+  "role-update": "roleUpdatesPerMinute",
+  "webhook-create": "webhookCreatesPerMinute",
+  "webhook-update": "webhookUpdatesPerMinute",
+  "message-bulk-delete": "messageBulkDeletesPerMinute"
 };
 
 /** Operator-facing names, in the language the dashboard is written in. */
@@ -85,7 +151,13 @@ export const ANTI_NUKE_ACTION_LABELS: Record<NukeAction, string> = {
   "channel-update": "تعديل القنوات",
   "channel-permissions": "صلاحيات القنوات",
   ban: "حظر الأعضاء",
-  "role-change": "إنشاء الرتب وحذفها"
+  kick: "طرد الأعضاء",
+  timeout: "عزل الأعضاء",
+  "role-change": "إنشاء الرتب وحذفها",
+  "role-update": "تعديل صلاحيات الرتب",
+  "webhook-create": "إنشاء الويبهوكات",
+  "webhook-update": "تعديل الويبهوكات",
+  "message-bulk-delete": "حذف الرسائل الجماعي"
 };
 
 export const DEFAULT_ANTI_NUKE_LIMITS: AntiNukeLimits = {
@@ -94,7 +166,13 @@ export const DEFAULT_ANTI_NUKE_LIMITS: AntiNukeLimits = {
   channelUpdatesPerMinute: 5,
   channelOverwritesPerMinute: 5,
   bansPerMinute: 5,
-  roleChangesPerMinute: 3
+  kicksPerMinute: 5,
+  timeoutsPerMinute: 5,
+  roleChangesPerMinute: 3,
+  roleUpdatesPerMinute: 3,
+  webhookCreatesPerMinute: 3,
+  webhookUpdatesPerMinute: 3,
+  messageBulkDeletesPerMinute: 5
 };
 
 /**
@@ -150,6 +228,9 @@ export function normaliseAntiNukeConfig(value: unknown): AntiNukeConfig {
   const source = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
   const limits = (source.limits && typeof source.limits === "object" ? source.limits : {}) as Record<string, unknown>;
   const quarantineRoleId = typeof source.quarantineRoleId === "string" ? source.quarantineRoleId.trim() : "";
+  // The pre-split field. Kept as a plain read off the raw object: it is not part
+  // of `AntiNukeLimits` any more, but every row written before the split has it.
+  const legacyWebhookBudget = limits.webhookChangesPerMinute;
 
   return {
     enabled: normaliseEnabled(source.enabled),
@@ -159,7 +240,23 @@ export function normaliseAntiNukeConfig(value: unknown): AntiNukeConfig {
       channelUpdatesPerMinute: clampLimit(limits.channelUpdatesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.channelUpdatesPerMinute),
       channelOverwritesPerMinute: clampLimit(limits.channelOverwritesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.channelOverwritesPerMinute),
       bansPerMinute: clampLimit(limits.bansPerMinute, DEFAULT_ANTI_NUKE_LIMITS.bansPerMinute),
-      roleChangesPerMinute: clampLimit(limits.roleChangesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.roleChangesPerMinute)
+      kicksPerMinute: clampLimit(limits.kicksPerMinute, DEFAULT_ANTI_NUKE_LIMITS.kicksPerMinute),
+      timeoutsPerMinute: clampLimit(limits.timeoutsPerMinute, DEFAULT_ANTI_NUKE_LIMITS.timeoutsPerMinute),
+      roleChangesPerMinute: clampLimit(limits.roleChangesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.roleChangesPerMinute),
+      roleUpdatesPerMinute: clampLimit(limits.roleUpdatesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.roleUpdatesPerMinute),
+      // A config saved before the split carries one budget for both actions;
+      // it seeds both rather than being dropped, so an operator's chosen number
+      // survives the upgrade. Read through the old name, which is no longer part
+      // of the type but is still in every row written before this change.
+      webhookCreatesPerMinute: clampLimit(
+        limits.webhookCreatesPerMinute ?? legacyWebhookBudget,
+        DEFAULT_ANTI_NUKE_LIMITS.webhookCreatesPerMinute
+      ),
+      webhookUpdatesPerMinute: clampLimit(
+        limits.webhookUpdatesPerMinute ?? legacyWebhookBudget,
+        DEFAULT_ANTI_NUKE_LIMITS.webhookUpdatesPerMinute
+      ),
+      messageBulkDeletesPerMinute: clampLimit(limits.messageBulkDeletesPerMinute, DEFAULT_ANTI_NUKE_LIMITS.messageBulkDeletesPerMinute)
     },
     protections: normaliseProtectionSettings(source.protections),
     // A malformed ID is dropped rather than stored: it would never match a role,

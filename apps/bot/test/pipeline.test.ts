@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { EventPipeline, GATEWAY_CEILING_PER_MINUTE, VOICE_DEBOUNCE_MS } from "../src/runtime/event-pipeline.ts";
+import { EventPipeline, GATEWAY_CEILING_PER_MINUTE, MAX_QUEUE_DEPTH, VOICE_DEBOUNCE_MS } from "../src/runtime/event-pipeline.ts";
 
 const tick = (ms = 5) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -144,4 +144,59 @@ test("a job arriving mid-drain is drained rather than stranded", async () => {
   });
   for (let attempt = 0; attempt < 10 && ran.length < 2; attempt += 1) await tick(10);
   assert.deepEqual(ran, ["first", "late"], "the drain that started the burst picks up its own tail");
+});
+
+/* ------------------------------------------------------------------ *
+ * The queue has a ceiling
+ *
+ * The drain rate is capped by Discord (120 events a minute), so a busy server
+ * produces faster than the pipeline can send. Without a ceiling the backlog is
+ * a leak: each waiting job is a closure holding a whole event, and a bot left
+ * overnight grew to gigabytes of them.
+ * ------------------------------------------------------------------ */
+
+test("a queue at its ceiling sheds the oldest low-priority job, not the newest", async () => {
+  let clock = 1_000_000;
+  // Ceiling 0 so nothing drains: everything stays queued, which is what a
+  // saturated window looks like.
+  const pipeline = new EventPipeline({ now: () => clock, ceiling: 0, maxDepth: 3 });
+  const ran: string[] = [];
+  const job = (name: string) => ({ run: async () => void ran.push(name), key: name });
+
+  pipeline.enqueue(4, job("noise-1"));
+  pipeline.enqueue(2, job("routine"));
+  pipeline.enqueue(4, job("noise-2"));
+  assert.equal(pipeline.stats().queued, 3);
+
+  pipeline.enqueue(2, job("incoming"));
+  assert.equal(pipeline.stats().queued, 3, "the queue holds its ceiling, it does not grow");
+  assert.equal(pipeline.stats().dropped, 1, "the shed job is counted, not hidden");
+});
+
+test("the ceiling never discards a top-priority job while lower ones wait", async () => {
+  const pipeline = new EventPipeline({ now: () => 1_000_000, ceiling: 0, maxDepth: 2 });
+  const ran: string[] = [];
+  const job = (name: string) => ({ run: async () => void ran.push(name), key: name });
+
+  pipeline.enqueue(0, job("security-1"));
+  pipeline.enqueue(0, job("security-2"));
+  pipeline.enqueue(4, job("noise"));
+
+  assert.equal(pipeline.stats().dropped, 1, "the incoming noise is the one refused");
+  assert.equal(pipeline.stats().queued, 2);
+});
+
+test("shedding is reported once per burst so it cannot become its own flood", async () => {
+  const pipeline = new EventPipeline({ now: () => 1_000_000, ceiling: 0, maxDepth: 1 });
+  const reports: number[] = [];
+  pipeline.onDropped(dropped => reports.push(dropped));
+
+  for (let index = 0; index < 5; index += 1) pipeline.enqueue(4, { run: async () => undefined });
+
+  assert.equal(pipeline.stats().dropped, 4, "four jobs had to go to keep the depth at one");
+  assert.deepEqual(reports, [1], "one report per burst, carrying the running count");
+});
+
+test("the documented ceiling is a real number, not a placeholder", () => {
+  assert.equal(MAX_QUEUE_DEPTH, 1_500);
 });

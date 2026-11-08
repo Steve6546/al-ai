@@ -523,7 +523,10 @@ const loadedMarkers: Record<string, RegExp> = {
   // The counter is built from the registry *and* the server's config, so it only
   // exists once the payload arrived — and it cannot be satisfied by the static
   // card title, which renders while the panel is still loading.
-  security: /4\/12 مفعّل/,
+  // The exact numerator is deliberately not pinned: it is how many protections
+  // the engine enforces, which grows every time a registry entry is wired, and
+  // a marker that hard-codes it fails for a reason unrelated to this screen.
+  security: /[0-9]+\/[0-9]+ مفعّل/,
   // The summary line under the controls, which is built from the stored row:
   // the activity kind by its Discord name, then the text beside it. Both halves
   // have to have arrived for the string to exist at all.
@@ -1103,7 +1106,7 @@ test("a locked role icon cannot be picked and is left out of the save", async ()
     });
 
     // The change is a draft; the bar's save is what writes it.
-    const save = [...container.querySelectorAll("button")].find(el => /حفظ التعديلات/.test(el.textContent ?? ""));
+    const save = [...container.querySelectorAll("button")].find(el => /حفظ التغييرات/.test(el.textContent ?? ""));
     assert.ok(save, "the unsaved-changes bar appeared once the nickname changed");
     await act(async () => {
       (save as HTMLButtonElement).click();

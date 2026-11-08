@@ -47,7 +47,6 @@ import { AccountMenu } from "@/components/account-menu";
 import { AppearanceMenu } from "@/components/appearance-menu";
 import { PageHeader } from "@/components/page-header";
 import { BrandMark } from "@/components/brand-mark";
-import { UpdateBanner } from "@/components/update-banner";
 import { initials } from "@/lib/format";
 import { navText, useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -400,7 +399,6 @@ export function AppShell({
         collapsed ? "lg:grid-cols-[4.75rem_1fr]" : "lg:grid-cols-[16.5rem_1fr]"
       )}
     >
-      <UpdateBanner />
       {/* ---------------------------------------------------------------- *
        * Sidebar (desktop)
        *
@@ -419,7 +417,7 @@ export function AppShell({
           {!collapsed ? (
             <div className="min-w-0 leading-tight">
               <p className="truncate text-sm font-semibold">AL AI</p>
-              <p className="truncate text-[11px] text-muted-foreground">{t("login.subtitle")}</p>
+              <p className="truncate text-mini text-muted-foreground">{t("login.subtitle")}</p>
             </div>
           ) : null}
         </div>
@@ -603,7 +601,24 @@ export function AppShell({
             able to scroll it. This is the fix axe asks for, and it changes no
             layout class the scrolling guard asserts. */}
         <main tabIndex={0} className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-3 pb-24 sm:p-4 lg:p-6">
-          <div className="w-full max-w-[1600px] px-0.5 py-2 sm:px-1 lg:px-4 lg:py-3">
+          {/*
+           * `mx-auto` is load-bearing, not cosmetic.
+           *
+           * A capped width without auto margins is pinned to the *start* edge,
+           * which in this RTL product is the right — so every screen narrower
+           * than the cap left one wide dead column down the left of the page,
+           * and the wider the monitor the more of the window was empty. Centring
+           * splits that slack instead, and the cap below is set high enough that
+           * a normal desktop window is filled rather than letterboxed.
+           *
+           * 1920 and not the 1600 it started at: the whole interface is now
+           * rendered at a 112.5% root, so the same number of pixels holds ~11%
+           * less content. Leaving the cap alone would have made every screen
+           * *narrower* than before in real terms while the request was to make
+           * it larger; raising it keeps the cards as wide as they were and
+           * gives the bigger type the room it needs.
+           */}
+          <div className="mx-auto w-full max-w-[1920px] px-0.5 py-1 sm:px-1 lg:px-4 lg:py-2">
             {/* The screen's own title and one line of context, taken from the
                 navigation so the menu and the page can never describe the same
                 screen differently. */}
@@ -663,7 +678,7 @@ function GuildSwitcher({
             >
               <Avatar className="size-8 rounded-lg">
                 {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
-                <AvatarFallback className="rounded-lg text-[10px]">{initials(guild.name)}</AvatarFallback>
+                <AvatarFallback className="rounded-lg text-micro">{initials(guild.name)}</AvatarFallback>
               </Avatar>
             </button>
           </TooltipTrigger>
@@ -681,11 +696,11 @@ function GuildSwitcher({
             <span className="flex min-w-0 items-center gap-2">
               <Avatar className="size-7 rounded-lg">
                 {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
-                <AvatarFallback className="rounded-lg text-[10px]">{initials(guild.name)}</AvatarFallback>
+                <AvatarFallback className="rounded-lg text-micro">{initials(guild.name)}</AvatarFallback>
               </Avatar>
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium">{guild.name}</span>
-                <span className="block truncate text-[11px] text-muted-foreground">{t("nav.guildSelected")}</span>
+                <span className="block truncate text-mini text-muted-foreground">{t("nav.guildSelected")}</span>
               </span>
             </span>
             <ChevronsUpDown className="size-4 shrink-0 opacity-60" />
@@ -706,7 +721,7 @@ function GuildSwitcher({
             <DropdownMenuItem key={item.id} onSelect={() => onSelectGuild(item.id)} className="gap-2">
               <Avatar className="size-6 rounded-md">
                 {item.iconUrl && <AvatarImage src={item.iconUrl} alt="" />}
-                <AvatarFallback className="rounded-md text-[10px]">{initials(item.name)}</AvatarFallback>
+                <AvatarFallback className="rounded-md text-micro">{initials(item.name)}</AvatarFallback>
               </Avatar>
               <span className="min-w-0 flex-1 truncate">{item.name}</span>
               {item.id === selectedGuildId && <Check className="size-3.5 text-muted-foreground" />}
@@ -832,7 +847,7 @@ function SidebarNav({
             onOpenChange={value => setOpenSections(current => ({ ...current, [section.id]: value }))}
           >
             <CollapsibleTrigger asChild>
-              <button className="flex w-full items-center justify-between rounded-md px-3 py-2 text-[11px] font-semibold tracking-wide text-muted-foreground transition-ui hover:text-foreground">
+              <button className="flex w-full items-center justify-between rounded-md px-3 py-2 text-mini font-semibold tracking-wide text-muted-foreground transition-ui hover:text-foreground">
                 {t(`nav.section.${section.id}` as "nav.section.server")}
                 <ChevronsUpDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
               </button>
@@ -843,7 +858,7 @@ function SidebarNav({
       })}
 
       {!guild.botPresent ? (
-        <p className="px-3 pt-3 text-[11px] leading-relaxed text-muted-foreground">
+        <p className="px-3 pt-3 text-mini leading-relaxed text-muted-foreground">
           {t("nav.settingsAfterBot")}
         </p>
       ) : null}
@@ -935,7 +950,7 @@ function StatusChips({ health }: { health: HealthSnapshot | null }) {
     <div className="hidden items-center gap-1.5 md:flex">
       <Tooltip>
         <TooltipTrigger asChild>
-          <Badge variant="outline" className="h-6 gap-1.5 px-2 text-[11px]">
+          <Badge variant="outline" className="h-6 gap-1.5 px-2 text-mini">
             <Activity className={cn("size-3", health.status === "healthy" ? "text-success" : "text-warning")} />
             {t("nav.statusDashboard")}
           </Badge>
@@ -946,7 +961,7 @@ function StatusChips({ health }: { health: HealthSnapshot | null }) {
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Badge variant="outline" className="h-6 gap-1.5 px-2 text-[11px]">
+          <Badge variant="outline" className="h-6 gap-1.5 px-2 text-mini">
             <span className={cn("size-2 rounded-full", botConnected ? "bg-success" : "bg-muted-foreground/40")} />
             {t("nav.statusBot")}
           </Badge>
@@ -962,7 +977,7 @@ function StatusChips({ health }: { health: HealthSnapshot | null }) {
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Badge variant="outline" className="h-6 gap-1.5 px-2 text-[11px]">
+          <Badge variant="outline" className="h-6 gap-1.5 px-2 text-mini">
             <Database className={cn("size-3", databaseUp ? "text-success" : "text-destructive")} />
             {t("nav.statusDatabase")}
           </Badge>

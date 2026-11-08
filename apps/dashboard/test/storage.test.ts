@@ -2,7 +2,7 @@ import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { commandFlagsFor, defaultCommandConfig, requireCommand, DEFAULT_PROTECTION_SETTINGS } from "@al-ai/core";
+import { commandFlagsFor, defaultCommandConfig, requireCommand, DEFAULT_ANTI_NUKE_LIMITS, DEFAULT_PROTECTION_SETTINGS, MAX_IMAGE_DATA_URL_LENGTH } from "@al-ai/core";
 import { createDatabase, createPool } from "../server/db.js";
 
 /**
@@ -209,7 +209,7 @@ test("a guild with no security row reads as armed at the defaults", { skip }, as
   const config = await db!.getSecurity(GUILD_ID);
 
   assert.equal(config.enabled, true, "a guild without a saved row is protected, not exposed");
-  assert.deepEqual(config.limits, { channelDeletesPerMinute: 3, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, channelOverwritesPerMinute: 5, bansPerMinute: 5, roleChangesPerMinute: 3 });
+  assert.deepEqual(config.limits, DEFAULT_ANTI_NUKE_LIMITS);
   assert.equal(config.quarantineRoleId, null);
 });
 
@@ -218,7 +218,7 @@ test("security settings survive a round trip", { skip }, async () => {
 
   const written = {
     enabled: true,
-    limits: { channelDeletesPerMinute: 7, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, channelOverwritesPerMinute: 5, bansPerMinute: 12, roleChangesPerMinute: 4 },
+    limits: { ...DEFAULT_ANTI_NUKE_LIMITS, channelDeletesPerMinute: 7, bansPerMinute: 12, roleChangesPerMinute: 4 },
     protections: DEFAULT_PROTECTION_SETTINGS,
     quarantineRoleId: "1540515175826985080"
   };
@@ -230,7 +230,7 @@ test("saving twice updates rather than duplicating", { skip }, async () => {
   await pool!.query("DELETE FROM guild_security WHERE guild_id = $1", [GUILD_ID]);
   const base = {
     enabled: false,
-    limits: { channelDeletesPerMinute: 3, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, channelOverwritesPerMinute: 5, bansPerMinute: 5, roleChangesPerMinute: 3 },
+    limits: DEFAULT_ANTI_NUKE_LIMITS,
     protections: DEFAULT_PROTECTION_SETTINGS,
     quarantineRoleId: null
   };
@@ -582,7 +582,7 @@ test("the database refuses a customization image over the ceiling", { skip }, as
   // The application validates the same thing, but the constraint is what makes
   // it true for a row written by anything else — a migration, a psql session.
   await seedCustomization();
-  const oversized = `data:image/png;base64,${"A".repeat(500_001)}`;
+  const oversized = `data:image/png;base64,${"A".repeat(MAX_IMAGE_DATA_URL_LENGTH + 100)}`;
 
   await assert.rejects(
     pool!.query("UPDATE guild_customization SET avatar_data_url = $1 WHERE guild_id = $2", [oversized, GUILD_ID]),

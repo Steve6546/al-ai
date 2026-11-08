@@ -151,8 +151,8 @@ function PreviewAvatar({
 function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3 py-1">
-      <span className="shrink-0 text-[11px] text-muted-foreground">{label}</span>
-      <span className="min-w-0 truncate text-end text-[11px] font-medium">{children}</span>
+      <span className="shrink-0 text-mini text-muted-foreground">{label}</span>
+      <span className="min-w-0 truncate text-end text-mini font-medium">{children}</span>
     </div>
   );
 }
@@ -230,7 +230,7 @@ export function BotLivePreview({
   return (
     <div className="space-y-3">
       {!enabled ? (
-        <p className="rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+        <p className="rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-mini text-muted-foreground">
           {t("preview.disabled")}
         </p>
       ) : null}
@@ -241,7 +241,7 @@ export function BotLivePreview({
         will see" and "this is what they will see once you save".
       */}
       {pending ? (
-        <p className="rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-[11px] text-warning">
+        <p className="rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-mini text-warning">
           {t("preview.pending")}
         </p>
       ) : null}
@@ -271,7 +271,7 @@ export function BotLivePreview({
               : { backgroundColor: roleColor ?? "#4e5058" }
           }
         >
-          {!banner ? <span className="absolute inset-0 grid place-items-center text-[11px] text-white/70">{t("preview.noBanner")}</span> : null}
+          {!banner ? <span className="absolute inset-0 grid place-items-center text-mini text-white/70">{t("preview.noBanner")}</span> : null}
           {editable ? (
             <span className="absolute inset-0 grid place-items-center bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1 text-xs">

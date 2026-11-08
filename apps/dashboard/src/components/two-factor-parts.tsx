@@ -98,7 +98,7 @@ export function QrPanel({ value, label, caption }: { value: string; label: strin
           role="img"
         />
       </div>
-      {caption ? <p className="mt-3 text-center text-[11px] leading-relaxed text-white/45">{caption}</p> : null}
+      {caption ? <p className="mt-3 text-center text-mini leading-relaxed text-white/45">{caption}</p> : null}
     </div>
   );
 }
@@ -141,7 +141,7 @@ export function SecretField({
 
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] font-medium text-white/55">{label}</p>
+      <p className="text-mini font-medium text-white/55">{label}</p>
       <div className="flex items-center gap-1.5">
         <code
           dir="ltr"
@@ -168,7 +168,7 @@ export function SecretField({
           {copied ? <Check className="size-4 text-primary" aria-hidden /> : <Copy className="size-4" aria-hidden />}
         </button>
       </div>
-      <p className="text-[10px] leading-relaxed text-white/35">{t("settings.security.secretWarning")}</p>
+      <p className="text-micro leading-relaxed text-white/35">{t("settings.security.secretWarning")}</p>
     </div>
   );
 }
@@ -226,13 +226,13 @@ export function RecoveryCodeGrid({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-xs font-semibold text-white/85">{title}</p>
-          <p className="text-[10px] leading-relaxed text-amber-300/90">{warning}</p>
+          <p className="text-micro leading-relaxed text-amber-300/90">{warning}</p>
         </div>
         <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => void copyOne(codes.join("\n"), "all")}
-            className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[11px] text-white/70 transition hover:border-primary/50 hover:text-primary"
+            className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-mini text-white/70 transition hover:border-primary/50 hover:text-primary"
           >
             {copied === "all" ? <Check className="size-3 text-primary" aria-hidden /> : <Copy className="size-3" aria-hidden />}
             {copyAllLabel}
@@ -240,7 +240,7 @@ export function RecoveryCodeGrid({
           <button
             type="button"
             onClick={download}
-            className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[11px] text-white/70 transition hover:border-primary/50 hover:text-primary"
+            className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-mini text-white/70 transition hover:border-primary/50 hover:text-primary"
           >
             {downloaded ? <Check className="size-3 text-primary" aria-hidden /> : <Download className="size-3" aria-hidden />}
             {downloadLabel}
@@ -257,7 +257,7 @@ export function RecoveryCodeGrid({
               aria-label={`${copyEachLabel}: ${code}`}
               className="group flex w-full items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2 text-start transition hover:border-primary/40 hover:bg-white/[0.06]"
             >
-              <code dir="ltr" className="font-mono text-[11px] tracking-wide text-white/80">
+              <code dir="ltr" className="font-mono text-mini tracking-wide text-white/80">
                 {code}
               </code>
               {copied === String(index) ? (
@@ -270,7 +270,7 @@ export function RecoveryCodeGrid({
         ))}
       </ul>
 
-      <p className="text-[10px] leading-relaxed text-white/35">{t("settings.security.oneTimeBody")}</p>
+      <p className="text-micro leading-relaxed text-white/35">{t("settings.security.oneTimeBody")}</p>
     </div>
   );
 }
@@ -391,7 +391,7 @@ export function TotpRing({ seconds }: { seconds: number }) {
   const fraction = Math.max(0, Math.min(1, seconds / TOTP_PERIOD_SECONDS));
   const circumference = 2 * Math.PI * 9;
   return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] text-white/40" title={`${TOTP_PERIOD_SECONDS}s`}>
+    <span className="inline-flex items-center gap-1.5 text-mini text-white/40" title={`${TOTP_PERIOD_SECONDS}s`}>
       <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true" className="shrink-0">
         <circle cx="11" cy="11" r="9" fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="2" />
         <circle

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { AlertTriangle, Check, Clock, Copy, KeyRound, Loader2, LockKeyhole, ShieldCheck, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, Copy, KeyRound, Loader2, ShieldCheck, X } from "lucide-react";
 import { api, ApiError } from "@/api";
 import {
   compactSecret,
@@ -12,7 +12,6 @@ import {
   useTotpSeconds
 } from "@/components/two-factor-parts";
 import { useI18n } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
 import type { TwoFactorEnrollment } from "@/types";
 
 /** mm:ss remaining on a pending login, clamped at zero. */
@@ -224,9 +223,24 @@ export function TwoFactorScreen({
    * Single render — no early returns, so no hook-order black screen.  *
    * ---------------------------------------------------------------- */
   return (
+    /*
+     * One column, one job: enter a code.
+     *
+     * The screen used to be a split card — a near-black plate carrying the
+     * brand (or the QR) on one side and the form on the other. For a sign-in
+     * step that plate was decoration: the operator has already enrolled, so a
+     * lock emblem beside the field said nothing the title did not, and on a
+     * laptop it halved the width available to six code boxes. The form now owns
+     * the card, centred, in the order it is read: what this is, what to type,
+     * how long it lasts, then the two actions.
+     *
+     * Enrolment keeps its QR — it is the only thing that makes a first sign-in
+     * possible — but it sits *in* the column above the field instead of beside
+     * it, so there is no second layout to maintain.
+     */
     <div
       dir={dir}
-      className="relative flex h-full justify-center overflow-y-auto overscroll-contain bg-[#050807] p-0 sm:p-6"
+      className="relative flex h-full justify-center overflow-y-auto overscroll-contain bg-[#050807] p-4 sm:p-6"
     >
       {/* The dithered blue-green texture from the supplied artwork, drawn with
           gradients so no image ever has to be downloaded. */}
@@ -240,310 +254,279 @@ export function TwoFactorScreen({
         }}
       />
 
-      <div className="relative my-auto w-full max-w-4xl overflow-hidden border-y border-white/10 bg-[#080d0b] shadow-[0_30px_120px_rgba(0,0,0,0.65)] sm:rounded-3xl sm:border">
-        <div className={cn("grid min-h-0", setupView ? "lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]" : "lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]")}>
-          {/* ---------------------------------------------------------- *
-           * Left plate: the QR when setting up, the brand when signing in
-           * ---------------------------------------------------------- */}
-          <div className="relative flex flex-col justify-between gap-6 border-b border-white/10 bg-[#060a08] p-6 sm:p-8 lg:border-b-0 lg:border-e">
-            <div className="leading-tight">
-              <p className="text-sm font-semibold text-white">AL AI</p>
-              <p className="text-[11px] text-white/40">{t("login.subtitle")}</p>
-            </div>
+      <div className="relative my-auto w-full max-w-md overflow-hidden rounded-3xl border border-white/10 bg-[#080d0b] shadow-[0_30px_120px_rgba(0,0,0,0.65)]">
+        <div className="space-y-5 p-6 sm:p-8">
+          <header className="space-y-1.5 text-center">
+            <h1 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">{t("twoFactor.title")}</h1>
+            <p className="text-sm leading-relaxed text-white/50">
+              {enrolled ? t("twoFactor.subtitleEnrolled") : t("twoFactor.subtitleSetup")}
+            </p>
+          </header>
 
-            {qrReady && enrollment?.otpauthUri ? (
-              <div className="space-y-4">
-                <QrPanel
-                  value={enrollment.otpauthUri}
-                  label={t("settings.security.qrLabel")}
-                  caption={t("twoFactor.guideNote")}
-                />
-                <div className="flex flex-wrap items-center justify-center gap-2 text-[10px] text-white/35">
-                  <span className="rounded-full border border-white/10 px-2 py-0.5">{t("settings.security.appsHint")}</span>
-                </div>
+          {notice && (
+            <p className="rounded-lg border border-primary/20 bg-primary/[0.06] px-3 py-2 text-center text-mini text-primary">
+              {notice}
+            </p>
+          )}
+
+          {copyStatus && (
+            <p role="status" aria-live="polite" className="text-center text-mini text-primary">
+              {copyStatus}
+            </p>
+          )}
+
+          {/* Enrolment material: shown exactly once, never fetched from a
+              third-party QR service. It lives in the column because without it
+              there is no first code to enter. */}
+          {!enrolled && (
+            <section aria-label={t("twoFactor.guideTitle")} className="space-y-4">
+              <div className="rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2.5">
+                <p className="flex items-start gap-2 text-mini leading-relaxed text-amber-200/90">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                  <strong className="font-medium">{t("twoFactor.warning")}</strong>
+                </p>
               </div>
-            ) : (
-              <div className="relative mx-auto grid size-36 place-items-center sm:size-44">
-                <span aria-hidden className="absolute inset-0 rounded-full border border-primary/20" />
-                <span aria-hidden className="absolute inset-6 rounded-full border border-primary/30" />
-                <span aria-hidden className="absolute inset-0 rounded-full bg-primary/10 blur-2xl" />
-                <div className="relative grid size-24 place-items-center rounded-2xl border border-primary/30 bg-[#0b1411] text-primary shadow-[0_0_50px_rgba(110,231,183,0.20)] sm:size-28">
-                  <LockKeyhole className="size-10" aria-hidden />
-                </div>
-              </div>
-            )}
 
-            <div className="space-y-2">
-              <p className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/[0.07] px-2.5 py-1 text-[10px] font-medium text-primary">
-                <ShieldCheck className="size-3" aria-hidden />
-                {t("twoFactor.title")}
-              </p>
-              {/* The QR / manual-key instructions belong to enrolment only. Once
-                  an authenticator is confirmed, the sign-in step is just the
-                  code field — showing "scan the QR" beside it reads as a task
-                  the operator has already done. */}
-              {!enrolled && (
-                <p className="text-[11px] leading-relaxed text-white/35">{t("twoFactor.guideBody")}</p>
-              )}
-            </div>
-          </div>
-
-          {/* ---------------------------------------------------------- *
-           * Right plate: the form
-           * ---------------------------------------------------------- */}
-          <div className="p-6 sm:p-8 lg:p-10">
-            <header className="mb-5">
-              <h1 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">{t("twoFactor.title")}</h1>
-              <p className="mt-1.5 text-xs leading-relaxed text-white/45">
-                {enrolled ? t("twoFactor.subtitleEnrolled") : t("twoFactor.subtitleSetup")}
-              </p>
-            </header>
-
-            {notice && (
-              <p className="mb-4 rounded-lg border border-primary/20 bg-primary/[0.06] px-3 py-2 text-[11px] text-primary">
-                {notice}
-              </p>
-            )}
-
-            {copyStatus && (
-              <p role="status" aria-live="polite" className="mb-3 text-[11px] text-primary">
-                {copyStatus}
-              </p>
-            )}
-
-            {/* Enrolment material: shown exactly once, never fetched from a
-                third-party QR service. */}
-            {!enrolled && (
-              <section aria-label={t("twoFactor.guideTitle")} className="mb-4 space-y-4">
-                <div className="rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2.5">
-                  <p className="flex items-start gap-2 text-[11px] leading-relaxed text-amber-200/90">
-                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                    <strong className="font-medium">{t("twoFactor.warning")}</strong>
+              {enrollmentError ? (
+                <div className="space-y-2 text-center">
+                  <p className="rounded-lg border border-red-400/25 bg-red-400/[0.06] px-3 py-2 text-mini text-red-200/85">
+                    {enrollmentError}
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => setReloadToken(token => token + 1)}
+                    className="text-mini text-primary underline underline-offset-4"
+                  >
+                    {t("twoFactor.retry")}
+                  </button>
                 </div>
-
-                {enrollmentError ? (
-                  <div className="space-y-2">
-                    <p className="rounded-lg border border-red-400/25 bg-red-400/[0.06] px-3 py-2 text-[11px] text-red-200/85">
-                      {enrollmentError}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setReloadToken(token => token + 1)}
-                      className="text-[11px] text-primary underline underline-offset-4"
-                    >
-                      {t("twoFactor.retry")}
-                    </button>
-                  </div>
-                ) : enrollment === null ? (
-                  <div className="flex items-center gap-2 text-xs text-white/40" role="status">
-                    <Loader2 className="size-4 animate-spin" aria-hidden />
-                    {t("twoFactor.loading")}
-                  </div>
-                ) : enrollment.enrolled ? (
-                  <p className="rounded-lg border border-primary/20 bg-primary/[0.06] px-3 py-2 text-[11px] text-primary">
-                    {t("twoFactor.alreadyEnrolled")}
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {enrollment.secret && (
-                      <SecretField
-                        secret={enrollment.secret}
-                        label={t("twoFactor.secret")}
-                        showLabel={t("twoFactor.showSecret")}
-                        hideLabel={t("twoFactor.hideSecret")}
-                        copyLabel={t("twoFactor.copySecret")}
-                        defaultVisible
-                      />
-                    )}
-
-                    {enrollment.otpauthUri && (
-                      <div className="space-y-1.5">
-                        <p className="text-[11px] font-medium text-white/55">{t("twoFactor.uri")}</p>
-                        <div className="flex items-center gap-1.5">
-                          <code
-                            dir="ltr"
-                            className="min-w-0 flex-1 truncate rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 font-mono text-[10px] text-white/55"
-                          >
-                            {enrollment.otpauthUri}
-                          </code>
-                          <button
-                            type="button"
-                            onClick={() => void copy(enrollment.otpauthUri ?? "", t("twoFactor.uriCopied"))}
-                            aria-label={t("twoFactor.copyUri")}
-                            className="grid size-9 shrink-0 place-items-center rounded-lg border border-white/10 text-white/55 transition hover:border-primary/50 hover:text-primary"
-                          >
-                            <Copy className="size-4" aria-hidden />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {enrollment.recoveryCodes.length > 0 && (
-                      <RecoveryCodeGrid
-                        codes={enrollment.recoveryCodes}
-                        title={t("twoFactor.recovery", { count: enrollment.recoveryCodes.length })}
-                        warning={t("twoFactor.recoveryWarning")}
-                        copyAllLabel={t("twoFactor.copyRecovery")}
-                        downloadLabel={t("twoFactor.downloadRecovery")}
-                        copyEachLabel={t("twoFactor.copyEach")}
-                      />
-                    )}
-
-                    <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
-                      <input
-                        type="checkbox"
-                        checked={savedCodes}
-                        onChange={event => setSavedCodes(event.target.checked)}
-                        className="mt-0.5 size-4 accent-primary"
-                      />
-                      <span className="text-[11px] leading-relaxed text-white/60">{t("twoFactor.recoverySaved")}</span>
-                    </label>
-                  </div>
-                )}
-              </section>
-            )}
-
-            {/* The pending login is short-lived: a live countdown, then an
-                explicit expired state (never a fake success). */}
-            {!expired && remainingMs !== null && (
-              <p className="mb-4 flex flex-wrap items-center gap-1.5 text-[11px] text-white/40">
-                <Clock className="size-3.5" aria-hidden />
-                {t("twoFactor.countdown")}:
-                <span dir="ltr" className="font-mono tabular text-white/70">
-                  {formatCountdown(remainingMs)}
-                </span>
-              </p>
-            )}
-
-            {expired ? (
-              <div className="space-y-3">
-                <div className="rounded-xl border border-red-400/25 bg-red-400/[0.06] p-3">
-                  <p className="text-sm font-medium text-red-200">{t("twoFactor.expiredTitle")}</p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-red-200/70">
-                    {error ?? t("twoFactor.expiredBody")}
-                  </p>
+              ) : enrollment === null ? (
+                <div className="flex items-center justify-center gap-2 text-xs text-white/40" role="status">
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                  {t("twoFactor.loading")}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void handleCancel()}
-                  className="w-full rounded-xl border border-white/10 px-4 py-2.5 text-sm text-white/70 transition hover:border-white/20 hover:text-white"
-                >
-                  {t("twoFactor.backToLogin")}
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={verify} className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <label htmlFor="two-factor-code" className="text-[11px] font-medium text-white/55">
-                      {isRecoveryMode
-                        ? t("twoFactor.codeLabelRecovery")
-                        : enrolled
-                          ? t("twoFactor.codeLabelEnrolled")
-                          : t("twoFactor.codeLabelSetup")}
-                    </label>
-                    {!isRecoveryMode && <TotpRing seconds={totpSeconds} />}
-                  </div>
+              ) : enrollment.enrolled ? (
+                <p className="rounded-lg border border-primary/20 bg-primary/[0.06] px-3 py-2 text-center text-mini text-primary">
+                  {t("twoFactor.alreadyEnrolled")}
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {/* Narrower than the shared panel's own cap: in a 504px
+                      column the default 16rem QR pushed the code field — the
+                      thing the operator came here to fill — below the fold. */}
+                  {qrReady && enrollment.otpauthUri && (
+                    <div className="mx-auto w-full max-w-[14rem]">
+                      <QrPanel
+                        value={enrollment.otpauthUri}
+                        label={t("settings.security.qrLabel")}
+                        caption={t("twoFactor.guideNote")}
+                      />
+                    </div>
+                  )}
 
-                  {isRecoveryMode ? (
-                    <input
-                      id="two-factor-code"
-                      name="code"
-                      type="text"
-                      dir="ltr"
-                      autoComplete="off"
-                      maxLength={128}
-                      placeholder={t("twoFactor.recoveryPlaceholder")}
-                      autoFocus
-                      aria-describedby="two-factor-hint"
-                      value={code}
-                      onChange={event => setCode(event.target.value)}
-                      disabled={verifying || cancelling}
-                      className="h-12 w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 text-center font-mono text-sm tracking-widest text-white placeholder:text-white/20 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
-                  ) : (
-                    <OtpInput
-                      id="two-factor-code"
-                      value={code}
-                      onChange={setCode}
-                      disabled={verifying || cancelling}
-                      autoFocus={enrolled}
-                      ariaLabel={
-                        enrolled ? t("twoFactor.codeLabelEnrolled") : t("twoFactor.codeLabelSetup")
-                      }
-                      describedBy="two-factor-hint"
+                  {enrollment.secret && (
+                    <SecretField
+                      secret={enrollment.secret}
+                      label={t("twoFactor.secret")}
+                      showLabel={t("twoFactor.showSecret")}
+                      hideLabel={t("twoFactor.hideSecret")}
+                      copyLabel={t("twoFactor.copySecret")}
+                      defaultVisible
                     />
                   )}
 
-                  <p id="two-factor-hint" className="text-[10px] leading-relaxed text-white/35">
+                  {enrollment.otpauthUri && (
+                    <div className="space-y-1.5">
+                      <p className="text-mini font-medium text-white/55">{t("twoFactor.uri")}</p>
+                      <div className="flex items-center gap-1.5">
+                        <code
+                          dir="ltr"
+                          className="min-w-0 flex-1 truncate rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 font-mono text-micro text-white/55"
+                        >
+                          {enrollment.otpauthUri}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => void copy(enrollment.otpauthUri ?? "", t("twoFactor.uriCopied"))}
+                          aria-label={t("twoFactor.copyUri")}
+                          className="grid size-9 shrink-0 place-items-center rounded-lg border border-white/10 text-white/55 transition hover:border-primary/50 hover:text-primary"
+                        >
+                          <Copy className="size-4" aria-hidden />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {enrollment.recoveryCodes.length > 0 && (
+                    <RecoveryCodeGrid
+                      codes={enrollment.recoveryCodes}
+                      title={t("twoFactor.recovery", { count: enrollment.recoveryCodes.length })}
+                      warning={t("twoFactor.recoveryWarning")}
+                      copyAllLabel={t("twoFactor.copyRecovery")}
+                      downloadLabel={t("twoFactor.downloadRecovery")}
+                      copyEachLabel={t("twoFactor.copyEach")}
+                    />
+                  )}
+
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                    <input
+                      type="checkbox"
+                      checked={savedCodes}
+                      onChange={event => setSavedCodes(event.target.checked)}
+                      className="mt-0.5 size-4 accent-primary"
+                    />
+                    <span className="text-mini leading-relaxed text-white/60">{t("twoFactor.recoverySaved")}</span>
+                  </label>
+                </div>
+              )}
+            </section>
+          )}
+
+          {expired ? (
+            <div className="space-y-3">
+              <div className="rounded-xl border border-red-400/25 bg-red-400/[0.06] p-3 text-center">
+                <p className="text-sm font-medium text-red-200">{t("twoFactor.expiredTitle")}</p>
+                <p className="mt-1 text-mini leading-relaxed text-red-200/70">
+                  {error ?? t("twoFactor.expiredBody")}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleCancel()}
+                className="w-full rounded-xl border border-white/10 px-4 py-2.5 text-sm text-white/70 transition hover:border-white/20 hover:text-white"
+              >
+                {t("twoFactor.backToLogin")}
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={verify} className="space-y-4">
+              <div className="space-y-2.5">
+                {/* The 30-second ring sits on the label line, next to the words
+                    it qualifies — «code» and «how long it stays valid». */}
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="two-factor-code" className="text-mini font-medium text-white/55">
                     {isRecoveryMode
-                      ? t("twoFactor.hintRecovery")
+                      ? t("twoFactor.codeLabelRecovery")
                       : enrolled
-                        ? t("twoFactor.hintEnrolled")
-                        : t("twoFactor.hintSetup")}
-                  </p>
+                        ? t("twoFactor.codeLabelEnrolled")
+                        : t("twoFactor.codeLabelSetup")}
+                  </label>
+                  {!isRecoveryMode && <TotpRing seconds={totpSeconds} />}
                 </div>
 
-                {enrolled && (
+                {isRecoveryMode ? (
+                  <input
+                    id="two-factor-code"
+                    name="code"
+                    type="text"
+                    dir="ltr"
+                    autoComplete="off"
+                    maxLength={128}
+                    placeholder={t("twoFactor.recoveryPlaceholder")}
+                    autoFocus
+                    aria-describedby="two-factor-hint"
+                    value={code}
+                    onChange={event => setCode(event.target.value)}
+                    disabled={verifying || cancelling}
+                    className="h-12 w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 text-center font-mono text-sm tracking-widest text-white placeholder:text-white/20 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                ) : (
+                  <OtpInput
+                    id="two-factor-code"
+                    value={code}
+                    onChange={setCode}
+                    disabled={verifying || cancelling}
+                    // The screen exists to be typed into: the first box takes
+                    // focus as soon as it is mounted, in both the sign-in and
+                    // the enrolment path.
+                    autoFocus
+                    ariaLabel={
+                      enrolled ? t("twoFactor.codeLabelEnrolled") : t("twoFactor.codeLabelSetup")
+                    }
+                    describedBy="two-factor-hint"
+                  />
+                )}
+
+                <p id="two-factor-hint" className="text-center text-micro leading-relaxed text-white/35">
+                  {isRecoveryMode
+                    ? t("twoFactor.hintRecovery")
+                    : enrolled
+                      ? t("twoFactor.hintEnrolled")
+                      : t("twoFactor.hintSetup")}
+                </p>
+              </div>
+
+              {/* The pending sign-in is short-lived. Quiet, centred, and below
+                  the field because it is a deadline, not an instruction — and
+                  worded as one, so it cannot be mistaken for the 30-second
+                  ring above the boxes, which is about the code, not the login. */}
+              {!expired && remainingMs !== null && (
+                <p className="flex items-center justify-center gap-1.5 text-mini text-white/35">
+                  <Clock className="size-3.5" aria-hidden />
+                  {t("twoFactor.sessionLeft", { time: formatCountdown(remainingMs) })}
+                </p>
+              )}
+
+              {enrolled && (
+                <div className="text-center">
                   <button
                     type="button"
                     onClick={toggleMode}
-                    className="text-[11px] text-primary underline underline-offset-4"
+                    className="text-micro text-white/40 underline underline-offset-4 transition hover:text-white/70"
                   >
                     {isRecoveryMode ? t("twoFactor.useTotp") : t("twoFactor.useRecovery")}
                   </button>
-                )}
-
-                {error && (
-                  <p
-                    role="alert"
-                    className="flex items-start gap-2 rounded-lg border border-red-400/25 bg-red-400/[0.07] px-3 py-2 text-[11px] leading-relaxed text-red-200/90"
-                  >
-                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                    {error}
-                  </p>
-                )}
-
-                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <button
-                    type="button"
-                    onClick={() => void handleCancel()}
-                    disabled={verifying || cancelling}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm text-white/45 transition hover:text-white/80 disabled:opacity-50"
-                  >
-                    {cancelling ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <X className="size-4" aria-hidden />}
-                    {t("common.cancel")}
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={verifying || cancelling}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[0_0_30px_rgba(110,231,183,0.22)] transition hover:bg-primary disabled:opacity-60"
-                  >
-                    {verifying ? (
-                      <Loader2 className="size-4 animate-spin" aria-hidden />
-                    ) : (
-                      <ShieldCheck className="size-4" aria-hidden />
-                    )}
-                    {enrolled ? t("twoFactor.verify") : t("twoFactor.verifySetup")}
-                  </button>
                 </div>
+              )}
 
-                {!enrolled && (
-                  <p className="flex items-center gap-1.5 text-[10px] text-white/25">
-                    <KeyRound className="size-3" aria-hidden />
-                    {t("twoFactor.guideNote")}
-                  </p>
-                )}
-                {enrolled && savedCodes ? (
-                  <p className="flex items-center gap-1.5 text-[10px] text-primary/70">
-                    <Check className="size-3" aria-hidden />
-                    {t("twoFactor.remainingCodes", { count: 10 })}
-                  </p>
-                ) : null}
-              </form>
-            )}
-          </div>
+              {error && (
+                <p
+                  role="alert"
+                  className="flex items-start gap-2 rounded-lg border border-red-400/25 bg-red-400/[0.07] px-3 py-2 text-mini leading-relaxed text-red-200/90"
+                >
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                  {error}
+                </p>
+              )}
+
+              <div className="space-y-1">
+                <button
+                  type="submit"
+                  disabled={verifying || cancelling}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-[0_0_30px_rgba(110,231,183,0.22)] transition hover:bg-primary disabled:opacity-60"
+                >
+                  {verifying ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                  ) : (
+                    <ShieldCheck className="size-4" aria-hidden />
+                  )}
+                  {enrolled ? t("twoFactor.verify") : t("twoFactor.verifySetup")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleCancel()}
+                  disabled={verifying || cancelling}
+                  className="mx-auto flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm text-white/45 transition hover:text-white/80 disabled:opacity-50"
+                >
+                  {cancelling ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <X className="size-4" aria-hidden />}
+                  {t("common.cancel")}
+                </button>
+              </div>
+
+              {!enrolled && (
+                <p className="flex items-center justify-center gap-1.5 text-micro text-white/25">
+                  <KeyRound className="size-3" aria-hidden />
+                  {t("twoFactor.guideNote")}
+                </p>
+              )}
+              {enrolled && savedCodes ? (
+                <p className="flex items-center justify-center gap-1.5 text-micro text-primary/70">
+                  <Check className="size-3" aria-hidden />
+                  {t("twoFactor.remainingCodes", { count: 10 })}
+                </p>
+              ) : null}
+            </form>
+          )}
         </div>
       </div>
     </div>

@@ -6,6 +6,7 @@ import {
   imageRejectionReason,
   normaliseImageDataUrl
 } from "../src/contracts.js";
+import { MAX_IMAGE_BYTES, normaliseWelcomeImageDataUrl } from "../src/welcome-messages.js";
 
 /**
  * What the image budget actually allows.
@@ -52,4 +53,22 @@ test("an image clearly beyond the budget is refused as too large, not as not-an-
   // `too-large` while streaming); this ceiling is the last line for a
   // hand-crafted request, so it is asserted at a distance it can actually see.
   assert.equal(imageRejectionReason(dataUrlFor(MAX_IMAGE_UPLOAD_BYTES + 3_000)), "TOO_LARGE");
+});
+
+/**
+ * The welcome picture used to be judged by comparing base64 characters against
+ * a budget stated in bytes. A 1.6 MB PNG is 2.15 M characters, so it passed the
+ * uploader (which counts bytes) and was refused here (which counted characters)
+ * — under a hint that promised the budget it had just met.
+ */
+test("a welcome picture is measured in bytes, not in base64 characters", () => {
+  const bytes = Math.floor(MAX_IMAGE_BYTES * 0.8);
+  const dataUrl = dataUrlFor(bytes, "image/png");
+  assert.ok(dataUrl.length > MAX_IMAGE_BYTES, "the encoded string really is longer than the budget");
+  assert.equal(normaliseWelcomeImageDataUrl(dataUrl, MAX_IMAGE_BYTES), dataUrl, "0.8x the budget must be accepted");
+});
+
+test("a welcome picture beyond the budget is still refused", () => {
+  const over = dataUrlFor(Math.floor(MAX_IMAGE_BYTES * 1.2), "image/png");
+  assert.equal(normaliseWelcomeImageDataUrl(over, MAX_IMAGE_BYTES), null);
 });

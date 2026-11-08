@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, Image as ImageIcon, Info, Plus, Trash2, X } 
 import { api } from "@/api";
 import { useI18n, type Translate, type TranslationKey } from "@/lib/i18n";
 import { useDraftForm } from "@/lib/use-draft-form";
+import { fitImageUnder } from "@/lib/image-fit";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { SaveBar } from "@/components/save-bar";
 import { Toaster, useToasts } from "@/components/toaster";
@@ -39,25 +40,26 @@ const NONE = "__none__";
 
 const IMAGE_SEND_MODES: WelcomeMessageSettings["imageMode"][] = ["with_message", "before_message", "separate_channel"];
 
-/** Reads an image file into a capped data URL, or fails with a translated reason. */
-function readImageAsDataUrl(file: File, t: Translate): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (!/^image\/(png|jpeg|jpg|webp|gif)$/.test(file.type)) {
-      reject(new Error(t("welcome.imageBadType")));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result);
-      if (dataUrl.length > MAX_IMAGE_BYTES) {
-        reject(new Error(t("welcome.imageTooLarge")));
-        return;
-      }
-      resolve(dataUrl);
-    };
-    reader.onerror = () => reject(new Error(t("customization.imageReadFailed")));
-    reader.readAsDataURL(file);
-  });
+/**
+ * The picked file as a data URL inside the image budget — shrunk if needed.
+ *
+ * The old version compared the *encoded string* against a byte budget, so the
+ * effective limit was three quarters of what the hint promised, and any photo
+ * from a phone was refused outright. Both are the same bug seen twice; the
+ * fitter below is the one place that decides.
+ */
+async function readImageAsDataUrl(file: File, t: Translate): Promise<string> {
+  if (!/^image\/(png|jpeg|jpg|webp|gif)$/.test(file.type)) {
+    throw new Error(t("welcome.imageBadType"));
+  }
+  try {
+    return (await fitImageUnder(file, MAX_IMAGE_BYTES)).dataUrl;
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : "";
+    if (reason === "animated-gif-too-large") throw new Error(t("welcome.gifTooLarge"));
+    if (reason === "cannot-fit") throw new Error(t("welcome.imageTooLarge"));
+    throw new Error(t("customization.imageReadFailed"));
+  }
 }
 
 /**
@@ -422,10 +424,10 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                       </SelectContent>
                     </Select>
                     {imageChannelRequired && (
-                      <p className="text-[11px] text-destructive">{t("welcome.imageChannelRequired")}</p>
+                      <p className="text-mini text-destructive">{t("welcome.imageChannelRequired")}</p>
                     )}
                     {imageChannelMissing && !imageChannelRequired && (
-                      <p className="text-[11px] text-destructive">
+                      <p className="text-mini text-destructive">
                         {t("welcome.savedChannelGone")}
                       </p>
                     )}
@@ -461,7 +463,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
               {/* One hint line, announced with the field: whichever sentence is
                   true wins - the missing channel is the thing to fix first. */}
               {(channelRequired || welcomeChannelMissing || channelsError) && (
-                <p id="welcome-channel-hint" className="text-[11px] text-destructive">
+                <p id="welcome-channel-hint" className="text-mini text-destructive">
                   {channelRequired
                     ? t("welcome.channelRequiredHint")
                     : welcomeChannelMissing
@@ -514,7 +516,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                       Overlaying it on the textarea made the first line run
                       underneath it on a phone, which read as clipped text. */}
                   <div className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 text-[11px] text-muted-foreground">
+                    <span className="min-w-0 text-mini text-muted-foreground">
                       {t("welcome.insertHint")}
                     </span>
                     <EmojiPicker label={t("welcome.insertEmoji")} onPick={emoji => patch({ text: insertAtCursor(textRef.current, draft.text, emoji) })} />
@@ -528,7 +530,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                     className="min-h-24 rounded-xl text-sm [overflow-wrap:anywhere]"
                   />
                   <div className="space-y-1">
-                    <span className="text-[11px] text-muted-foreground">{t("welcome.availableVariables")}</span>
+                    <span className="text-mini text-muted-foreground">{t("welcome.availableVariables")}</span>
                     <TokenStrip onInsert={token => patch({ text: insertAtCursor(textRef.current, draft.text, token) })} />
                   </div>
                 </CardContent>
@@ -960,7 +962,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
                       disabled={draft.image.background.type === "transparent"}
                     />
                   </FieldRow>
-                  <p className="self-center text-[11px] text-muted-foreground">
+                  <p className="self-center text-mini text-muted-foreground">
                     {draft.image.background.type === "transparent"
                       ? t("welcome.transparentExport")
                       : t("welcome.filledExport")}

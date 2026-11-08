@@ -331,11 +331,17 @@ export function createDatabase(pool: pg.Pool) {
         channel_updates_per_minute: number;
         channel_overwrites_per_minute: number;
         bans_per_minute: number;
+        kicks_per_minute: number;
+        timeouts_per_minute: number;
         role_changes_per_minute: number;
+        role_updates_per_minute: number;
+        webhook_creates_per_minute: number;
+        webhook_updates_per_minute: number;
+        message_bulk_deletes_per_minute: number;
         quarantine_role_id: string | null;
         protection_settings: unknown;
       }>(
-        `SELECT enabled, channel_deletes_per_minute, channel_creates_per_minute, channel_updates_per_minute, channel_overwrites_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id, protection_settings
+        `SELECT enabled, channel_deletes_per_minute, channel_creates_per_minute, channel_updates_per_minute, channel_overwrites_per_minute, bans_per_minute, kicks_per_minute, timeouts_per_minute, role_changes_per_minute, role_updates_per_minute, webhook_creates_per_minute, webhook_updates_per_minute, message_bulk_deletes_per_minute, quarantine_role_id, protection_settings
          FROM guild_security WHERE guild_id = $1`,
         [guildId]
       );
@@ -351,15 +357,21 @@ export function createDatabase(pool: pg.Pool) {
           channelUpdatesPerMinute: row.channel_updates_per_minute,
           channelOverwritesPerMinute: row.channel_overwrites_per_minute,
           bansPerMinute: row.bans_per_minute,
-          roleChangesPerMinute: row.role_changes_per_minute
+          kicksPerMinute: row.kicks_per_minute,
+          timeoutsPerMinute: row.timeouts_per_minute,
+          roleChangesPerMinute: row.role_changes_per_minute,
+          roleUpdatesPerMinute: row.role_updates_per_minute,
+          webhookCreatesPerMinute: row.webhook_creates_per_minute,
+          webhookUpdatesPerMinute: row.webhook_updates_per_minute,
+          messageBulkDeletesPerMinute: row.message_bulk_deletes_per_minute
         }
       });
     },
 
     async saveSecurity(guildId: string, config: AntiNukeConfig) {
       await pool.query(
-        `INSERT INTO guild_security (guild_id, enabled, channel_deletes_per_minute, channel_creates_per_minute, channel_updates_per_minute, channel_overwrites_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id, protection_settings, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+        `INSERT INTO guild_security (guild_id, enabled, channel_deletes_per_minute, channel_creates_per_minute, channel_updates_per_minute, channel_overwrites_per_minute, bans_per_minute, kicks_per_minute, timeouts_per_minute, role_changes_per_minute, role_updates_per_minute, webhook_creates_per_minute, webhook_updates_per_minute, message_bulk_deletes_per_minute, quarantine_role_id, protection_settings, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
          ON CONFLICT (guild_id) DO UPDATE
            SET enabled = EXCLUDED.enabled,
                channel_deletes_per_minute = EXCLUDED.channel_deletes_per_minute,
@@ -367,7 +379,13 @@ export function createDatabase(pool: pg.Pool) {
                channel_updates_per_minute = EXCLUDED.channel_updates_per_minute,
                channel_overwrites_per_minute = EXCLUDED.channel_overwrites_per_minute,
                bans_per_minute = EXCLUDED.bans_per_minute,
+               kicks_per_minute = EXCLUDED.kicks_per_minute,
+               timeouts_per_minute = EXCLUDED.timeouts_per_minute,
                role_changes_per_minute = EXCLUDED.role_changes_per_minute,
+               role_updates_per_minute = EXCLUDED.role_updates_per_minute,
+               webhook_creates_per_minute = EXCLUDED.webhook_creates_per_minute,
+               webhook_updates_per_minute = EXCLUDED.webhook_updates_per_minute,
+               message_bulk_deletes_per_minute = EXCLUDED.message_bulk_deletes_per_minute,
                quarantine_role_id = EXCLUDED.quarantine_role_id,
                protection_settings = EXCLUDED.protection_settings,
                updated_at = now()`,
@@ -379,7 +397,13 @@ export function createDatabase(pool: pg.Pool) {
           config.limits.channelUpdatesPerMinute,
           config.limits.channelOverwritesPerMinute,
           config.limits.bansPerMinute,
+          config.limits.kicksPerMinute,
+          config.limits.timeoutsPerMinute,
           config.limits.roleChangesPerMinute,
+          config.limits.roleUpdatesPerMinute,
+          config.limits.webhookCreatesPerMinute,
+          config.limits.webhookUpdatesPerMinute,
+          config.limits.messageBulkDeletesPerMinute,
           config.quarantineRoleId,
           JSON.stringify(config.protections)
         ]

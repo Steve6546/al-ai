@@ -53,7 +53,14 @@ export class DiscordApiError extends Error {
   ) {
     super(`Discord ${path} failed with ${status}: ${body.slice(0, 200)}`);
     this.name = "DiscordApiError";
+    // Kept as a field, not only inside the message: a 400 carries the *reason*
+    // in its JSON body (`AVATAR_RATE_LIMIT`, `INVALID_FORM_BODY`, …), and a
+    // caller that wants to say what actually happened cannot parse a sentence.
+    this.body = body;
   }
+
+  /** The response body Discord sent, for the callers that read its error code. */
+  public readonly body: string;
 }
 
 /**
@@ -394,7 +401,7 @@ const guildRoleListCache = new TtlCache<string, RawGuildRole[]>(GUILD_READ_CACHE
  * left stays gone, and re-asking on every render would be the one case where
  * this cache made things worse instead of better.
  */
-const guildMemberCache = new TtlCache<string, { id: string; name: string; avatarUrl: string | null } | null>(GUILD_READ_CACHE_MS);
+const guildMemberCache = new TtlCache<string, { id: string; name: string; username: string; avatarUrl: string | null } | null>(GUILD_READ_CACHE_MS);
 
 /**
  * The in-flight member read per guild, so concurrent callers share one request.
@@ -490,7 +497,7 @@ export async function fetchMemberRoleIds(botToken: string, guildId: string, user
  * to render at most fifty, and would turn opening this screen into the heaviest
  * request the dashboard makes.
  */
-export async function fetchGuildMember(token: string, guildId: string, userId: string): Promise<{ id: string; name: string; avatarUrl: string | null } | null> {
+export async function fetchGuildMember(token: string, guildId: string, userId: string): Promise<{ id: string; name: string; username: string; avatarUrl: string | null } | null> {
   const member = await request<{
     user?: { id?: string; username?: string; global_name?: string | null; avatar?: string | null };
     nick?: string | null;
@@ -500,12 +507,98 @@ export async function fetchGuildMember(token: string, guildId: string, userId: s
   // client shows, so the operator recognises the person they picked.
   const name = member.nick || member.user.global_name || member.user.username || member.user.id;
   const avatarUrl = member.user.avatar ? userAvatarUrl(member.user.id, member.user.avatar, 64) : null;
-  return { id: member.user.id, name, avatarUrl };
+  // The @handle travels too: the exception chips show it under the display name
+  // exactly as the search results do, so a chosen member looks the same before
+  // and after they are picked.
+  return { id: member.user.id, name, username: member.user.username ?? member.user.id, avatarUrl };
 }
 
 /** `fetchGuildMember` behind the shared guild-read cache. */
 export function fetchGuildMemberCached(botToken: string, guildId: string, userId: string) {
   return guildMemberCache.resolve(`${guildId}:${userId}`, () => fetchGuildMember(botToken, guildId, userId));
+}
+
+/* ------------------------------------------------------------------ *
+ * Member search — the exception picker
+ * ------------------------------------------------------------------ */
+
+/** One row of the member search: enough to draw an avatar and two lines. */
+export type MemberSearchResult = {
+  id: string;
+  /** Nickname, then global name, then @handle — what Discord itself shows. */
+  name: string;
+  /** The @handle, which never changes and is how a person is identified. */
+  username: string;
+  avatarUrl: string | null;
+};
+
+/**
+ * How long one member query is trusted.
+ *
+ * Short, and only there to absorb the retyping of the same prefix (the picker
+ * debounces, but a backspace-then-retype is two identical queries). A member
+ * search is a *live* read — someone joining a moment ago should be findable on
+ * the next deliberate look — so this is measured in seconds, not minutes.
+ */
+const MEMBER_SEARCH_CACHE_MS = 15_000;
+
+/**
+ * Bounded on purpose.
+ *
+ * A TTL cache keyed by an arbitrary search string has no natural bound: every
+ * prefix the operator types is a new key, and an expired entry is never removed
+ * by a read. A guild with a long-lived dashboard session would accumulate one
+ * entry per keystroke forever. Clearing at the cap keeps the memory of this one
+ * cache a constant, and the cost of a clear is a single Discord request.
+ */
+const MEMBER_SEARCH_CACHE_MAX = 64;
+const memberSearchCache = new TtlCache<string, MemberSearchResult[]>(MEMBER_SEARCH_CACHE_MS);
+
+/**
+ * Read-only: the members whose name or handle starts with `query`.
+ *
+ * Discord's own member search, not a filtered member list. Listing a guild's
+ * members is the heaviest read this dashboard could make (thousands of rows to
+ * render at most twenty) and would turn typing into a stall; this route asks
+ * Discord to do the matching and returns one page of it.
+ *
+ * The bot token is used because the exception list is a guild-scoped setting and
+ * the caller may be an administrator who cannot see the member list themselves —
+ * the route's own access check has already established that they may configure
+ * this guild. A failed search is reported as an empty list rather than an error:
+ * the picker's other half (the list already chosen) still renders, and a search
+ * box that says "nothing found" is a better answer than a broken screen.
+ */
+export async function searchGuildMembers(
+  botToken: string,
+  guildId: string,
+  query: string,
+  limit = 20
+): Promise<MemberSearchResult[]> {
+  const needle = query.trim();
+  if (needle.length === 0) return [];
+
+  const key = `${guildId}:${needle.toLowerCase()}`;
+  return memberSearchCache.resolve(key, async () => {
+    if (memberSearchCache.size > MEMBER_SEARCH_CACHE_MAX) memberSearchCache.clear();
+
+    const params = new URLSearchParams({ query: needle, limit: String(Math.min(100, Math.max(1, limit))) });
+    const members = await request<
+      { user?: { id?: string; username?: string; global_name?: string | null; avatar?: string | null }; nick?: string | null }[]
+    >(`/guilds/${guildId}/members?${params.toString()}`, { token: botToken });
+
+    return members
+      .filter(member => Boolean(member.user?.id))
+      .map(member => {
+        const user = member.user!;
+        return {
+          id: user.id!,
+          name: member.nick || user.global_name || user.username || user.id!,
+          username: user.username ?? user.id!,
+          avatarUrl: user.avatar ? userAvatarUrl(user.id!, user.avatar, 64) : null
+        };
+      });
+  });
 }
 
 /* ------------------------------------------------------------------ *
@@ -588,6 +681,7 @@ export function resetGuildReadCaches() {
   guildRoleListCache.clear();
   userGuildCache.clear();
   guildMemberCache.clear();
+  memberSearchCache.clear();
   botMemberInFlight.clear();
 }
 

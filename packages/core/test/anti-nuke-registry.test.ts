@@ -27,8 +27,10 @@ import {
  * other, and with Discord's own vocabulary.
  */
 
-test("the registry holds twelve protections, each with a unique key", () => {
-  assert.equal(NUKE_PROTECTIONS.length, 12, "the security screen promises 12 rows");
+test("the registry holds thirteen protections, each with a unique key", () => {
+  // Twelve until the webhook budget was split into creation and editing, which
+  // are different attacks with different owners inside a server.
+  assert.equal(NUKE_PROTECTIONS.length, 13, "the security screen promises 13 rows");
   const keys = NUKE_PROTECTIONS.map(protection => protection.key);
   assert.deepEqual(keys, [...new Set(keys)], "two protections cannot share a key");
 });
@@ -92,20 +94,30 @@ test("role create and delete deliberately share one budget", () => {
   // that sentence becomes a lie, so the pairing is pinned here.
 });
 
+test("every protection in the registry is counted by the engine", () => {
+  // The screen prints «غير موصولة بالمحرّك بعد» for any protection without a
+  // limitKey. That badge was on five cards for a whole round, so the rule is
+  // now a test rather than a comment: adding a protection without wiring it
+  // fails here instead of shipping a card that promises nothing.
+  const unwired = NUKE_PROTECTIONS.filter(protection => protection.limitKey === undefined).map(protection => protection.key);
+  assert.deepEqual(unwired, [], "these protections would render as «not wired»");
+  assert.equal(enforcedProtections().length, NUKE_PROTECTIONS.length);
+});
+
 test("the badge counts what the engine actually enforces", () => {
   const enforced = enforcedProtections().length;
-  assert.ok(enforced > 0 && enforced < NUKE_PROTECTIONS.length, "either nothing or everything is enforced");
+  assert.ok(enforced > 0, "nothing is enforced at all");
   assert.equal(activeProtectionCount(true), enforced);
   // Disarmed means the operator asked for no protection, so the badge must say 0
   // rather than continuing to advertise the rows below it.
   assert.equal(activeProtectionCount(false), 0);
-  // A per-protection switch only changes the count when it lands on a protection
-  // the engine counts. Turning off something already unenforced must not move a
-  // number that was never claiming to include it.
-  const offUnenforced = { "role-update": { enabled: false, windowSeconds: 600, punishment: "remove-roles" as const, timeoutSeconds: 600 } };
-  assert.equal(activeProtectionCount(true, offUnenforced), enforced, "switching an unenforced protection off changes nothing");
-  const offEnforced = { "channel-delete": { enabled: false, windowSeconds: 600, punishment: "remove-roles" as const, timeoutSeconds: 600 } };
+  // A per-protection switch only moves the number when the engine counts that
+  // protection: switching one off must be visible, and switching an unenforced
+  // one off must not be — which is why both directions are pinned.
+  const offEnforced = { "channel-delete": { enabled: false, windowSeconds: 600, punishment: "remove-roles" as const, timeoutSeconds: 600, exceptions: [] } };
   assert.equal(activeProtectionCount(true, offEnforced), enforced - 1, "switching an enforced protection off is visible");
+  const offAnother = { "member-kick": { enabled: false, windowSeconds: 600, punishment: "remove-roles" as const, timeoutSeconds: 600, exceptions: [] } };
+  assert.equal(activeProtectionCount(true, offAnother), enforced - 1, "every protection now counts, kick included");
 });
 
 test("the action → protection map covers every action the engine watches", () => {

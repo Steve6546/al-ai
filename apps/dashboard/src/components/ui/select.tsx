@@ -81,7 +81,13 @@ SelectScrollDownButton.displayName =
  *   alone, which is "however much room the window happens to have". On a tall
  *   screen with a long role or channel list that produced a menu several hundred
  *   pixels deep, so the list the operator was choosing from covered the field
- *   they were choosing for. 256px is a menu, not a page.
+ *   they were choosing for. 20rem is a menu, not a page.
+ *
+ *   A flat `max-h-64` replaced that, and was wrong in the other direction: a
+ *   guild's nine roles needed 306px, so the menu scrolled inside a box that was
+ *   shorter than its contents — the list looked truncated for no reason. The cap
+ *   is now the smaller of 20rem and the room Radix says the popup actually has,
+ *   so it shows every option that fits and still never runs off the screen.
  * - **Width.** `min-w-[var(--radix-select-trigger-width)]` is a *floor*, so a
  *   long option name stretched the popup wider than the control that opened it
  *   and the menu no longer read as belonging to that field. The exact trigger
@@ -97,7 +103,12 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        "relative z-50 max-h-64 w-[var(--radix-select-trigger-width)] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-select-content-transform-origin]",
+        // `z-[var(--z-menu)]`, not `z-50`: HeroUI's modal backdrop sits at
+        // z-index 100000, so a menu opened from inside a dialog (the reward
+        // editor's role picker) was painted *behind* the dialog and looked cut
+        // off at its edge. `--z-menu` is defined in index.css as one step above
+        // that overlay, so every menu stays above the modal it belongs to.
+        "relative z-[var(--z-menu)] max-h-[min(20rem,var(--radix-select-content-available-height,20rem))] w-[var(--radix-select-trigger-width)] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-select-content-transform-origin]",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
         className

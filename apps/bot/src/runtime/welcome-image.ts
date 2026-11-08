@@ -161,11 +161,19 @@ export function dataUrlToBuffer(dataUrl: string | null, maxBytes = MAX_IMAGE_BYT
   const comma = dataUrl.indexOf(",");
   if (comma < 0) return null;
   const base64 = dataUrl.slice(comma + 1);
-  if (base64.length * 0.75 > maxBytes) return null;
+  if (base64.length === 0 || base64.length * 0.75 > maxBytes) return null;
   // Buffer.from silently skips invalid characters, so a garbage payload would
-  // decode into an empty buffer and read as "fine". The charset check is what
-  // makes a malformed data URL a null instead.
-  if (!/^[A-Za-z0-9+/=\s]+$/.test(base64) || base64.length === 0) return null;
+  // decode into an empty buffer and read as "fine". A manual scan is used
+  // instead of a regex because the engine backtracks pathologically on a
+  // multi-megabyte string of valid characters.
+  for (let i = 0; i < base64.length; i++) {
+    const c = base64.charCodeAt(i);
+    const ok =
+      (c >= 65 && c <= 90) || (c >= 97 && c <= 122) ||
+      (c >= 48 && c <= 57) || c === 43 || c === 47 || c === 61 ||
+      c === 32 || c === 9 || c === 10 || c === 13;
+    if (!ok) return null;
+  }
   const bytes = Buffer.from(base64, "base64");
   return bytes.length > 0 ? bytes : null;
 }

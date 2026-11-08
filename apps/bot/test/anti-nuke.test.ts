@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_ANTI_NUKE_CONFIG, DEFAULT_PROTECTION_SETTINGS, type AntiNukeConfig } from "@al-ai/core";
+import { ANTI_NUKE_LIMIT_KEYS, DEFAULT_ANTI_NUKE_CONFIG, DEFAULT_ANTI_NUKE_LIMITS, DEFAULT_PROTECTION_SETTINGS, type AntiNukeConfig, type AntiNukeLimits } from "@al-ai/core";
 import {
   createAntiNukeEngine,
   createAntiNukeTracker,
@@ -25,7 +25,12 @@ const ACTOR = "111111111111111111";
 const OTHER = "222222222222222222";
 const QUARANTINE_ROLE = "333333333333333333";
 
-const limits = { channelDeletesPerMinute: 2, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, channelOverwritesPerMinute: 5, bansPerMinute: 3, roleChangesPerMinute: 2 };
+const limits: AntiNukeLimits = {
+  ...DEFAULT_ANTI_NUKE_LIMITS,
+  channelDeletesPerMinute: 2,
+  bansPerMinute: 3,
+  roleChangesPerMinute: 2
+};
 
 const armed: AntiNukeConfig = {
   enabled: true,
@@ -169,26 +174,55 @@ test("ordinary events are not treated as destructive", () => {
 });
 
 /**
- * `role.update` is deliberately *not* counted, and this pins that decision.
+ * `role.update` is counted, on its own budget, and this pins both halves.
  *
- * The event exists in the schema and the bot emits it (`dispatch.ts` gives it
- * priority 2), so the engine sees it — but a role edit is a rename, a colour, or
- * a permission toggle, and a busy server produces them in normal moderation.
- * Counting them against `roleChangesPerMinute` would quarantine a moderator for
- * tidying up role colours. The destructive pair is create/delete, which is what
- * the mapper watches.
- *
- * Asserted rather than left implicit so the scope is a decision a reader can
- * find, not an omission they have to guess at. If role permission edits are ever
- * meant to count — that is the privilege-escalation path — this test is where
- * the change belongs, together with a decision about the shared budget.
+ * It used to be observed but ignored: a role edit is a rename, a colour or a
+ * permission toggle, and a busy server produces them in normal moderation —
+ * counting them against `roleChangesPerMinute` would have quarantined a
+ * moderator for tidying up role colours. That reasoning still holds for the
+ * *shared* budget; what changed is that raising a role's permissions is the
+ * privilege-escalation path, and it deserves its own number rather than
+ * silence. So the assertion is now two-sided: the action maps, and it maps to
+ * a different limit than create/delete.
  */
-test("role.update is observed but never counted as a role change", () => {
-  assert.equal(
-    nukeActionOf({ type: "role.update", guildId: GUILD, roleId: "r", actorId: ACTOR }),
-    null,
+test("role.update is counted against its own budget, never the churn budget", () => {
+  const observation = nukeActionOf({ type: "role.update", guildId: GUILD, roleId: "r", actorId: ACTOR });
+  assert.equal(observation?.action, "role-update");
+  assert.equal(observation?.protectionKey, "role-update");
+  assert.notEqual(
+    ANTI_NUKE_LIMIT_KEYS["role-update"],
+    ANTI_NUKE_LIMIT_KEYS["role-change"],
     "a role edit must not consume the create/delete budget"
   );
+});
+
+test("the five newly wired actions map to their own protections", () => {
+  const cases: { event: BotEvent; action: string; protection: string }[] = [
+    { event: { type: "moderation.kick", guildId: GUILD, targetId: OTHER, actorId: ACTOR }, action: "kick", protection: "member-kick" },
+    { event: { type: "moderation.timeout", guildId: GUILD, targetId: OTHER, actorId: ACTOR }, action: "timeout", protection: "member-timeout" },
+    // Creating a webhook and editing one are separate protections with separate
+    // budgets; deleting stays with editing, because both change a webhook that
+    // already exists.
+    { event: { type: "webhook.create", guildId: GUILD, webhookId: "w", channelId: "c", actorId: ACTOR }, action: "webhook-create", protection: "webhook-create" },
+    { event: { type: "webhook.update", guildId: GUILD, webhookId: "w", channelId: "c", actorId: ACTOR }, action: "webhook-update", protection: "webhook-update" },
+    { event: { type: "webhook.delete", guildId: GUILD, webhookId: "w", channelId: "c", actorId: ACTOR }, action: "webhook-update", protection: "webhook-update" },
+    { event: { type: "message.bulk-delete", guildId: GUILD, channelId: "c", count: 200, actorId: ACTOR }, action: "message-bulk-delete", protection: "message-purge" }
+  ];
+  for (const entry of cases) {
+    const observation = nukeActionOf(entry.event);
+    assert.equal(observation?.action, entry.action, `${entry.event.type} must be counted`);
+    assert.equal(observation?.protectionKey, entry.protection, `${entry.event.type} belongs to ${entry.protection}`);
+  }
+});
+
+test("an event nobody is named in is never counted", () => {
+  // The resolver's "unknown" is not a person. Counting it would accumulate
+  // every unattributable action into one phantom budget and eventually trip a
+  // punishment Discord would refuse to apply to anybody.
+  assert.equal(nukeActionOf({ type: "moderation.timeout", guildId: GUILD, targetId: OTHER, actorId: "unknown" }), null);
+  assert.equal(nukeActionOf({ type: "role.update", guildId: GUILD, roleId: "r", actorId: "unknown" }), null);
+  assert.equal(nukeActionOf({ type: "message.bulk-delete", guildId: GUILD, channelId: "c", count: 5 }), null, "no actor at all");
+  assert.equal(nukeActionOf({ type: "webhook.create", guildId: GUILD, webhookId: "w", channelId: "c" }), null, "no actor at all");
 });
 
 /* ------------------------------------------------------------------ *
@@ -314,8 +348,45 @@ test("a disarmed engine observes but never acts", async () => {
   assert.deepEqual(calls, { punish: 0, notify: 0, report: 0 });
 });
 
+test("an exempt member is not counted, and cannot trip the shared budget", async () => {
+  const exempt = {
+    ...DEFAULT_PROTECTION_SETTINGS,
+    "channel-delete": { enabled: true, windowSeconds: 600, punishment: "remove-roles" as const, timeoutSeconds: 600, exceptions: [ACTOR] }
+  };
+  const { engine, calls } = makeEngine({ protections: exempt });
+
+  for (let i = 0; i < 10; i += 1) {
+    assert.equal(await engine.observe(channelDelete(ACTOR)), null, "an exempt member is never counted");
+  }
+  assert.deepEqual(calls, { punish: 0, notify: 0, report: 0 }, "an exemption cannot end in a punishment");
+
+  // The exemption is not a shield for everybody: the same actions from somebody
+  // else still count from zero and trip the limit they would have tripped.
+  assert.equal(await engine.observe(channelDelete(OTHER)), null);
+  assert.equal(await engine.observe(channelDelete(OTHER)), null);
+  const tripped = await engine.observe(channelDelete(OTHER));
+  assert.ok(tripped, "a non-exempt actor still trips a limit of two on the third action");
+  assert.equal(calls.punish, 1);
+});
+
+test("an exemption on one protection does not cover another", async () => {
+  const exempt = {
+    ...DEFAULT_PROTECTION_SETTINGS,
+    "channel-delete": { enabled: true, windowSeconds: 600, punishment: "remove-roles" as const, timeoutSeconds: 600, exceptions: [ACTOR] }
+  };
+  const { engine, calls } = makeEngine({ protections: exempt });
+
+  const ban = (): BotEvent => ({ type: "moderation.ban", guildId: GUILD, targetId: OTHER, actorId: ACTOR });
+  await engine.observe(ban());
+  await engine.observe(ban());
+  await engine.observe(ban());
+  const outcome = await engine.observe(ban());
+  assert.ok(outcome, "banning has its own exception list, and this one is empty");
+  assert.equal(calls.punish, 1);
+});
+
 test("a protection switched off is not counted, while the others keep counting", async () => {
-  const off = { ...DEFAULT_PROTECTION_SETTINGS, "channel-delete": { enabled: false, windowSeconds: 600, punishment: "remove-roles" as const, timeoutSeconds: 600 } };
+  const off = { ...DEFAULT_PROTECTION_SETTINGS, "channel-delete": { enabled: false, windowSeconds: 600, punishment: "remove-roles" as const, timeoutSeconds: 600, exceptions: [] } };
   const { engine, calls } = makeEngine({ protections: off });
 
   for (let i = 0; i < 6; i += 1) {
@@ -326,7 +397,7 @@ test("a protection switched off is not counted, while the others keep counting",
   // The gate asks about the *event's* protection, not about the budget it feeds.
   // Turning role creation off must not silence role deletion, which shares that
   // budget — the operator who disabled one still expects the other caught.
-  const roleOff = { ...DEFAULT_PROTECTION_SETTINGS, "role-create": { enabled: false, windowSeconds: 600, punishment: "remove-roles" as const, timeoutSeconds: 600 } };
+  const roleOff = { ...DEFAULT_PROTECTION_SETTINGS, "role-create": { enabled: false, windowSeconds: 600, punishment: "remove-roles" as const, timeoutSeconds: 600, exceptions: [] } };
   const other = makeEngine({ protections: roleOff });
   const roleDelete = (): BotEvent => ({ type: "role.delete", guildId: GUILD, roleId: "r", actorId: ACTOR });
   assert.equal(await other.engine.observe({ type: "role.create", guildId: GUILD, roleId: "r", actorId: ACTOR }), null);

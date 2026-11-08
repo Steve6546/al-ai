@@ -125,7 +125,7 @@ export function AccountMenu({
               @{user.handle}
             </p>
           ) : null}
-          <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground" dir="ltr">
+          <p className="flex items-center gap-1.5 text-mini text-muted-foreground" dir="ltr">
             <span className="truncate">{user?.id ?? "—"}</span>
             <button
               type="button"
@@ -164,7 +164,7 @@ export function AccountMenu({
         {isOwner ? (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <DropdownMenuLabel className="flex items-center gap-1.5 text-mini text-muted-foreground">
               <ShieldCheck className="size-3.5" />
               {t("account.ownerArea")}
             </DropdownMenuLabel>

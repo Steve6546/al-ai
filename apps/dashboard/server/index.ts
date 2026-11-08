@@ -111,6 +111,7 @@ import {
   isAuthFailure,
   isRateLimited,
   resolveBotUserId,
+  searchGuildMembers,
   userAvatarUrl,
   userBannerUrl,
   guildMemberAvatarUrl,
@@ -207,7 +208,11 @@ function trustProxyOnlyLoopback(addr: string): boolean {
  * caps) before any other field. Stating the bound explicitly keeps a future
  * field from silently breaking that save, while still capping bodies.
  */
-const REQUEST_BODY_LIMIT = 1_200_000;
+// A data URL is four characters per three bytes, so the body that carries the
+// largest accepted image is ~2.7 MB of JSON. The limit sits above that with
+// room for the rest of the form; below it, Fastify would answer 413 before the
+// route could say which field was too big.
+const REQUEST_BODY_LIMIT = 3_200_000;
 
 /**
  * How long the browser is told to wait after an upstream Discord failure.
@@ -1932,6 +1937,36 @@ app.get("/api/guilds/:guildId/members", async (request, reply) => {
 });
 
 /**
+ * Searches the guild's members by name or handle, for the exception pickers.
+ *
+ * A search rather than a member list, and the difference is load-bearing: a
+ * guild has thousands of members and the picker shows at most twenty, so
+ * listing them would make the first keystroke the heaviest request the dashboard
+ * makes — and a guild large enough to need an exception list is exactly the one
+ * where that hurts. Discord does the matching; this route only asks.
+ *
+ * The query is bounded before it reaches Discord, and an empty one is answered
+ * without a request: "no query" is not "everybody", and a screen that fired on
+ * focus would spend a call per click for a list nobody asked for.
+ */
+app.get("/api/guilds/:guildId/members/search", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const context = await requireGuildAccess(request, reply, guildId);
+  if (!context) return;
+
+  const raw = (request.query as { q?: string } | undefined)?.q ?? "";
+  const query = raw.trim().slice(0, 32);
+  if (query.length === 0 || !env.botToken) return { members: [] };
+
+  // A failed search is an empty result rather than a 5xx: the operator is
+  // mid-typing, and a red screen for a transient Discord hiccup would take the
+  // whole protection card with it. The picker says "no matches" and the next
+  // keystroke asks again.
+  const members = await searchGuildMembers(env.botToken, guildId, query).catch(() => []);
+  return { members };
+});
+
+/**
  * Applies a batch of command changes.
  *
  * The body carries only the commands the operator actually edited. Each change
@@ -2674,7 +2709,11 @@ function appearanceResponse(
 
   if (attempted.length > 0 && applied.length === 0) {
     const first = failed[0];
-    return reply.code(first.code === "RATE_LIMITED" ? 429 : 502).send({
+    // A cooldown is a throttle, not a service failure: 429 says "try again
+    // later" to anything that reads the status, and the message says which
+    // cooldown it is.
+    const throttled = first.code === "RATE_LIMITED" || first.code === "AVATAR_RATE_LIMIT";
+    return reply.code(throttled ? 429 : 502).send({
       error: first.code,
       message: first.message,
       failed
@@ -3143,6 +3182,43 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
   if (!response) return;
 
   return { settings, ...response };
+});
+
+/* ------------------------------------------------------------------ *
+ * A pasted image address, turned into the data URL the contract requires
+ * ------------------------------------------------------------------ */
+/**
+ * The image at a pasted address, as the data URL the rest of the pipeline
+ * already speaks.
+ *
+ * The work is `fetchImageAsDataUrl`'s, not this route's — deliberately. That
+ * function is the project's one image importer: it pins the connection to an
+ * address it vetted (so a name that resolves twice cannot walk into loopback),
+ * follows share-link redirects, reads `og:image` off a page that is not itself
+ * a file (which is what makes a `pin.it/…` link work), and enforces the size
+ * ceiling while streaming.
+ *
+ * This route exists for one reason: the screen has to *show* the picture before
+ * the operator saves, and the browser cannot fetch a foreign address under this
+ * page's CSP. It is a thin wrapper, so there is no second policy to drift.
+ */
+app.post("/api/image/from-url", async (request, reply) => {
+  const session = await requireSession(request, reply);
+  if (!session) return;
+
+  const raw = (request.body as { url?: unknown } | null)?.url;
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return reply.code(400).send({ error: "URL_REQUIRED", message: "أدخل رابط الصورة." });
+  }
+  try {
+    const dataUrl = await fetchImageAsDataUrl(raw.trim());
+    return { dataUrl };
+  } catch (cause) {
+    return reply.code(400).send({
+      error: "IMAGE_FETCH_FAILED",
+      message: cause instanceof Error ? cause.message : "تعذّر جلب الصورة من هذا الرابط."
+    });
+  }
 });
 
 /* ------------------------------------------------------------------ *

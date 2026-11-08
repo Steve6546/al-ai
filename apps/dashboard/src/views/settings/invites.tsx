@@ -130,7 +130,7 @@ export function InvitesView({ guild }: { guild: Guild }) {
                 value={draft.fakeAccountDays}
                 onChange={event => patch({ fakeAccountDays: Number(event.target.value) })}
               />
-              <p className="text-[10px] text-muted-foreground">{t("invites.fakeAgeHint")}</p>
+              <p className="text-micro text-muted-foreground">{t("invites.fakeAgeHint")}</p>
             </div>
             <div className="grid grid-cols-1 gap-2 self-end">
               <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-1.5">
@@ -158,7 +158,7 @@ export function InvitesView({ guild }: { guild: Guild }) {
               <Switch checked={draft.logMilestones} onCheckedChange={logMilestones => patch({ logMilestones })} />
             </label>
           </div>
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             {t("invites.logChannel")}
           </p>
         </CardContent>
@@ -233,7 +233,7 @@ export function InvitesView({ guild }: { guild: Guild }) {
             </Button>
           </div>
           {roles.length === 0 && (
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-micro text-muted-foreground">
               {t("invites.roleBelowBot")}
             </p>
           )}
@@ -250,7 +250,7 @@ export function InvitesView({ guild }: { guild: Guild }) {
         <CardContent className="space-y-3">
           <div className="flex flex-wrap gap-1.5">
             {INVITE_MESSAGE_TOKENS.map(token => (
-              <span key={token} className="rounded-md border border-border/80 bg-muted/40 px-2 py-0.5 font-mono text-[10px]">
+              <span key={token} className="rounded-md border border-border/80 bg-muted/40 px-2 py-0.5 font-mono text-micro">
                 {token}
               </span>
             ))}

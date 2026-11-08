@@ -54,12 +54,12 @@ export function WelcomeMessagePreview({
   return (
     <div className={cn("overflow-hidden rounded-xl border border-border bg-card", className)}>
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
-        <span className="shrink-0 text-[11px] font-medium text-muted-foreground">{t("welcome.previewTitle")}</span>
-        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+        <span className="shrink-0 text-mini font-medium text-muted-foreground">{t("welcome.previewTitle")}</span>
+        <span className="min-w-0 flex-1 truncate text-mini text-muted-foreground">
           {channelName ? t("welcome.toChannel", { channel: channelName }) : t("welcome.noChannelYet")}
         </span>
         {settings.imageEnabled ? (
-          <span className="shrink-0 rounded-md bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary">{t("welcome.imageEnabledBadge")}</span>
+          <span className="shrink-0 rounded-md bg-primary/15 px-1.5 py-0.5 text-micro text-primary">{t("welcome.imageEnabledBadge")}</span>
         ) : null}
       </div>
 
@@ -107,7 +107,7 @@ export function WelcomeMessagePreview({
               </div>
             ) : null}
             {settings.imageEnabled && settings.imageMode === "before_message" ? (
-              <p className="mt-2 rounded-lg border border-dashed border-border px-3 py-2 text-[11px] text-muted-foreground">
+              <p className="mt-2 rounded-lg border border-dashed border-border px-3 py-2 text-mini text-muted-foreground">
                 {t("welcome.imageSeparate")}
               </p>
             ) : null}
@@ -128,7 +128,7 @@ function WelcomeImageStub({ config }: { config: WelcomeImageConfig }) {
   const { t } = useI18n();
   return (
     <div
-      className="grid place-items-center text-[11px] text-muted-foreground"
+      className="grid place-items-center text-mini text-muted-foreground"
       style={{ aspectRatio: `${config.width} / ${config.height}` }}
     >
       {t("welcome.imageStub")}

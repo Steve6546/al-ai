@@ -150,7 +150,7 @@ export function DashboardView({ guild }: { guild: Guild }) {
                             {entry.targetId}
                           </span>
                         )}
-                        <Badge variant="secondary" className="text-[10px]">
+                        <Badge variant="secondary" className="text-micro">
                           {formatRelative(entry.createdAt, t)}
                         </Badge>
                       </div>
@@ -296,7 +296,7 @@ function Stat({
         <div className="min-w-0">
           <p className="text-xs text-muted-foreground">{label}</p>
           <p className="truncate text-sm font-semibold tabular">{value}</p>
-          {hint && <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{hint}</p>}
+          {hint && <p className="mt-0.5 line-clamp-2 text-mini text-muted-foreground">{hint}</p>}
         </div>
       </CardContent>
     </Card>

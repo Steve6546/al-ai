@@ -183,6 +183,12 @@ export function WelcomeImageCanvas({
   };
 
   const beginDrag = (event: React.PointerEvent, target: Exclude<Selection, null>, resizing: boolean) => {
+    // Both, and in this order: `preventDefault` is what stops the browser from
+    // starting its own gesture on the same press — text selection, and the
+    // native image drag whose translucent copy is the «ghost» that follows the
+    // cursor and leaves the layer behind. Without it, a drag that begins on the
+    // picture never reaches `pointermove`, which is why only the border worked.
+    event.preventDefault();
     event.stopPropagation();
     onSelect(target);
     // The box's own width, in card pixels: the text's anchor is clamped by
@@ -526,7 +532,7 @@ export function WelcomeImageCanvas({
           <div className="absolute inset-0" style={{ ...backgroundLayer, opacity: backgroundOpacity }} aria-hidden />
         ) : null}
         {!preview ? (
-          <span className="absolute top-2 start-2 z-10 rounded-md bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground backdrop-blur-sm">
+          <span className="absolute top-2 start-2 z-10 rounded-md bg-background/80 px-2 py-0.5 text-micro text-muted-foreground backdrop-blur-sm">
             {t("welcome.canvas.dragHint")}
           </span>
         ) : null}
@@ -543,7 +549,9 @@ export function WelcomeImageCanvas({
               !preview && "cursor-move",
               isSelected({ kind: "avatar" }) && "outline outline-2 outline-primary"
             )}
+            onDragStart={event => event.preventDefault()}
             style={{
+              touchAction: "none",
               left: config.avatar.x * scale,
               top: config.avatar.y * scale,
               width: config.avatar.size * scale,
@@ -582,8 +590,20 @@ export function WelcomeImageCanvas({
                 exactly as it animates in Discord.
               */}
               {sampleAvatarUrl ? (
+                // `draggable={false}` + `pointerEvents: none`: the <img> is a
+                // drawing of the layer, not a control. A native draggable image
+                // swallows the press and starts its own drag, which both
+                // duplicates the picture (the ghost) and starves the canvas of
+                // the moves it needs. With the pointer passing through, the
+                // whole box — centre included — is one hit area.
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={sampleAvatarUrl} alt="" className="size-full object-cover" />
+                <img
+                  src={sampleAvatarUrl}
+                  alt=""
+                  draggable={false}
+                  className="size-full object-cover"
+                  style={{ pointerEvents: "none", userSelect: "none" }}
+                />
               ) : (
                 <User className="size-1/2" aria-hidden />
               )}
@@ -682,7 +702,9 @@ export function WelcomeImageCanvas({
               key={entry.kind === "custom" ? entry.id : "username"}
               data-layer-box="text"
               className={cn("absolute w-max cursor-move", isSelected(target) && "outline outline-2 outline-primary")}
+              onDragStart={event => event.preventDefault()}
               style={{
+                touchAction: "none",
                 left: anchor.x,
                 top: anchor.y - ascent,
                 height: entry.layer.fontSize * scale,

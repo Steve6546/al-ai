@@ -353,7 +353,7 @@ function SettingsTab({
                 </Badge>
               </div>
               <div className="flex items-center gap-2">
-                <span className="w-10 shrink-0 text-[10px] text-muted-foreground">1</span>
+                <span className="w-10 shrink-0 text-micro text-muted-foreground">1</span>
                 <input
                   id="levels-min-members"
                   type="range"
@@ -366,7 +366,7 @@ function SettingsTab({
                   aria-label={t("levels.minMembersAria")}
                   aria-valuetext={t("levels.minMembersValue", { count: draft.voiceMinMembers })}
                 />
-                <span className="w-10 shrink-0 text-end text-[10px] text-muted-foreground">10</span>
+                <span className="w-10 shrink-0 text-end text-micro text-muted-foreground">10</span>
               </div>
             </div>
             <div className="grid grid-cols-1 gap-2">
@@ -436,7 +436,7 @@ function SettingsTab({
             <label className="flex items-center justify-between gap-2 rounded-lg border border-border/80 px-3 py-2">
               <span>
                 <span className="block text-sm">{t("levels.notify.rankCard")}</span>
-                <span className="block text-[10px] text-muted-foreground">{t("levels.notify.rankCardHint")}</span>
+                <span className="block text-micro text-muted-foreground">{t("levels.notify.rankCardHint")}</span>
               </span>
               <Switch checked={draft.rankCardEnabled} onCheckedChange={rankCardEnabled => patch({ rankCardEnabled })} />
             </label>
@@ -899,14 +899,14 @@ function RewardRulesTab({
                           variant="outline"
                           className={
                             reward.alwaysKeep
-                              ? "border-primary/40 text-[10px] text-primary"
-                              : "text-[10px] text-muted-foreground"
+                              ? "border-primary/40 text-micro text-primary"
+                              : "text-micro text-muted-foreground"
                           }
                         >
                           {reward.alwaysKeep ? t("levels.stackingShort") : t("levels.evolving")}
                         </Badge>
                         {others.map(other => (
-                          <Badge key={other} variant="outline" className="text-[10px] text-muted-foreground">
+                          <Badge key={other} variant="outline" className="text-micro text-muted-foreground">
                             {t("levels.alsoAs", { kind: kindChip(other, t) })}
                           </Badge>
                         ))}
@@ -1356,7 +1356,7 @@ function LeaderboardTab({ guild, cap }: { guild: Guild; cap: number }) {
                         <span className="flex min-w-0 items-center gap-1.5">
                           <span className="truncate text-sm font-medium">{entry.displayName ?? entry.userId}</span>
                           {entry.hidden && (
-                            <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                            <Badge variant="outline" className="text-micro text-muted-foreground">
                               {t("levels.board.hidden")}
                             </Badge>
                           )}

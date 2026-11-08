@@ -1,5 +1,6 @@
 import type { AntiNukeLimits, NukeAction } from "./anti-nuke.js";
 import type { DiscordPermissionBit } from "./discord-permissions.js";
+import { isSnowflake } from "./snowflake.js";
 
 /**
  * What the anti-nuke engine could watch, in the order an operator thinks about it.
@@ -43,7 +44,8 @@ export type NukeProtectionKey =
   | "member-ban"
   | "member-kick"
   | "member-timeout"
-  | "webhook-churn"
+  | "webhook-create"
+  | "webhook-update"
   | "message-purge";
 
 export type NukeProtection = {
@@ -164,13 +166,16 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
     description: "منع رفع صلاحيات رتب موجودة إلى مستوى الإدارة.",
     auditEvents: ["RoleUpdate"],
     permission: "MANAGE_ROLES",
-    limit: { min: 1, max: 100, default: 3 }
+    limit: { min: 1, max: 100, default: 3 },
+    limitKey: "roleUpdatesPerMinute"
   },
 
   /* ---------------- Members ----------------
-   * The three ways to remove a person's access. Ban is counted today; kick and
-   * timeout arrive as their own events and are declared here so the next round
-   * does not have to invent the vocabulary again. */
+   * The three ways to remove a person's access, each with its own budget. They
+   * are not interchangeable: a ban is permanent, a kick is reversible, and a
+   * timeout is temporary — an operator who tolerates a kick storm is not
+   * thereby tolerating bans, so one number for all three would either punish
+   * the mild case or wave through the severe one. */
   {
     key: "member-ban",
     family: "members",
@@ -188,7 +193,8 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
     description: "منع طرد الأعضاء بشكل جماعي (العضو يستطيع العودة، بعكس الحظر).",
     auditEvents: ["MemberKick"],
     permission: "KICK_MEMBERS",
-    limit: { min: 1, max: 100, default: 5 }
+    limit: { min: 1, max: 100, default: 5 },
+    limitKey: "kicksPerMinute"
   },
   {
     key: "member-timeout",
@@ -197,21 +203,41 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
     description: "منع إسكات الأعضاء بشكل جماعي (timeout).",
     auditEvents: ["MemberUpdate"],
     permission: "MODERATE_MEMBERS",
-    limit: { min: 1, max: 100, default: 5 }
+    limit: { min: 1, max: 100, default: 5 },
+    limitKey: "timeoutsPerMinute"
   },
 
   /* ---------------- Webhooks ----------------
-   * One entry, not three: a webhook attack is the same burst whether the attacker
-   * creates it to exfiltrate messages or deletes the server's existing ones, and
-   * splitting it would ask the operator to set one number three times. */
+   * Two protections, not one budget for three events.
+   *
+   * They answer different questions and are carried out by different hands:
+   * *creating* a webhook is how a channel's message stream is copied out of the
+   * server (a webhook posts as the server, so nobody sees a stranger), while
+   * *editing or deleting* an existing one is how the server's own alerts are
+   * silenced. Sharing a budget meant an operator could not limit the first
+   * without also moving the second, and the event feed could not say which of
+   * the two had fired. Deleting stays with editing: both are changes to a
+   * webhook that already exists and both need the same permission.
+   */
   {
-    key: "webhook-churn",
+    key: "webhook-create",
     family: "webhooks",
-    label: "مكافحة إنشاء وحذف الويبهوكات",
-    description: "منع تغيير ويبهوكات القنوات لسرقة الرسائل أو تعطيل التنبيهات.",
-    auditEvents: ["WebhookCreate", "WebhookUpdate", "WebhookDelete"],
+    label: "مكافحة إنشاء الويب هوك",
+    description: "منع إنشاء ويبهوكات في القنوات — الطريق المعتاد لسرقة الرسائل وانتحال شخصية السيرفر.",
+    auditEvents: ["WebhookCreate"],
     permission: "MANAGE_WEBHOOKS",
-    limit: { min: 1, max: 100, default: 3 }
+    limit: { min: 1, max: 100, default: 3 },
+    limitKey: "webhookCreatesPerMinute"
+  },
+  {
+    key: "webhook-update",
+    family: "webhooks",
+    label: "مكافحة تعديل الويب هوك",
+    description: "منع تعديل ويبهوك قائم أو حذفه — تغيير وجهته يسرق الرسائل، وحذفه يعطّل التنبيهات.",
+    auditEvents: ["WebhookUpdate", "WebhookDelete"],
+    permission: "MANAGE_WEBHOOKS",
+    limit: { min: 1, max: 100, default: 3 },
+    limitKey: "webhookUpdatesPerMinute"
   },
 
   /* ---------------- Content ----------------
@@ -225,7 +251,8 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
     description: "منع حذف الرسائل الجماعي لإفراغ القنوات من محتواها.",
     auditEvents: ["MessageBulkDelete", "MessageDelete"],
     permission: "MANAGE_MESSAGES",
-    limit: { min: 1, max: 100, default: 5 }
+    limit: { min: 1, max: 100, default: 5 },
+    limitKey: "messageBulkDeletesPerMinute"
   }
 ];
 
@@ -311,13 +338,49 @@ export type ProtectionSettings = {
   punishment: ProtectionPunishment;
   /** Seconds for the `timeout` punishment. Ignored by every other punishment. */
   timeoutSeconds: number;
+  /**
+   * Members this protection never counts, as Discord user IDs.
+   *
+   * A person the operator trusts with a bulk job — the community manager moving
+   * a category, a bot-adjacent account re-importing channels — performs exactly
+   * the burst the engine is built to stop. Without this list the only ways out
+   * were to disarm the protection for everybody or to punish an ally, so the
+   * engine reads this before it counts anything.
+   *
+   * IDs only, never names: two members can share a display name, and a list that
+   * matched on one would exempt the wrong person. Snowflakes are validated at
+   * the boundary for the same reason `quarantineRoleId` is — a malformed entry
+   * would be stored, shown to the operator, and match nobody.
+   */
+  exceptions: string[];
 };
 
-/** Seconds the window may cover: 10..3600, defaulting to 600. */
+/**
+ * How many members one protection may exempt.
+ *
+ * A cap rather than "as many as you like": this list is read on every event the
+ * engine sees, and an unbounded array is a linear scan in the hottest path in
+ * the bot. Fifty is far more than any real guild needs and still small enough
+ * that the scan costs nothing.
+ */
+export const MAX_PROTECTION_EXCEPTIONS = 50;
+
+/**
+ * Seconds the window may cover: 5..600, defaulting to 600.
+ *
+ * Five seconds is the shortest window in which a burst is still a burst — below
+ * it two clicks by one moderator in a row would trip the engine. Ten minutes is
+ * the ceiling because the counters live in memory per guild: a longer window
+ * would keep counting actions the operator can no longer see in the event feed,
+ * and mitigation would fire long after the incident it belongs to.
+ */
+export const MIN_WINDOW_SECONDS = 5;
+export const MAX_WINDOW_SECONDS = 600;
+
 function clampWindowSeconds(value: unknown): number {
   const numeric = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(numeric)) return 600;
-  return Math.min(3600, Math.max(10, Math.trunc(numeric)));
+  if (!Number.isFinite(numeric)) return MAX_WINDOW_SECONDS;
+  return Math.min(MAX_WINDOW_SECONDS, Math.max(MIN_WINDOW_SECONDS, Math.trunc(numeric)));
 }
 
 /** A timeout length: 60s .. 28 days, defaulting to 600s (Discord's ceiling is 28d). */
@@ -327,14 +390,52 @@ function clampTimeoutSeconds(value: unknown): number {
   return Math.min(2_419_200, Math.max(60, Math.trunc(numeric)));
 }
 
+/**
+ * Coerces an untrusted exception list into IDs the engine can match.
+ *
+ * Anything that is not a snowflake is dropped rather than kept: a username, a
+ * mention (`<@123…>`) or a typo would sit in the list looking like an exemption
+ * while matching no event, which is worse than an empty list — the operator
+ * would believe a person was exempt and find out only when the engine acted on
+ * them. Duplicates collapse so the same person cannot occupy two slots, and the
+ * result is capped so the hot-path scan stays bounded.
+ */
+function normaliseExceptions(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const id = entry.trim();
+    if (!isSnowflake(id)) continue;
+    seen.add(id);
+    if (seen.size >= MAX_PROTECTION_EXCEPTIONS) break;
+  }
+  return [...seen];
+}
+
 export type ProtectionSettingsMap = Record<NukeProtectionKey, ProtectionSettings>;
 
-export const DEFAULT_PROTECTION_SETTINGS: ProtectionSettingsMap = Object.fromEntries(
-  NUKE_PROTECTIONS.map(protection => [
-    protection.key,
-    { enabled: true, windowSeconds: 600, punishment: "remove-roles" as ProtectionPunishment, timeoutSeconds: 600 }
-  ])
-) as ProtectionSettingsMap;
+/**
+ * Every protection, switched on, with the documented defaults.
+ *
+ * Built with a `reduce` over the registry rather than `Object.fromEntries`: the
+ * registry is the single list of keys, so the map cannot be missing one, and
+ * each value is checked against `ProtectionSettings` as it is written instead of
+ * being asserted after the fact.
+ */
+export const DEFAULT_PROTECTION_SETTINGS: ProtectionSettingsMap = NUKE_PROTECTIONS.reduce(
+  (map, protection) => {
+    map[protection.key] = {
+      enabled: true,
+      windowSeconds: 600,
+      punishment: "remove-roles",
+      timeoutSeconds: 600,
+      exceptions: []
+    };
+    return map;
+  },
+  {} as ProtectionSettingsMap
+);
 
 /**
  * Coerces an untrusted object — a JSON body or a JSONB column — into the full map.
@@ -347,6 +448,23 @@ export const DEFAULT_PROTECTION_SETTINGS: ProtectionSettingsMap = Object.fromEnt
 export function normaliseProtectionSettings(value: unknown): ProtectionSettingsMap {
   const source = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
   const result = { ...DEFAULT_PROTECTION_SETTINGS };
+  // «webhook-churn» was one protection for create + edit + delete. A row written
+  // before the split carries it, and dropping it would reset both new switches
+  // to their defaults — an operator's opt-out would silently become an opt-in.
+  const legacyWebhook = source["webhook-churn"];
+  if (legacyWebhook && typeof legacyWebhook === "object") {
+    for (const key of ["webhook-create", "webhook-update"] as const) {
+      if (source[key] !== undefined) continue;
+      const settings = legacyWebhook as Record<string, unknown>;
+      result[key] = {
+        enabled: settings.enabled !== false,
+        windowSeconds: clampWindowSeconds(settings.windowSeconds),
+        punishment: isProtectionPunishment(settings.punishment) ? settings.punishment : "remove-roles",
+        timeoutSeconds: clampTimeoutSeconds(settings.timeoutSeconds),
+        exceptions: normaliseExceptions(settings.exceptions)
+      };
+    }
+  }
   for (const [key, raw] of Object.entries(source)) {
     if (!isNukeProtectionKey(key)) continue;
     const settings = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -354,7 +472,8 @@ export function normaliseProtectionSettings(value: unknown): ProtectionSettingsM
       enabled: settings.enabled !== false,
       windowSeconds: clampWindowSeconds(settings.windowSeconds),
       punishment: isProtectionPunishment(settings.punishment) ? settings.punishment : "remove-roles",
-      timeoutSeconds: clampTimeoutSeconds(settings.timeoutSeconds)
+      timeoutSeconds: clampTimeoutSeconds(settings.timeoutSeconds),
+      exceptions: normaliseExceptions(settings.exceptions)
     };
   }
   return result;
@@ -362,6 +481,21 @@ export function normaliseProtectionSettings(value: unknown): ProtectionSettingsM
 
 export function protectionEnabled(settings: ProtectionSettingsMap | undefined, key: NukeProtectionKey): boolean {
   return settings?.[key]?.enabled ?? true;
+}
+
+/**
+ * The members one protection exempts.
+ *
+ * Read through this rather than `settings[key].exceptions` at each call site so
+ * "no settings" and "no exceptions" answer the same thing. The engine asks this
+ * on every event; a caller that had to guard for an absent map would eventually
+ * forget once, and a forgotten guard here means acting on an exempt member.
+ */
+export function protectionExceptions(
+  settings: Partial<ProtectionSettingsMap> | undefined,
+  key: NukeProtectionKey
+): readonly string[] {
+  return settings?.[key]?.exceptions ?? [];
 }
 
 export function protectionsInFamily(family: NukeFamily): NukeProtection[] {
@@ -394,12 +528,35 @@ export const PROTECTION_KEYS_BY_ACTION: Record<NukeAction, readonly NukeProtecti
   "channel-update": ["channel-update"],
   "channel-permissions": ["channel-permissions"],
   ban: ["member-ban"],
-  "role-change": ["role-create", "role-delete"]
+  kick: ["member-kick"],
+  timeout: ["member-timeout"],
+  "role-change": ["role-create", "role-delete"],
+  // An edit is its own protection and its own budget: raising a role's
+  // permissions is privilege escalation, not churn, and an operator who turned
+  // "create/delete" off has not thereby turned "raise to administrator" off.
+  "role-update": ["role-update"],
+  "webhook-create": ["webhook-create"],
+  "webhook-update": ["webhook-update"],
+  "message-bulk-delete": ["message-purge"]
 };
 
 /** The single protection an observed event belongs to, or null if the engine ignores it. */
 export function protectionKeyForEvent(
-  event: "server.channel-delete" | "server.channel-create" | "server.channel-update" | "channel.permission-update" | "moderation.ban" | "role.create" | "role.delete"
+  event:
+    | "server.channel-delete"
+    | "server.channel-create"
+    | "server.channel-update"
+    | "channel.permission-update"
+    | "moderation.ban"
+    | "moderation.kick"
+    | "moderation.timeout"
+    | "role.create"
+    | "role.delete"
+    | "role.update"
+    | "webhook.create"
+    | "webhook.update"
+    | "webhook.delete"
+    | "message.bulk-delete"
 ): NukeProtectionKey {
   switch (event) {
     case "server.channel-delete":
@@ -412,10 +569,23 @@ export function protectionKeyForEvent(
       return "channel-permissions";
     case "moderation.ban":
       return "member-ban";
+    case "moderation.kick":
+      return "member-kick";
+    case "moderation.timeout":
+      return "member-timeout";
     case "role.create":
       return "role-create";
     case "role.delete":
       return "role-delete";
+    case "role.update":
+      return "role-update";
+    case "webhook.create":
+      return "webhook-create";
+    case "webhook.update":
+    case "webhook.delete":
+      return "webhook-update";
+    case "message.bulk-delete":
+      return "message-purge";
   }
 }
 

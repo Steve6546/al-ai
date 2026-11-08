@@ -120,6 +120,18 @@ export function describeAppearanceFailure(field: AppearanceField, error: unknown
     };
   }
 
+  if (error.status === 400 && /AVATAR_RATE_LIMIT/.test(error.body)) {
+    // Discord answers 400 — not 429 — when the same picture is changed too many
+    // times in a short window, with the reason buried in the body. Falling
+    // through to «رفض Discord القيمة» told the operator their *image* was
+    // wrong, so they tried another one and hit the same wall: the sentence
+    // turned a cooldown into "animated pictures do not work".
+    return {
+      code: "AVATAR_RATE_LIMIT",
+      message: `غيّرت ${label} عدة مرات متتالية، وDiscord يحدّ عدد التغييرات في الوقت القصير. انتظر نحو عشر دقائق ثم أعد المحاولة — الصورة نفسها لم تُرفض.`
+    };
+  }
+
   if (error.status === 400) {
     return {
       code: "REJECTED",
@@ -362,11 +374,53 @@ const PAGE_SNIFF_BYTES = 64_000;
  * redirect to one would be.
  */
 export function previewImageFrom(html: string): string | null {
+  const declared = declaredPreviewImage(html);
+  if (!declared) return null;
+  // A page that shows an animated picture almost never declares it: the
+  // `og:image` tag points at a still thumbnail (Pinterest serves a `736x/…jpg`
+  // of the same asset). Following only the tag is why an animated pin arrived
+  // as a photograph. When the same asset is also linked as a GIF — same file
+  // name, different extension and size segment — the GIF is the picture the
+  // operator meant.
+  return animatedSiblingOf(declared, html) ?? declared;
+}
+
+/** The still the page declares as its own preview. */
+function declaredPreviewImage(html: string): string | null {
   for (const tag of html.match(/<meta[^>]*>/gi) ?? []) {
     const key = /(?:property|name)\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1]?.toLowerCase();
     if (key !== "og:image" && key !== "twitter:image" && key !== "twitter:image:src") continue;
     const content = /content\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1]?.trim();
     if (content) return content;
+  }
+  return null;
+}
+
+/**
+ * The file name of an asset address, when it looks like one.
+ *
+ * Used to decide that two URLs are the same picture at different sizes:
+ * `…/736x/96/64/8d/96648da2….jpg` and `…/originals/96/64/8d/96648da2….gif`
+ * share `96648da2…`. A short or generic name (`image`, `photo`) is not used —
+ * matching on those would attach an unrelated GIF to a page.
+ */
+function assetKey(url: string): string | null {
+  try {
+    const file = new URL(url).pathname.split("/").pop() ?? "";
+    const base = file.replace(/\.[a-z0-9]+$/i, "");
+    return base.length >= 8 ? base.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A GIF in the same document that is the same asset as `declared`. */
+function animatedSiblingOf(declared: string, html: string): string | null {
+  const key = assetKey(declared);
+  if (!key) return null;
+  for (const match of html.matchAll(/https?:\/\/[^\s"'<>\\]+\.gif(?:\?[^\s"'<>\\]*)?/gi)) {
+    const candidate = match[0];
+    if (assetKey(candidate) === key) return candidate;
   }
   return null;
 }

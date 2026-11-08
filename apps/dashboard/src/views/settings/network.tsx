@@ -346,7 +346,7 @@ export function NetworkView() {
                   href="https://dashboard.ngrok.com/domains"
                   target="_blank"
                   rel="noreferrer"
-                  className="text-[11px] text-primary underline underline-offset-2 dark:text-foreground"
+                  className="text-mini text-primary underline underline-offset-2 dark:text-foreground"
                 >
                   {t("network.ngrokDashboard")}
                 </a>

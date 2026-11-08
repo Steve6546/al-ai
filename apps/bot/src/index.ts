@@ -214,6 +214,27 @@ const pipeline = new EventPipeline({
 });
 const client = createDiscordClient();
 
+/**
+ * One line every five minutes, so memory growth is a number instead of a
+ * surprise.
+ *
+ * The leak this replaces was invisible from inside the product: every screen was
+ * correct, every log line was correct, and the only symptom was the process
+ * reaching gigabytes. `queued` and `dropped` are here because the event backlog
+ * is the part of this process that grows when the gateway ceiling is reached —
+ * the figure that says "the queue is the problem" rather than "Node is fat".
+ */
+const memoryReport = setInterval(() => {
+  const usage = process.memoryUsage();
+  const stats = pipeline.stats();
+  const mb = (bytes: number) => Math.round(bytes / 1_048_576);
+  console.log(
+    `AL AI memory: rss=${mb(usage.rss)}MB heap=${mb(usage.heapUsed)}MB external=${mb(usage.external)}MB ` +
+      `queued=${stats.queued} dropped=${stats.dropped}`
+  );
+}, 300_000);
+memoryReport.unref?.();
+
 const detector = createIntrusionDetector();
 
 /**

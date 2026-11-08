@@ -104,23 +104,20 @@ async function request<T>(path: string, init: RequestInit | undefined, mayRetry:
     headers["Content-Type"] = headers["Content-Type"] ?? "application/json";
   }
 
-  const controller = new AbortController();
-  const deadline = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   let response: Response;
   try {
     response = await fetch(path, {
       credentials: "same-origin",
       ...init,
       headers,
-      signal: controller.signal
+      signal
     });
   } catch (cause) {
-    if (controller.signal.aborted) {
+    if (signal.aborted) {
       throw new ApiError("TIMEOUT", "انتهت مهلة الطلب. أعد المحاولة.", 408);
     }
     throw cause;
-  } finally {
-    clearTimeout(deadline);
   }
 
   if (!response.ok) {
@@ -221,7 +218,7 @@ export const saveTiers = (guildId: string, values: TierRoles) =>
  * ------------------------------------------------------------------ */
 
 /** A member named in a per-command scope, resolved to something readable. */
-export type ScopedMember = { id: string; name: string; avatarUrl: string | null };
+export type ScopedMember = { id: string; name: string; username?: string; avatarUrl: string | null };
 
 /**
  * The list fields the board iterates over.
@@ -293,6 +290,21 @@ export const resolveMembers = (guildId: string, ids: string[]) =>
     : call<{ members: ScopedMember[] }>(`/api/guilds/${guildId}/members?ids=${ids.join(",")}`);
 
 /**
+ * Searches the guild's members by name or handle.
+ *
+ * Server-side search, not a filter over a downloaded list: a guild has thousands
+ * of members and the picker shows twenty. An empty query resolves to no rows
+ * without a request, so focusing the field never costs a Discord call.
+ */
+export const searchMembers = (guildId: string, query: string) => {
+  const needle = query.trim();
+  if (needle.length === 0) return Promise.resolve({ members: [] as ScopedMember[] });
+  return call<{ members: ScopedMember[] }>(
+    `/api/guilds/${guildId}/members/search?q=${encodeURIComponent(needle)}`
+  );
+};
+
+/**
  * One entry per changed command. Unchanged commands are not sent at all, and
  * the server normalises each one against its registry definition — a control
  * the command does not support is dropped rather than stored and ignored.
@@ -360,6 +372,21 @@ export const saveCustomization = (guildId: string, settings: Partial<Customizati
     `/api/guilds/${guildId}/customization`,
     { method: "PUT", body: JSON.stringify(settings) }
   );
+
+/**
+ * A pasted image address, downloaded by the BFF into the data URL this app
+ * stores.
+ *
+ * The hop exists because the stored value must be a `data:` URI (Discord's
+ * requirement) and the page's CSP only displays images from its own origin,
+ * `data:` and the Discord CDN — so a link can be neither previewed nor saved
+ * without the bytes passing through the server.
+ */
+export const imageFromUrl = (url: string) =>
+  call<{ dataUrl: string; bytes: number }>("/api/image/from-url", {
+    method: "POST",
+    body: JSON.stringify({ url })
+  });
 
 /* ------------------------------------------------------------------ *
  * Settings: the bot's presence

@@ -42,13 +42,29 @@ export class TtlCache<K, V> {
   private readonly entries = new Map<K, Entry<V>>();
   private readonly inFlight = new Map<K, Promise<V>>();
 
-  constructor(private readonly ttlMs: number) {}
+  /**
+   * `maxEntries` bounds the map itself, not just the age of an entry.
+   *
+   * An expired entry used to stay in the map forever: `get` answered `undefined`
+   * and the value was never reachable again, but its memory was never given back
+   * either. With one key per guild that is small; with one key per *viewed
+   * resource* it is a leak that grows with uptime and never shows in a screen.
+   */
+  constructor(
+    private readonly ttlMs: number,
+    private readonly maxEntries = 1_000
+  ) {}
 
   /** The value if it is still inside its TTL, otherwise undefined. */
   get(key: K): V | undefined {
     const entry = this.entries.get(key);
     if (!entry) return undefined;
-    if (Date.now() - entry.at >= this.ttlMs) return undefined;
+    if (Date.now() - entry.at >= this.ttlMs) {
+      // Dropped here rather than left for a sweep: this is the only place that
+      // knows the entry is dead, and a dead entry still holds its value.
+      this.entries.delete(key);
+      return undefined;
+    }
     return entry.value;
   }
 
@@ -59,6 +75,13 @@ export class TtlCache<K, V> {
 
   set(key: K, value: V): void {
     this.entries.set(key, { value, at: Date.now() });
+    // Oldest first: `Map` keeps insertion order, so the first key is the one
+    // written longest ago — good enough for a cache whose keys are equivalent.
+    while (this.entries.size > this.maxEntries) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest === undefined) break;
+      this.entries.delete(oldest);
+    }
   }
 
   /** Drop one key, or every key when called with no argument. */
@@ -86,6 +109,11 @@ export class TtlCache<K, V> {
    *   when there is nothing cached does the error reach the caller.
    */
   async resolve(key: K, load: () => Promise<V>): Promise<V> {
+    // Captured *before* `get`, which drops an expired entry: a failed load must
+    // still fall back to the last known value rather than fail a screen that
+    // could have been answered from it.
+    const stale = this.peek(key);
+
     const cached = this.get(key);
     if (cached !== undefined) return cached;
 
@@ -98,7 +126,6 @@ export class TtlCache<K, V> {
         this.set(key, value);
         return value;
       } catch (error) {
-        const stale = this.peek(key);
         if (stale !== undefined) return stale;
         throw error;
       } finally {
@@ -145,6 +172,15 @@ export class RequestThrottle {
 
     recent.push(now);
     this.hits.set(key, recent);
+    // A key that has been quiet for a whole window holds nothing useful, and the
+    // map had no other way to forget it: every peer address that ever made one
+    // request kept an array for the life of the process.
+    if (this.hits.size > 1_000) {
+      for (const [other, stamps] of this.hits) {
+        const last = stamps[stamps.length - 1] ?? 0;
+        if (now - last >= this.windowMs) this.hits.delete(other);
+      }
+    }
     return { allowed: true };
   }
 

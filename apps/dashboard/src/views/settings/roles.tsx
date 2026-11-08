@@ -121,7 +121,7 @@ export function RolesView({ guild }: { guild: Guild }) {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-base font-semibold leading-snug">{t("roles.owner")}</p>
-              <Badge variant="secondary" className="text-[10px]">{t("roles.auto")}</Badge>
+              <Badge variant="secondary" className="text-micro">{t("roles.auto")}</Badge>
             </div>
             <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
               {t("roles.ownerBody")}
@@ -260,7 +260,7 @@ function RolePicker({
             </Badge>
             {/* The size of the choice. Counted from the command registry the bot
                 actually serves, so it cannot disagree with it. */}
-            <Badge variant="outline" className="tabular text-[10px] text-muted-foreground">
+            <Badge variant="outline" className="tabular text-micro text-muted-foreground">
               {t("roles.unlocked", { count: unlocked })}
             </Badge>
           </div>
@@ -281,7 +281,7 @@ function RolePicker({
           is not a neutral state — it is "only the owner can do this", and the
           screen has to say so while the operator is looking at it.
         */}
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
+        <p className="text-mini leading-relaxed text-muted-foreground">
           {chosenRoles.length
             ? t("roles.everyoneHas", { description })
             : t("roles.noRoles")}
@@ -298,7 +298,7 @@ function RolePicker({
                 type="button"
                 onClick={() => onToggle(role.id, false)}
                 aria-label={t("roles.remove", { role: role.name, title })}
-                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] transition-colors hover:border-destructive/60 hover:text-destructive"
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2 py-0.5 text-mini transition-colors hover:border-destructive/60 hover:text-destructive"
               >
                 <RoleSwatch color={role.color} />
                 <span className="max-w-36 truncate">{role.name}</span>
@@ -339,7 +339,7 @@ function RolePicker({
                           <span
                             key={power.key}
                             className={cn(
-                              "rounded px-1 py-px text-[10px]",
+                              "rounded px-1 py-px text-micro",
                               power.tier === "admin" ? "bg-primary/15 text-primary" : "bg-accent text-accent-foreground"
                             )}
                           >
@@ -348,11 +348,11 @@ function RolePicker({
                         ))}
                       </span>
                     ) : (
-                      <span className="block text-[10px] text-muted-foreground">{t("roles.noModPowers")}</span>
+                      <span className="block text-micro text-muted-foreground">{t("roles.noModPowers")}</span>
                     )}
                   </span>
                   {blocked && (
-                    <Badge variant="destructive" className="shrink-0 text-[10px]">
+                    <Badge variant="destructive" className="shrink-0 text-micro">
                       {t("roles.aboveBot")}
                     </Badge>
                   )}

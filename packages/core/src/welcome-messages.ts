@@ -1,4 +1,5 @@
 import { normaliseSnowflake } from "./snowflake.js";
+import { MAX_IMAGE_UPLOAD_BYTES } from "./contracts.js";
 
 /* ------------------------------------------------------------------ *
  * Welcome messages (رسائل الترحيب) — settings
@@ -220,7 +221,12 @@ const IMAGE_DATA_URL_PATTERN = /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Z
 /** Accepts a well-formed image data URL, or null. The caller enforces the size cap. */
 export function normaliseWelcomeImageDataUrl(value: unknown, maxBytes: number): string | null {
   if (typeof value !== "string" || !IMAGE_DATA_URL_PATTERN.test(value)) return null;
-  return value.length <= maxBytes ? value : null;
+  // `maxBytes` is image bytes; `value.length` is base64 characters, which are a
+  // third longer. Comparing them directly made the real ceiling three quarters
+  // of the one the hint promised, so a picture between those numbers passed the
+  // uploader and was refused here.
+  const bytes = Math.floor((value.length - value.indexOf(",") - 1) * 0.75);
+  return bytes <= maxBytes ? value : null;
 }
 
 const EMBED_FIELD_ID = (index: number) => `field-${index + 1}`;
@@ -355,7 +361,14 @@ export function normaliseWelcomeImageConfig(value: unknown): WelcomeImageConfig 
   return clampWelcomeImageConfig(base);
 }
 
-export const MAX_IMAGE_BYTES = 500_000;
+/**
+ * The welcome picture's ceiling — the same number as every other image.
+ *
+ * It used to be a second, independent 500 000, so "the limit" depended on which
+ * screen you were on: raising one left the other refusing the same file with a
+ * different sentence. There is one budget for images in this product.
+ */
+export const MAX_IMAGE_BYTES = MAX_IMAGE_UPLOAD_BYTES;
 
 const DEFAULT_EMBED: WelcomeEmbed = {
   content: "",

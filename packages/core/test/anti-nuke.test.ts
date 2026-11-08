@@ -7,7 +7,8 @@ import {
   DEFAULT_ANTI_NUKE_CONFIG,
   DEFAULT_ANTI_NUKE_LIMITS,
   MAX_ANTI_NUKE_LIMIT,
-  normaliseAntiNukeConfig
+  normaliseAntiNukeConfig,
+  type AntiNukeLimits
 } from "../src/anti-nuke.js";
 
 /**
@@ -19,7 +20,20 @@ import {
  * armed and is not.
  */
 
-const limits = { channelDeletesPerMinute: 3, channelCreatesPerMinute: 5, channelUpdatesPerMinute: 5, channelOverwritesPerMinute: 5, bansPerMinute: 5, roleChangesPerMinute: 2 };
+const limits: AntiNukeLimits = {
+  channelDeletesPerMinute: 3,
+  channelCreatesPerMinute: 5,
+  channelUpdatesPerMinute: 5,
+  channelOverwritesPerMinute: 5,
+  bansPerMinute: 5,
+  kicksPerMinute: 5,
+  timeoutsPerMinute: 5,
+  roleChangesPerMinute: 2,
+  roleUpdatesPerMinute: 3,
+  webhookCreatesPerMinute: 3,
+  webhookUpdatesPerMinute: 3,
+  messageBulkDeletesPerMinute: 5
+};
 
 /* ------------------------------------------------------------------ *
  * The trip decision

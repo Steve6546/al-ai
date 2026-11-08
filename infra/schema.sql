@@ -89,12 +89,16 @@ ALTER TABLE guild_customization ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NUL
 -- them small, so these only stop a hand-crafted request from writing megabytes
 -- into a text column. Dropped-then-added rather than guarded, which is how every
 -- other constraint in this file is made idempotent.
+-- The ceiling is the *encoded* length of `MAX_IMAGE_UPLOAD_BYTES` (2 000 000
+-- bytes -> ceil(2e6 / 3) * 4 + 64 = 2 666 731 characters). It used to be a flat
+-- 500 000 here while the application allowed 666 731, so a picture between
+-- ~375 KB and 500 KB passed the uploader and was refused by the database.
 ALTER TABLE guild_customization DROP CONSTRAINT IF EXISTS guild_customization_avatar_size_check;
 ALTER TABLE guild_customization ADD CONSTRAINT guild_customization_avatar_size_check
-  CHECK (avatar_data_url IS NULL OR length(avatar_data_url) <= 500000);
+  CHECK (avatar_data_url IS NULL OR length(avatar_data_url) <= 2666731);
 ALTER TABLE guild_customization DROP CONSTRAINT IF EXISTS guild_customization_banner_size_check;
 ALTER TABLE guild_customization ADD CONSTRAINT guild_customization_banner_size_check
-  CHECK (banner_data_url IS NULL OR length(banner_data_url) <= 500000);
+  CHECK (banner_data_url IS NULL OR length(banner_data_url) <= 2666731);
 ALTER TABLE guild_customization DROP CONSTRAINT IF EXISTS guild_customization_bio_check;
 ALTER TABLE guild_customization ADD CONSTRAINT guild_customization_bio_check CHECK (length(bio) <= 300);
 
@@ -580,7 +584,16 @@ CREATE TABLE IF NOT EXISTS guild_security (
   channel_updates_per_minute SMALLINT NOT NULL DEFAULT 5,
   channel_overwrites_per_minute SMALLINT NOT NULL DEFAULT 5,
   bans_per_minute SMALLINT NOT NULL DEFAULT 5,
+  kicks_per_minute SMALLINT NOT NULL DEFAULT 5,
+  timeouts_per_minute SMALLINT NOT NULL DEFAULT 5,
   role_changes_per_minute SMALLINT NOT NULL DEFAULT 3,
+  role_updates_per_minute SMALLINT NOT NULL DEFAULT 3,
+  -- The pre-split budget, kept so an older row still has a value to migrate
+  -- from; nothing reads or writes it any more.
+  webhook_changes_per_minute SMALLINT NOT NULL DEFAULT 3,
+  webhook_creates_per_minute SMALLINT NOT NULL DEFAULT 3,
+  webhook_updates_per_minute SMALLINT NOT NULL DEFAULT 3,
+  message_bulk_deletes_per_minute SMALLINT NOT NULL DEFAULT 5,
   quarantine_role_id TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   -- The code clamps to the same range. Enforced here too so a direct write
@@ -591,7 +604,14 @@ CREATE TABLE IF NOT EXISTS guild_security (
   CONSTRAINT guild_security_channel_updates_check CHECK (channel_updates_per_minute BETWEEN 1 AND 100),
   CONSTRAINT guild_security_channel_overwrites_check CHECK (channel_overwrites_per_minute BETWEEN 1 AND 100),
   CONSTRAINT guild_security_bans_check CHECK (bans_per_minute BETWEEN 1 AND 100),
-  CONSTRAINT guild_security_role_changes_check CHECK (role_changes_per_minute BETWEEN 1 AND 100)
+  CONSTRAINT guild_security_kicks_check CHECK (kicks_per_minute BETWEEN 1 AND 100),
+  CONSTRAINT guild_security_timeouts_check CHECK (timeouts_per_minute BETWEEN 1 AND 100),
+  CONSTRAINT guild_security_role_changes_check CHECK (role_changes_per_minute BETWEEN 1 AND 100),
+  CONSTRAINT guild_security_role_updates_check CHECK (role_updates_per_minute BETWEEN 1 AND 100),
+  CONSTRAINT guild_security_webhook_changes_check CHECK (webhook_changes_per_minute BETWEEN 1 AND 100),
+  CONSTRAINT guild_security_webhook_creates_check CHECK (webhook_creates_per_minute BETWEEN 1 AND 100),
+  CONSTRAINT guild_security_webhook_updates_check CHECK (webhook_updates_per_minute BETWEEN 1 AND 100),
+  CONSTRAINT guild_security_message_bulk_deletes_check CHECK (message_bulk_deletes_per_minute BETWEEN 1 AND 100)
 );
 
 -- `CREATE TABLE IF NOT EXISTS` leaves an existing column's default alone, so the
@@ -612,6 +632,51 @@ ALTER TABLE guild_security ADD CONSTRAINT guild_security_channel_updates_check C
 ALTER TABLE guild_security ADD COLUMN IF NOT EXISTS channel_overwrites_per_minute SMALLINT NOT NULL DEFAULT 5;
 ALTER TABLE guild_security DROP CONSTRAINT IF EXISTS guild_security_channel_overwrites_check;
 ALTER TABLE guild_security ADD CONSTRAINT guild_security_channel_overwrites_check CHECK (channel_overwrites_per_minute BETWEEN 1 AND 100);
+
+-- The five protections that used to be declared but unwired — kick, timeout,
+-- role edit, webhook churn and bulk message deletion — are now counted, so each
+-- needs its own budget. One column per action, like every budget above: the
+-- alternative (a JSON blob of numbers) would put the limits in a second place
+-- the normaliser has to know about, and the screen already reads these columns.
+ALTER TABLE guild_security ADD COLUMN IF NOT EXISTS kicks_per_minute SMALLINT NOT NULL DEFAULT 5;
+ALTER TABLE guild_security DROP CONSTRAINT IF EXISTS guild_security_kicks_check;
+ALTER TABLE guild_security ADD CONSTRAINT guild_security_kicks_check CHECK (kicks_per_minute BETWEEN 1 AND 100);
+
+ALTER TABLE guild_security ADD COLUMN IF NOT EXISTS timeouts_per_minute SMALLINT NOT NULL DEFAULT 5;
+ALTER TABLE guild_security DROP CONSTRAINT IF EXISTS guild_security_timeouts_check;
+ALTER TABLE guild_security ADD CONSTRAINT guild_security_timeouts_check CHECK (timeouts_per_minute BETWEEN 1 AND 100);
+
+ALTER TABLE guild_security ADD COLUMN IF NOT EXISTS role_updates_per_minute SMALLINT NOT NULL DEFAULT 3;
+ALTER TABLE guild_security DROP CONSTRAINT IF EXISTS guild_security_role_updates_check;
+ALTER TABLE guild_security ADD CONSTRAINT guild_security_role_updates_check CHECK (role_updates_per_minute BETWEEN 1 AND 100);
+
+ALTER TABLE guild_security ADD COLUMN IF NOT EXISTS webhook_changes_per_minute SMALLINT NOT NULL DEFAULT 3;
+ALTER TABLE guild_security DROP CONSTRAINT IF EXISTS guild_security_webhook_changes_check;
+ALTER TABLE guild_security ADD CONSTRAINT guild_security_webhook_changes_check CHECK (webhook_changes_per_minute BETWEEN 1 AND 100);
+
+-- «مكافحة الويب هوك» was one budget for creating, editing and deleting. It is
+-- two protections now, so the old column seeds both new ones exactly once: a
+-- database that already has values in the new columns keeps them.
+ALTER TABLE guild_security ADD COLUMN IF NOT EXISTS webhook_creates_per_minute SMALLINT;
+ALTER TABLE guild_security ADD COLUMN IF NOT EXISTS webhook_updates_per_minute SMALLINT;
+UPDATE guild_security
+   SET webhook_creates_per_minute = webhook_changes_per_minute
+ WHERE webhook_creates_per_minute IS NULL;
+UPDATE guild_security
+   SET webhook_updates_per_minute = webhook_changes_per_minute
+ WHERE webhook_updates_per_minute IS NULL;
+ALTER TABLE guild_security ALTER COLUMN webhook_creates_per_minute SET DEFAULT 3;
+ALTER TABLE guild_security ALTER COLUMN webhook_creates_per_minute SET NOT NULL;
+ALTER TABLE guild_security ALTER COLUMN webhook_updates_per_minute SET DEFAULT 3;
+ALTER TABLE guild_security ALTER COLUMN webhook_updates_per_minute SET NOT NULL;
+ALTER TABLE guild_security DROP CONSTRAINT IF EXISTS guild_security_webhook_creates_check;
+ALTER TABLE guild_security ADD CONSTRAINT guild_security_webhook_creates_check CHECK (webhook_creates_per_minute BETWEEN 1 AND 100);
+ALTER TABLE guild_security DROP CONSTRAINT IF EXISTS guild_security_webhook_updates_check;
+ALTER TABLE guild_security ADD CONSTRAINT guild_security_webhook_updates_check CHECK (webhook_updates_per_minute BETWEEN 1 AND 100);
+
+ALTER TABLE guild_security ADD COLUMN IF NOT EXISTS message_bulk_deletes_per_minute SMALLINT NOT NULL DEFAULT 5;
+ALTER TABLE guild_security DROP CONSTRAINT IF EXISTS guild_security_message_bulk_deletes_check;
+ALTER TABLE guild_security ADD CONSTRAINT guild_security_message_bulk_deletes_check CHECK (message_bulk_deletes_per_minute BETWEEN 1 AND 100);
 
 -- Per-protection switches, as one JSON object keyed by the registry's names.
 --

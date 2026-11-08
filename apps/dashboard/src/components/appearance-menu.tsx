@@ -99,7 +99,7 @@ export function AppearanceMenu({ className, iconOnly = false }: { className?: st
             />
           ))}
         </div>
-        <p className="px-1 pt-3 text-[11px] leading-relaxed text-muted-foreground">
+        <p className="px-1 pt-3 text-mini leading-relaxed text-muted-foreground">
           {t("appearance.localOnly")}
         </p>
       </PopoverContent>

@@ -289,8 +289,16 @@ export const MAX_BIO_LENGTH = 300;
 /**
  * Largest image the dashboard will accept, counted in image bytes. This is the
  * number the field hint shows the operator, so it is the number that must hold.
+ *
+ * 2 MB, not the 500 KB this used to be. Discord documents no per-field ceiling
+ * for `avatar`/`banner` — only a general per-file upload limit of 20 MiB — and
+ * the old number was enforced *twice*: here, and again as a 500 000-character
+ * CHECK on the column, which is ~375 KB of image. A picture between those two
+ * numbers passed the uploader and was refused by the database, under a hint
+ * that promised 500 KB. One constant, derived downwards, is the fix; the
+ * screen also downscales anything larger instead of refusing it.
  */
-export const MAX_IMAGE_UPLOAD_BYTES = 500_000;
+export const MAX_IMAGE_UPLOAD_BYTES = 2_000_000;
 
 /**
  * Largest base64 data URL accepted for an avatar, a banner or a role icon.

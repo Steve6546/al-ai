@@ -398,6 +398,23 @@ function resolveNgrokPath(): string {
   return process.env.NGROK_PATH?.trim() || "ngrok";
 }
 
+/**
+ * This process's environment minus every proxy variable, for the agent only.
+ *
+ * The dashboard itself may legitimately need a proxy to reach Discord (a
+ * filtered network, a corporate egress). ngrok may not: see the spawn call.
+ * `NO_PROXY` is deliberately *not* set — an empty `http_proxy` is what the Go
+ * HTTP client reads as "no proxy", and adding `NO_PROXY=*` as well would hide
+ * the next proxy variable somebody introduces.
+ */
+function withoutProxyEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"]) {
+    delete env[key];
+  }
+  return env;
+}
+
 /** A fixed ngrok hostname from the environment, when one is configured. */
 function envNgrokDomain(): string | null {
   return normaliseNgrokDomain(process.env.NGROK_DOMAIN);
@@ -709,7 +726,19 @@ export function createNetworkManager(input: {
       child = spawn(ngrokPath, args, {
         stdio: ["ignore", logFd, logFd],
         detached: true,
-        windowsHide: true
+        windowsHide: true,
+        // The agent must reach ngrok's edge **directly**.
+        //
+        // An `http_proxy` inherited from whatever launched this process sends
+        // the agent through that proxy, and ngrok then authenticates as the
+        // *proxy's* address. On a hosted proxy that surfaces as
+        // `ERR_NGROK_9040 — we do not allow agents to connect from your IP
+        // address`, naming an address the machine does not own, which reads as
+        // an account block and sends you looking in the wrong place. A proxied
+        // agent is also a paid feature (`ERR_NGROK_9009`), so the tunnel is
+        // never meant to use one. Removed here rather than in the launcher so
+        // the tunnel behaves the same however the dashboard was started.
+        env: withoutProxyEnv()
       });
       child.unref();
       tunnelPid = child.pid ?? null;

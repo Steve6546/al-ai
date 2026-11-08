@@ -1540,7 +1540,10 @@ export type BotEvent =
       before?: string;
       after?: string;
     }
-  | { type: "message.bulk-delete"; guildId: string; channelId: string; count: number }
+  // A purge names no author: the messages are gone and their writers are the
+  // victims, not the actor. `actorId` is the moderator who ran it, read from the
+  // audit log — without it the anti-nuke engine cannot count the act at all.
+  | { type: "message.bulk-delete"; guildId: string; channelId: string; count: number; actorId?: string }
   // Discord gives no notice for a deleted file; the names come from the cache.
   | { type: "message.delete-attachment"; guildId: string; messageId: string; channelId: string; authorId?: string; attachments: string[] }
   | { type: "message.pin"; guildId: string; channelId: string; messageId: string }
@@ -1593,9 +1596,12 @@ export type BotEvent =
   | { type: "bot.join"; guildId: string; memberId: string }
   | { type: "bot.leave"; guildId: string; memberId: string }
   | { type: "integration.update"; guildId: string; integrationId: string }
-  | { type: "webhook.create"; guildId: string; webhookId: string; channelId: string }
-  | { type: "webhook.update"; guildId: string; webhookId: string; channelId: string }
-  | { type: "webhook.delete"; guildId: string; webhookId: string; channelId: string }
+  // `actorId` is what makes a webhook change countable by the anti-nuke engine:
+  // an event nobody is named in cannot be blamed on a person, and the engine
+  // refuses to count one. Resolved from the audit log at emission time.
+  | { type: "webhook.create"; guildId: string; webhookId: string; channelId: string; actorId?: string }
+  | { type: "webhook.update"; guildId: string; webhookId: string; channelId: string; actorId?: string }
+  | { type: "webhook.delete"; guildId: string; webhookId: string; channelId: string; actorId?: string }
   | { type: "bot.role-create"; guildId: string; roleId: string }
   | { type: "bot.role-remove"; guildId: string; roleId: string }
   | { type: "automod.rule-create"; guildId: string; ruleId: string }
@@ -2349,9 +2355,20 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
       after: afterContent
     });
   });
-  client.on(Events.MessageBulkDelete, (messages, channel) => {
+  client.on(Events.MessageBulkDelete, async (messages, channel) => {
     if (!channel.guildId) return;
-    emit({ type: "message.bulk-delete", guildId: channel.guildId, channelId: channel.id, count: messages.size });
+    // A purge is the one message action Discord *does* attribute: the audit log
+    // records who ran it against the channel. Without this the event names no
+    // actor and the anti-nuke engine (rightly) refuses to count it.
+    const guild = "guild" in channel ? channel.guild : null;
+    const actorId = guild ? await resolveActor(guild, AuditLogEvent.MessageBulkDelete, channel.id) : "unknown";
+    emit({
+      type: "message.bulk-delete",
+      guildId: channel.guildId,
+      channelId: channel.id,
+      count: messages.size,
+      ...(actorId && actorId !== "unknown" ? { actorId } : {})
+    });
   });
 
   // `channelPinsUpdate` says "the pinned set changed" and not which way, so the
@@ -2595,9 +2612,22 @@ export function bindEvents(client: Client, sink: EventSink, options: BindOptions
     const previous = derived.webhooks.get(guild.id);
     derived.webhooks.set(guild.id, new Map(current.map(item => [item.id, item])));
     const diff = classifyWebhooks(current, previous);
-    for (const created of diff.created) emit({ type: "webhook.create", guildId: guild.id, webhookId: created.id, channelId: created.channelId ?? "" });
-    for (const updated of diff.updated) emit({ type: "webhook.update", guildId: guild.id, webhookId: updated.id, channelId: updated.channelId ?? "" });
-    for (const removed of diff.deleted) emit({ type: "webhook.delete", guildId: guild.id, webhookId: removed.id, channelId: removed.channelId ?? "" });
+    // Each change is attributed before it is emitted. `classifyWebhooks` says
+    // *what* changed; the audit log is the only thing that says *who*, and an
+    // unattributed webhook change is invisible to the anti-nuke engine by
+    // design — it will not blame the nearest person.
+    for (const created of diff.created) {
+      const actorId = await resolveActor(guild, AuditLogEvent.WebhookCreate, created.id);
+      emit({ type: "webhook.create", guildId: guild.id, webhookId: created.id, channelId: created.channelId ?? "", ...(actorId !== "unknown" ? { actorId } : {}) });
+    }
+    for (const updated of diff.updated) {
+      const actorId = await resolveActor(guild, AuditLogEvent.WebhookUpdate, updated.id);
+      emit({ type: "webhook.update", guildId: guild.id, webhookId: updated.id, channelId: updated.channelId ?? "", ...(actorId !== "unknown" ? { actorId } : {}) });
+    }
+    for (const removed of diff.deleted) {
+      const actorId = await resolveActor(guild, AuditLogEvent.WebhookDelete, removed.id);
+      emit({ type: "webhook.delete", guildId: guild.id, webhookId: removed.id, channelId: removed.channelId ?? "", ...(actorId !== "unknown" ? { actorId } : {}) });
+    }
   });
   client.on(Events.GuildIntegrationsUpdate, async guild => {
     let current: Integration[];

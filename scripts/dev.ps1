@@ -98,7 +98,11 @@ function Start-ManagedService {
     [Parameter(Mandatory)][string]$Entry,
     [Parameter(Mandatory)][string]$WorkingDirectory,
     [Parameter(Mandatory)][string]$OutLog,
-    [Parameter(Mandatory)][string]$ErrLog
+    [Parameter(Mandatory)][string]$ErrLog,
+    # Heap ceiling for this service, in MB. A runaway heap then stops at a known
+    # number instead of taking the machine's memory with it — the difference
+    # between a restart and a frozen desktop.
+    [int]$HeapMb = 0
   )
 
   Ensure-RunDirectory
@@ -115,8 +119,18 @@ function Start-ManagedService {
   $envFile = Join-Path $repoRoot ".env"
   $inner = '""' + $node + '" --import tsx --env-file="' + $envFile + '" ' + $Entry +
     ' 1>"' + $OutLog + '" 2>"' + $ErrLog + '""'
-  Start-Process -FilePath $env:ComSpec -ArgumentList ('/c ' + $inner) `
-    -WorkingDirectory $WorkingDirectory -WindowStyle Hidden | Out-Null
+  # `NODE_OPTIONS` rather than an argv flag: the entry runs through `tsx`, so a
+  # flag placed here would reach tsx, not the Node process that owns the heap.
+  $previousOptions = $env:NODE_OPTIONS
+  if ($HeapMb -gt 0) {
+    $env:NODE_OPTIONS = ("--max-old-space-size=$HeapMb " + $previousOptions).Trim()
+  }
+  try {
+    Start-Process -FilePath $env:ComSpec -ArgumentList ('/c ' + $inner) `
+      -WorkingDirectory $WorkingDirectory -WindowStyle Hidden | Out-Null
+  } finally {
+    $env:NODE_OPTIONS = $previousOptions
+  }
 }
 
 # Whom to name as "the dashboard" / "the bot": the process holding the port,
@@ -208,7 +222,7 @@ function Invoke-Start {
         "- refusing to start over it and refusing to manage that process. Free the port or stop the other service first.")
     } else {
       Start-ManagedService -Entry "server/index.ts" -WorkingDirectory $dashboardDir `
-        -OutLog $dashboardLog.out -ErrLog $dashboardLog.err
+        -OutLog $dashboardLog.out -ErrLog $dashboardLog.err -HeapMb 512
       if (-not (Wait-TcpPort -Port $dashboardPort -TimeoutSeconds $WaitSeconds)) {
         throw "The dashboard did not answer on port $dashboardPort within $WaitSeconds s - see $($dashboardLog.out)."
       }
@@ -224,8 +238,11 @@ function Invoke-Start {
     } elseif ($script:ForeignPortOwner) {
       Write-Host "port $botAdapterPort is held by pid $($script:ForeignPortOwner), which is not an AL AI bot - the bot was NOT started."
     } else {
+      # The bot caches Discord members and roles for every guild it serves, so it
+      # legitimately needs more room than the dashboard; the ceiling is still a
+      # ceiling, and it is below the 4 GB V8 would otherwise claim on 64-bit.
       Start-ManagedService -Entry "src/index.ts" -WorkingDirectory $botDir `
-        -OutLog $botLog.out -ErrLog $botLog.err
+        -OutLog $botLog.out -ErrLog $botLog.err -HeapMb 2048
       if (-not (Wait-TcpPort -Port $botAdapterPort -TimeoutSeconds $WaitSeconds)) {
         Write-Host "bot is not listening on $botAdapterPort yet - see $($botLog.out)."
         $botPid = Get-ServiceOwnerPid -Port $botAdapterPort -EntrySuffix "src/index.ts"

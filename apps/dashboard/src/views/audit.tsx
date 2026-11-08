@@ -165,7 +165,7 @@ export function AuditView({ guild }: { guild: Guild }) {
                       {t(`audit.severity.${entry.severity}` as TranslationKey)}
                     </Badge>
                   </div>
-                  <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                  <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-mini text-muted-foreground">
                     <div className="flex min-w-0 items-center gap-1">
                       <dt className="shrink-0">{t("audit.layerColon")}</dt>
                       <dd className="truncate">{entry.sourceLayer}</dd>

@@ -410,7 +410,7 @@ export function SettingsView({
                   <Icon className={cn("size-4 shrink-0", active && "text-primary")} aria-hidden />
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
                   {item.key === "sessions" && sessions.length > 0 ? (
-                    <span className="rounded-full bg-muted px-1.5 text-[10px] tabular text-muted-foreground">
+                    <span className="rounded-full bg-muted px-1.5 text-micro tabular text-muted-foreground">
                       {sessions.length}
                     </span>
                   ) : null}
@@ -475,7 +475,7 @@ export function SettingsView({
 
                 <dl className="grid gap-3 sm:grid-cols-3">
                   <div className="min-w-0">
-                    <dt className="text-[11px] font-medium text-muted-foreground">{t("settings.account.id")}</dt>
+                    <dt className="text-mini font-medium text-muted-foreground">{t("settings.account.id")}</dt>
                     <dd className="mt-0.5 flex items-center gap-1 text-sm" dir="ltr">
                       <span className="truncate font-mono text-xs">{user?.id ?? "—"}</span>
                       <button
@@ -494,20 +494,20 @@ export function SettingsView({
                     </dd>
                   </div>
                   <div className="min-w-0">
-                    <dt className="text-[11px] font-medium text-muted-foreground">{t("settings.account.handle")}</dt>
+                    <dt className="text-mini font-medium text-muted-foreground">{t("settings.account.handle")}</dt>
                     <dd className="mt-0.5 truncate text-sm" dir="ltr">
                       {user?.handle ? `@${user.handle}` : "—"}
                     </dd>
                   </div>
                   <div className="min-w-0">
-                    <dt className="text-[11px] font-medium text-muted-foreground">
+                    <dt className="text-mini font-medium text-muted-foreground">
                       {t("settings.account.memberSince")}
                     </dt>
                     <dd className="mt-0.5 truncate text-sm">{formatDateTime(user?.expiresAt, language)}</dd>
                   </div>
                 </dl>
 
-                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground" aria-live="polite">
+                <p className="flex items-center gap-1.5 text-mini text-muted-foreground" aria-live="polite">
                   {copied === "account-id" ? (
                     <>
                       <Check className="size-3 text-success" aria-hidden />
@@ -585,7 +585,7 @@ export function SettingsView({
                   </div>
                 </div>
 
-                <p className="text-[11px] leading-relaxed text-muted-foreground">{t("settings.appearance.note")}</p>
+                <p className="text-mini leading-relaxed text-muted-foreground">{t("settings.appearance.note")}</p>
               </CardContent>
             </Card>
           ) : null}
@@ -633,7 +633,7 @@ export function SettingsView({
                             <Flag value={item.value} className="h-4 w-6 shrink-0 rounded-[2px] shadow-sm ring-1 ring-black/10" />
                             <span className="block text-sm font-medium">{t(`settings.language.${item.value === "ar" ? "arabic" : item.value === "en" ? "english" : "german"}` as "settings.language.arabic")}</span>
                           </span>
-                          <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                          <span className="mt-0.5 block text-mini text-muted-foreground">
                             {t(`settings.language.${item.value === "ar" ? "arabicHint" : item.value === "en" ? "englishHint" : "germanHint"}` as "settings.language.arabicHint")}
                           </span>
                         </span>
@@ -642,7 +642,7 @@ export function SettingsView({
                   })}
                 </div>
 
-                <p className="min-h-5 text-[11px] leading-relaxed" aria-live="polite">
+                <p className="min-h-5 text-mini leading-relaxed" aria-live="polite">
                   {languageState === "saving" ? (
                     <span className="inline-flex items-center gap-1.5 text-muted-foreground">
                       <Loader2 className="size-3 animate-spin" aria-hidden />
@@ -715,7 +715,7 @@ export function SettingsView({
                               : t("settings.security.unprotectedBody")}
                           </p>
                           {enrolled ? (
-                            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-mini text-muted-foreground">
                               {overview?.twoFactor.confirmedAt ? (
                                 <span>
                                   {t("settings.security.confirmedAt", {
@@ -782,10 +782,10 @@ export function SettingsView({
                         )}
                       </div>
 
-                      <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      <p className="text-mini leading-relaxed text-muted-foreground">
                         {t("settings.security.reverifyBody")}
                       </p>
-                      {securityError ? <p className="text-[11px] text-destructive">{securityError}</p> : null}
+                      {securityError ? <p className="text-mini text-destructive">{securityError}</p> : null}
                     </div>
                   )}
                 </CardContent>
@@ -807,10 +807,10 @@ export function SettingsView({
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    <p className="text-mini leading-relaxed text-muted-foreground">
                       {t("settings.security.regenerateWarning")}
                     </p>
-                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    <p className="mt-1 text-mini leading-relaxed text-muted-foreground">
                       {t("settings.security.oneTime")}
                     </p>
                   </CardContent>
@@ -886,7 +886,7 @@ export function SettingsView({
                     </ul>
 
                     {others === 0 ? (
-                      <p className="text-[11px] text-muted-foreground">{t("settings.sessions.noneOthers")}</p>
+                      <p className="text-mini text-muted-foreground">{t("settings.sessions.noneOthers")}</p>
                     ) : null}
                   </>
                 )}
@@ -917,7 +917,7 @@ export function SettingsView({
             </DialogHeader>
 
             <div className="space-y-3 rounded-2xl border border-white/10 bg-[#080d0b] p-4">
-              <label htmlFor="settings-reverify-code" className="block text-[11px] font-medium text-white/60">
+              <label htmlFor="settings-reverify-code" className="block text-mini font-medium text-white/60">
                 {t("settings.security.codeLabel")}
               </label>
               <input
@@ -933,24 +933,24 @@ export function SettingsView({
                 disabled={verifyBusy}
                 className="h-11 w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 text-center font-mono text-sm tracking-widest text-white placeholder:text-white/20 focus:border-[#6ee7b7] focus:outline-none focus:ring-2 focus:ring-[#6ee7b7]/20"
               />
-              <div className="flex items-center justify-between gap-2 text-[10px] text-white/35">
+              <div className="flex items-center justify-between gap-2 text-micro text-white/35">
                 <span>{t("settings.security.secretWarning")}</span>
                 <TotpRing seconds={totpSeconds} />
               </div>
               {verifyIntent === "disable" ? (
-                <p className="flex items-start gap-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.06] px-2.5 py-2 text-[10px] leading-relaxed text-amber-200/90">
+                <p className="flex items-start gap-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.06] px-2.5 py-2 text-micro leading-relaxed text-amber-200/90">
                   <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden />
                   {t("settings.security.disableWarning")}
                 </p>
               ) : null}
               {verifyIntent === "regenerate" ? (
-                <p className="flex items-start gap-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.06] px-2.5 py-2 text-[10px] leading-relaxed text-amber-200/90">
+                <p className="flex items-start gap-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.06] px-2.5 py-2 text-micro leading-relaxed text-amber-200/90">
                   <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden />
                   {t("settings.security.regenerateWarning")}
                 </p>
               ) : null}
               {verifyError ? (
-                <p role="alert" className="rounded-lg border border-red-400/25 bg-red-400/[0.07] px-2.5 py-2 text-[11px] text-red-200">
+                <p role="alert" className="rounded-lg border border-red-400/25 bg-red-400/[0.07] px-2.5 py-2 text-mini text-red-200">
                   {verifyError}
                 </p>
               ) : null}
@@ -992,7 +992,7 @@ export function SettingsView({
             </DialogHeader>
 
             <div className="space-y-4 rounded-2xl border border-white/10 bg-[#080d0b] p-4 sm:p-5">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-white/40">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-micro text-white/40">
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-[#6ee7b7]/25 bg-[#6ee7b7]/[0.07] px-2.5 py-1 text-[#8ff0c5]">
                   <ShieldCheck className="size-3" aria-hidden />
                   {t("settings.security.stepScan")} · {t("settings.security.stepVerify")} ·{" "}
@@ -1012,7 +1012,7 @@ export function SettingsView({
                       caption={t("twoFactor.guideNote")}
                     />
                   ) : null}
-                  <p className="text-center text-[10px] text-white/35">{t("settings.security.appsHint")}</p>
+                  <p className="text-center text-micro text-white/35">{t("settings.security.appsHint")}</p>
                 </div>
 
                 <div className="min-w-0 space-y-3">
@@ -1028,11 +1028,11 @@ export function SettingsView({
                       />
 
                       <div className="space-y-1.5">
-                        <p className="text-[11px] font-medium text-white/55">{t("settings.security.uri")}</p>
+                        <p className="text-mini font-medium text-white/55">{t("settings.security.uri")}</p>
                         <div className="flex items-center gap-1.5">
                           <code
                             dir="ltr"
-                            className="min-w-0 flex-1 truncate rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 font-mono text-[10px] text-white/55"
+                            className="min-w-0 flex-1 truncate rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 font-mono text-micro text-white/55"
                           >
                             {setup.otpauthUri}
                           </code>
@@ -1068,14 +1068,14 @@ export function SettingsView({
                           onChange={event => setSetupSaved(event.target.checked)}
                           className="mt-0.5 size-4 accent-[#6ee7b7]"
                         />
-                        <span className="text-[11px] leading-relaxed text-white/60">
+                        <span className="text-mini leading-relaxed text-white/60">
                           {t("settings.security.savedCodes")}
                         </span>
                       </label>
 
                       <div className="space-y-2">
                         <div className="flex items-center justify-between gap-2">
-                          <label htmlFor="settings-2fa-code" className="text-[11px] font-medium text-white/55">
+                          <label htmlFor="settings-2fa-code" className="text-mini font-medium text-white/55">
                             {t("settings.security.setupCodeLabel")}
                           </label>
                           <TotpRing seconds={totpSeconds} />
@@ -1089,7 +1089,7 @@ export function SettingsView({
                           ariaLabel={t("settings.security.setupCodeLabel")}
                           describedBy="settings-2fa-hint"
                         />
-                        <p id="settings-2fa-hint" className="text-[10px] leading-relaxed text-white/35">
+                        <p id="settings-2fa-hint" className="text-micro leading-relaxed text-white/35">
                           {t("twoFactor.hintSetup")}
                         </p>
                       </div>
@@ -1101,7 +1101,7 @@ export function SettingsView({
               {setupError ? (
                 <p
                   role="alert"
-                  className="flex items-start gap-2 rounded-lg border border-red-400/25 bg-red-400/[0.07] px-3 py-2 text-[11px] leading-relaxed text-red-200/90"
+                  className="flex items-start gap-2 rounded-lg border border-red-400/25 bg-red-400/[0.07] px-3 py-2 text-mini leading-relaxed text-red-200/90"
                 >
                   <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
                   {setupError}
@@ -1166,7 +1166,7 @@ export function SettingsView({
                   onChange={event => setCodesSaved(event.target.checked)}
                   className="mt-0.5 size-4 accent-[#6ee7b7]"
                 />
-                <span className="text-[11px] leading-relaxed text-white/60">{t("settings.security.savedCodes")}</span>
+                <span className="text-mini leading-relaxed text-white/60">{t("settings.security.savedCodes")}</span>
               </label>
             </div>
           ) : null}
@@ -1242,19 +1242,19 @@ function SessionRow({
           <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium leading-snug">
             <span className="truncate">{describeDevice(session.userAgent, t("settings.sessions.unknownDevice"))}</span>
             {session.current ? (
-              <Badge variant="secondary" className="shrink-0 text-[10px]">
+              <Badge variant="secondary" className="shrink-0 text-micro">
                 {t("settings.sessions.current")}
               </Badge>
             ) : null}
           </p>
-          <p className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+          <p className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-mini text-muted-foreground">
             <span>{t("settings.sessions.lastSeen", { time: formatDateTime(session.lastSeenAt, language) })}</span>
             <span aria-hidden>·</span>
             <span>{t("settings.sessions.created", { time: formatDateTime(session.createdAt, language) })}</span>
           </p>
         </div>
       </div>
-      <p className="shrink-0 text-[11px] text-muted-foreground sm:text-end">
+      <p className="shrink-0 text-mini text-muted-foreground sm:text-end">
         {t("settings.sessions.expires", { time: formatDateTime(session.expiresAt, language) })}
       </p>
     </li>

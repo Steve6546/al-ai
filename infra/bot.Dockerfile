@@ -20,4 +20,8 @@ COPY apps/bot apps/bot
 # SIGTERM an orchestrator sends reaches the wrapper instead of the supervisor
 # and the graceful shutdown never runs. exec form, one process, the signal
 # lands on the program that has to handle it.
+# A heap ceiling, so a leak restarts the container instead of
+# consuming the host's memory.
+ENV NODE_OPTIONS="--max-old-space-size=2048"
+
 CMD ["node_modules/.bin/tsx", "apps/bot/src/index.ts"]

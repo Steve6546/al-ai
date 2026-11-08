@@ -150,6 +150,15 @@ export function createDispatcher({ pipeline, runtime, onHealth, onGuildJoined }:
     console.error(`AL AI pipeline job failed (${job.key ?? "unkeyed"})`, error);
   });
 
+  // The queue has a ceiling, so a long enough burst sheds work. Rule 11 forbids
+  // dropping *silently*: the same throttle event carries how many were shed, so
+  // the operator can see a backlog instead of inferring it from a restart.
+  pipeline.onDropped((dropped, queued) => {
+    void logEvent("bot.gateway-throttle", { guildId: "*", actorId: "system", data: { queued, dropped, windowMs: 60_000 } }, runtime).catch(
+      () => undefined
+    );
+  });
+
   return function dispatch(event: BotEvent) {
     if (nonLoggable.has(event.type)) {
       if (event.type === "client.ready") onHealth?.("online", pipeline.stats().eventsLastMinute);

@@ -58,7 +58,7 @@ export function TokenStrip({ onInsert }: { onInsert: (token: string) => void }) 
           type="button"
           dir="ltr"
           title={t(TOKEN_KEYS[token])}
-          className="rounded-md border border-border/80 bg-muted/40 px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary sm:px-2 sm:py-0.5"
+          className="rounded-md border border-border/80 bg-muted/40 px-2.5 py-1.5 font-mono text-mini text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary sm:px-2 sm:py-0.5"
           onClick={() => onInsert(token)}
         >
           {token}
@@ -115,7 +115,7 @@ export function EmojiPicker({ onPick, label }: { onPick: (emoji: string) => void
 export function FieldRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="space-y-1">
-      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <span className="text-mini text-muted-foreground">{label}</span>
       {children}
     </div>
   );

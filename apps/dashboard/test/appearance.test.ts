@@ -192,6 +192,28 @@ test("Discord's own 50013 counts as a missing permission, not a generic 400", ()
   assert.match(failure.message, /إدارة الأسماء المستعارة/);
 });
 
+test("changing the picture too often is reported as a cooldown, not as a bad image", () => {
+  // Discord answers 400 with `AVATAR_RATE_LIMIT` inside the body when the same
+  // picture is changed several times in a few minutes. The generic 400 sentence
+  // («رفض Discord القيمة. تحقّق من الصيغة والحجم») sent the operator to replace
+  // an image that was never the problem — which reads as "animated pictures do
+  // not work".
+  const body = JSON.stringify({
+    message: "Invalid Form Body",
+    code: 50035,
+    errors: { avatar: { _errors: [{ code: "AVATAR_RATE_LIMIT", message: "You are changing your avatar too fast. Try again later." }] } }
+  });
+  const failure = describeAppearanceFailure("guildAvatarDataUrl", new DiscordApiError(400, "/x", body));
+  assert.equal(failure.code, "AVATAR_RATE_LIMIT");
+  assert.match(failure.message, /عدة مرات/);
+  assert.match(failure.message, /لم تُرفض/, "it must say the picture itself was accepted");
+});
+
+test("a plain 400 is still reported as a rejected value", () => {
+  const failure = describeAppearanceFailure("guildAvatarDataUrl", new DiscordApiError(400, "/x", '{"code":50035}'));
+  assert.equal(failure.code, "REJECTED");
+});
+
 test("the member fields name Change Nickname, which is the permission they need", () => {
   // The four member fields travel in one Modify Current Member call and all four
   // need the same permission. Naming it per field is what tells the operator

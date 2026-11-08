@@ -39,6 +39,24 @@
   --primary-foreground: oklch(0.99 0 0);
 }
 
+/*
+ * The layer a floating menu belongs to.
+ *
+ * HeroUI's modal backdrop is `position: fixed; z-index: 100000`
+ * (`--z-index-overlay`). A Radix popper at `z-50` — the value every menu in
+ * this app used — therefore renders *behind* a modal, and a dropdown opened
+ * from inside one appeared cut in half: the part inside the dialog was painted
+ * over, only the part hanging below it stayed visible. Measured, not guessed:
+ * backdrop 100000 vs listbox 50.
+ *
+ * Derived from HeroUI's own token rather than hard-coded, so a library bump
+ * moves both together. One step above the overlay, which is also the toast
+ * layer — the operator is looking at the menu they just opened.
+ */
+:root {
+  --z-menu: calc(var(--z-index-overlay, 100000) + 1);
+}
+
 [data-accent="violet"] {
   --accent-h: 292;
   --accent-c: 0.17;
@@ -181,6 +199,21 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
+  /*
+   * The two smallest steps, as real tokens instead of arbitrary values.
+   *
+   * They were `text-[10px]` and `text-[11px]` in about ninety places — literal
+   * pixels, which means they were the only text in the product that did NOT
+   * follow the root font size. Everything else is `rem`, so the global scale
+   * below moves it and these stayed behind, looking even smaller than before.
+   * As tokens they scale like the rest, and the phone rule that lifts them has
+   * a name to point at.
+   */
+  --text-micro: 0.6875rem;
+  --text-micro--line-height: 1.05rem;
+  --text-mini: 0.75rem;
+  --text-mini--line-height: 1.15rem;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -234,6 +267,27 @@
    * pinned. `#root` is included because React renders into it, so a height on
    * `body` alone leaves the app free to be as tall as it likes.
    */
+  /*
+   * The global scale.
+   *
+   * Every size in this app is a `rem` — Tailwind's text scale, the spacing
+   * scale, `size-*` icons, the header height, the sidebar rail — so one
+   * declaration here resizes the whole product at once and keeps the
+   * proportions intact. That is what makes it a zoom rather than a font change.
+   *
+   * 112.5% = 18px at the browser's 16px default, so the interface reads about
+   * an eighth larger everywhere: a 14px paragraph becomes 15.75px, the 20px
+   * page title becomes 22.5px, and the paddings, buttons and cards grow with
+   * them instead of leaving text stranded in oversized boxes.
+   *
+   * A percentage and not `18px` on purpose: an operator who raised their
+   * browser's default font size (an accessibility setting, and a common one)
+   * gets their choice multiplied by this, not overwritten by it.
+   */
+  html {
+    font-size: 112.5%;
+  }
+
   html,
   body,
   #root {
@@ -249,7 +303,52 @@
     background-color: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans);
+    /* macOS/WebKit honour this; Chrome on Windows ignores it (measured below),
+       and `-moz-osx-font-smoothing` is the Firefox/macOS half of the same
+       request. Neither is enough on its own — see `main` below. */
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Kerning and the Arabic ligatures the font actually ships with. It does
+       not replace the antialiasing work below — `optimizeLegibility` changes
+       which glyphs are chosen, not how their edges are painted. */
+    text-rendering: optimizeLegibility;
+    /* A weight the loaded files do not have is *fabricated* by smearing the
+       nearest one — the faux-bold that makes Arabic look chewed. The font ships
+       400/500/600/700, so `font-black` (900) used to be synthesised. With this,
+       the browser picks the closest real file (700) instead of inventing one. */
+    font-synthesis: none;
+  }
+
+  /*
+   * Grayscale antialiasing for the whole content area.
+   *
+   * The complaint was colour fringes on card titles — "broken, not clean,
+   * rough edges with strange pixel colours". Those are ClearType's subpixel
+   * fringes: each glyph edge is drawn with red/blue fringes to fake a third of
+   * a pixel. On a near-black card with white Arabic at 14–16px they dominate.
+   *
+   * Measured on this machine, on the live page, by reading the pixels back:
+   *
+   *   as shipped ......... 497 of 817 ink pixels have channels more than 18
+   *                        apart; the worst is 192 apart (saturated fringes)
+   *   -webkit-font-smoothing: auto → antialiased ... 497 → 497. No change.
+   *                        Chrome on Windows ignores the property outright.
+   *   composited layer .... 497 → 0. Grayscale, no fringes at all.
+   *
+   * Chrome only uses subpixel antialiasing on text it paints into an *opaque,
+   * un-composited* layer. Promoting the content column to its own layer is
+   * therefore the one lever that works here, and `will-change: opacity` is the
+   * least invasive form of it: it creates the layer without a transform (which
+   * would make `position: fixed` children — the save bar — resolve against
+   * this element instead of the window) and without changing any colour.
+   *
+   * Deliberately `main` and not `body`: the sidebar and the header keep the
+   * sharper ClearType rendering, and every fixed or backdrop-filtered surface
+   * in this app lives inside the content column, where it still samples the
+   * page behind it because opacity does not create a containing block.
+   */
+  main {
+    will-change: opacity;
   }
 
   /* Numerals and Latin text inside an RTL layout read better with tabular figures. */
@@ -318,15 +417,20 @@
 
   /*
    * The smallest type on the platform was set for a desktop monitor. On a
-   * phone, 10–12px Arabic is the first thing that stops being readable, so the
+   * phone, 11–13px Arabic is the first thing that stops being readable, so the
    * two smallest steps move up one notch at that width. The desktop sizes stay
    * as designed.
+   *
+   * These used to target `.text-[10px]` / `.text-[11px]`. Those classes no
+   * longer exist — they became the `micro`/`mini` tokens above, which is also
+   * what makes this rule survive the global scale: a rule written against a
+   * literal pixel class silently stops matching the day the class changes.
    */
   @media (max-width: 639px) {
-    .text-\[10px\],
-    .text-\[11px\] {
-      font-size: 0.75rem;
-      line-height: 1.15rem;
+    .text-micro,
+    .text-mini {
+      font-size: 0.8125rem;
+      line-height: 1.25rem;
       font-weight: 500;
     }
     .text-xs {
@@ -351,5 +455,29 @@
      rail or table inside its own container. */
   html {
     overflow-x: clip;
+  }
+
+  /*
+   * No native spinners on number fields, anywhere.
+   *
+   * Every numeric field in this dashboard is paired with its own −/+ buttons
+   * (the limit steppers, the reward levels), and the browser's spinner sat on
+   * top of the value with a different meaning: it steps by one regardless of
+   * the field's own bounds, and it is invisible until hover, so it read as a
+   * glitch in the middle of the box. Removing it globally is deliberate — a
+   * per-field class would leave the next number input with the same defect.
+   *
+   * `appearance: none` covers Blink/WebKit; Firefox needs `-moz-appearance:
+   * textfield`, because it keeps the spinner even with `appearance: none`.
+   */
+  input[type="number"] {
+    appearance: none;
+    -moz-appearance: textfield;
+  }
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    appearance: none;
+    -webkit-appearance: none;
+    margin: 0;
   }
 }

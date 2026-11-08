@@ -201,11 +201,16 @@ export function createBotDatabase(databaseUrl: string) {
         channel_updates_per_minute: number;
         channel_overwrites_per_minute: number;
         bans_per_minute: number;
+        kicks_per_minute: number;
+        timeouts_per_minute: number;
         role_changes_per_minute: number;
+        role_updates_per_minute: number;
+        webhook_changes_per_minute: number;
+        message_bulk_deletes_per_minute: number;
         quarantine_role_id: string | null;
         protection_settings: unknown;
       }>(
-        `SELECT enabled, channel_deletes_per_minute, channel_creates_per_minute, channel_updates_per_minute, channel_overwrites_per_minute, bans_per_minute, role_changes_per_minute, quarantine_role_id, protection_settings
+        `SELECT enabled, channel_deletes_per_minute, channel_creates_per_minute, channel_updates_per_minute, channel_overwrites_per_minute, bans_per_minute, kicks_per_minute, timeouts_per_minute, role_changes_per_minute, role_updates_per_minute, webhook_changes_per_minute, message_bulk_deletes_per_minute, quarantine_role_id, protection_settings
          FROM guild_security WHERE guild_id = $1`,
         [guildId]
       );
@@ -221,7 +226,12 @@ export function createBotDatabase(databaseUrl: string) {
           channelUpdatesPerMinute: row.channel_updates_per_minute,
           channelOverwritesPerMinute: row.channel_overwrites_per_minute,
           bansPerMinute: row.bans_per_minute,
-          roleChangesPerMinute: row.role_changes_per_minute
+          kicksPerMinute: row.kicks_per_minute,
+          timeoutsPerMinute: row.timeouts_per_minute,
+          roleChangesPerMinute: row.role_changes_per_minute,
+          roleUpdatesPerMinute: row.role_updates_per_minute,
+          webhookChangesPerMinute: row.webhook_changes_per_minute,
+          messageBulkDeletesPerMinute: row.message_bulk_deletes_per_minute
         }
       });
     },

@@ -14,6 +14,21 @@ export const WINDOW_MS = 60_000;
 export const GATEWAY_CEILING_PER_MINUTE = 120;
 export const VOICE_DEBOUNCE_MS = 2_000;
 
+/**
+ * How many jobs may wait at once before the oldest low-priority ones are shed.
+ *
+ * The queue needs a ceiling because the drain rate has one: Discord accepts 120
+ * events a minute per connection, so a busy server produces faster than the
+ * pipeline can send. Without a cap the backlog is not a queue, it is a leak —
+ * every waiting job is a closure holding the whole event (message content,
+ * embeds, attachments), and a bot left running for a day reached several
+ * gigabytes of them while the dashboard showed nothing wrong.
+ *
+ * The number is generous on purpose: a burst that briefly outruns the drain
+ * should survive. What must not happen is unbounded growth.
+ */
+export const MAX_QUEUE_DEPTH = 1_500;
+
 export type Job = { run: () => Promise<void>; key?: string };
 export type Priority = 0 | 1 | 2 | 3 | 4;
 
@@ -22,6 +37,8 @@ export type PipelineOptions = {
   ceiling?: number;
   windowMs?: number;
   voiceDebounceMs?: number;
+  /** Queue depth ceiling; defaults to `MAX_QUEUE_DEPTH`. */
+  maxDepth?: number;
 };
 
 export class EventPipeline {
@@ -39,17 +56,22 @@ export class EventPipeline {
    */
   readonly voiceDebounceMs: number;
   private timestamps: number[] = [];
+  private dropped = 0;
+  private droppedSinceReport = 0;
+  private readonly maxDepth: number;
   private draining = false;
   private drainScheduled = false;
   private retryTimer: NodeJS.Timeout | null = null;
   private throttleHandler: ((queued: number) => void) | null = null;
   private failureHandler: ((error: unknown, job: Job) => void) | null = null;
+  private dropHandler: ((dropped: number, queued: number) => void) | null = null;
 
   constructor(options: PipelineOptions = {}) {
     this.now = options.now ?? Date.now;
     this.ceiling = options.ceiling ?? GATEWAY_CEILING_PER_MINUTE;
     this.windowMs = options.windowMs ?? WINDOW_MS;
     this.voiceDebounceMs = options.voiceDebounceMs ?? VOICE_DEBOUNCE_MS;
+    this.maxDepth = options.maxDepth ?? MAX_QUEUE_DEPTH;
   }
 
   onThrottled(handler: (queued: number) => void) {
@@ -60,9 +82,60 @@ export class EventPipeline {
     this.failureHandler = handler;
   }
 
+  /**
+   * Called when the ceiling forces jobs out.
+   *
+   * GOVERNANCE rule 11 says nothing is dropped silently, so a shed job is
+   * *reported* — once per burst, with a count, not one log line per job (which
+   * would be its own flood).
+   */
+  onDropped(handler: (dropped: number, queued: number) => void) {
+    this.dropHandler = handler;
+  }
+
   enqueue(priority: Priority, job: Job) {
+    // `makeRoom` answers whether the job may enter: a refused job must not be
+    // pushed anyway, or the ceiling would hold only for the jobs that were shed.
+    if (this.queued() >= this.maxDepth && !this.makeRoom(priority)) return;
     this.queues[priority].push(job);
     this.scheduleDrain();
+  }
+
+  /**
+   * Makes room for one job by discarding the oldest job of the lowest priority
+   * that has any — reaction noise must never push a ban out of the queue.
+   *
+   * Priority 0 (security and moderation) is never discarded: if the queue is
+   * full of those, the incoming job is the one that waits, because the work
+   * already queued is at least as important as the work arriving.
+   */
+  private makeRoom(incoming: Priority): boolean {
+    for (let level = 4 as Priority; level >= 1; level -= 1) {
+      if (this.queues[level].length > 0) {
+        this.queues[level].shift();
+        this.countDrop();
+        return true;
+      }
+    }
+    // Nothing below the top priority to give up, and the incoming job is not
+    // itself top priority: refuse it rather than grow.
+    if (incoming !== 0) {
+      this.countDrop();
+      return false;
+    }
+    // A full queue of priority-0 work: accept the newcomer and let the oldest go,
+    // since a security event that never runs is worse than one that runs late.
+    this.queues[0].shift();
+    this.countDrop();
+    return true;
+  }
+
+  private countDrop() {
+    this.dropped += 1;
+    this.droppedSinceReport += 1;
+    if (this.droppedSinceReport === 1) {
+      this.dropHandler?.(this.droppedSinceReport, this.queued());
+    }
   }
 
   /**
@@ -106,7 +179,13 @@ export class EventPipeline {
   }
 
   stats() {
-    return { eventsLastMinute: this.windowUsage(), ceiling: this.ceiling, queued: this.queued() };
+    return {
+      eventsLastMinute: this.windowUsage(),
+      ceiling: this.ceiling,
+      queued: this.queued(),
+      /** Jobs shed since the process started, because the queue hit its ceiling. */
+      dropped: this.dropped
+    };
   }
 
   private scheduleRetry() {

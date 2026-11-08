@@ -77,7 +77,8 @@ test("a transparent background exports PNG, and an empty card is honestly null",
 test("data URL decoding is bounded and strict", () => {
   assert.deepEqual(dataUrlToBuffer(`data:image/png;base64,${RED_DOT.toString("base64")}`), RED_DOT);
   assert.equal(dataUrlToBuffer("data:image/png;base64,!!!"), null);
-  assert.equal(dataUrlToBuffer(`data:image/png;base64,${"A".repeat(2_000_000)}`), null, "oversized payloads are refused");
+  // 3M base64 chars ≈ 2.25 MB, over the 2 MB budget.
+  assert.equal(dataUrlToBuffer(`data:image/png;base64,${"A".repeat(3_000_000)}`), null, "oversized payloads are refused");
 });
 
 test("executeDrawOp drives the canvas without throwing on every op kind", async () => {

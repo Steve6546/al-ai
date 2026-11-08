@@ -216,7 +216,7 @@ test("Administrator satisfies every permission, as Discord grants the whole set"
 
   assert.deepEqual(
     statuses.map(status => status.granted),
-    [true, true],
+    [true, true, true],
     "an Administrator bot must not be reported as missing permissions"
   );
 });

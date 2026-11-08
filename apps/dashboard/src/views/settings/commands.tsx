@@ -736,7 +736,7 @@ function CommandCard({
                 /{command.name}
               </p>
               {customised && (
-                <Badge variant="outline" className="text-[10px]">
+                <Badge variant="outline" className="text-micro">
                   {t("commands.customised")}
                 </Badge>
               )}
@@ -745,7 +745,7 @@ function CommandCard({
               {translatedDescription === descriptionKey ? command.description : translatedDescription}
             </p>
           </div>
-          <Badge variant={permission ? "secondary" : "outline"} className="shrink-0 text-[10px]">
+          <Badge variant={permission ? "secondary" : "outline"} className="shrink-0 text-micro">
             {permission ? t("commands.requires", { permission }) : t("commands.availableToAll")}
           </Badge>
           <CollapsibleTrigger asChild>
@@ -913,7 +913,7 @@ function CommandCard({
                    * screen that looks like it decides who may run a command and
                    * one that is honest about not deciding.
                    */}
-                  <Badge variant="secondary" className="gap-1 text-[10px]">
+                  <Badge variant="secondary" className="gap-1 text-micro">
                     <ShieldCheck className="size-3" aria-hidden />
                     {t("commands.permissionMode")}
                   </Badge>
@@ -1295,7 +1295,7 @@ function ScopeTrigger({
           <span className="min-w-0 truncate text-start">{summary}</span>
           <span className="flex shrink-0 items-center gap-1">
             {count > 0 && (
-              <Badge variant="secondary" className="tabular px-1.5 text-[10px]">
+              <Badge variant="secondary" className="tabular px-1.5 text-micro">
                 {count}
               </Badge>
             )}
@@ -1388,7 +1388,7 @@ export function ScopeSelector({
                 onCheckedChange={checked => onChange(checked ? [...selected, item.id] : selected.filter(id => id !== item.id))}
               />
               <RoleSwatch color={item.color} />
-              {item.type && <span className="text-[10px] text-muted-foreground">#{item.type}</span>}
+              {item.type && <span className="text-micro text-muted-foreground">#{item.type}</span>}
               <span className="truncate">{item.name}</span>
             </label>
           ))}
@@ -1472,7 +1472,7 @@ export function MemberScopeSelector({
           </Button>
         </div>
 
-        <p className="mt-1 px-1 text-[10px] text-muted-foreground">
+        <p className="mt-1 px-1 text-micro text-muted-foreground">
           {trimmed && !valid
             ? t("commands.memberInvalid")
             : duplicate
@@ -1565,7 +1565,7 @@ function AliasEditor({
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <Label htmlFor={`alias-${command.name}`}>{t("commands.aliasLabel")}</Label>
-        <span className="tabular text-[10px] text-muted-foreground">
+        <span className="tabular text-micro text-muted-foreground">
           {command.aliases.length}/{MAX_ALIASES_PER_COMMAND}
         </span>
       </div>

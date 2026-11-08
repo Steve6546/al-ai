@@ -3,13 +3,14 @@ import { Check, IdCard, Loader2, Lock, Palette, Pencil, TriangleAlert, Upload, X
 import {
   DEFAULT_CUSTOMIZATION,
   MAX_BIO_LENGTH,
-  MAX_IMAGE_DATA_URL_LENGTH,
+  MAX_IMAGE_UPLOAD_BYTES,
   MAX_NICKNAME_LENGTH,
   describeAppearanceResult
 } from "@al-ai/core/browser";
 import { api } from "@/api";
 import { useI18n, type Translate } from "@/lib/i18n";
 import { useDraftForm } from "@/lib/use-draft-form";
+import { fitImageUnder } from "@/lib/image-fit";
 import { cn } from "@/lib/utils";
 import { SaveBar } from "@/components/save-bar";
 import { Toaster, useToasts } from "@/components/toaster";
@@ -17,6 +18,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { BotLivePreview } from "@/views/settings/bot-preview";
@@ -44,27 +47,36 @@ const BANNER_MIN_SIZE = { width: 600, height: 240 };
 
 type ReadImage = { dataUrl: string; width: number; height: number };
 
-/** Reads an image file into a capped base64 data URL, or fails with a reason. */
-function readImageAsDataUrl(file: File, t: Translate): Promise<ReadImage> {
+/**
+ * The picked file as a data URL inside the image budget.
+ *
+ * A file that fits is stored byte-for-byte; a larger one is re-encoded down to
+ * the budget instead of being refused — the operator picked a picture, not a
+ * file size, and a phone photo is 3–8 MB by default. Only an animated GIF over
+ * the budget is refused, because shrinking it would silently drop the motion.
+ */
+async function readImageAsDataUrl(file: File, t: Translate): Promise<ReadImage> {
+  if (!file.type.startsWith("image/")) {
+    throw new Error(t("customization.imageNotImage"));
+  }
+  try {
+    const fitted = await fitImageUnder(file, MAX_IMAGE_UPLOAD_BYTES);
+    return { dataUrl: fitted.dataUrl, width: fitted.width, height: fitted.height };
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : "";
+    if (reason === "animated-gif-too-large") throw new Error(t("customization.gifTooLarge"));
+    if (reason === "cannot-fit") throw new Error(t("customization.imageTooLarge"));
+    throw new Error(t("customization.imageUndecodable"));
+  }
+}
+
+/** The pixel size of a data URL, for the same minimum-size warning a file gets. */
+function measureDataUrl(dataUrl: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {
-    if (!file.type.startsWith("image/")) {
-      reject(new Error(t("customization.imageNotImage")));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result);
-      if (dataUrl.length > MAX_IMAGE_DATA_URL_LENGTH) {
-        reject(new Error(t("customization.imageTooLarge")));
-        return;
-      }
-      const image = new Image();
-      image.onload = () => resolve({ dataUrl, width: image.naturalWidth, height: image.naturalHeight });
-      image.onerror = () => reject(new Error(t("customization.imageUndecodable")));
-      image.src = dataUrl;
-    };
-    reader.onerror = () => reject(new Error(t("customization.imageReadFailed")));
-    reader.readAsDataURL(file);
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    image.onerror = () => reject(new Error("undecodable"));
+    image.src = dataUrl;
   });
 }
 
@@ -91,6 +103,11 @@ export function CustomizationView({ guild }: { guild: Guild }) {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingTarget = useRef<"avatar" | "banner" | "roleIcon">("avatar");
+  // Which picture the picker is open for, and what has been typed into it.
+  const [picker, setPicker] = useState<"avatar" | "banner" | "roleIcon" | null>(null);
+  const [imageUrl, setImageUrl] = useState("");
+  const [urlBusy, setUrlBusy] = useState(false);
+  const [urlError, setUrlError] = useState<string | null>(null);
   const { toasts, push, dismiss } = useToasts();
 
   useEffect(() => {
@@ -164,34 +181,86 @@ export function CustomizationView({ guild }: { guild: Guild }) {
   /* ---------------- image picking ---------------- */
   const openPicker = (target: "avatar" | "banner" | "roleIcon") => {
     pendingTarget.current = target;
+    setImageUrl("");
+    setUrlError(null);
+    setPicker(target);
+  };
+
+  const closePicker = () => {
+    setPicker(null);
+    setUrlBusy(false);
+    setUrlError(null);
+  };
+
+  /** Hands over to the OS file dialog; the picker has done its job by then. */
+  const chooseFile = () => {
+    setPicker(null);
     fileInputRef.current?.click();
+  };
+
+  /**
+   * Writes the chosen picture into the draft — the one path both sources use.
+   *
+   * The draft, not the saved row: the card behind the dialog is the live
+   * preview, so patching here is what makes a pasted link appear *before* the
+   * save bar is pressed, exactly as a picked file already did.
+   */
+  const applyImage = (target: "avatar" | "banner" | "roleIcon", dataUrl: string, size: { width: number; height: number } | null) => {
+    if (target === "avatar") {
+      patch({ avatarDataUrl: dataUrl });
+      setImageWarning(
+        size && (size.width < AVATAR_MIN_SIDE || size.height < AVATAR_MIN_SIDE)
+          ? t("customization.avatarTooSmall", { width: size.width, height: size.height })
+          : null
+      );
+    } else if (target === "banner") {
+      patch({ bannerDataUrl: dataUrl });
+      setImageWarning(
+        size && (size.width < BANNER_MIN_SIZE.width || size.height < BANNER_MIN_SIZE.height)
+          ? t("customization.bannerTooSmall", { width: size.width, height: size.height })
+          : null
+      );
+    } else {
+      patch({ roleIconUrl: dataUrl });
+      setImageWarning(null);
+    }
   };
 
   const onFileChosen = async (file: File | undefined) => {
     if (!file) return;
     try {
       const image = await readImageAsDataUrl(file, t);
-      const target = pendingTarget.current;
-      if (target === "avatar") {
-        patch({ avatarDataUrl: image.dataUrl });
-        setImageWarning(
-          image.width < AVATAR_MIN_SIDE || image.height < AVATAR_MIN_SIDE
-            ? t("customization.avatarTooSmall", { width: image.width, height: image.height })
-            : null
-        );
-      } else if (target === "banner") {
-        patch({ bannerDataUrl: image.dataUrl });
-        setImageWarning(
-          image.width < BANNER_MIN_SIZE.width || image.height < BANNER_MIN_SIZE.height
-            ? t("customization.bannerTooSmall", { width: image.width, height: image.height })
-            : null
-        );
-      } else {
-        patch({ roleIconUrl: image.dataUrl });
-        setImageWarning(null);
-      }
+      applyImage(pendingTarget.current, image.dataUrl, { width: image.width, height: image.height });
     } catch (cause) {
       push({ tone: "error", title: cause instanceof Error ? cause.message : t("customization.imageReadFailed") });
+    }
+  };
+
+  /**
+   * A pasted address, downloaded by the BFF into a data URL.
+   *
+   * The hop is not a preference: the stored value must be a `data:` URI for
+   * Discord, and this page's CSP lets it display images only from its own
+   * origin, `data:` and the Discord CDN — so the browser cannot read the
+   * remote bytes itself.
+   */
+  const fetchFromUrl = async () => {
+    const trimmed = imageUrl.trim();
+    if (!/^https:\/\/\S+$/i.test(trimmed)) {
+      setUrlError(t("customization.imageUrlInvalid"));
+      return;
+    }
+    setUrlBusy(true);
+    setUrlError(null);
+    try {
+      const { dataUrl } = await api.imageFromUrl(trimmed);
+      const size = await measureDataUrl(dataUrl).catch(() => null);
+      applyImage(pendingTarget.current, dataUrl, size);
+      closePicker();
+    } catch (cause) {
+      setUrlError(cause instanceof Error ? cause.message : t("customization.imageReadFailed"));
+    } finally {
+      setUrlBusy(false);
     }
   };
 
@@ -300,12 +369,12 @@ export function CustomizationView({ guild }: { guild: Guild }) {
             roleColorReason={t("customization.roleColorLocked")}
           />
           {imageWarning ? (
-            <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-[11px] text-warning">
+            <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-mini text-warning">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
               {imageWarning}
             </p>
           ) : null}
-          <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">{t("customization.presenceNote")}</p>
+          <p className="mt-3 text-mini leading-relaxed text-muted-foreground">{t("customization.presenceNote")}</p>
         </CardContent>
       </Card>
 
@@ -324,18 +393,18 @@ export function CustomizationView({ guild }: { guild: Guild }) {
               <Label className="flex items-center gap-1.5 text-xs">
                 {t("customization.roleIcon")}
                 {roleIcon?.locked ? (
-                  <Badge variant="outline" className="gap-1 text-[10px]" title={roleIcon.reason ?? undefined}>
+                  <Badge variant="outline" className="gap-1 text-micro" title={roleIcon.reason ?? undefined}>
                     <Lock className="size-3" />
                     {t("customization.locked")}
                   </Badge>
                 ) : null}
               </Label>
               {roleIcon?.locked ? (
-                <p className="max-w-sm text-[11px] text-muted-foreground">
+                <p className="max-w-sm text-mini text-muted-foreground">
                   {roleIcon.reason ?? t("customization.roleIconLocked")}
                 </p>
               ) : (
-                <p className="text-[11px] text-muted-foreground">{t("customization.roleIconHint")}</p>
+                <p className="text-mini text-muted-foreground">{t("customization.roleIconHint")}</p>
               )}
             </div>
             <div className="flex items-center gap-2">
@@ -369,10 +438,82 @@ export function CustomizationView({ guild }: { guild: Guild }) {
           </div>
 
           {permissionsUnreadable ? (
-            <p className="text-[11px] text-muted-foreground">{t("customization.permissionsUnreadable")}</p>
+            <p className="text-mini text-muted-foreground">{t("customization.permissionsUnreadable")}</p>
           ) : null}
         </CardContent>
       </Card>
+
+      {/*
+        One picker for both pictures and the role icon.
+
+        It replaces "click → the OS file dialog appears": that flow had no room
+        for the second source, and the second source is the one people reach for
+        when the picture is already on the internet. Choosing either path writes
+        into the same draft, so the card behind this dialog — which is the live
+        preview — updates before anything is saved.
+      */}
+      <Dialog open={picker !== null} onOpenChange={open => (open ? undefined : closePicker())}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("customization.imageDialogTitle")}</DialogTitle>
+            <DialogDescription>{t("customization.imageDialogBody")}</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <Button type="button" variant="outline" className="w-full gap-2" onClick={chooseFile}>
+              <Upload className="size-4" aria-hidden />
+              {t("customization.imageUpload")}
+            </Button>
+
+            <div className="flex items-center gap-3 text-mini text-muted-foreground">
+              <span className="h-px flex-1 bg-border" aria-hidden />
+              <span>{t("customization.imageOr")}</span>
+              <span className="h-px flex-1 bg-border" aria-hidden />
+            </div>
+
+            <form
+              className="space-y-2"
+              onSubmit={event => {
+                event.preventDefault();
+                void fetchFromUrl();
+              }}
+            >
+              <Label htmlFor="image-url" className="text-xs text-muted-foreground">
+                {t("customization.imageUrlLabel")}
+              </Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="image-url"
+                  dir="ltr"
+                  inputMode="url"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={t("customization.imageUrlPlaceholder")}
+                  value={imageUrl}
+                  disabled={urlBusy}
+                  onChange={event => setImageUrl(event.target.value)}
+                />
+                <Button type="submit" className="shrink-0 gap-1.5" disabled={urlBusy || imageUrl.trim() === ""}>
+                  {urlBusy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                  {urlBusy ? t("customization.imageUrlFetching") : t("customization.imageUrlFetch")}
+                </Button>
+              </div>
+              <p className="text-micro leading-relaxed text-muted-foreground">{t("customization.imageUrlHint")}</p>
+              {urlError ? (
+                <p role="alert" className="text-mini text-destructive">
+                  {urlError}
+                </p>
+              ) : null}
+            </form>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={closePicker}>
+              {t("common.cancel")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {dirty ? (
         <SaveBar
