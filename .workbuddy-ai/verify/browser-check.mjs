@@ -26,11 +26,16 @@ import { tmpdir } from "node:os";
 import { join, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  ANTI_NUKE_ACTIONS,
+  ANTI_NUKE_ACTION_LABELS,
+  ANTI_NUKE_LIMIT_KEYS,
   commandCategories,
   commandCategoryDescriptions,
   commandCategoryLabels,
   commandFlagsFor,
-  discordPermissionLabels
+  discordPermissionLabels,
+  normaliseAntiNukeConfig,
+  NUKE_PROTECTIONS
 } from "@al-ai/core";
 
 const REPO = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
@@ -96,6 +101,31 @@ const commandsPayload = {
   permissionLabels: discordPermissionLabels
 };
 
+/**
+ * The protection screen's config, read through the same normaliser the BFF
+ * reads stored rows with (server/db.ts). A hand-written fixture missing the
+ * per-protection map would mount the error state, not the console under test —
+ * the same failure mode the commands payload comment above describes.
+ */
+const securityConfig = normaliseAntiNukeConfig({
+  enabled: true,
+  limits: { channelDeletesPerMinute: 3, bansPerMinute: 5, roleChangesPerMinute: 3 },
+  quarantineRoleId: null
+});
+
+/**
+ * The `actions` list, built exactly as server/index.ts builds it: every action
+ * the engine counts, with its stored limit. A partial list (the old stub had
+ * only `ban`) made the family pills disagree with the whole-engine badge —
+ * the pills read the server's list, the badge reads the registry, and in
+ * production the two are the same set.
+ */
+const securityActions = ANTI_NUKE_ACTIONS.map(action => ({
+  action,
+  label: ANTI_NUKE_ACTION_LABELS[action],
+  limit: securityConfig.limits[ANTI_NUKE_LIMIT_KEYS[action]]
+}));
+
 const STUB = `
 (() => {
   const payloads = [
@@ -127,9 +157,9 @@ const STUB = `
       settings: { status: "idle", activityType: "listening", activityText: "السجلات", statusDuration: "", statusExpiresAt: "" }
     }],
     [/^\\/api\\/guilds\\/[^/]+\\/security\\/config$/, {
-      config: { enabled: true, limits: { channelDeletesPerMinute: 3, bansPerMinute: 5, roleChangesPerMinute: 3 }, quarantineRoleId: null },
+      config: ${JSON.stringify(securityConfig)},
       roles: ${JSON.stringify(roles)},
-      actions: [{ action: "ban", label: "حظر الأعضاء", limit: 5 }]
+      actions: ${JSON.stringify(securityActions)}
     }],
     [/^\\/api\\/guilds\\/[^/]+\\/security$/, { events: [] }],
     [/^\\/api\\/guilds\\/[^/]+\\/tiers$/, { roles: ${JSON.stringify(roles)}, configured: { ownerRoleIds: [], adminRoleIds: [], moderatorRoleIds: [] }, botHighestRolePosition: 10, unassignable: [], warning: null }],
@@ -286,32 +316,29 @@ try {
   await visit(
     `/dashboard/${GUILD_ID}/customization`,
     /*
-     * The bio field's own label, which lives on CARD 1 — the card that is only
-     * reached once the stored row has arrived.
+     * The stored nickname, which the live preview only draws once the row has
+     * arrived — a value the payload supplies, not copy a skeleton could print.
      *
-     * This gate used to be «حالة البوت», the presence field that shared the
-     * screen. The status moved to its own route and its own screen, so that
-     * string is no longer a marker for anything here; and it is worse than
-     * useless as one, because the note that tells the operator where the status
-     * went still contains it. A gate on a phrase that a static paragraph also
-     * prints would pass on a screen whose data never loaded at all.
+     * This gate used to be «حالة البوت» and then «نبذة عني». Both labels became
+     * aria-labels on the preview card, which textContent never contains, so the
+     * gate stopped meaning anything. A gate on a phrase that lives only in an
+     * attribute is a gate that always times out; a gate on payload data is one
+     * that proves the read happened.
      */
-    `document.querySelector('main') && document.body.textContent.includes('نبذة عني')`
+    `document.querySelector('main') && document.body.textContent.includes('AL uwu')`
   );
 
   check("window does not scroll", await evaluate(`document.scrollingElement.scrollHeight - document.scrollingElement.clientHeight`), 0);
   check("main does scroll", await evaluate(`document.querySelector('main').scrollHeight > document.querySelector('main').clientHeight + 100`), true);
 
 /**
- * The rect of the preview column, or null when the column is not there.
- *
- * The previous version fell back to `main` when the selector missed, which made
- * every measurement of it *pass*: `main` is the scroll container, so its own
- * top never changes, and a screen whose preview column had lost its `sticky`
- * class looked perfectly stable. Null is the honest answer, and the existence
- * check below turns it into a failure.
+ * The identity screen is one centred card now — the side form and the sticky
+ * preview column were removed when the card became the editor. The old probe
+ * measured `main .lg\:sticky`, which no longer exists; a null rect is the
+ * honest answer to "where is the preview column", so the check below turns it
+ * into a failure if the card itself ever disappears.
  */
-const PREVIEW_RECT = `(el => el ? { top: Math.round(el.getBoundingClientRect().top), left: Math.round(el.getBoundingClientRect().left) } : null)(document.querySelector('main .lg\\\\:sticky'))`;
+const PREVIEW_RECT = `(el => el ? { top: Math.round(el.getBoundingClientRect().top), left: Math.round(el.getBoundingClientRect().left) } : null)(document.querySelector('main .max-w-2xl > .border-primary\\\\/20'))`;
 
   const before = await evaluate(`(() => {
     const rect = el => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top), left: Math.round(r.left) }; };
@@ -323,28 +350,12 @@ const PREVIEW_RECT = `(el => el ? { top: Math.round(el.getBoundingClientRect().t
   })()`);
 
   /*
-   * The preview is measured at two scroll positions that are *both* past the
-   * point where it would have left the viewport.
-   *
-   * Comparing against scroll 0 measured the wrong thing. The preview starts
-   * below the page header, so it is supposed to travel up with the form until
-   * it reaches its sticky offset and come to rest there — that travel is the
-   * feature, not a defect. What must not change is where it rests once it has
-   * arrived, and that is what the two measurements below establish. Removing
-   * `lg:sticky` still fails both of them, because the preview would then keep
-   * moving with the form.
+   * The card is measured at two scroll positions to prove it is in normal
+   * flow: its top must fall by exactly the distance the container scrolled.
+   * The old assertion — "it stayed put" — belonged to the sticky preview
+   * column that no longer exists; on a single-column screen a card that
+   * refused to scroll would be the defect, not the feature.
    */
-  await evaluate(`document.querySelector('main').scrollTop = 300`);
-  await sleep(150);
-  const pinned = await evaluate(`(() => {
-    const rect = el => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top), left: Math.round(r.left) }; };
-    return {
-      header: rect(document.querySelector('header')),
-      sidebar: rect(document.querySelector('aside')),
-      preview: ${PREVIEW_RECT}
-    };
-  })()`);
-
   await evaluate(`document.querySelector('main').scrollTop = 600`);
   await sleep(150);
 
@@ -361,9 +372,13 @@ const PREVIEW_RECT = `(el => el ? { top: Math.round(el.getBoundingClientRect().t
   check("the header did not move", after.header.top, before.header.top);
   check("the sidebar did not move", after.sidebar.top, before.sidebar.top);
   check("the page really scrolled", after.scrolled, value => value > 100);
-  check("the preview column is on the screen at all", after.preview !== null, true);
-  check("the live preview stayed put", after.preview?.top ?? null, value => value !== null && Math.abs(value - pinned.preview.top) <= 4);
-  check("…and is still on screen at the bottom of the form", after.preview?.top ?? null, value => value !== null && value > 0);
+  check("the identity card is on the screen at all", after.preview !== null, true);
+  check(
+    "the card travels with the form, one column in normal flow",
+    after.preview?.top ?? null,
+    value => value !== null && before.preview !== null && Math.abs(before.preview.top - value - after.scrolled) <= 4
+  );
+  check("the card started on screen", before.preview?.top ?? null, value => value !== null && value > 0);
   await shoot("customization");
 
   /* ---- 2. the activity picker ---- */
@@ -408,11 +423,20 @@ const PREVIEW_RECT = `(el => el ? { top: Math.round(el.getBoundingClientRect().t
     };
   })()`);
 
+  /*
+   * The cap select.tsx documents is `min(20rem, the room Radix says the popup
+   * has)`. The root font is 112.5%, so 20rem is 360px here — the old literal
+   * 256px belonged to the `max-h-64` the component replaced. Deriving the cap
+   * from the resolved rem keeps the check honest if the root size changes.
+   */
+  const remPx = await evaluate(`parseFloat(getComputedStyle(document.documentElement).fontSize)`);
+  const MENU_CAP = 20 * remPx;
+
   check("the activity menu has geometry", activity, value => value !== null);
   check("the activity menu matches its trigger's width", activity?.contentWidth, value => Math.abs(value - activity.triggerWidth) <= 2);
   check("the activity menu is not clamped to the trigger's height", activity?.viewportHeight, value => value > 60);
-  check("the activity menu is capped at 256px", activity?.contentHeight, value => value <= 258);
-  check("the activity menu has a real max-height", activity?.maxHeight, "256px");
+  check("the activity menu fits under the 20rem cap", activity?.contentHeight, value => value <= MENU_CAP + 2);
+  check("the activity menu has a real max-height", activity?.maxHeight, value => typeof value === "string" && parseFloat(value) > 0 && parseFloat(value) <= MENU_CAP);
   check("the activity menu is not white", activity?.background, value => value !== "rgb(255, 255, 255)");
   await shoot("activity-menu");
 
@@ -466,6 +490,41 @@ const PREVIEW_RECT = `(el => el ? { top: Math.round(el.getBoundingClientRect().t
     `document.querySelector('#quarantine-role') && document.body.textContent.includes('رتبة الحجر')`
   );
 
+  /*
+   * The redesigned console, measured before the picker opens: four modes on
+   * their own strip, five families on theirs, and one counter for the whole
+   * engine at the section header. The total comes from the registry this file
+   * already imports, so adding a protection cannot leave a stale literal here.
+   */
+  await shoot("security");
+  const securityLayout = await evaluate(`(() => {
+    const strips = [...document.querySelectorAll('nav[role="tablist"]')];
+    const badge = document.querySelector('main h2')?.parentElement?.querySelector('.tabular');
+    const familyLive = [...(strips[1] ? strips[1].querySelectorAll('button') : [])]
+      .map(button => parseInt((button.textContent.match(/(\\d+)\\/\\d+/) || [])[1] || "0", 10))
+      .reduce((sum, live) => sum + live, 0);
+    return {
+      stripSizes: strips.map(nav => nav.querySelectorAll('button[role="tab"]').length),
+      familyStrip: strips[1] ? strips[1].textContent : "",
+      counter: document.body.textContent.includes('/${NUKE_PROTECTIONS.length} مفعّل'),
+      familyLive,
+      globalActive: badge ? parseInt(badge.textContent, 10) : null
+    };
+  })()`);
+  check("the mode strip has four sections and the family strip five", securityLayout.stripSizes, value => JSON.stringify(value) === JSON.stringify([4, 5]));
+  check(
+    "every family is named on the strip",
+    ["حماية الرومات / الشاتات", "حماية الرتب", "حماية الأعضاء", "حماية الويبوك", "حماية المحتوى"].every(name => securityLayout.familyStrip.includes(name)),
+    true
+  );
+  check("the section header carries the whole-engine counter", securityLayout.counter, true);
+  check("the family pills sum to the whole-engine badge", securityLayout.familyLive, securityLayout.globalActive);
+  await evaluate(`document.querySelector('main').scrollTop = 450`);
+  await sleep(150);
+  await shoot("security-cards");
+  await evaluate(`document.querySelector('main').scrollTop = 0`);
+  await sleep(150);
+
   await evaluate(`(() => {
     const trigger = document.querySelector('#quarantine-role');
     trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }));
@@ -492,7 +551,7 @@ const PREVIEW_RECT = `(el => el ? { top: Math.round(el.getBoundingClientRect().t
   check("the quarantine menu has geometry", quarantine, value => value !== null);
   check("the quarantine menu offers every role", quarantine?.options, 31);
   check("the quarantine menu matches its trigger's width", quarantine?.contentWidth, value => Math.abs(value - quarantine.triggerWidth) <= 2);
-  check("the quarantine menu is capped at 256px", quarantine?.contentHeight, value => value <= 258);
+  check("the quarantine menu fits under the 20rem cap", quarantine?.contentHeight, value => value <= MENU_CAP + 2);
   check("the quarantine menu scrolls inside that cap", quarantine?.viewportScrolls, true);
   await shoot("quarantine-menu");
 
@@ -638,8 +697,10 @@ const PREVIEW_RECT = `(el => el ? { top: Math.round(el.getBoundingClientRect().t
   })()`);
   await sleep(250);
   check(
-    "an empty section says the commands are coming",
-    await evaluate(`document.body.textContent.includes('سيتم توفيرها في التحديثات القادمة')`),
+    "an empty section says so plainly",
+    // commands.emptySection's current copy. The old marker — «سيتم توفيرها في
+    // التحديثات القادمة» — was a promise the screen no longer makes.
+    await evaluate(`document.body.textContent.includes('لا توجد أوامر في هذا القسم')`),
     true
   );
   await shoot("commands-empty-section");
@@ -653,26 +714,39 @@ const PREVIEW_RECT = `(el => el ? { top: Math.round(el.getBoundingClientRect().t
   })()`);
   await sleep(250);
 
+  /*
+   * Both measurements are taken PAST the point where the nav reaches its
+   * sticky offset. Comparing scroll 0 against scroll 400 measured the travel
+   * from the natural position to the pinned one — the feature — and reported
+   * it as drift. What must not move is the resting position, so the two
+   * readings below are both taken while the nav is pinned.
+   */
   const boardBefore = await evaluate(`(() => {
     const main = document.querySelector('main');
-    const nav = document.querySelector('nav[aria-label="أقسام الأوامر"]');
-    return { navTop: Math.round(nav.getBoundingClientRect().top), scrollable: main.scrollHeight > main.clientHeight + 200 };
+    main.scrollTop = 400;
+    return { scrollable: main.scrollHeight > main.clientHeight + 200 };
   })()`);
   check("the commands board is long enough to scroll", boardBefore.scrollable, true);
+  await sleep(150);
+  const pinnedNavTop = await evaluate(`Math.round(document.querySelector('nav[aria-label="أقسام الأوامر"]').getBoundingClientRect().top)`);
 
   const boardAfter = await evaluate(`(() => {
     const main = document.querySelector('main');
-    main.scrollTop = 400;
+    main.scrollTop = 800;
     const nav = document.querySelector('nav[aria-label="أقسام الأوامر"]');
     return { navTop: Math.round(nav.getBoundingClientRect().top), scrolled: Math.round(main.scrollTop) };
   })()`);
-  check("the page really scrolled", boardAfter.scrolled, value => value > 100);
+  check("the page really scrolled", boardAfter.scrolled, value => value > 500);
   check(
     "the section nav stays put while the cards scroll",
-    Math.abs(boardAfter.navTop - boardBefore.navTop),
+    Math.abs(boardAfter.navTop - pinnedNavTop),
     value => value <= 2
   );
   check("the window still does not scroll", await evaluate(`document.scrollingElement.scrollHeight - document.scrollingElement.clientHeight`), 0);
+  // Back to the top so the scope-selector probes below anchor on a card that
+  // is actually in the viewport.
+  await evaluate(`document.querySelector('main').scrollTop = 0`);
+  await sleep(150);
 
   /* ---- 5b. the six scope selectors: closed, and opening one moves nothing ---- */
   /*
@@ -774,7 +848,9 @@ const PREVIEW_RECT = `(el => el ? { top: Math.round(el.getBoundingClientRect().t
   // list that rendered no rows at all.
   check("the panel offers every role", opened.rows, 30);
   check("the list scrolls inside its cap", opened.listScrolls, true);
-  check("the cap is a real max-height", opened.listMaxHeight, "224px");
+  // max-h-56 is 14rem; the root font is 112.5%, so the resolved cap is 252px,
+  // not the 224px a 16px root would give. Derived, not written down.
+  check("the cap is a real max-height", opened.listMaxHeight, `${14 * remPx}px`);
   // The claim, measured: a portalled panel is out of the document flow, so
   // opening it cannot push the cards below it down.
   check("opening a selector does not lengthen the board", opened.boardHeight - beforeOpen.boardHeight, value => value <= 2);

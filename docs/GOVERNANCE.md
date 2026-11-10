@@ -122,9 +122,10 @@ test together.
     expanding into them. Check `0x8` first (`hasPermission`).
 23. **Storage never contains a secret.** `.env` is never tracked and its values  
     must not reach a committed file. Images are the one large payload the  
-    dashboard accepts, and they are bounded by  
-    `MAX_IMAGE_DATA_URL_LENGTH = 500_000`; an oversized upload is refused rather  
-    than stored. A value that is read back is normalised again on the way out, so  
+    dashboard accepts, and they are bounded by `MAX_IMAGE_UPLOAD_BYTES`
+    (2,000,000 bytes) and its base64 form `MAX_IMAGE_DATA_URL_LENGTH`, both
+    declared once in packages/core/src/contracts.ts; an oversized upload is
+    refused rather than stored. A value that is read back is normalised again on the way out, so  
     a hand-edited row cannot inject a shape the writer would have rejected.  
     `.workbuddy-ai/backups/` (live `pg_dump` output) and `.workbuddy-ai/preview/`  
     (generated bundles) are git-ignored for this reason.

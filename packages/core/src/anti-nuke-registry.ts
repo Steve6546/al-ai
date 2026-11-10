@@ -79,10 +79,10 @@ export type NukeProtection = {
 };
 
 export const NUKE_FAMILY_LABELS: Record<NukeFamily, string> = {
-  channels: "حماية القنوات",
+  channels: "حماية الرومات / الشاتات",
   roles: "حماية الرتب",
   members: "حماية الأعضاء",
-  webhooks: "حماية الويبهوك",
+  webhooks: "حماية الويبوك",
   content: "حماية المحتوى"
 };
 
@@ -162,8 +162,8 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
   {
     key: "role-update",
     family: "roles",
-    label: "مكافحة تعديل صلاحيات الرتب",
-    description: "منع رفع صلاحيات رتب موجودة إلى مستوى الإدارة.",
+    label: "مكافحة تعديل الرتب",
+    description: "منع رفع صلاحيات رتبة قائمة إلى مستوى الإدارة.",
     auditEvents: ["RoleUpdate"],
     permission: "MANAGE_ROLES",
     limit: { min: 1, max: 100, default: 3 },
@@ -179,8 +179,8 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
   {
     key: "member-ban",
     family: "members",
-    label: "مكافحة حظر الأعضاء",
-    description: "منع حظر الأعضاء بشكل جماعي.",
+    label: "مكافحة الحظر",
+    description: "منع الحظر الجماعي للأعضاء.",
     auditEvents: ["MemberBanAdd"],
     permission: "BAN_MEMBERS",
     limit: { min: 1, max: 100, default: 5 },
@@ -189,8 +189,8 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
   {
     key: "member-kick",
     family: "members",
-    label: "مكافحة طرد الأعضاء",
-    description: "منع طرد الأعضاء بشكل جماعي (العضو يستطيع العودة، بعكس الحظر).",
+    label: "مكافحة الطرد",
+    description: "منع الطرد الجماعي للأعضاء (المطرود يستطيع العودة، بعكس المحظور).",
     auditEvents: ["MemberKick"],
     permission: "KICK_MEMBERS",
     limit: { min: 1, max: 100, default: 5 },
@@ -199,8 +199,8 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
   {
     key: "member-timeout",
     family: "members",
-    label: "مكافحة عزل الأعضاء",
-    description: "منع إسكات الأعضاء بشكل جماعي (timeout).",
+    label: "مكافحة العزل",
+    description: "منع العزل الجماعي للأعضاء (timeout).",
     auditEvents: ["MemberUpdate"],
     permission: "MODERATE_MEMBERS",
     limit: { min: 1, max: 100, default: 5 },
@@ -222,8 +222,8 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
   {
     key: "webhook-create",
     family: "webhooks",
-    label: "مكافحة إنشاء الويب هوك",
-    description: "منع إنشاء ويبهوكات في القنوات — الطريق المعتاد لسرقة الرسائل وانتحال شخصية السيرفر.",
+    label: "مكافحة إنشاء الويبوك",
+    description: "منع إنشاء ويبوكات في القنوات — الطريق المعتاد لسرقة الرسائل وانتحال شخصية السيرفر.",
     auditEvents: ["WebhookCreate"],
     permission: "MANAGE_WEBHOOKS",
     limit: { min: 1, max: 100, default: 3 },
@@ -232,8 +232,8 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
   {
     key: "webhook-update",
     family: "webhooks",
-    label: "مكافحة تعديل الويب هوك",
-    description: "منع تعديل ويبهوك قائم أو حذفه — تغيير وجهته يسرق الرسائل، وحذفه يعطّل التنبيهات.",
+    label: "مكافحة تعديل الويبوك",
+    description: "منع تعديل ويبوك قائم أو حذفه — تغيير وجهته يسرق الرسائل، وحذفه يعطّل التنبيهات.",
     auditEvents: ["WebhookUpdate", "WebhookDelete"],
     permission: "MANAGE_WEBHOOKS",
     limit: { min: 1, max: 100, default: 3 },
@@ -247,8 +247,8 @@ export const NUKE_PROTECTIONS: readonly NukeProtection[] = [
   {
     key: "message-purge",
     family: "content",
-    label: "مكافحة حذف رسائل القنوات",
-    description: "منع حذف الرسائل الجماعي لإفراغ القنوات من محتواها.",
+    label: "مكافحة حذف الرسائل",
+    description: "منع الحذف الجماعي للرسائل لإفراغ القنوات من محتواها.",
     auditEvents: ["MessageBulkDelete", "MessageDelete"],
     permission: "MANAGE_MESSAGES",
     limit: { min: 1, max: 100, default: 5 },
@@ -314,7 +314,7 @@ export type ProtectionSettings = {
    * Off means the engine does not count this action at all for this guild.
    *
    * Defaulted to on, because the registry lists protections the engine mostly
-   * does *not* enforce yet — a default of off would make the badge read 0/12 for
+   * does *not* enforce yet — a default of off would make the badge read 0/13 for
    * a guild that has never opened the screen, which is the opposite of the truth.
    */
   enabled: boolean;

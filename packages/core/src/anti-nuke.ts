@@ -100,7 +100,7 @@ export type AntiNukeConfig = {
    *
    * Kept next to `limits` rather than replacing them: the limits are the engine's
    * budgets (three counters, shared on purpose), and these are which of the
-   * twelve listed actions feed those counters. Collapsing the two would make a
+   * listed actions feed those counters. Collapsing the two would make a
    * guild able to set a limit for an action nothing counts.
    */
   protections: ProtectionSettingsMap;
@@ -155,8 +155,8 @@ export const ANTI_NUKE_ACTION_LABELS: Record<NukeAction, string> = {
   timeout: "عزل الأعضاء",
   "role-change": "إنشاء الرتب وحذفها",
   "role-update": "تعديل صلاحيات الرتب",
-  "webhook-create": "إنشاء الويبهوكات",
-  "webhook-update": "تعديل الويبهوكات",
+  "webhook-create": "إنشاء الويبوكات",
+  "webhook-update": "تعديل الويبوكات",
   "message-bulk-delete": "حذف الرسائل الجماعي"
 };
 

@@ -560,7 +560,7 @@ for (const view of views) {
 /**
  * The protection screen's navigation and its honesty about what is wired.
  *
- * Four sections, five families, twelve rows — and only the rows the engine
+ * Four sections, five families, thirteen rows — and only the rows the engine
  * actually counts get an editable number. The rest have to say so in words,
  * because a disabled input reads to an operator as "configured elsewhere" and a
  * number that nothing reads reads as "protected".
@@ -576,7 +576,7 @@ test("the security screen shows its sections and marks what the engine does not 
   // The section that is built opens on a family strip, and the family it renders
   // shows the limit the server returned (3 channel deletions) rather than the
   // registry's default — proof the number is read from the payload.
-  assert.ok(html.includes("حماية القنوات"), "the family strip renders");
+  assert.ok(html.includes("حماية الرومات / الشاتات"), "the family strip renders");
   assert.ok(html.includes("مكافحة حذف القنوات"), "the enforced channel row renders");
   assert.ok(html.includes('value="3"'), "the enforced limit comes from the server");
   // The three channel protections nothing counts yet are labelled rather than

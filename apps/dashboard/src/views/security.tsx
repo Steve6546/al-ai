@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { AlertTriangle, Ban, Bot, Check, ChevronDown, Clock, DoorOpen, Eye, Gavel, Hash, Loader2, MessageSquare, Minus, MinusCircle, Plus, Search, ShieldAlert, ShieldCheck, ShieldOff, Users, Webhook, X, Zap } from "lucide-react";
+import { AlertTriangle, Ban, Bot, Check, ChevronDown, Clock, DoorOpen, Eye, FolderPlus, Gavel, Hash, KeyRound, Loader2, MessageSquare, MessageSquareX, Minus, MinusCircle, Pencil, Plus, Search, ShieldAlert, ShieldCheck, ShieldMinus, ShieldOff, ShieldPlus, Timer, Trash2, Users, Webhook, WebhookOff, X, Zap } from "lucide-react";
 import { api, type ScopedMember } from "@/api";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { SaveBar } from "@/components/save-bar";
@@ -26,6 +26,7 @@ import {
   protectionsInFamily,
   type NukeFamily,
   type NukeProtection,
+  type NukeProtectionKey,
   type ProtectionPunishment
 } from "@al-ai/core/browser";
 import { formatDateTime, initials } from "@/lib/format";
@@ -156,6 +157,27 @@ const familyIcons: Record<NukeFamily, typeof Hash> = {
   members: Users,
   webhooks: Webhook,
   content: MessageSquare
+};
+
+/**
+ * One lucide glyph per protection, so a card is recognisable before it is read.
+ * Lucide is ISC-licensed; the names are the library's own, checked against the
+ * installed package rather than guessed.
+ */
+const PROTECTION_ICONS: Record<NukeProtectionKey, typeof Hash> = {
+  "channel-delete": Trash2,
+  "channel-create": FolderPlus,
+  "channel-update": Pencil,
+  "channel-permissions": KeyRound,
+  "role-create": ShieldPlus,
+  "role-delete": ShieldMinus,
+  "role-update": ShieldAlert,
+  "member-ban": Ban,
+  "member-kick": DoorOpen,
+  "member-timeout": Timer,
+  "webhook-create": Webhook,
+  "webhook-update": WebhookOff,
+  "message-purge": MessageSquareX
 };
 
 /**
@@ -351,7 +373,7 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
             <div
               className={cn(
                 "grid size-10 shrink-0 place-items-center rounded-xl",
-                draft.enabled ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"
+                draft.enabled ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"
               )}
             >
               {draft.enabled ? <ShieldCheck className="size-5" aria-hidden /> : <ShieldOff className="size-5" aria-hidden />}
@@ -379,105 +401,115 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
       </Card>
 
       {/*
-        2 — the controls, on their own surface.
+        2 — the mode strip, alone on its surface and filling the width.
 
-        Both strips live in this one card and nothing else does. They are
-        navigation: one chooses how the engine responds, the other which section
-        is being tuned. Keeping them in the same card as the settings is what
-        made this screen read as one long form — the eye now has one place to
-        look for "where am I" and a different one for "what do I set".
+        The four modes are a grid, not a right-aligned row of pills: the old row
+        left half the card empty on an RTL screen, which read as a broken layout
+        rather than as navigation.
       */}
       <Card>
-        <CardContent className="space-y-4 p-5">
+        <CardContent className="space-y-2 p-4 sm:p-5">
+          <p className="text-mini font-medium text-muted-foreground">{t("security.navMode")}</p>
+          <nav role="tablist" aria-label={t("security.tabsAria")} className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+            {securityTabs.map(entry => {
+              const Icon = entry.icon;
+              const active = tab === entry.key;
+              return (
+                <button
+                  key={entry.key}
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setTab(entry.key)}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border px-2 py-2.5 text-sm transition-colors sm:gap-2",
+                    active
+                      ? "border-primary bg-primary font-medium text-primary-foreground shadow-sm shadow-primary/25"
+                      : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                  )}
+                >
+                  <Icon className="size-4 shrink-0" aria-hidden />
+                  {t(entry.labelKey)}
+                </button>
+              );
+            })}
+          </nav>
+        </CardContent>
+      </Card>
+
+      {tab !== "punish" && (
+        <Alert>
+          <ShieldAlert />
+          <AlertDescription>{t(pendingSections[tab])}</AlertDescription>
+        </Alert>
+      )}
+
+      {tab === "punish" && (
+        <>
+          {/*
+            The section header carries the WHOLE engine's counter — every
+            protection in all five families — because «am I protected?» is one
+            question, not five. The per-family figures live on the strip below
+            and beside the family heading, so the two scales never disagree.
+          */}
+          <div className="space-y-1 px-1 pt-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-bold">{t("security.tab.punish")}</h2>
+              <Badge variant={draft.enabled ? "secondary" : "destructive"} className="tabular shrink-0">
+                {t("security.activeCount", {
+                  active: activeProtectionCount(draft.enabled, draft.protections),
+                  total: NUKE_PROTECTIONS.length
+                })}
+              </Badge>
+            </div>
+            <p className="text-sm text-muted-foreground">{t("security.punish.title")}</p>
+          </div>
+
           <div className="space-y-2">
-            <p className="text-mini font-medium text-muted-foreground">{t("security.navMode")}</p>
-            <nav role="tablist" aria-label={t("security.tabsAria")} className="flex flex-wrap gap-2">
-              {securityTabs.map(entry => {
-                const Icon = entry.icon;
-                const active = tab === entry.key;
+            <p className="px-1 text-mini font-medium text-muted-foreground">{t("security.navFamilies")}</p>
+            <nav
+              role="tablist"
+              aria-label={t("security.familiesAria")}
+              className="grid grid-cols-2 gap-1 rounded-2xl border border-border bg-card p-1 sm:grid-cols-3 lg:grid-cols-5"
+            >
+              {FAMILY_ORDER.map(entry => {
+                const Icon = familyIcons[entry];
+                const active = family === entry;
+                const rows = protectionsInFamily(entry);
+                const live = rows.filter(isActive).length;
                 return (
                   <button
-                    key={entry.key}
+                    key={entry}
                     role="tab"
                     aria-selected={active}
-                    onClick={() => setTab(entry.key)}
+                    onClick={() => setFamily(entry)}
                     className={cn(
-                      "flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1.5 text-sm transition-colors sm:gap-2 sm:px-4 sm:py-2",
+                      "flex items-center justify-center gap-1.5 rounded-xl px-2 py-2.5 text-sm transition-colors",
                       active
-                        ? "border-primary bg-primary font-medium text-primary-foreground shadow-sm shadow-primary/25"
-                        : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                        ? "bg-primary font-medium text-primary-foreground shadow-sm shadow-primary/25"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
                     )}
                   >
-                    <Icon className="size-4" aria-hidden />
-                    {t(entry.labelKey)}
+                    <Icon className="size-3.5 shrink-0" aria-hidden />
+                    <span className="truncate">{t(`security.family.${entry}` as TranslationKey)}</span>
+                    <span className="tabular text-mini opacity-80">
+                      {live}/{rows.length}
+                    </span>
                   </button>
                 );
               })}
             </nav>
           </div>
 
-          {tab === "punish" ? (
-            <div className="space-y-2 border-t border-border/70 pt-4">
-              <p className="text-mini font-medium text-muted-foreground">{t("security.navFamilies")}</p>
-              <nav role="tablist" aria-label={t("security.familiesAria")} className="flex flex-wrap gap-2">
-                {FAMILY_ORDER.map(entry => {
-                  const Icon = familyIcons[entry];
-                  const active = family === entry;
-                  const rows = protectionsInFamily(entry);
-                  const live = rows.filter(isActive).length;
-                  return (
-                    <button
-                      key={entry}
-                      role="tab"
-                      aria-selected={active}
-                      onClick={() => setFamily(entry)}
-                      className={cn(
-                        "flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1.5 text-sm transition-colors sm:gap-2 sm:px-3.5",
-                        active
-                          ? "border-primary bg-primary font-medium text-primary-foreground shadow-sm shadow-primary/25"
-                          : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                      )}
-                    >
-                      <Icon className="size-3.5" aria-hidden />
-                      {t(`security.family.${entry}` as TranslationKey)}
-                      <span className="tabular text-mini">
-                        {live}/{rows.length}
-                      </span>
-                    </button>
-                  );
-                })}
-              </nav>
-            </div>
-          ) : (
-            <Alert>
-              <ShieldAlert />
-              <AlertDescription>{t(pendingSections[tab])}</AlertDescription>
-            </Alert>
-          )}
-        </CardContent>
-      </Card>
-
-      {tab === "punish" && (
-        <>
-          {/*
-            The category's name, then its tools — one card each.
-
-            The heading is a caption, not a card: it belongs to the grid under
-            it, and wrapping a title in a border would add back the third level
-            of nesting this screen just lost. The count stays beside it because
-            it is a total for the whole engine, not for the open category — the
-            pills above carry the per-category figure.
-          */}
-          <div className="flex flex-wrap items-center gap-2 px-1 pt-1">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <p className="min-w-0 truncate text-base font-semibold">
               {t(`security.family.${family}` as TranslationKey)}
             </p>
-            <Badge variant={draft.enabled ? "secondary" : "destructive"} className="tabular shrink-0">
+            <p className="tabular shrink-0 text-xs text-muted-foreground">
               {t("security.activeCount", {
-                active: activeProtectionCount(draft.enabled, draft.protections),
-                total: NUKE_PROTECTIONS.length
+                active: protectionsInFamily(family).filter(isActive).length,
+                total: protectionsInFamily(family).length
               })}
-            </Badge>
+            </p>
           </div>
 
           <div className="grid gap-3 lg:grid-cols-2">
@@ -616,6 +648,7 @@ function ProtectionCard({
   const [showExceptions, setShowExceptions] = useState(false);
   const style = PUNISHMENT_STYLES[punishment];
   const PunishIcon = style.icon;
+  const ProtectionIcon = PROTECTION_ICONS[protection.key];
   const label = t(`security.protection.${protection.key}.label` as TranslationKey);
 
   return (
@@ -631,11 +664,16 @@ function ProtectionCard({
      */
     <Card className="@container flex flex-col p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <p className="text-sm font-semibold">{label}</p>
-          <p className="text-xs text-muted-foreground">
-            {t(`security.protection.${protection.key}.description` as TranslationKey)}
-          </p>
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+            <ProtectionIcon className="size-5" aria-hidden />
+          </div>
+          <div className="min-w-0 space-y-1">
+            <p className="text-base font-semibold">{label}</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {t(`security.protection.${protection.key}.description` as TranslationKey)}
+            </p>
+          </div>
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-1.5">
@@ -741,7 +779,7 @@ function ProtectionCard({
                 disabled={!canEdit}
                 onChange={onWindowChange}
               />
-              <p className="text-micro text-muted-foreground">{windowHint(windowSeconds, t)}</p>
+              <p className="text-mini text-muted-foreground">{windowHint(windowSeconds, t)}</p>
             </div>
 
             {punishment === "timeout" && (
