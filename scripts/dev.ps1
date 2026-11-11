@@ -8,10 +8,23 @@
 #   npm run dev:status          what is up, on which ports, and is it healthy
 #   npm run dev:restart         stop, then start
 #
+# Unattended keep-alive lives in scripts/watchdog.ps1 (logon task + probe loop);
+# it starts this script with -SavedMode -Detach and idles while a deliberate
+# stop's pause file exists.
+#
 # What it guarantees that a row of hand-typed commands did not:
 #   * the database is started on demand (scripts/postgres.ps1) and its port is
 #     waited on before either service is launched, so nothing races a cold DB;
 #   * every value comes from .env - the password is never read or printed;
+#   * this script is the only launcher. `npm run dev:bot` and
+#     `npm run dev:dashboard` delegate here, and the workspace `dev` scripts run
+#     the service in one process rather than under a file watcher, because a
+#     watcher is a second supervisor: it restarts its own child behind this
+#     script's back and shows up as a second Node process for one bot;
+#   * a running bot is recognised by its own lock file as well as by its adapter
+#     port, so `start` cannot launch a second copy of a bot that is alive but not
+#     listening (adapter disabled, still binding, or started by hand from
+#     `apps/bot`);
 #   * both services write to files under .al-ai/logs, so the console stays quiet
 #     and readable;
 #   * in the default (foreground) mode a Ctrl+C here stops *everything*: the
@@ -35,6 +48,10 @@ param(
   # Start and return instead of supervising. A detached stack is stopped later
   # with `npm run dev:stop`.
   [switch]$Detach,
+  # Leave AL_AI_REMOTE_ACCESS unset so the dashboard boots with the operator's
+  # saved reach mode. For unattended bring-up (scripts/watchdog.ps1): a flag
+  # default of `off` would lock the operator out of a tunnel they saved on.
+  [switch]$SavedMode,
   [switch]$NoDb,
   [switch]$NoDashboard,
   [switch]$NoBot,
@@ -61,14 +78,24 @@ $botLog = @{ out = Join-Path $logDir "bot.out.log"; err = Join-Path $logDir "bot
 $dotenv = Import-DotEnv -Path (Join-Path $repoRoot ".env")
 Set-ProcessEnvFromDotEnv -Values $dotenv
 
+# The bot's own lock: written by the bot before it logs in, and the authority on
+# whether one is already running. See `Get-BotLockOwner` for why the adapter port
+# is not enough to answer that.
+$botLockPath = Get-BotLockPath -RepoRoot $repoRoot -Values $dotenv
+
 $dashboardPort = if ($dotenv.ContainsKey("PORT") -and $dotenv["PORT"]) { [int]$dotenv["PORT"] } else { 3000 }
 $botAdapterPort = 3400
 $postgresPort = Get-PostgresPort -Values $dotenv
 
 # The reach mode for this run, forced one way or the other. It is not saved, so
 # a `dev.ps1 start` without -Tunnel never rewrites the operator's dashboard
-# choice; it only decides what this process does.
-$env:AL_AI_REMOTE_ACCESS = if ($Tunnel) { "on" } else { "off" }
+# choice; it only decides what this process does. -SavedMode forces nothing at
+# all: the variable is removed so the dashboard reads instance_settings.
+if ($SavedMode) {
+  Remove-Item Env:AL_AI_REMOTE_ACCESS -ErrorAction SilentlyContinue
+} else {
+  $env:AL_AI_REMOTE_ACCESS = if ($Tunnel) { "on" } else { "off" }
+}
 
 function Ensure-RunDirectory {
   if (-not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
@@ -189,10 +216,19 @@ function Get-LiveServicePids {
     $candidate = Get-StatePid -State $state -Name $name
     if ($candidate -and (Test-ProcessAlive -Id $candidate)) { [void]$found.Add($candidate) }
   }
+  # A bot that owns its lock is up even when nothing is listening: its adapter may
+  # be disabled, or bound but not yet answering. Without this the supervisor
+  # announced "every service has exited" over a healthy bot.
+  $lockOwner = Get-BotLockOwner -Path $botLockPath
+  if ($lockOwner) { [void]$found.Add($lockOwner) }
   return @($found | Sort-Object -Unique)
 }
 
 function Invoke-Start {
+  # A start cancels a deliberate stop: the watchdog resumes watching. The pause
+  # file is written by Invoke-Stop and survives reboots until someone starts.
+  $pausePath = Join-Path $runDir "watchdog.pause"
+  if (Test-Path -LiteralPath $pausePath) { Remove-Item -LiteralPath $pausePath -Force }
   # Stamped before anything launches, and written immediately: the dashboard
   # starts its tunnel during boot, so a start time recorded at the *end* of this
   # function would be later than the tunnel's birth and the tunnel would look
@@ -232,23 +268,38 @@ function Invoke-Start {
   }
 
   if (-not $NoBot) {
+    # Two independent ways to recognise a running bot, cheapest first: the port
+    # owner (adopted only when its command line names this repository and this
+    # entry point) and the bot's own lock. The lock is what catches the cases the
+    # port cannot — an adapter that is disabled, a launch from `apps/bot` whose
+    # command line carries no absolute path, or a bot that is still binding.
     $botPid = Get-ServiceOwnerPid -Port $botAdapterPort -EntrySuffix "src/index.ts"
     if ($botPid) {
       Write-Host "bot already running (pid $botPid)"
-    } elseif ($script:ForeignPortOwner) {
-      Write-Host "port $botAdapterPort is held by pid $($script:ForeignPortOwner), which is not an AL AI bot - the bot was NOT started."
     } else {
-      # The bot caches Discord members and roles for every guild it serves, so it
-      # legitimately needs more room than the dashboard; the ceiling is still a
-      # ceiling, and it is below the 4 GB V8 would otherwise claim on 64-bit.
-      Start-ManagedService -Entry "src/index.ts" -WorkingDirectory $botDir `
-        -OutLog $botLog.out -ErrLog $botLog.err -HeapMb 2048
-      if (-not (Wait-TcpPort -Port $botAdapterPort -TimeoutSeconds $WaitSeconds)) {
-        Write-Host "bot is not listening on $botAdapterPort yet - see $($botLog.out)."
-        $botPid = Get-ServiceOwnerPid -Port $botAdapterPort -EntrySuffix "src/index.ts"
+      $botPid = Get-BotLockOwner -Path $botLockPath
+      if ($botPid) { Write-Host "bot already running (pid $botPid, per $(Split-Path -Leaf $botLockPath))" }
+    }
+
+    if (-not $botPid) {
+      if ($script:ForeignPortOwner) {
+        Write-Host "port $botAdapterPort is held by pid $($script:ForeignPortOwner), which is not an AL AI bot - the bot was NOT started."
       } else {
+        # The bot caches Discord members and roles for every guild it serves, so
+        # it legitimately needs more room than the dashboard; the ceiling is
+        # still a ceiling, and it is below the 4 GB V8 would otherwise claim.
+        Start-ManagedService -Entry "src/index.ts" -WorkingDirectory $botDir `
+          -OutLog $botLog.out -ErrLog $botLog.err -HeapMb 2048
+        $listening = Wait-TcpPort -Port $botAdapterPort -TimeoutSeconds $WaitSeconds
         $botPid = Get-ServiceOwnerPid -Port $botAdapterPort -EntrySuffix "src/index.ts"
-        Write-Host "bot: adapter http://127.0.0.1:$botAdapterPort  (pid $botPid, log $($botLog.out))"
+        # The bot writes its lock before it logs in, so this is also the pid to
+        # remember when the adapter is off and nothing ever listens.
+        if (-not $botPid) { $botPid = Get-BotLockOwner -Path $botLockPath }
+        if ($listening) {
+          Write-Host "bot: adapter http://127.0.0.1:$botAdapterPort  (pid $botPid, log $($botLog.out))"
+        } else {
+          Write-Host "bot is not listening on $botAdapterPort yet - see $($botLog.out)."
+        }
       }
     }
   }
@@ -264,6 +315,10 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
+  # Record the decision so scripts/watchdog.ps1 does not resurrect a stack the
+  # operator stopped on purpose. A fall leaves no such file; a start removes it.
+  Ensure-RunDirectory
+  Set-Content -LiteralPath (Join-Path $runDir "watchdog.pause") -Value (Get-Date).ToString("o") -Encoding utf8
   $state = Read-State
   $targets = New-Object System.Collections.Generic.HashSet[int]
 
@@ -293,6 +348,11 @@ function Invoke-Stop {
     $suffix = if ($name -eq "dashboardPid") { "server/index.ts" } else { "src/index.ts" }
     if (Test-AlAiServiceProcess -Id $candidate -EntrySuffix $suffix) { [void]$targets.Add($candidate) }
   }
+  # The bot's own lock, which is the only name it carries when it was launched by
+  # hand from `apps/bot` or with its adapter switched off. `Get-BotLockOwner`
+  # has already rejected a recycled pid, so this cannot kill a stranger.
+  $lockOwner = Get-BotLockOwner -Path $botLockPath
+  if ($lockOwner) { [void]$targets.Add($lockOwner) }
 
   if ($targets.Count -eq 0) {
     Write-Host "No AL AI services are running."
@@ -324,7 +384,12 @@ function Invoke-Status {
   Write-Host ("dashboard: " + $dashboardLine + " - http://127.0.0.1:$dashboardPort")
 
   $botPid = Get-ServiceOwnerPid -Port $botAdapterPort -EntrySuffix "src/index.ts"
-  $botLine = if ($botPid) { "up (pid $botPid)" }
+  $botSource = "adapter"
+  if (-not $botPid) {
+    $botPid = Get-BotLockOwner -Path $botLockPath
+    $botSource = "lock"
+  }
+  $botLine = if ($botPid) { "up (pid $botPid" + $(if ($botSource -eq "lock") { ", per $(Split-Path -Leaf $botLockPath)" } else { "" }) + ")" }
     elseif ($script:ForeignPortOwner) { "PORT HELD BY pid $($script:ForeignPortOwner) - not an AL AI process" }
     else { "down" }
   Write-Host ("bot:       " + $botLine + " - adapter http://127.0.0.1:$botAdapterPort")

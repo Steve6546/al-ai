@@ -351,3 +351,81 @@ function Stop-ProcessTree {
     try { & kill -9 $Id } catch { }
   }
 }
+
+
+# --- The bot's instance lock ------------------------------------------------
+#
+# The bot writes `.al-ai-bot.lock` before it logs in and refuses to boot while a
+# live owner holds it (apps/bot/src/runtime/supervisor.ts). That file — not the
+# adapter port — is the authoritative answer to "is the bot running?".
+#
+# The port was the old answer, and it was the wrong one: a bot can be alive and
+# connected to Discord while its adapter failed to bind, and a bot launched from
+# `apps/bot` by hand carries no absolute path in its command line, so
+# `Find-AlAiProcesses` cannot see it either. Both cases read as "bot down" to
+# the bootstrapper, which then started a second copy — and a second copy is
+# exactly what the lock exists to prevent.
+#
+# The record is `{ pid, execPath, startedAt }`. Validating it here mirrors
+# `isLiveOwner` on the TypeScript side, including the pid-recycling defence: a
+# number the OS handed out again belongs to a process that started *after* the
+# lock was written, so its start time rejects it.
+
+function Get-BotLockPath {
+  param(
+    [Parameter(Mandatory)][string]$RepoRoot,
+    [hashtable]$Values
+  )
+
+  # Same rule as `resolveLockPath`: a bare name means "at the repository root",
+  # and only an absolute value names its own place. Reading a relative value as
+  # cwd-relative is what once produced two lock files and two live bots.
+  $configured = ""
+  if ($Values -and $Values.ContainsKey("BOT_LOCK_FILE")) { $configured = ([string]$Values["BOT_LOCK_FILE"]).Trim() }
+  if (-not $configured) { return (Join-Path $RepoRoot ".al-ai-bot.lock") }
+  if ([System.IO.Path]::IsPathRooted($configured)) { return $configured }
+  return (Join-Path $RepoRoot $configured)
+}
+
+# The pid of a bot that is genuinely running right now, or $null.
+function Get-BotLockOwner {
+  param([Parameter(Mandatory)][string]$Path)
+
+  if (-not (Test-Path -LiteralPath $Path)) { return $null }
+
+  $record = $null
+  try { $record = (Get-Content -LiteralPath $Path -Raw).Trim() | ConvertFrom-Json } catch { return $null }
+  if (-not $record) { return $null }
+
+  $processId = 0
+  if (-not [int]::TryParse([string]$record.pid, [ref]$processId) -or $processId -le 0) { return $null }
+  if (-not (Test-ProcessAlive -Id $processId)) { return $null }
+
+  $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+  if (-not $process) { return $null }
+
+  # A recycled pid now belongs to something else. Only a Node process can be the
+  # bot; anything else holding the number is a stale lock and must be reclaimed.
+  $image = $process.ProcessName.ToLowerInvariant() -replace '\.exe$', ''
+  if ($image -ne "node" -and $image -ne "nodejs") { return $null }
+
+  # And a Node process that started after the lock was written cannot be its
+  # author either. An unreadable start time is not evidence of recycling, so the
+  # owner is trusted then — refusing wrongly is a lockout.
+  $recorded = $null
+  try {
+    $recorded = if ($record.startedAt -is [datetime]) {
+      $record.startedAt.ToUniversalTime()
+    } else {
+      [datetime]::Parse([string]$record.startedAt, [System.Globalization.CultureInfo]::InvariantCulture).ToUniversalTime()
+    }
+  } catch { $recorded = $null }
+
+  if ($recorded) {
+    $liveStart = $null
+    try { $liveStart = $process.StartTime.ToUniversalTime() } catch { $liveStart = $null }
+    if ($liveStart -and $liveStart -gt $recorded.AddSeconds(2)) { return $null }
+  }
+
+  return $processId
+}

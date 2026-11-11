@@ -3823,7 +3823,30 @@ const housekeeping = setInterval(async () => {
 }, 5 * 60 * 1000);
 housekeeping.unref();
 
-await app.listen({ port: env.port, host: "0.0.0.0" });
+/**
+ * The bind is the dashboard's single-instance guard, and it is meant to be a
+ * loud one.
+ *
+ * A second dashboard cannot serve a second deployment — it would share the same
+ * database, mint a second ngrok agent on the same reserved domain, and answer
+ * the same tunnel URL — so the only useful behaviour is to refuse and say why.
+ * Without this the failure surfaced as a bare `EADDRINUSE` stack trace, which
+ * reads like a crash rather than like the deliberate refusal it is.
+ */
+try {
+  await app.listen({ port: env.port, host: "0.0.0.0" });
+} catch (error) {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "EADDRINUSE") {
+    app.log.error(
+      `Port ${env.port} is already in use: another AL AI dashboard owns this deployment. Refusing to start a second copy.`
+    );
+  } else {
+    app.log.error(error, "The dashboard could not start");
+  }
+  await db.close().catch(() => undefined);
+  process.exit(1);
+}
 
 /**
  * Graceful shutdown.

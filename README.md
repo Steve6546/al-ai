@@ -177,8 +177,9 @@ records the running pids in `.al-ai/dev.json`. **By default it supervises**: it
 stays in the foreground, and a Ctrl+C there stops the whole stack — the trap
 turns the interrupt into a graceful stop, so the bot flushes its pipeline and
 releases its lock while the dashboard closes its pool. Nothing is orphaned: each
-child is named by port owner, command line, and remembered pid rather than
-assumed to have died with the shell. A forced kill is the fallback, not the norm.
+child is named by port owner, command line, remembered pid, **and the bot's own
+lock file**, rather than assumed to have died with the shell. A forced kill is
+the fallback, not the norm.
 The tunnel is managed by the dashboard through ngrok. A fixed ngrok hostname
 set on the network screen (or in `NGROK_DOMAIN`) survives restarts and keeps the
 registered OAuth callback stable; a random ngrok URL does not, and is labelled
@@ -191,6 +192,33 @@ listed at <https://ngrok.com/docs/pricing-limits/free-plan-limits>.
 `-Detach` skips supervision when you want the prompt back; `npm run dev:stop`
 then stops that stack later.
 Extra flags go after `--`: `-Tunnel`, `-Detach`, `-NoDb`, `-NoDashboard`, `-NoBot`.
+
+#### Exactly one copy of each service
+
+`npm run dev` is the only launcher. `npm run dev:bot` and `npm run dev:dashboard`
+delegate to it (`-NoDashboard` / `-NoBot`), and each workspace's `dev` script runs
+its service in **one** process (`node --import tsx`) instead of under a file
+watcher. That is not tidiness: `tsx watch` is a second supervisor. It keeps its
+own child, restarts it behind the bootstrapper's back, and appears in the task
+list as a second `Node.js JavaScript Runtime` for a single bot.
+
+Three independent guards stop a duplicate, and each one fails closed:
+
+| Guard | Process | Refuses when |
+|---|---|---|
+| `.al-ai-bot.lock` — atomic `open(…, "wx")`, then pid **and** start-time checks | bot | a live bot already owns the lock |
+| integration adapter port `3400` (loopback only) | bot | the port is taken — the bot exits **before** `client.login()`, so two Gateways can never share one token |
+| `PORT` (`3000`) | dashboard | the port is taken — the dashboard exits instead of starting a second ngrok agent on the same domain |
+
+`dev.ps1` and `watchdog.ps1` read that same lock, so a bot that is alive but not
+listening — adapter switched off, still binding, or started by hand from
+`apps/bot` — is adopted rather than duplicated, and `dev:stop` still stops it.
+
+The bot has no file watcher on purpose. To pick up a change, `npm run dev:restart`;
+the database stays up, so it is a few seconds.
+
+`npm run dev:ui` is the raw Vite server (`:5173`) for front-end work. It serves
+the SPA only and has no `/api` proxy, so it needs the BFF from `npm run dev`.
 
 The database alone has its own entry point (`npm run db:start`, `db:stop`,
 `db:status`, `db:verify`). `db:verify` reads `DATABASE_URL`, connects with those

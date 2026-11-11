@@ -204,3 +204,43 @@ test("applyConfig only accepts allowlisted keys", () => {
   assert.deepEqual(rejected, ["security.hmacSecret"]);
   assert.equal(APPLYABLE_KEYS.includes("security.hmacSecret" as never), false);
 });
+
+/**
+ * The bind is the OS-level half of the single-instance guarantee.
+ *
+ * `index.ts` now refuses to log in when this call fails, because a bot that
+ * cannot own its control port is a second copy of a bot that already owns this
+ * deployment — two Gateway connections sharing one token, duplicated log lines
+ * and doubled anti-nuke counting. This test pins the behaviour that refusal
+ * depends on: a taken port rejects instead of silently succeeding.
+ */
+test("a port already owned by another instance is refused", async () => {
+  const first: Harness = await boot();
+  const taken = Number(new URL(first.base).port);
+  try {
+    const second = startIntegrationAdapter({
+      hmacSecret: SECRET,
+      sourceLayer: "bot-runtime",
+      port: taken,
+      consumeNonce: async () => true,
+      handlers: {
+        getStatus: async () => ({}),
+        diagnose: async () => ({}),
+        readLogs: async () => ({}),
+        suggestConfig: async () => ({}),
+        applyConfig: async () => ({}),
+        listChannels: async () => ({})
+      }
+    });
+
+    await assert.rejects(second.listen(), (error: NodeJS.ErrnoException) => {
+      assert.equal(error.code, "EADDRINUSE", "the second copy must be refused by the kernel, not by luck");
+      return true;
+    });
+    // Closing a server that never listened must not throw, or the refusal path
+    // in index.ts would fail on its own cleanup.
+    await second.close();
+  } finally {
+    await first.adapter.close();
+  }
+});

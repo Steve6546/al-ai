@@ -2658,10 +2658,36 @@ const adapter =
     : null;
 
 if (adapter) {
-  await adapter.listen().then(
-    ({ host, port }) => console.log(`AL AI integration adapter listening on http://${host}:${port}`),
-    error => console.error("AL AI integration adapter failed to start", error)
-  );
+  // The bind is the second half of the single-instance guarantee, and the half
+  // the operating system enforces: one loopback port can have exactly one
+  // owner. It used to be swallowed — the error was logged and the bot went on to
+  // `client.login()`, which is the worst possible outcome. Two bots then shared
+  // one token (duplicated log lines, doubled commands, doubled anti-nuke
+  // counting) while only one held port 3400, so `dev.ps1` and the watchdog both
+  // read the deployment as "bot down" and kept launching replacements that the
+  // lock refused. The operator saw a server running more than one copy.
+  //
+  // A control surface that cannot bind is not a degraded bot, it is a bot that
+  // does not own this deployment. Refusing to log in is the only honest answer.
+  try {
+    const { host, port } = await adapter.listen();
+    console.log(`AL AI integration adapter listening on http://${host}:${port}`);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    console.error(
+      code === "EADDRINUSE"
+        ? "AL AI is already running: another instance owns the integration adapter port. Refusing to start a second copy."
+        : "AL AI integration adapter failed to start; refusing to run without its control surface.",
+      error
+    );
+    await database.close().catch(() => undefined);
+    lock.release();
+    process.exit(1);
+  }
+} else {
+  // Said out loud, because it changes what protects this deployment: without a
+  // port to bind, the instance lock is the only guard against a second copy.
+  console.log('AL AI integration adapter is off (INTEGRATION_ADAPTER_ENABLED is not "true"); the instance lock alone guards this instance.');
 }
 
 /* ------------------------------------------------------------------ *
