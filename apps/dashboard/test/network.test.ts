@@ -15,6 +15,7 @@ import {
   parseTunnelUrl,
   probeTunnelReachability,
   splitHostPort,
+  tunnelHostForGate,
   unpackOAuthState
 } from "../server/network.js";
 
@@ -119,6 +120,32 @@ test("an explicit wrong port is refused even on an allowed hostname", () => {
   assert.equal(isHostAllowed("localhost:9999", options), false);
   // A bare host (no port) stays allowed; some proxies forward it that way.
   assert.equal(isHostAllowed("192.0.2.10", options), true);
+});
+
+/**
+ * The gate must not depend on a value that can be missing.
+ *
+ * Measured failure: the agent was alive and serving the reserved domain while
+ * `remote_access_tunnel_url` was empty (the URL write lost a race with the
+ * spawn). The gate only knew the live URL, so it answered every request through
+ * the tunnel with `REMOTE_ACCESS_DISABLED` — and the probe that decides whether
+ * to re-mint read that refusal as "the URL does not answer" and replaced a
+ * working agent, every eight minutes, forever.
+ */
+test("the tunnel host survives an empty live URL when a domain is configured", () => {
+  assert.equal(tunnelHostForGate(null, "quiet-river-1234.ngrok-free.dev"), "quiet-river-1234.ngrok-free.dev");
+  assert.equal(tunnelHostForGate("", "quiet-river-1234.ngrok-free.dev"), "quiet-river-1234.ngrok-free.dev");
+  // The domain wins: the agent is started with `--url=https://<domain>`, so a
+  // differing live URL is a stale quick-tunnel address.
+  assert.equal(
+    tunnelHostForGate("https://old-quick-9999.ngrok-free.app", "quiet-river-1234.ngrok-free.dev"),
+    "quiet-river-1234.ngrok-free.dev"
+  );
+  // A quick tunnel has no domain to fall back on, so the live URL is the answer.
+  assert.equal(tunnelHostForGate("https://old-quick-9999.ngrok-free.app", null), "old-quick-9999.ngrok-free.app");
+  // Nothing known: nothing allowed, rather than a wildcard.
+  assert.equal(tunnelHostForGate(null, null), null);
+  assert.equal(tunnelHostForGate("not a url", null), null);
 });
 
 test("OAuth state packs the origin in and unpacks it back out", () => {

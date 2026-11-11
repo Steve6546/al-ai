@@ -129,6 +129,36 @@ export function isLoopbackPeer(remoteAddress: string | undefined): boolean {
 }
 
 /**
+ * The host a request through the tunnel may carry, given what the dashboard
+ * knows right now.
+ *
+ * The live URL is the precise answer, but it only exists once the agent's log
+ * line has been parsed — and that parse can lose a race with the spawn, or be
+ * missed entirely, leaving a running agent and no URL. A reserved domain names
+ * the address by itself, so it is the fallback, and it wins when both are known
+ * (the agent is started with `--url=https://<domain>`, so a differing live URL
+ * is a stale quick-tunnel address).
+ *
+ * The peer check in `isHostAllowed` is untouched: only a loopback caller — the
+ * local agent — may present this Host.
+ *
+ * Without this fallback the dashboard served its own tunnel with
+ * `REMOTE_ACCESS_DISABLED` whenever the URL was empty, and the probe that
+ * decides whether to re-mint read that refusal as "the URL does not answer", so
+ * it kept replacing an agent that was working. One missing string became a
+ * tunnel that died every eight minutes.
+ */
+export function tunnelHostForGate(liveUrl: string | null, domain: string | null): string | null {
+  if (domain) return domain.toLowerCase();
+  if (!liveUrl) return null;
+  try {
+    return new URL(liveUrl).host;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The reachability verdict for one Host header **from one TCP peer**. A missing
  * port is allowed (some proxies forward the host bare); an explicit port that
  * is not ours is not this server and is refused.
@@ -551,6 +581,12 @@ export function createNetworkManager(input: {
 
   const ngrokPath = resolveNgrokPath();
 
+  /**
+   * The host this deployment answers at through the tunnel — see
+   * `tunnelHostForGate` for why a configured domain is enough on its own.
+   */
+  const tunnelGateHost = (): string | null => tunnelHostForGate(tunnelUrl, domain);
+
   function isOriginAllowed(origin: string): boolean {
     let host: string;
     try {
@@ -566,14 +602,11 @@ export function createNetworkManager(input: {
     // live tunnel host is accepted here directly — delegating would run the
     // peer check with no peer and refuse, handing every remote sign-in a
     // localhost redirect URI that lands the member on their own machine.
-    if (
-      mode === "tunnel" &&
-      tunnelUrl &&
-      host === new URL(tunnelUrl).host
-    ) {
+    const tunnelHost = tunnelGateHost();
+    if (mode === "tunnel" && tunnelHost && host === tunnelHost) {
       return true;
     }
-    return isHostAllowed(host, { port: input.port, mode, machineHosts: machineHosts(), tunnelHost: tunnelUrl ? new URL(tunnelUrl).host : null });
+    return isHostAllowed(host, { port: input.port, mode, machineHosts: machineHosts(), tunnelHost });
   }
 
   /**
@@ -586,7 +619,7 @@ export function createNetworkManager(input: {
       port: input.port,
       mode,
       machineHosts: machineHosts(),
-      tunnelHost: tunnelUrl ? new URL(tunnelUrl).host : null,
+      tunnelHost: tunnelGateHost(),
       remoteAddress
     });
   }
@@ -653,16 +686,43 @@ export function createNetworkManager(input: {
     if (child || tunnelStatus === "running" || tunnelStatus === "starting") return;
     const savedPid = Number((await input.getSetting(TUNNEL_PID_KEY)) ?? 0);
     const savedUrl = await input.getSetting(TUNNEL_URL_KEY);
-    if (savedPid > 0 && savedUrl && isExpectedTunnelUrl(savedUrl) && (await isNgrokPid(savedPid))) {
-      const replacement = await replacementTunnelUrl(savedUrl);
-      const liveUrl = replacement ?? (await urlAnswers(savedUrl) ? savedUrl : null);
+    const pidAlive = savedPid > 0 && (await isNgrokPid(savedPid));
+
+    /*
+     * The address to adopt, decided without a probe when the domain names it.
+     *
+     * `boot()` runs before `app.listen`, so a probe of the public URL at this
+     * moment always failed — the new process is not listening yet and the old
+     * one is already gone. That made adoption impossible on every start: a
+     * perfectly good agent was killed and a replacement spawned on the same
+     * reserved domain, which is both a needless outage and (when the old agent
+     * had not released the endpoint) `ERR_NGROK_6030`. A reserved domain *is*
+     * the address the agent serves, so a live pid is adopted on that alone; the
+     * runtime healer (`probeTunnel`, which does run after listen) owns "the edge
+     * stopped answering".
+     *
+     * A quick tunnel has no such name, so its stored URL is still probed — and
+     * failing that it is replaced, which costs only a new random address.
+     */
+    const namedUrl = domain
+      ? `https://${domain}`
+      : savedUrl && isExpectedTunnelUrl(savedUrl)
+        ? savedUrl
+        : null;
+
+    if (pidAlive && namedUrl) {
+      const replacement = domain ? null : await replacementTunnelUrl(namedUrl);
+      const liveUrl = replacement ?? (domain ? namedUrl : (await urlAnswers(namedUrl)) ? namedUrl : null);
       if (liveUrl) {
         tunnelPid = savedPid;
         tunnelUrl = liveUrl;
         tunnelStatus = "running";
         if (liveUrl !== savedUrl) {
-          input.log.info({ from: savedUrl, to: liveUrl }, "Adopted the tunnel's replacement URL");
-          void input.setSetting(TUNNEL_URL_KEY, liveUrl).catch(() => undefined);
+          // Awaited: an unawaited write here can land *after* a later write and
+          // leave the row empty while the tunnel runs — the state that closed
+          // the gate in the first place.
+          input.log.info({ from: savedUrl || null, to: liveUrl, pid: savedPid }, "Adopted the live tunnel");
+          await input.setSetting(TUNNEL_URL_KEY, liveUrl).catch(() => undefined);
         } else {
           input.log.info({ tunnelUrl: liveUrl, pid: savedPid }, "Adopted the ngrok tunnel from a previous run");
         }
@@ -671,11 +731,19 @@ export function createNetworkManager(input: {
       // The process is alive but its address no longer answers and the log has
       // no replacement: the tunnel is wedged, not adopted. Starting a fresh one
       // is the only way to have a working address again.
-      input.log.warn({ pid: savedPid, url: savedUrl }, "The saved tunnel process is live but its URL does not answer; restarting it");
+      input.log.warn({ pid: savedPid, url: namedUrl }, "The saved tunnel process is live but its URL does not answer; restarting it");
       await killTree(savedPid);
       await waitForGone(savedPid);
-      void input.setSetting(TUNNEL_PID_KEY, "").catch(() => undefined);
-      void input.setSetting(TUNNEL_URL_KEY, "").catch(() => undefined);
+      await input.setSetting(TUNNEL_PID_KEY, "").catch(() => undefined);
+      await input.setSetting(TUNNEL_URL_KEY, "").catch(() => undefined);
+    } else if (pidAlive) {
+      // Alive, but nothing names its address: no reserved domain and no usable
+      // stored URL. Stop it before starting a replacement, or the two agents
+      // race for one endpoint and the second is refused.
+      input.log.warn({ pid: savedPid }, "A tunnel process is live but nothing names its address; stopping it before a fresh start");
+      await killTree(savedPid);
+      await waitForGone(savedPid);
+      await input.setSetting(TUNNEL_PID_KEY, "").catch(() => undefined);
     }
     startTunnel();
   }
