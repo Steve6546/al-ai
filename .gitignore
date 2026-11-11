@@ -37,3 +37,9 @@ coverage/
 # the same twenty-one files. The canonical set lives in .agents/skills.
 .claude/skills/
 .zcode/skills/
+
+# Local scratch probes and unrelated screenshot folders kept at the repo root
+# by convenience. They are not part of the product and must never enter history.
+/exp1.mts
+/spectator-test-1.png
+/evidence/
