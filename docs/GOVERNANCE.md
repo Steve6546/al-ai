@@ -201,3 +201,17 @@ test together.
     still visible in `git log --all -- .env`), and its contents were that
     publishable key. Anything with a server-side privilege that reaches a commit
     is rotated first and scrubbed from history second.
+
+29. **A surface never covers text.** The guild selector's notice carried `-mb-4`,
+    which pulled the search input up over the notice's own line: the operator
+    saw half a sentence ghosting behind a control, and read it as a rendering
+    bug in the search. Negative margins are allowed only where a *ringed or
+    bordered* piece of media deliberately overlaps a banner (the guild card's
+    avatar, the profile preview's avatar) — the ring is what makes the overlap
+    read as one piece. Notices and errors are strips in the normal flow with
+    their own padding, never bare paragraphs tightened into the next block.
+    A translucent surface (`bg-*/85` and friends) placed over scrolling content
+    carries `backdrop-blur`, so what passes underneath is colour, not legible
+    text; translucency over a static background needs no blur because nothing
+    moves behind it. The browser harness measures the notice/search pair
+    (`notice.bottom <= input.top`) so the regression cannot return silently.

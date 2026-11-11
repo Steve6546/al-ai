@@ -28,7 +28,10 @@ export default defineConfig({
             { name: "motion", test: /node_modules[\\/](framer-motion|motion-dom|motion-utils)[\\/]/ },
             { name: "ui", test: /node_modules[\\/]@heroui[\\/]/ },
             { name: "react", test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
-            { name: "vendor", test: /node_modules[\\/]/ }
+            // tsParticles is excluded so it stays inside the lazy sign-in
+            // chunk: a named group would be modulepreloaded for every visitor,
+            // and signed-in screens never need the particle engine.
+            { name: "vendor", test: /node_modules[\\/](?!@tsparticles[\\/])/ }
           ]
         }
       }

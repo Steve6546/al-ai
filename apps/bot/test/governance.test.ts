@@ -122,12 +122,12 @@ const governance = readFileSync(governancePath, "utf8");
 /** Rule numbers declared in docs/GOVERNANCE.md, e.g. "1. **Slash commands only.**" */
 const declaredRules = [...governance.matchAll(/^(\d+)\.\s+\*\*/gm)].map(match => Number(match[1]));
 
-test("docs/GOVERNANCE.md declares exactly twenty-eight rules", () => {
-  assert.equal(declaredRules.length, 28, `found ${declaredRules.length} numbered rules`);
+test("docs/GOVERNANCE.md declares exactly twenty-nine rules", () => {
+  assert.equal(declaredRules.length, 29, `found ${declaredRules.length} numbered rules`);
   assert.deepEqual(
     declaredRules,
-    Array.from({ length: 28 }, (_, index) => index + 1),
-    "rules are numbered 1..28 with no gaps"
+    Array.from({ length: 29 }, (_, index) => index + 1),
+    "rules are numbered 1..29 with no gaps"
   );
 });
 

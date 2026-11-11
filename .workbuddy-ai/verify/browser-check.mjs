@@ -129,7 +129,7 @@ const securityActions = ANTI_NUKE_ACTIONS.map(action => ({
 const STUB = `
 (() => {
   const payloads = [
-    [/^\\/api\\/session$/, { authenticated: true, user: { id: "1", username: "owner", avatarUrl: null, expiresAt: new Date(Date.now() + 3.6e6).toISOString(), isPlatformOwner: true } }],
+    [/^\\/api\\/session$/, location.hash === "#signed-out" ? { authenticated: false, user: null } : { authenticated: true, user: { id: "1", username: "owner", avatarUrl: null, expiresAt: new Date(Date.now() + 3.6e6).toISOString(), isPlatformOwner: true } }],
     [/^\\/api\\/health$/, { status: "healthy", dashboard: "online", bot: "connected", database: "reachable", gateway: { eventsLastMinute: 0, ceiling: 120 }, verification: { guildCount: 1, uniqueUsers: 1, reviewRequired: false, warning: null } }],
     [/^\\/api\\/guilds$/, { guilds: ${JSON.stringify([guild])} }],
     [/^\\/api\\/guilds\\/[^/]+\\/customization$/, {
@@ -189,6 +189,10 @@ const STUB = `
 
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, "http://x").pathname;
+  // The OAuth hand-off answers slowly on purpose: the sign-in loading check
+  // measures the button while this navigation is in flight, which is exactly
+  // the wait the operator sees before Discord takes over.
+  if (path === "/auth/discord/login") await sleep(2500);
   const file = join(DIST, path === "/" ? "index.html" : path);
   const target = existsSync(file) && extname(file) ? file : join(DIST, "index.html");
   res.writeHead(200, { "content-type": MIME[extname(target)] ?? "application/octet-stream" });
@@ -312,6 +316,40 @@ const check = (label, actual, expected) => {
 };
 
 try {
+  /* ---- 0. the sign-in screen ---- */
+  await visit(
+    "/#signed-out",
+    `document.querySelector('button') && document.body.textContent.includes('تسجيل الدخول عبر Discord')`
+  );
+  // The particle engine loads as its own chunk; give it a moment to draw.
+  await sleep(1500);
+  check("sign-in has no card", await evaluate(`Boolean(document.querySelector('.bg-card'))`), false);
+  check("sign-in button carries the Discord mark", await evaluate(`Boolean(document.querySelector('button svg path[d^="M20.317"]'))`), true);
+  check("the star sky is a live canvas", await evaluate(`(() => { const c = document.querySelector('#login-stars canvas'); return Boolean(c && c.width > 0); })()`), true);
+  await shoot("login");
+
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await sleep(500);
+  await shoot("login-mobile");
+  await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+
+  /*
+   * The loading state, measured mid-hand-off: the click starts the OAuth
+   * redirect and the stub server holds that response for 2.5s, so the button
+   * can be read while the navigation is genuinely in flight — the same wait
+   * the operator sees before Discord takes over.
+   */
+  const loadingState = await evaluate(`(async () => {
+    const btn = document.querySelector('button');
+    btn.click();
+    await new Promise(r => setTimeout(r, 500));
+    return { busy: btn.getAttribute('aria-busy'), disabled: btn.disabled, spinner: Boolean(btn.querySelector('.animate-spin')) };
+  })()`);
+  check("sign-in click shows loading", loadingState, v => v.busy === "true" && v.disabled === true && v.spinner === true);
+  await shoot("login-loading");
+  // Let the held response land so the next phase starts from a settled page.
+  await sleep(3000);
+
   /* ---- 1. the frame ---- */
   await visit(
     `/dashboard/${GUILD_ID}/customization`,
@@ -559,6 +597,30 @@ const PREVIEW_RECT = `(el => el ? { top: Math.round(el.getBoundingClientRect().t
   await visit(`/`, `document.querySelector('main') && document.body.textContent.includes('اختر سيرفراً')`);
   check("the selector's header is at the top", await evaluate(`Math.round(document.querySelector('header').getBoundingClientRect().top)`), 0);
   await shoot("guild-selector");
+
+  /*
+   * The notice regression: `?auth=denied` hands the selector a notice, and the
+   * strip must keep its own row. The old `-mb-4` let the search input cover the
+   * sentence — half a line ghosting behind a control is what the operator
+   * photographed, so the geometry is measured, not eyeballed.
+   */
+  await visit(`/?auth=denied`, `document.querySelector('main [aria-live="polite"]')`);
+  const noticeGap = await evaluate(`(() => {
+    const note = document.querySelector('main [aria-live="polite"]').getBoundingClientRect();
+    const input = document.querySelector('main input').getBoundingClientRect();
+    return { noteBottom: Math.round(note.bottom), inputTop: Math.round(input.top) };
+  })()`);
+  check("the notice keeps its row above the search", noticeGap, v => v.noteBottom <= v.inputTop);
+  await shoot("guild-selector-notice");
+
+  // A query with no matches must offer the way back, not a dead end.
+  await evaluate(`document.querySelector('main input').focus()`);
+  await send("Input.insertText", { text: "لا يوجد" });
+  await sleep(250);
+  check("a fruitless search offers a clear button", await evaluate(`Boolean(document.querySelector('main input').parentElement.querySelector('button'))`), true);
+  await evaluate(`document.querySelector('main input').parentElement.querySelector('button').click()`);
+  await sleep(250);
+  check("clearing restores the list", await evaluate(`document.querySelector('main input').value === "" && Boolean(document.querySelector('main section'))`), true);
 
   /* ---- 5. the commands screen ---- */
   /*

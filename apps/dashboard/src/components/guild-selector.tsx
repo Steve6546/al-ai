@@ -9,7 +9,8 @@ import {
   ServerOff,
   Settings,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  X
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -159,9 +160,16 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
           </div>
 
           {notice && (
+            /*
+             * A strip in the flow, like the error block below. This used to be
+             * a bare paragraph with `-mb-4`, which pulled the search box up
+             * over its own text: the operator saw half a sentence ghosting
+             * behind the input. Notices are content, not decoration — they
+             * keep their own row.
+             */
             <p
               aria-live="polite"
-              className="-mb-4 flex items-center gap-2 text-sm text-muted-foreground"
+              className="flex items-center gap-2 rounded-lg border border-border bg-muted/60 px-4 py-3 text-sm text-muted-foreground"
             >
               <Info className="size-4 shrink-0" />
               {notice}
@@ -181,8 +189,18 @@ export function GuildSelector({ user, guilds, health, notice, error, refreshing,
               onChange={event => setQuery(event.target.value)}
               placeholder={`${t("guilds.search")} 🔭`}
               aria-label={t("guilds.searchLabel")}
-              className="h-11 ps-9"
+              className={cn("h-11 ps-9", searching && "pe-10")}
             />
+            {searching && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label={t("guilds.clearSearch")}
+                className="absolute end-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            )}
           </div>
 
           {nothingFound && (
@@ -285,11 +303,16 @@ function GuildSection({
 }) {
   return (
     <section className="space-y-3">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        <Badge variant="outline" className="tabular">
-          {count}
-        </Badge>
+      {/* Title and count on one line, the explanation on its own: a single
+          baseline row wrapped the description into the heading and the list
+          lost its scan line. */}
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold">{title}</h2>
+          <Badge variant="outline" className="tabular">
+            {count}
+          </Badge>
+        </div>
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
 
