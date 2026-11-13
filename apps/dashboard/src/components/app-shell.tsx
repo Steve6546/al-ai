@@ -2,14 +2,11 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import {
   Activity,
-  Check,
   ChevronsUpDown,
-  CirclePlus,
   Database,
   FileClock,
   Globe,
   LayoutDashboard,
-  LayoutGrid,
   Link2,
   Menu,
   MessageSquareHeart,
@@ -26,19 +23,10 @@ import {
   UserCog,
   UserPlus
 } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { splitGuilds } from "@/components/guild-selector";
+import { GuildRail } from "@/components/guild-rail";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -47,7 +35,6 @@ import { AccountMenu } from "@/components/account-menu";
 import { AppearanceMenu } from "@/components/appearance-menu";
 import { PageHeader } from "@/components/page-header";
 import { BrandMark } from "@/components/brand-mark";
-import { initials } from "@/lib/format";
 import { navText, useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { type Guild, type HealthSnapshot, type SessionInfo } from "@/types";
@@ -346,8 +333,6 @@ export function AppShell({
     }
   }, [collapsed]);
 
-  const inviteUrl = `/api/guilds/${guild.id}/invite`;
-
   const isOwner = user?.isPlatformOwner === true;
   const allowed = (item: NavItem) => {
     if (item.ownerOnly && !isOwner) return false;
@@ -388,23 +373,45 @@ export function AppShell({
      */
     <div
       /*
-       * `--sidebar-width` is published here so that the floating save bar can
-       * span the content column and stop at the sidebar's edge: a `fixed`
-       * element with `inset-x-0` would otherwise stretch over the sidebar.
-       * The value is the same width the grid's column uses.
+       * `--sidebar-width` and `--rail-width` are published here so that the
+       * floating save bar can span the content column and stop at the rail's
+       * edge: a `fixed` element with `inset-x-0` would otherwise stretch over
+       * the navigation. The values are the same widths the grid's columns use.
        */
-      style={{ "--sidebar-width": collapsed ? "4.75rem" : "16.5rem" } as React.CSSProperties}
+      style={
+        {
+          "--sidebar-width": collapsed ? "4.75rem" : "16.5rem",
+          "--rail-width": "4.5rem"
+        } as React.CSSProperties
+      }
       className={cn(
         "grid h-full grid-cols-1 grid-rows-[minmax(0,1fr)] transition-ui",
-        collapsed ? "lg:grid-cols-[4.75rem_1fr]" : "lg:grid-cols-[16.5rem_1fr]"
+        collapsed ? "lg:grid-cols-[4.5rem_4.75rem_1fr]" : "lg:grid-cols-[4.5rem_16.5rem_1fr]"
       )}
     >
+      {/* ---------------------------------------------------------------- *
+       * Server rail (desktop)
+       *
+       * Every administrable server, always on screen: switching is one click
+       * instead of opening a dropdown, and a server the bot is missing from is
+       * visible rather than hidden behind the one that is open. It sits on the
+       * outer edge, the way a server list is read, with the settings nav
+       * between it and the screen. The phone drawer renders the same data as
+       * labelled rows.
+       * ---------------------------------------------------------------- */}
+      <GuildRail
+        guilds={guilds}
+        selectedGuildId={selectedGuildId}
+        onSelect={onSelectGuild}
+        onBrowseAll={onBrowseAll}
+      />
+
       {/* ---------------------------------------------------------------- *
        * Sidebar (desktop)
        *
        * `overflow-hidden` + `min-h-0` keep it exactly as tall as the frame: the
-       * nav scrolls inside the ScrollArea, and a long guild list can never
-       * stretch the column and take the account menu off the bottom.
+       * nav scrolls inside the ScrollArea, and a long nav can never stretch the
+       * column and take the account menu off the bottom.
        * ---------------------------------------------------------------- */}
       <aside
         className={cn(
@@ -422,15 +429,6 @@ export function AppShell({
           ) : null}
         </div>
         <Separator />
-        <GuildSwitcher
-          guilds={guilds}
-          guild={guild}
-          selectedGuildId={selectedGuildId}
-          onSelectGuild={onSelectGuild}
-          onBrowseAll={onBrowseAll}
-          inviteUrl={inviteUrl}
-          collapsed={collapsed}
-        />
         <ScrollArea className="min-h-0 flex-1">{nav(collapsed)}</ScrollArea>
         <Separator />
         <div className={cn("flex items-center gap-1 p-2", collapsed && "lg:flex-col lg:justify-center")}>
@@ -493,15 +491,14 @@ export function AppShell({
                   AL AI
                 </SheetTitle>
               </SheetHeader>
-              {/* The server picker lives in the sidebar on desktop; on a
-                  phone the sidebar is this drawer, so the drawer must carry
-                  it too - otherwise there is no way to switch servers
-                  without editing the address bar. */}
-              <GuildSwitcher
+              {/* The server rail lives beside the nav on desktop; on a phone
+                  the sidebar is this drawer, so the drawer carries the same
+                  list — otherwise there is no way to switch servers without
+                  editing the address bar. */}
+              <GuildRail
                 guilds={guilds}
-                guild={guild}
                 selectedGuildId={selectedGuildId}
-                onSelectGuild={guildId => {
+                onSelect={guildId => {
                   onSelectGuild(guildId);
                   setMobileOpen(false);
                 }}
@@ -509,8 +506,7 @@ export function AppShell({
                   onBrowseAll();
                   setMobileOpen(false);
                 }}
-                inviteUrl={inviteUrl}
-                collapsed={false}
+                variant="list"
               />
               <Separator />
               {/* `min-h-0 flex-1` is what keeps the account/appearance row at
@@ -637,112 +633,6 @@ export function AppShell({
 /* -------------------------------------------------------------------- *
  * Sidebar pieces
  * -------------------------------------------------------------------- */
-
-/**
- * Server picker. Every row shows the guild's real Discord icon and name, and the
- * invite action is pinned to the currently selected guild so the bot can never be
- * added somewhere the operator did not choose.
- */
-function GuildSwitcher({
-  guilds,
-  guild,
-  selectedGuildId,
-  onSelectGuild,
-  onBrowseAll,
-  inviteUrl,
-  collapsed
-}: {
-  guilds: Guild[];
-  guild: Guild;
-  selectedGuildId: string | null;
-  onSelectGuild: (guildId: string) => void;
-  onBrowseAll: () => void;
-  inviteUrl: string;
-  collapsed: boolean;
-}) {
-  const { t } = useI18n();
-  // The same predicate the selector uses: `botPresent` is the whole test for
-  // "there is something here to switch to".
-  const switchable = splitGuilds(guilds).active;
-
-  if (collapsed) {
-    return (
-      <div className="flex justify-center p-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={onBrowseAll}
-              className="rounded-md p-1 transition-ui hover:bg-sidebar-accent"
-              aria-label={guild.name}
-            >
-              <Avatar className="size-8 rounded-lg">
-                {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
-                <AvatarFallback className="rounded-lg text-micro">{initials(guild.name)}</AvatarFallback>
-              </Avatar>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right">{guild.name}</TooltipContent>
-        </Tooltip>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-3">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" className="h-auto w-full justify-between gap-2 px-2.5 py-2" disabled={guilds.length === 0}>
-            <span className="flex min-w-0 items-center gap-2">
-              <Avatar className="size-7 rounded-lg">
-                {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
-                <AvatarFallback className="rounded-lg text-micro">{initials(guild.name)}</AvatarFallback>
-              </Avatar>
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium">{guild.name}</span>
-                <span className="block truncate text-mini text-muted-foreground">{t("nav.guildSelected")}</span>
-              </span>
-            </span>
-            <ChevronsUpDown className="size-4 shrink-0 opacity-60" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-64">
-          {/* Only guilds the bot is in are switchable here: the others have
-              nothing to show yet, and the selector is where they are invited.
-              The trigger stays enabled on an empty list — «كل السيرفرات» and the
-              invite row below are the way out of a guild without AL AI. */}
-          <DropdownMenuLabel>{t("nav.guilds")}</DropdownMenuLabel>
-          {switchable.length === 0 && (
-            <DropdownMenuItem disabled className="gap-2 text-muted-foreground">
-              {t("nav.noBotGuild")}
-            </DropdownMenuItem>
-          )}
-          {switchable.map(item => (
-            <DropdownMenuItem key={item.id} onSelect={() => onSelectGuild(item.id)} className="gap-2">
-              <Avatar className="size-6 rounded-md">
-                {item.iconUrl && <AvatarImage src={item.iconUrl} alt="" />}
-                <AvatarFallback className="rounded-md text-micro">{initials(item.name)}</AvatarFallback>
-              </Avatar>
-              <span className="min-w-0 flex-1 truncate">{item.name}</span>
-              {item.id === selectedGuildId && <Check className="size-3.5 text-muted-foreground" />}
-            </DropdownMenuItem>
-          ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={onBrowseAll} className="gap-2">
-            <LayoutGrid className="size-4" />
-            {t("nav.allGuilds")}
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <a href={inviteUrl} className="gap-2">
-              <CirclePlus className="size-4" />
-              {t("nav.addBotHere")}
-            </a>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  );
-}
 
 function SidebarNav({
   guild,
