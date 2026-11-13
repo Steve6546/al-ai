@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "start": "tsx --env-file=../../.env server/index.ts",
+    "start": "node --import tsx --env-file=../../.env server/index.ts",
     "test": "tsx --test test/*.test.ts test/*.test.tsx",
     "lint": "tsc --noEmit"
   },

@@ -34,9 +34,14 @@ for _ in $(seq 1 40); do
 done
 
 # 3. Dashboard BFF + SPA. It does not read .env on its own.
+#
+# `node --import tsx`, not the `tsx` shim: the shim spawns a second Node process
+# for the loader and a third for esbuild, so one service costs three processes
+# and ~220MB. Running the loader in-process keeps it to one process (~100MB),
+# and the SIGTERM an orchestrator sends reaches the server itself.
 PORT_VALUE="$(env_value PORT)"; PORT_VALUE="${PORT_VALUE:-3000}"
 if ! curl -s --noproxy '*' -o /dev/null "http://127.0.0.1:${PORT_VALUE}/api/health"; then
-  ( cd apps/dashboard && setsid nohup "$ROOT/node_modules/.bin/tsx" --env-file="$ROOT/.env" server/index.ts >"$LOG_DIR/dashboard.log" 2>&1 </dev/null & )
+  ( cd apps/dashboard && setsid nohup node --import tsx --env-file="$ROOT/.env" server/index.ts >"$LOG_DIR/dashboard.log" 2>&1 </dev/null & )
   for _ in $(seq 1 30); do
     curl -s --noproxy '*' -o /dev/null "http://127.0.0.1:${PORT_VALUE}/api/health" && break
     sleep 1
@@ -46,12 +51,15 @@ fi
 # 4. Loopback relay. The dashboard's reach gate answers its deployment hostname
 #    only for a loopback peer (the rule it applies to ngrok's agent); a platform
 #    that publishes the app on its own port needs a relay that connects over
-#    loopback and presents that hostname. LISTEN_PORT/TUNNEL_HOST come from the
-#    environment, so a local run simply skips this step.
-if [ -n "${AL_AI_RELAY_LISTEN_PORT:-}" ] && [ -n "${AL_AI_TUNNEL_HOST:-}" ]; then
-  if ! curl -s --noproxy '*' -o /dev/null "http://127.0.0.1:${AL_AI_RELAY_LISTEN_PORT}/api/health"; then
+#    loopback and presents that hostname. LISTEN_PORT accepts a comma-separated
+#    list so a host publishing several ports still costs one relay process.
+#    Both come from the environment, so a local run simply skips this step.
+RELAY_PORTS="${AL_AI_RELAY_LISTEN_PORTS:-${AL_AI_RELAY_LISTEN_PORT:-}}"
+if [ -n "$RELAY_PORTS" ] && [ -n "${AL_AI_TUNNEL_HOST:-}" ]; then
+  FIRST_PORT="${RELAY_PORTS%%,*}"
+  if ! curl -s --noproxy '*' -o /dev/null "http://127.0.0.1:${FIRST_PORT}/api/health"; then
     setsid nohup node "$ROOT/scripts/linux/port-forward.mjs" \
-      "$AL_AI_RELAY_LISTEN_PORT" "$PORT_VALUE" "$AL_AI_TUNNEL_HOST" \
+      "$RELAY_PORTS" "$PORT_VALUE" "$AL_AI_TUNNEL_HOST" \
       >"$LOG_DIR/relay.log" 2>&1 </dev/null &
     sleep 2
   fi
@@ -60,7 +68,7 @@ fi
 # 5. The bot only connects when real secrets are present; without them it prints
 #    what is missing and exits, by design.
 if [ "${1:-}" = "--with-bot" ]; then
-  ( cd apps/bot && setsid nohup "$ROOT/node_modules/.bin/tsx" --env-file="$ROOT/.env" src/index.ts >"$LOG_DIR/bot.log" 2>&1 </dev/null & )
+  ( cd apps/bot && setsid nohup node --import tsx --env-file="$ROOT/.env" src/index.ts >"$LOG_DIR/bot.log" 2>&1 </dev/null & )
   sleep 5
   tail -5 "$LOG_DIR/bot.log" 2>/dev/null || true
 fi
