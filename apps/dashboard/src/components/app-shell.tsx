@@ -432,6 +432,11 @@ export function AppShell({
         <ScrollArea className="min-h-0 flex-1">{nav(collapsed)}</ScrollArea>
         <Separator />
         <div className={cn("flex items-center gap-1 p-2", collapsed && "lg:flex-col lg:justify-center")}>
+          {/* The appearance switch lives here on desktop and in the drawer on a
+              phone - one home each. It had drifted out of this row and existed
+              only as a `lg:hidden` header button, which left the desktop with
+              no theme switch at all and the phone with two. */}
+          <AppearanceMenu iconOnly />
           {collapsed ? (
             <AccountMenu
               user={user}
@@ -549,12 +554,11 @@ export function AppShell({
 
           <StatusChips health={health} />
 
-          {/* The sidebar owns the appearance panel on desktop; below `lg` the
-              sidebar is a drawer, so the header carries a compact trigger —
-              otherwise the light/dark switch is unreachable on a phone. */}
-          <div className="lg:hidden">
-            <AppearanceMenu iconOnly className="size-8" />
-          </div>
+          {/* The appearance panel and the account menu live in the sidebar on
+              desktop and in the drawer on a phone - one home each. They used to
+              also sit here below `lg`, which put two light/dark switches and
+              two account buttons on every phone screen. The drawer is where
+              they belong now, exactly as the sidebar is on desktop. */}
 
           <Button
             variant="outline"
@@ -568,18 +572,6 @@ export function AppShell({
             <RefreshCw className={cn(refreshing && "animate-spin")} />
             <span className="hidden sm:inline">{t("nav.refresh")}</span>
           </Button>
-
-          {/* The account menu lives in the sidebar on the desktop; on a phone
-              the sidebar is a drawer, so the header carries the account. */}
-          <div className="lg:hidden">
-            <AccountMenu
-              user={user}
-              guild={guild}
-              onLogout={onLogout}
-              onOpenSettings={onOpenSettings}
-              variant="compact"
-            />
-          </div>
         </header>
 
         {/*

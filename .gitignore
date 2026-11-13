@@ -43,3 +43,7 @@ coverage/
 /exp1.mts
 /spectator-test-1.png
 /evidence/
+
+# The OpenHands agent's own per-session memory. Working notes, not product
+# source; the durable rules belong in `.workbuddy-ai/memory/`.
+.openhands/

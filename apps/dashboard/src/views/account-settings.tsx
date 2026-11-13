@@ -1260,6 +1260,3 @@ function SessionRow({
     </li>
   );
 }
-
-/** Kept for the router's exhaustive view list. */
-export type { Section as SettingsSection };
