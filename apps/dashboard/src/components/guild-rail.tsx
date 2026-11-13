@@ -1,6 +1,5 @@
 import { Check, CirclePlus, LayoutGrid } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -10,15 +9,14 @@ import { cn } from "@/lib/utils";
 import type { Guild } from "@/types";
 
 /**
- * The server rail: every server the signed-in account may administer, always
- * on screen.
+ * The server rail: every server the signed-in account may administer, always on
+ * screen, one click away.
  *
- * It replaces the dropdown that used to sit at the top of the sidebar. A
- * dropdown answers "which server am I in?" only after a click, and it hides the
- * other servers entirely — so an operator watching one server had no way to see
- * the rest, or to notice that the bot is missing from one of them. The rail
- * shows all of them at once, marks each one's bot state, and switches on a
- * single click.
+ * It is placement-agnostic. On desktop it is the first column of the shell grid;
+ * on a phone it is the leading column *inside* the navigation drawer, so opening
+ * the menu reveals the servers beside the settings nav rather than a strip that
+ * eats a permanent slice of the content. Either way the caller owns the frame
+ * (`border`, `background`, width) and this component owns only the list.
  *
  * The guild list is the server's answer, not a client guess: a guild the caller
  * cannot administer never reaches this component.
@@ -29,81 +27,20 @@ type Props = {
   selectedGuildId: string | null;
   onSelect: (guildId: string) => void;
   onBrowseAll: () => void;
-  /**
-   * `rail` is the desktop strip of round icons; `list` is the same data as
-   * labelled rows inside the phone drawer, where a 4.5rem column would be a
-   * waste of the screen.
-   */
-  variant?: "rail" | "list";
 };
 
-export function GuildRail({ guilds, selectedGuildId, onSelect, onBrowseAll, variant = "rail" }: Props) {
+export function GuildRail({ guilds, selectedGuildId, onSelect, onBrowseAll }: Props) {
   const { t } = useI18n();
 
-  if (variant === "list") {
-    return (
-      <nav aria-label={t("nav.bots")} className="flex min-h-0 shrink-0 flex-col p-3">
-        <p className="shrink-0 px-3 pb-2 text-mini font-semibold tracking-wide text-muted-foreground">{t("nav.bots")}</p>
-        {/*
-         * The server list scrolls inside a bounded region.
-         *
-         * A drawer is a column of unbounded lists, and a flex item will not
-         * shrink below its content unless it is told to — so a long server list
-         * used to take the whole column and push the settings nav below the
-         * viewport, where it could not be reached or scrolled to. Capping this
-         * list keeps the settings nav on screen; a short list still sizes to
-         * its content, so nothing is wasted when there are two servers.
-         */}
-        <ScrollArea className="max-h-[30vh]">
-          <div className="space-y-0.5">
-            {guilds.map(guild => {
-              const selected = guild.id === selectedGuildId;
-              return (
-                <button
-                  key={guild.id}
-                  type="button"
-                  onClick={() => onSelect(guild.id)}
-                  aria-current={selected ? "page" : undefined}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-3 py-2 text-start text-sm transition-ui",
-                    "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                    selected && "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                  )}
-                >
-                  <Avatar className="size-7 rounded-lg">
-                    {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
-                    <AvatarFallback className="rounded-lg text-micro">{initials(guild.name)}</AvatarFallback>
-                  </Avatar>
-                  <span className="min-w-0 flex-1 truncate">{guild.name}</span>
-                  <BotStateBadge guild={guild} />
-                  {selected && <Check className="size-3.5 shrink-0 text-muted-foreground" />}
-                </button>
-              );
-            })}
-            {guilds.length === 0 && (
-              <p className="px-3 py-2 text-mini text-muted-foreground">{t("nav.noBotGuild")}</p>
-            )}
-          </div>
-        </ScrollArea>
-        <Separator className="my-2 shrink-0" />
-        <button
-          type="button"
-          onClick={onBrowseAll}
-          className="flex w-full shrink-0 items-center gap-2 rounded-md px-3 py-2 text-start text-sm text-muted-foreground transition-ui hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-        >
-          <LayoutGrid className="size-4" />
-          {t("nav.browseGuilds")}
-        </button>
-      </nav>
-    );
-  }
-
   return (
-    <nav aria-label={t("nav.bots")} className="hidden min-h-0 flex-col border-e border-sidebar-border bg-sidebar/60 lg:flex">
+    <nav aria-label={t("nav.bots")} className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex shrink-0 items-center justify-center px-1 py-3">
         <span className="text-micro font-semibold tracking-wide text-muted-foreground">{t("nav.bots")}</span>
       </div>
       <Separator />
+      {/* The rail is one viewport tall and its list is the only thing inside it
+          that scrolls: a long list of servers must not push the browse button
+          off the bottom of the rail. */}
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col items-center gap-2 px-2 py-3">
           {guilds.map(guild => (
@@ -149,46 +86,69 @@ export function GuildRail({ guilds, selectedGuildId, onSelect, onBrowseAll, vari
  * The icon grows slightly on hover — the "it is about to be pressed" cue the
  * Discord rail has taught everyone — and the tooltip is the card that names the
  * server and says, in words, whether the bot is there. A missing bot is not
- * just a red dot: the card spells it out and the click lands on the invite
- * panel.
+ * just an amber dot: the card spells it out.
+ *
+ * A server the bot is already in switches the dashboard to it. A server it is
+ * *not* in cannot show a single usable setting — every screen there writes state
+ * only the bot can apply — so the click is a link straight into the invite flow
+ * instead of a settings screen that would silently do nothing.
  */
 function RailItem({ guild, selected, onSelect }: { guild: Guild; selected: boolean; onSelect: () => void }) {
   const { t } = useI18n();
   const present = guild.botPresent;
   const state = present ? t("nav.botAdded") : t("nav.botMissing");
 
+  const className = cn(
+    "group relative grid size-12 shrink-0 place-items-center rounded-2xl outline-none transition-ui",
+    "hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring",
+    selected && "bg-sidebar-accent"
+  );
+
+  const inner = (
+    <>
+      <Avatar
+        className={cn(
+          "size-10 rounded-2xl ring-1 ring-border transition-transform duration-200 ease-out",
+          "group-hover:scale-110 group-focus-visible:scale-110",
+          selected && "ring-2 ring-primary"
+        )}
+      >
+        {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
+        <AvatarFallback className="rounded-2xl text-micro">{initials(guild.name)}</AvatarFallback>
+      </Avatar>
+      {/* The activity indicator: colour plus the words in the tooltip, because a
+          dot on its own is not a label. */}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "absolute bottom-0 end-0 size-3 rounded-full ring-2 ring-sidebar",
+          present ? "bg-success" : "bg-warning"
+        )}
+      />
+    </>
+  );
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onSelect}
-          aria-current={selected ? "page" : undefined}
-          aria-label={`${guild.name} — ${state}`}
-          className={cn(
-            "group relative grid size-12 shrink-0 place-items-center rounded-2xl outline-none transition-ui",
-            "hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring",
-            selected && "bg-sidebar-accent"
-          )}
-        >
-          <Avatar
-            className={cn(
-              "size-10 rounded-2xl ring-1 ring-border transition-transform duration-200 ease-out",
-              "group-hover:scale-110 group-focus-visible:scale-110",
-              selected && "ring-2 ring-primary"
-            )}
+        {present ? (
+          <button
+            type="button"
+            onClick={onSelect}
+            aria-current={selected ? "page" : undefined}
+            aria-label={`${guild.name} — ${state}`}
+            className={className}
           >
-            {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
-            <AvatarFallback className="rounded-2xl text-micro">{initials(guild.name)}</AvatarFallback>
-          </Avatar>
-          <span
-            aria-hidden="true"
-            className={cn(
-              "absolute bottom-0 end-0 size-3 rounded-full ring-2 ring-sidebar",
-              present ? "bg-success" : "bg-warning"
-            )}
-          />
-        </button>
+            {inner}
+          </button>
+        ) : (
+          /* An anchor, not a button: the invite flow is a server redirect, so it
+             works as a plain link (middle-click, open in a new tab) and needs no
+             JavaScript to reach. */
+          <a href={`/api/guilds/${guild.id}/invite`} aria-label={`${guild.name} — ${state}`} className={className}>
+            {inner}
+          </a>
+        )}
       </TooltipTrigger>
       <TooltipContent
         side="left"
@@ -202,12 +162,7 @@ function RailItem({ guild, selected, onSelect }: { guild: Guild; selected: boole
           </Avatar>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold">{guild.name}</p>
-            <p
-              className={cn(
-                "flex items-center gap-1 text-mini",
-                present ? "text-success" : "text-warning"
-              )}
-            >
+            <p className={cn("flex items-center gap-1 text-mini", present ? "text-success" : "text-warning")}>
               {present ? <Check className="size-3" /> : <CirclePlus className="size-3" />}
               {state}
             </p>
@@ -218,19 +173,5 @@ function RailItem({ guild, selected, onSelect }: { guild: Guild; selected: boole
         </p>
       </TooltipContent>
     </Tooltip>
-  );
-}
-
-/** The compact bot-state label used by the phone list. */
-function BotStateBadge({ guild }: { guild: Guild }) {
-  const { t } = useI18n();
-  return guild.botPresent ? (
-    <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-micro text-success">
-      {t("nav.botAdded")}
-    </Badge>
-  ) : (
-    <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-micro text-warning">
-      {t("nav.botMissing")}
-    </Badge>
   );
 }
