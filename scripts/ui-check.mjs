@@ -317,6 +317,10 @@ const API_STUB = `
       authenticated: true,
       user: { id: "1", username: "owner", avatarUrl: null, expiresAt: new Date(Date.now() + 86400000).toISOString(), isPlatformOwner: true }
     },
+    // The account's language is read at boot and applied to every label. An
+    // empty answer here leaves the dictionary undefined, and the first screen
+    // then throws on t(...) instead of being measured.
+    "/api/me/preferences": { language: "ar" },
     "/api/health": {
       status: "healthy",
       dashboard: "online",
@@ -340,6 +344,23 @@ const API_STUB = `
         canManageTiers: true,
         canInvite: true,
         canAdminInstance: true
+      }, {
+        // A second server the account may administer but AL AI is not in yet.
+        // It is what makes the rail's "not added" state and the invite panel
+        // reachable in the visual check instead of only in a unit test.
+        id: "222222222222222222",
+        name: "سيرفر بدون البوت",
+        iconUrl: null,
+        memberCount: 7,
+        tier: "admin",
+        botPresent: false,
+        canManage: true,
+        canManageIdentity: true,
+        canManageLogging: true,
+        canManageCommands: true,
+        canManageTiers: true,
+        canInvite: true,
+        canAdminInstance: false
       }]
     },
     "/api/guilds/111111111111111111/metrics": {
@@ -1205,6 +1226,197 @@ async function main() {
         );
       }
     }
+
+    /*
+     * The server rail.
+     *
+     * Every guild the account may administer is on screen at once - no dropdown
+     * to open - and the hover card names the guild and states whether the bot
+     * is in it. The guild without the bot must not open a settings screen: the
+     * click has to land on the invite panel, because nothing on the settings
+     * screens can be applied by a bot that is not there.
+     *
+     * Radix opens a tooltip on real pointer movement and after its own delay,
+     * so the hover is a dispatched `mouseMoved`, not a synthesised event on the
+     * trigger.
+     */
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false },
+      sessionId
+    );
+    await cdp.send("Page.navigate", { url: `${origin}/dashboard/111111111111111111` }, sessionId);
+    await sleep(1500);
+
+    const railHover = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const rail = document.querySelector('nav[aria-label="البوتات"]');
+          if (!rail) return JSON.stringify({ found: false });
+          const buttons = [...rail.querySelectorAll("button")];
+          const target = buttons.find(button => (button.getAttribute("aria-label") ?? "").includes("سيرفر بدون البوت"));
+          if (!target) return JSON.stringify({ found: true, count: buttons.length, target: null });
+          const rect = target.getBoundingClientRect();
+          return JSON.stringify({
+            found: true,
+            count: buttons.length,
+            target: {
+              x: Math.round(rect.left + rect.width / 2),
+              y: Math.round(rect.top + rect.height / 2),
+              label: target.getAttribute("aria-label")
+            }
+          });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const rail = JSON.parse(railHover.result.value);
+    if (!rail.found || !rail.target) {
+      failures.push("the server rail does not offer the guild the bot is missing from");
+      console.log(`FAIL  server rail       found=${rail.found} buttons=${rail.count ?? 0}`);
+    } else {
+      await cdp.send(
+        "Input.dispatchMouseEvent",
+        { type: "mouseMoved", x: rail.target.x, y: rail.target.y },
+        sessionId
+      );
+      await sleep(1200);
+      const hoverCard = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `(() => {
+            const card = document.querySelector('[role="tooltip"]');
+            return JSON.stringify({
+              shown: Boolean(card),
+              text: (card?.textContent ?? "").trim(),
+              state: document.querySelector('nav[aria-label="البوتات"] button[aria-label*="سيرفر بدون البوت"]')?.getAttribute("aria-label") ?? ""
+            });
+          })()`,
+          returnByValue: true
+        },
+        sessionId
+      );
+      const card = JSON.parse(hoverCard.result.value);
+      const hoverShot = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
+      await writeFile(join(outDir, "rail-hover.png"), Buffer.from(hoverShot.data, "base64"));
+      const named = card.text.includes("سيرفر بدون البوت");
+      const missing = card.text.includes("البوت غير مضاف");
+      if (!card.shown || !named || !missing) {
+        failures.push(
+          `the rail hover card does not name the guild and its bot state (shown=${card.shown}, text="${card.text.slice(0, 80)}")`
+        );
+      }
+      console.log(
+        `${card.shown && named && missing ? "PASS" : "FAIL"}  rail hover card    state="${card.state}" text="${card.text.slice(0, 60)}"`
+      );
+
+      /*
+       * Picking the guild the bot is missing from. The click is a real press
+       * and release: the rail switches route and the invite panel has to be
+       * the screen that answers, not a settings form the bot cannot apply.
+       */
+      await cdp.send(
+        "Input.dispatchMouseEvent",
+        { type: "mousePressed", x: rail.target.x, y: rail.target.y, button: "left", clickCount: 1, buttons: 1 },
+        sessionId
+      );
+      await cdp.send(
+        "Input.dispatchMouseEvent",
+        { type: "mouseReleased", x: rail.target.x, y: rail.target.y, button: "left", clickCount: 1, buttons: 0 },
+        sessionId
+      );
+      await sleep(1500);
+      const invite = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `(() => {
+            const text = (document.querySelector("#root")?.textContent ?? "").trim();
+            return JSON.stringify({
+              path: window.location.pathname,
+              notAdded: text.includes("البوت غير مضاف إلى هذا السيرفر بعد"),
+              add: text.includes("إضافة AL AI إلى هذا السيرفر"),
+              railButtons: document.querySelectorAll('nav[aria-label="البوتات"] button').length
+            });
+          })()`,
+          returnByValue: true
+        },
+        sessionId
+      );
+      const picked = JSON.parse(invite.result.value);
+      const onRoute = picked.path === "/dashboard/222222222222222222";
+      const inviteShot = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
+      await writeFile(join(outDir, "rail-missing-bot.png"), Buffer.from(inviteShot.data, "base64"));
+      if (!onRoute || !picked.notAdded || !picked.add) {
+        failures.push(
+          `picking the guild without the bot did not land on the invite panel (path=${picked.path}, notAdded=${picked.notAdded}, add=${picked.add})`
+        );
+      }
+      console.log(
+        `${onRoute && picked.notAdded && picked.add ? "PASS" : "FAIL"}  rail pick missing  path=${picked.path} notAdded=${picked.notAdded} add=${picked.add}`
+      );
+    }
+
+    /*
+     * The rail on a phone.
+     *
+     * At 375px the rail column is gone, so the drawer has to carry the same
+     * list - otherwise there is no way to switch servers on a phone at all.
+     * The drawer renders it as labelled rows: an icon-only strip inside a
+     * 288px sheet would name nothing.
+     */
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 375, height: 812, deviceScaleFactor: 1, mobile: true },
+      sessionId
+    );
+    await cdp.send("Page.navigate", { url: `${origin}/dashboard/111111111111111111` }, sessionId);
+    await sleep(1500);
+    await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const button = [...document.querySelectorAll("button")].find(node => node.getAttribute("aria-label") === "القائمة");
+          if (!button) return "no trigger";
+          button.click();
+          return "clicked";
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    await sleep(800);
+    const drawer = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const dialog = document.querySelector('[role="dialog"]');
+          const list = dialog?.querySelector('nav[aria-label="البوتات"]');
+          const text = (list?.textContent ?? "").trim();
+          return JSON.stringify({
+            found: Boolean(list),
+            inDialog: Boolean(dialog),
+            rows: list ? list.querySelectorAll("button").length : 0,
+            names: text.includes("سيرفر الاختبار") && text.includes("سيرفر بدون البوت"),
+            labelled: text.includes("البوت مضاف") && text.includes("البوت غير مضاف")
+          });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const phoneRail = JSON.parse(drawer.result.value);
+    const drawerShot = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
+    await writeFile(join(outDir, "rail-drawer.png"), Buffer.from(drawerShot.data, "base64"));
+    if (!phoneRail.found || phoneRail.rows < 3 || !phoneRail.names || !phoneRail.labelled) {
+      failures.push(
+        `the phone drawer does not carry the server list (found=${phoneRail.found}, rows=${phoneRail.rows}, names=${phoneRail.names}, labelled=${phoneRail.labelled})`
+      );
+    }
+    console.log(
+      `${phoneRail.found && phoneRail.rows >= 3 && phoneRail.names && phoneRail.labelled ? "PASS" : "FAIL"}  rail phone drawer  rows=${phoneRail.rows} names=${phoneRail.names} labelled=${phoneRail.labelled}`
+    );
 
     // The account menu and the appearance panel, opened for real: the account
     // menu has to offer the actions that exist, and the appearance panel has to
