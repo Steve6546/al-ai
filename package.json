@@ -39,6 +39,7 @@
     "verify": "npm run lint && npm run check:schema && npm test && npm run build && npm run check:secrets && npm run audit",
     "audit": "npm audit --omit=dev --audit-level=high",
     "backup": "node --env-file=.env scripts/backup-db.mjs",
+    "deploy": "node --env-file=.env scripts/deploy.mjs",
     "secrets:rotate": "node --env-file=.env scripts/rotate-secrets.mjs",
     "keys:rotate": "node --env-file=.env scripts/rotate-encryption-key.mts",
     "dev:session": "node --env-file=.env scripts/dev-issue-session.mts",
