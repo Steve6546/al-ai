@@ -89,6 +89,21 @@ HeroUI فقط. **فحوص المشروع الحيّة هي:** `scripts/ui-check.
 - **الشاشة لا تحمل أي مفهوم عام:** لا شارات، لا «الصورة العالمية»، لا `قراءة فقط`، ولا حصرية للمالك —
   و**مشرف غير مالك يُحوَّل من `/presence` إلى `/dashboard/…/dashboard`**.
 
+## شريط السيرفرات (2026-11-13) — → `RULES-UI.md`
+- **كل السيرفرات ظاهرة دائماً في شريط أقصى اليمين**، والتبديل بنقرة. **لا قائمة منسدلة ولا مُبدِّل**:
+  `GuildSwitcher` أُزيل من الـshell. الشبكة `[4.5rem_16.5rem_1fr]` والطيّ `[4.5rem_4.75rem_1fr]`.
+- **الكرت `Tooltip` (portal إلى `document.body`) لا `Popover`** — `ScrollArea`/`overflow-hidden` يقصّ الكرت.
+  التكبير `scale-110` على الصورة، وحالة البوت نصّ + لون + `aria-label` (اللون وحده ليس دليلاً).
+- **الفحص:** `npm run check:ui` يغطّي hover والكرت ومسار «البوت غير مضاف» وقائمة الهاتف وaxe.
+
+## الاستضافة (2026-11-13) — → `docs/BOT-HOSTING-MCP.md`
+- **FeatherPanel مرفوض:** الحساب `role: user` و`permissions: []` و0 سيرفرات، وقواعده MySQL فقط ⇒
+  لا يصلح لمشروع PostgreSQL بثلاث عمليات. أُبقي مربوطاً بـ`enabled: false` للسجلّ فقط.
+- **Bot-Hosting.net هو المسار:** PostgreSQL كنشر مستقل + Node 24، و72 أداة MCP تُدير كل شيء.
+  يحتاج مفتاح `bhk_` وخطة **Starter+ £2.59**؛ المجاني (نشر واحد، 256MB) لا يشيل التطبيق + القاعدة.
+- **المفتاح لا يدخل المستودع:** `%USERPROFILE%\.al-ai\bot-hosting-mcp\.env` + `run.cmd`، والـMCP مسجَّل
+  في `opencode.jsonc` باسم `bot-hosting`.
+
 ## 🔴 Git — → `al-ai-git-recovery`
 `.git` مشترك مع `glyph-agent`؛ `origin` → `Steve6546/al-ai`.
 - **⛔ لا `git rm`** (أتلف ملفات غير متعقَّبة) — احذف بـ`rm` بعد `git add -A`. **⛔ لا `git stash`**.
