@@ -24,6 +24,19 @@ import { TtlCache } from "./cache.js";
 
 const API = "https://discord.com/api/v10";
 
+/**
+ * Discord's documented User-Agent shape: `DiscordBot ($url, $versionNumber)`.
+ *
+ * The API reference states that a client using the HTTP API *must* send a valid
+ * User-Agent in that format, and that a request without one "may be blocked and
+ * return a Cloudflare error". A plain `fetch` from Node carries no User-Agent at
+ * all, so every Discord call from this process was one proxy rule away from a
+ * block that reads as a broken dashboard rather than a missing header. discord.js
+ * sets this for the bot; the BFF does not go through discord.js, so it sets its
+ * own here.
+ */
+const DISCORD_USER_AGENT = "DiscordBot (https://github.com/Steve6546/al-ai, 0.1.0)";
+
 export type DiscordIdentity = { id: string; username: string; globalName: string | null; avatar: string | null };
 export type DiscordUserGuild = { id: string; name: string; icon: string | null; owner: boolean; permissions: bigint };
 
@@ -159,6 +172,7 @@ async function request<T>(path: string, init: RequestInit & { token: string; sch
       headers: {
         Authorization: `${scheme} ${token}`,
         "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": DISCORD_USER_AGENT,
         ...(rest.headers ?? {})
       }
     });
@@ -192,7 +206,11 @@ export async function requestJson<T>(
     const response = await fetch(`${API}${path}`, {
       method: init.method,
       signal: AbortSignal.timeout(DISCORD_CALL_TIMEOUT_MS),
-      headers: { Authorization: `Bot ${init.token}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bot ${init.token}`,
+        "Content-Type": "application/json",
+        "User-Agent": DISCORD_USER_AGENT
+      },
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) })
     });
     if (!response.ok) {
@@ -273,7 +291,7 @@ export async function exchangeCode(input: { clientId: string; clientSecret: stri
   const response = await fetch(`${API}/oauth2/token`, {
     method: "POST",
     signal: AbortSignal.timeout(DISCORD_CALL_TIMEOUT_MS),
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": DISCORD_USER_AGENT },
     body
   });
   if (!response.ok) throw new Error(`Discord token exchange failed with ${response.status}.`);
@@ -1105,7 +1123,7 @@ export type WidgetPresence = { online: number } | { online: null; reason: "widge
 export async function fetchWidgetPresence(guildId: string): Promise<WidgetPresence> {
   try {
     const response = await fetch(`https://discord.com/api/v10/guilds/${guildId}/widget.json`, {
-      headers: { "User-Agent": "AL-AI-Dashboard" },
+      headers: { "User-Agent": DISCORD_USER_AGENT },
       signal: AbortSignal.timeout(DISCORD_CALL_TIMEOUT_MS)
     });
     // 403 is Discord's answer when the Server Widget is switched off.

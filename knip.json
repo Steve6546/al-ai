@@ -3,6 +3,7 @@
   "workspaces": {
     ".": {
       "project": ["scripts/**/*.mjs", "scripts/**/*.mts"],
+      "ignore": ["scripts/linux/port-forward.mjs"],
       "ignoreDependencies": ["pg"]
     },
     "apps/bot": {
@@ -21,7 +22,8 @@
     "pgsql-ast-parser"
   ],
   "ignoreBinaries": [
-    "tasklist"
+    "tasklist",
+    "pgrep"
   ],
   "ignoreExportsUsedInFile": true,
   "includeEntryExports": false

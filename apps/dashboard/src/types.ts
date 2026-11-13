@@ -19,11 +19,9 @@ import {
   type LogDestination,
   type NukeAction,
   type RemoteAccessMode,
-  type Tier,
   type TierRoles
 } from "@al-ai/core/browser";
 
-export type { Tier } from "@al-ai/core/browser";
 export { tierOrder } from "@al-ai/core/browser";
 
 /* ------------------------------------------------------------------ *
@@ -322,34 +320,6 @@ export type NetworkSnapshot = {
   /** Whether a sign-in has completed through the tunnel address, proving its
    * redirect URI is registered in Discord — see `markOriginVerified` server-side. */
   tunnelCallbackVerified: boolean;
-};
-
-/* ------------------------------------------------------------------ *
- * Display copy
- * ------------------------------------------------------------------ */
-
-export const tierDescriptions: Record<Tier, string> = {
-  owner: "تحكم كامل. تلقائي: مالك السيرفر وأي عضو يملك صلاحية Administrator في Discord.",
-  admin: "إعدادات اللوحة وكافة الأوامر الإشرافية.",
-  moderator: "العقوبات اليومية فقط: إسكات مؤقت، تحذير، طرد."
-};
-
-export const tierLabels: Record<Tier, string> = {
-  owner: "المالك",
-  admin: "مدير",
-  moderator: "مشرف"
-};
-
-export const remoteAccessLabels: Record<RemoteAccessMode, string> = {
-  off: "هذا الجهاز فقط",
-  lan: "الشبكة المحلية",
-  tunnel: "عبر الإنترنت"
-};
-
-export const remoteAccessDescriptions: Record<RemoteAccessMode, string> = {
-  off: "اللوحة من هذا الجهاز فقط (localhost).",
-  lan: "أي جهاز على نفس الشبكة يفتح اللوحة.",
-  tunnel: "أي جهاز عبر نفق ngrok مشفّر — بلا فتح منفذ."
 };
 
 /**

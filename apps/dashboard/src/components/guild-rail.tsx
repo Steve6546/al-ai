@@ -42,46 +42,58 @@ export function GuildRail({ guilds, selectedGuildId, onSelect, onBrowseAll, vari
 
   if (variant === "list") {
     return (
-      <nav aria-label={t("nav.bots")} className="p-3">
-        <p className="px-3 pb-2 text-mini font-semibold tracking-wide text-muted-foreground">{t("nav.bots")}</p>
-        <div className="space-y-0.5">
-          {guilds.map(guild => {
-            const selected = guild.id === selectedGuildId;
-            return (
-              <button
-                key={guild.id}
-                type="button"
-                onClick={() => onSelect(guild.id)}
-                aria-current={selected ? "page" : undefined}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-3 py-2 text-start text-sm transition-ui",
-                  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                  selected && "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                )}
-              >
-                <Avatar className="size-7 rounded-lg">
-                  {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
-                  <AvatarFallback className="rounded-lg text-micro">{initials(guild.name)}</AvatarFallback>
-                </Avatar>
-                <span className="min-w-0 flex-1 truncate">{guild.name}</span>
-                <BotStateBadge guild={guild} />
-                {selected && <Check className="size-3.5 shrink-0 text-muted-foreground" />}
-              </button>
-            );
-          })}
-          {guilds.length === 0 && (
-            <p className="px-3 py-2 text-mini text-muted-foreground">{t("nav.noBotGuild")}</p>
-          )}
-          <Separator className="my-2" />
-          <button
-            type="button"
-            onClick={onBrowseAll}
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-start text-sm text-muted-foreground transition-ui hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-          >
-            <LayoutGrid className="size-4" />
-            {t("nav.browseGuilds")}
-          </button>
-        </div>
+      <nav aria-label={t("nav.bots")} className="flex min-h-0 shrink-0 flex-col p-3">
+        <p className="shrink-0 px-3 pb-2 text-mini font-semibold tracking-wide text-muted-foreground">{t("nav.bots")}</p>
+        {/*
+         * The server list scrolls inside a bounded region.
+         *
+         * A drawer is a column of unbounded lists, and a flex item will not
+         * shrink below its content unless it is told to — so a long server list
+         * used to take the whole column and push the settings nav below the
+         * viewport, where it could not be reached or scrolled to. Capping this
+         * list keeps the settings nav on screen; a short list still sizes to
+         * its content, so nothing is wasted when there are two servers.
+         */}
+        <ScrollArea className="max-h-[30vh]">
+          <div className="space-y-0.5">
+            {guilds.map(guild => {
+              const selected = guild.id === selectedGuildId;
+              return (
+                <button
+                  key={guild.id}
+                  type="button"
+                  onClick={() => onSelect(guild.id)}
+                  aria-current={selected ? "page" : undefined}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-3 py-2 text-start text-sm transition-ui",
+                    "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                    selected && "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                  )}
+                >
+                  <Avatar className="size-7 rounded-lg">
+                    {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
+                    <AvatarFallback className="rounded-lg text-micro">{initials(guild.name)}</AvatarFallback>
+                  </Avatar>
+                  <span className="min-w-0 flex-1 truncate">{guild.name}</span>
+                  <BotStateBadge guild={guild} />
+                  {selected && <Check className="size-3.5 shrink-0 text-muted-foreground" />}
+                </button>
+              );
+            })}
+            {guilds.length === 0 && (
+              <p className="px-3 py-2 text-mini text-muted-foreground">{t("nav.noBotGuild")}</p>
+            )}
+          </div>
+        </ScrollArea>
+        <Separator className="my-2 shrink-0" />
+        <button
+          type="button"
+          onClick={onBrowseAll}
+          className="flex w-full shrink-0 items-center gap-2 rounded-md px-3 py-2 text-start text-sm text-muted-foreground transition-ui hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        >
+          <LayoutGrid className="size-4" />
+          {t("nav.browseGuilds")}
+        </button>
       </nav>
     );
   }

@@ -101,7 +101,15 @@ const CHROME_CANDIDATES = [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"
+  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+  // The Linux stack (scripts/run-linux-stack.sh) is supported, so the check has
+  // to find a browser there too. Without these the run printed "no Chrome or Edge
+  // binary found" and skipped every visual assertion on a host that had one.
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/microsoft-edge"
 ].filter(Boolean);
 
 const VIEWPORTS = [
@@ -312,10 +320,15 @@ const MIME = {
 const API_STUB = `
 (() => {
   const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  // A 1x1 PNG as a data URL. It exercises the whole image path - the server
+  // field, the Avatar component, the <img> load - without depending on the
+  // network, so "the icon renders" is asserted rather than assumed. Every stub
+  // used to carry null here, which is why a broken image path could ship unseen.
+  const ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
   const routes = {
     "/api/session": {
       authenticated: true,
-      user: { id: "1", username: "owner", avatarUrl: null, expiresAt: new Date(Date.now() + 86400000).toISOString(), isPlatformOwner: true }
+      user: { id: "1", username: "owner", avatarUrl: ICON, expiresAt: new Date(Date.now() + 86400000).toISOString(), isPlatformOwner: true }
     },
     // The account's language is read at boot and applied to every label. An
     // empty answer here leaves the dictionary undefined, and the first screen
@@ -333,7 +346,7 @@ const API_STUB = `
       guilds: [{
         id: "111111111111111111",
         name: "سيرفر الاختبار",
-        iconUrl: null,
+        iconUrl: ICON,
         memberCount: 42,
         tier: "owner",
         botPresent: true,
@@ -361,7 +374,25 @@ const API_STUB = `
         canManageTiers: true,
         canInvite: true,
         canAdminInstance: false
-      }]
+      },
+      // The rest exist so the drawer is measured the way a busy operator sees
+      // it. Two servers never crowded the settings nav out of the viewport; a
+      // dozen do, and that is the state the reach check has to fail on.
+      ...Array.from({ length: 10 }, (_, index) => ({
+        id: "3333333333333333" + String(index).padStart(2, "0"),
+        name: "سيرفر إضافي " + (index + 1),
+        iconUrl: ICON,
+        memberCount: 5 + index,
+        tier: "admin",
+        botPresent: index % 2 === 0,
+        canManage: true,
+        canManageIdentity: true,
+        canManageLogging: true,
+        canManageCommands: true,
+        canManageTiers: true,
+        canInvite: true,
+        canAdminInstance: false
+      }))]
     },
     "/api/guilds/111111111111111111/metrics": {
       bot: { online: true, pingMs: 42, lastSeenAt: new Date().toISOString() },
@@ -463,6 +494,59 @@ async function findChrome() {
     }
   }
   return null;
+}
+
+/** True once the browser has written its debugging port into `portFile`. */
+async function portFileAppears(portFile, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const text = await readFile(portFile, "utf8");
+      const port = Number(text.split("\n")[0].trim());
+      if (Number.isFinite(port) && port > 0) return true;
+    } catch {
+      /* not written yet */
+    }
+    await sleep(120);
+  }
+  return false;
+}
+
+/**
+ * Starts the browser and returns the child process.
+ *
+ * Chrome's sandbox needs privileges a container or a root run does not have —
+ * there the browser exits before it writes its debugging port, and the whole
+ * check dies at startup instead of running its assertions. So the first attempt
+ * keeps the sandbox, and only when no port appears is the browser relaunched
+ * once with `--no-sandbox`. A host with a working sandbox is unaffected; a
+ * restricted one still runs the checks rather than skipping them.
+ */
+async function launchBrowser(chrome, profile) {
+  const baseArgs = [
+    "--headless=new",
+    "--disable-gpu",
+    "--no-first-run",
+    "--no-default-browser-check",
+    // The point of the check: a browser without extensions, so a
+    // `chrome-extension://` message cannot be blamed on this app.
+    "--disable-extensions"
+  ];
+  for (const extra of [[], ["--no-sandbox"]]) {
+    const child = spawn(
+      chrome,
+      [...baseArgs, ...extra, "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"],
+      { stdio: "ignore", windowsHide: true }
+    );
+    if (await portFileAppears(join(profile, "DevToolsActivePort"), 20_000)) return child;
+    child.kill();
+    await new Promise(resolve => {
+      if (child.exitCode !== null || child.signalCode !== null) return resolve(undefined);
+      child.once("exit", () => resolve(undefined));
+      setTimeout(() => resolve(undefined), 3_000);
+    });
+  }
+  throw new Error("the browser did not report a debugging port");
 }
 
 /** Serves `dist/` the way the production server does, with an SPA fallback. */
@@ -576,22 +660,7 @@ async function main() {
   const { server, origin: stubOrigin } = await serveDist();
   const origin = live ? "http://127.0.0.1:3000" : stubOrigin;
   const profile = mkdtempSync(join(tmpdir(), "al-ai-ui-"));
-  const browser = spawn(
-    chrome,
-    [
-      "--headless=new",
-      "--disable-gpu",
-      "--no-first-run",
-      "--no-default-browser-check",
-      // The point of the check: a browser without extensions, so a
-      // `chrome-extension://` message cannot be blamed on this app.
-      "--disable-extensions",
-      "--remote-debugging-port=0",
-      `--user-data-dir=${profile}`,
-      "about:blank"
-    ],
-    { stdio: "ignore", windowsHide: true }
-  );
+  const browser = await launchBrowser(chrome, profile);
 
   const failures = [];
   const consoleMessages = [];
@@ -1416,6 +1485,167 @@ async function main() {
     }
     console.log(
       `${phoneRail.found && phoneRail.rows >= 3 && phoneRail.names && phoneRail.labelled ? "PASS" : "FAIL"}  rail phone drawer  rows=${phoneRail.rows} names=${phoneRail.names} labelled=${phoneRail.labelled}`
+    );
+
+    /*
+     * The drawer as a phone actually uses it.
+     *
+     * Two things are asserted that the row check above cannot see, both of them
+     * real regressions this check now guards:
+     *
+     *  - the settings nav has to be *inside the viewport*. A drawer is a column
+     *    of lists, and an unbounded server list silently pushed the nav below
+     *    the fold where it could not be reached or scrolled to;
+     *  - the appearance and account controls have to appear exactly once. They
+     *    drifted into the header as well as the drawer, so a phone showed two of
+     *    each while the desktop showed none.
+     */
+    const drawerReach = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const sheet = document.querySelector('[role="dialog"]');
+          if (!sheet) return JSON.stringify({ error: "no sheet" });
+          const vh = window.innerHeight;
+          const inView = el => { const r = el.getBoundingClientRect(); return r.height > 0 && r.top >= 0 && r.bottom <= vh; };
+          // The desktop sidebar is still in the DOM below the lg breakpoint; it
+          // is display:none, so a count that ignored visibility would read the
+          // hidden copy and report a duplicate that no phone user can see.
+          const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+          const isAppearance = b => (b.getAttribute("aria-label") || "") === "المظهر";
+          const buttons = [...sheet.querySelectorAll("button")];
+          const labelled = name => buttons.find(b => (b.textContent || "").includes(name));
+          const settingsRoot = labelled("لوحة التحكم")?.closest('[data-radix-scroll-area-viewport]');
+          // Scroll the settings list to its end and confirm the last screen lands
+          // in view: the cap on the server list is what makes this possible.
+          let lastReachable = null;
+          if (settingsRoot) {
+            settingsRoot.scrollTop = settingsRoot.scrollHeight;
+            const last = labelled("الوصول للشبكة");
+            lastReachable = last ? inView(last) : null;
+          }
+          return JSON.stringify({
+            welcomeInView: inView(labelled("رسائل الترحيب")),
+            protectionInView: inView(labelled("الحماية")),
+            lastReachable,
+            appearanceCount: [...document.querySelectorAll("button")].filter(b => isAppearance(b) && visible(b)).length,
+            appearanceInDrawer: [...sheet.querySelectorAll("button")].filter(isAppearance).length,
+            appearanceInHeader: [...document.querySelectorAll("header button")].filter(isAppearance).length,
+            accountCount: [...document.querySelectorAll("button[data-account-trigger]")].filter(visible).length,
+            accountInDrawer: sheet.querySelectorAll("button[data-account-trigger]").length,
+            accountInHeader: document.querySelectorAll("header button[data-account-trigger]").length
+          });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const reach = JSON.parse(drawerReach.result.value);
+    const reachOk =
+      reach.welcomeInView &&
+      reach.lastReachable === true &&
+      reach.appearanceCount === 1 &&
+      reach.appearanceInDrawer === 1 &&
+      reach.appearanceInHeader === 0 &&
+      reach.accountCount === 1 &&
+      reach.accountInHeader === 0;
+    if (!reachOk) {
+      failures.push(`the phone drawer is not usable: ${JSON.stringify(reach)}`);
+    }
+    console.log(
+      `${reachOk ? "PASS" : "FAIL"}  phone drawer usable  welcomeInView=${reach.welcomeInView} lastReachable=${reach.lastReachable} appearance=${reach.appearanceCount} account=${reach.accountCount}`
+    );
+
+    /*
+     * The desktop keeps one of each too, and the appearance switch has to be
+     * *visible* there. It once lived only in the phone header, so the desktop
+     * had no way to change the palette at all.
+     */
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false },
+      sessionId
+    );
+    await cdp.send("Page.navigate", { url: `${origin}/dashboard/111111111111111111` }, sessionId);
+    await sleep(1200);
+    const desktopControls = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+          const appearance = [...document.querySelectorAll("button")].filter(b => (b.getAttribute("aria-label") || "") === "المظهر");
+          const account = [...document.querySelectorAll("button[data-account-trigger]")];
+          return JSON.stringify({
+            appearanceVisible: appearance.filter(visible).length,
+            appearanceInSidebar: appearance.filter(b => b.closest("aside") && visible(b)).length,
+            accountVisible: account.filter(visible).length,
+            accountInSidebar: account.filter(b => b.closest("aside") && visible(b)).length
+          });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const desktop = JSON.parse(desktopControls.result.value);
+    const desktopOk =
+      desktop.appearanceVisible === 1 &&
+      desktop.appearanceInSidebar === 1 &&
+      desktop.accountVisible === 1 &&
+      desktop.accountInSidebar === 1;
+    if (!desktopOk) {
+      failures.push(`the desktop shell does not show one of each control: ${JSON.stringify(desktop)}`);
+    }
+    console.log(
+      `${desktopOk ? "PASS" : "FAIL"}  desktop controls  appearance=${desktop.appearanceVisible} inSidebar=${desktop.appearanceInSidebar} account=${desktop.accountVisible}`
+    );
+
+    /*
+     * The images, actually loaded.
+     *
+     * Every stub used to answer with `iconUrl: null`, so no image path was ever
+     * exercised: a broken icon - a blocked host, a wrong field, a missing
+     * fallback - would ship unseen. The stub now carries a real data URL for
+     * most servers and `null` for one, and this check asserts what the operator
+     * sees: the ones with an icon render an <img> that finished loading, and the
+     * one without falls back to its initial rather than a blank tile.
+     *
+     * `complete && naturalWidth > 0` is the load test: an <img> element is
+     * always in the DOM, so counting elements would pass on a 404. Only a
+     * decoded bitmap has a non-zero natural size.
+     */
+    const images = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const rail = document.querySelector('nav[aria-label="البوتات"]');
+          const loaded = el => el.tagName === "IMG" && el.complete && el.naturalWidth > 0;
+          const imgs = rail ? [...rail.querySelectorAll("img")] : [];
+          // The fallback is the initial letter rendered as text where there is
+          // no icon. Radix keeps it in the DOM only while the image is absent.
+          const rows = rail ? [...rail.querySelectorAll("button")] : [];
+          const withoutIcon = rows.find(b => (b.getAttribute("aria-label") ?? "").includes("سيرفر بدون البوت"));
+          return JSON.stringify({
+            railImages: imgs.length,
+            railImagesLoaded: imgs.filter(loaded).length,
+            fallbackForIconless: withoutIcon ? (withoutIcon.textContent ?? "").trim().length > 0 : null,
+            brokenImages: imgs.filter(el => el.complete && el.naturalWidth === 0).length
+          });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const media = JSON.parse(images.result.value);
+    const mediaOk =
+      media.railImages > 0 &&
+      media.railImagesLoaded === media.railImages &&
+      media.brokenImages === 0 &&
+      media.fallbackForIconless === true;
+    if (!mediaOk) {
+      failures.push(`server icons do not render: ${JSON.stringify(media)}`);
+    }
+    console.log(
+      `${mediaOk ? "PASS" : "FAIL"}  server icons  loaded=${media.railImagesLoaded}/${media.railImages} broken=${media.brokenImages} fallback=${media.fallbackForIconless}`
     );
 
     // The account menu and the appearance panel, opened for real: the account

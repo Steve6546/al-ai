@@ -4,6 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { EMOJI_SET, TOKEN_KEYS, insertAtCursor } from "./welcome-messages-parts";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import { api } from "@/api";
 import { WELCOME_MESSAGE_TOKENS, type WelcomeEmbed } from "@al-ai/core/browser";
 import type { WelcomeEmbedField } from "@/types";
 
@@ -157,15 +158,42 @@ function FocusTokenStrip({ targetRef }: { targetRef: { current: ((token: string)
  * so a share link (a Pinterest *page*, a Google Drive preview) has nothing for
  * Discord to attach and the member sees no picture.
  *
- * So the honest preview is the browser's own `<img>` against the same URL, and
- * an address that does not answer with an image says so here, before the
- * operator finds out from a silent greeting.
+ * The preview therefore has to prove the address answers with an image, and it
+ * cannot do that with a bare `<img src="https://…">`: the page's CSP allows
+ * images only from its own origin, `data:` and the Discord CDN, so a remote URL
+ * is blocked and *every* pasted address would look broken — the exact opposite
+ * of the screen's purpose. The bytes are pulled through the BFF instead (the
+ * same `/api/image/from-url` hop the identity screen uses), which also means a
+ * share page is rejected here, where the operator can see why, rather than by
+ * Discord's servers at send time.
  */
 function RemoteImage({ url, className, label }: { url: string | null; className: string; label: string }) {
   const { t } = useI18n();
-  const [failed, setFailed] = useState(false);
   const trimmed = (url ?? "").trim();
-  useEffect(() => setFailed(false), [trimmed]);
+  const [state, setState] = useState<{ src: string | null; failed: boolean }>({ src: null, failed: false });
+
+  useEffect(() => {
+    if (!/^https?:\/\/.+/i.test(trimmed)) {
+      setState({ src: null, failed: false });
+      return;
+    }
+    let cancelled = false;
+    setState({ src: null, failed: false });
+    const timer = setTimeout(() => {
+      api
+        .imageFromUrl(trimmed)
+        .then(({ dataUrl }) => {
+          if (!cancelled) setState({ src: dataUrl, failed: false });
+        })
+        .catch(() => {
+          if (!cancelled) setState({ src: null, failed: true });
+        });
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [trimmed]);
 
   if (!/^https?:\/\/.+/i.test(trimmed)) {
     return (
@@ -174,15 +202,16 @@ function RemoteImage({ url, className, label }: { url: string | null; className:
       </p>
     );
   }
-  if (failed) {
+  if (state.failed) {
     return (
       <p className="rounded border border-dashed border-border/60 px-2 py-1 text-micro text-[#949ba4]">
         {t("welcome.embed.failedUrl", { label })}
       </p>
     );
   }
+  if (!state.src) return <div className={cn(className, "animate-pulse bg-[#3b3d44]")} aria-hidden />;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={trimmed} alt="" className={className} onError={() => setFailed(true)} />;
+  return <img src={state.src} alt="" className={className} />;
 }
 
 export type EmbedEditorProps = {
@@ -565,8 +594,11 @@ export function EmbedEditor({
                       a custom picture, the member's picture (a real face here,
                       the joiner's at send time), then the labelled empty box. */}
                   {embed.thumbnailMode === "custom" && embed.thumbnailUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={embed.thumbnailUrl} alt="" className="size-14 rounded object-cover sm:size-20" />
+                    <RemoteImage
+                      url={embed.thumbnailUrl}
+                      className="size-14 rounded object-cover sm:size-20"
+                      label={t("welcome.embed.thumbnail")}
+                    />
                   ) : embed.thumbnailMode === "member_avatar" && memberAvatarUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={memberAvatarUrl} alt="" className="size-14 rounded object-cover sm:size-20" />
