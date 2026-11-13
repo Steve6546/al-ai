@@ -24,10 +24,11 @@ import { useRef, useState } from "react";
  * The rules the bar keeps:
  *
  * - It is **fixed to the bottom of the window**, inside the content column -
- *   the shell publishes the sidebar's and the server rail's widths as
+ *   on desktop the shell publishes the sidebar's and the server rail's widths as
  *   `--sidebar-width` and `--rail-width`, so the bar never stretches over
- *   either - and it is *not* a modal: it never traps focus and never blocks
- *   the content underneath.
+ *   either; below `lg` neither is a frame column (the rail lives in the drawer),
+ *   so the bar spans the full width - and it is *not* a modal: it never traps
+ *   focus and never blocks the content underneath.
  * - It keeps **no copy** of the form data: it only calls `onCancel`, so the
  *   revert is performed by the screen that owns the state and the bar can
  *   never disagree with what is on screen.

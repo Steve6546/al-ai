@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import {
   Activity,
-  ChevronsUpDown,
+  ChevronDown,
   Database,
   FileClock,
   Globe,
@@ -25,17 +25,16 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { GuildRail } from "@/components/guild-rail";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { GuildRail } from "@/components/guild-rail";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AccountMenu } from "@/components/account-menu";
-import { AppearanceMenu } from "@/components/appearance-menu";
 import { PageHeader } from "@/components/page-header";
 import { BrandMark } from "@/components/brand-mark";
-import { navText, useI18n } from "@/lib/i18n";
+import { navText, useI18n, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { type Guild, type HealthSnapshot, type SessionInfo } from "@/types";
 
@@ -92,8 +91,6 @@ export function isViewKey(value: unknown): value is ViewKey {
 type NavItem = {
   key: ViewKey;
   label: string;
-  /** One line of context: what the screen is *for*, in the operator's words. */
-  hint: string;
   icon: typeof LayoutDashboard;
   /** A boolean flag on the selected guild that must be true for access. */
   needs?: keyof Guild;
@@ -111,150 +108,56 @@ type NavItem = {
  * Navigation is data, not markup, so adding a screen means adding one entry.
  *
  * The groups follow the operator's mental model rather than the code layout:
- * what the server is doing now (الرئيسية), what you configure once (إدارة
- * السيرفر), what protects the server day to day (الإشراف والأوامر), what
- * happened in the past (السجلات), and the two instance-wide surfaces that
- * belong to the deployment's owner (النظام).
+ * what the server is doing now and what protects it (عام), what you configure
+ * once per module (إعدادات الأنظمة), and the two instance-wide surfaces that
+ * belong to the deployment's owner (النظام). Each titled group is a collapsible
+ * header — open by default, foldable to the groups in use — with one row per
+ * screen inside it.
  *
  * Every screen the project actually has is here, once. A screen that exists
  * but is unreachable is a bug to fix, not a reason to hide it — and a screen
  * that does not exist must not be advertised.
  */
-const navSections: { id: string; title: string | null; items: NavItem[] }[] = [
+const navSections: { id: string; title: TranslationKey | null; items: NavItem[] }[] = [
   {
-    id: "home",
-    title: null,
+    id: "general",
+    title: "nav.section.general",
     items: [
-      {
-        key: "dashboard",
-        label: "لوحة التحكم",
-        hint: "نظرة عامة على حالة السيرفر",
-        icon: LayoutDashboard
-      }
+      { key: "dashboard", label: "لوحة التحكم", icon: LayoutDashboard },
+      { key: "security", label: "الحماية", icon: ShieldAlert },
+      { key: "logs", label: "سجلات البوت", icon: ScrollText, needs: "canManageLogging", requiresBot: true },
+      { key: "audit", label: "سجل تدقيق اللوحة", icon: FileClock }
     ]
   },
   {
-    id: "server",
-    title: "إدارة السيرفر",
+    id: "modules",
+    title: "nav.section.modules",
     items: [
-      {
-        key: "roles",
-        label: "رتب الإدارة والمشرفين",
-        hint: "من يدير ومن يشرف",
-        icon: UserCog,
-        needs: "canManageTiers",
-        requiresBot: true
-      },
-      {
-        key: "welcome",
-        label: "الرتبة التلقائية",
-        hint: "رتبة الأعضاء والبوتات",
-        icon: UserPlus,
-        needs: "canManage",
-        requiresBot: true
-      },
-      {
-        key: "welcome-messages",
-        label: "رسائل الترحيب",
-        hint: "نص الترحيب والصورة والإيمبد",
-        icon: MessageSquareHeart,
-        needs: "canManage",
-        requiresBot: true
-      },
-      {
-        key: "customization",
-        label: "هوية البوت",
-        hint: "الاسم والصورة والبايو",
-        icon: Palette,
-        needs: "canManageIdentity",
-        requiresBot: true
-      },
-      {
-        key: "levels",
-        label: "المستويات والخبرة",
-        hint: "النقاط والمكافآت والرتب",
-        icon: Trophy,
-        needs: "canManage",
-        requiresBot: true
-      },
-      {
-        key: "invites",
-        label: "الإحالات والدعوات",
-        hint: "حالة الدعوات ولوحة النتائج",
-        icon: Link2,
-        needs: "canManage",
-        requiresBot: true
-      }
-    ]
-  },
-  {
-    id: "moderation",
-    title: "الإشراف والأوامر",
-    items: [
-      {
-        key: "commands",
-        label: "الأوامر",
-        hint: "أوامر الإشراف وإعداداتها",
-        icon: SquareTerminal,
-        needs: "canManageCommands",
-        requiresBot: true
-      },
-      {
-        key: "security",
-        label: "الحماية",
-        hint: "حدود الإشراف والحماية التلقائية",
-        icon: ShieldAlert
-      }
-    ]
-  },
-  {
-    id: "logs",
-    title: "السجلات",
-    items: [
-      {
-        key: "logs",
-        label: "سجلات البوت",
-        hint: "ما الذي فعّله البوت",
-        icon: ScrollText,
-        needs: "canManageLogging",
-        requiresBot: true
-      },
-      {
-        key: "audit",
-        label: "سجل تدقيق اللوحة",
-        hint: "ما الذي غيّره المشغّل",
-        icon: FileClock
-      }
+      { key: "commands", label: "الأوامر", icon: SquareTerminal, needs: "canManageCommands", requiresBot: true },
+      { key: "roles", label: "رتب الإدارة والمشرفين", icon: UserCog, needs: "canManageTiers", requiresBot: true },
+      { key: "welcome", label: "الرتبة التلقائية", icon: UserPlus, needs: "canManage", requiresBot: true },
+      { key: "welcome-messages", label: "رسائل الترحيب", icon: MessageSquareHeart, needs: "canManage", requiresBot: true },
+      { key: "customization", label: "هوية البوت", icon: Palette, needs: "canManageIdentity", requiresBot: true },
+      { key: "levels", label: "المستويات والخبرة", icon: Trophy, needs: "canManage", requiresBot: true },
+      { key: "invites", label: "الإحالات والدعوات", icon: Link2, needs: "canManage", requiresBot: true }
     ]
   },
   {
     id: "system",
-    title: "النظام",
+    title: "nav.section.system",
+    // Both of these are instance-wide rather than per guild, and both are the
+    // platform owner's. The server enforces OWNER_ID on every gated route, and
+    // the sidebar hides what its caller cannot reach.
+    //
+    // «حالة البوت» belongs here and not under «إعدادات الأنظمة» for a reason
+    // that is Discord's, not a preference: a status lives on the bot's gateway
+    // connection, so it is one value for every server the bot is in. It was on
+    // the identity screen, where everything else is scoped to one server — the
+    // one control that reached everywhere on a form that promised it did not.
     items: [
-      // Both of these are instance-wide rather than per guild, and both are the
-      // platform owner's. The server enforces OWNER_ID on every gated route, and
-      // the sidebar hides what its caller cannot reach.
-      //
-      // «حالة البوت» belongs here and not under «إدارة السيرفر» for a reason
-      // that is Discord's, not a preference: a status lives on the bot's gateway
-      // connection, so it is one value for every server the bot is in. It was on
-      // the identity screen, where everything else is scoped to one server — the
-      // one control that reached everywhere on a form that promised it did not.
-      {
-        key: "presence",
-        label: "حالة البوت",
-        hint: "نشاط البوت على ديسكورد",
-        icon: Radio,
-        ownerOnly: true
-      },
+      { key: "presence", label: "حالة البوت", icon: Radio, ownerOnly: true },
       // Instance-wide, not per guild: the reach of this deployment itself.
-      {
-        key: "network",
-        label: "الوصول للشبكة",
-        hint: "من يستطيع فتح اللوحة",
-        icon: Globe,
-        ownerOnly: true
-      }
+      { key: "network", label: "الوصول للشبكة", icon: Globe, ownerOnly: true }
     ]
   }
 ];
@@ -267,7 +170,6 @@ const navSections: { id: string; title: string | null; items: NavItem[] }[] = [
 const settingsNavItem: NavItem = {
   key: "settings",
   label: "الإعدادات",
-  hint: "حسابك ولغتك وأمانك",
   icon: Settings
 };
 
@@ -390,21 +292,25 @@ export function AppShell({
       )}
     >
       {/* ---------------------------------------------------------------- *
-       * Server rail (desktop)
+       * Server rail — a frame column on desktop, the drawer's leading column
+       * on a phone
        *
-       * Every administrable server, always on screen: switching is one click
-       * instead of opening a dropdown, and a server the bot is missing from is
-       * visible rather than hidden behind the one that is open. It sits on the
-       * outer edge, the way a server list is read, with the settings nav
-       * between it and the screen. The phone drawer renders the same data as
-       * labelled rows.
+       * On a monitor the rail is the first column of the frame: every
+       * administrable server on screen, one click away, never behind a menu.
+       * Below `lg` it is not a column of the frame at all — a strip that ate a
+       * permanent slice of a 375px content area — but the leading column of the
+       * navigation drawer, so opening the menu reveals the servers beside the
+       * settings nav. Both placements render the same `GuildRail`; the frame
+       * that surrounds it is the only thing that differs.
        * ---------------------------------------------------------------- */}
-      <GuildRail
-        guilds={guilds}
-        selectedGuildId={selectedGuildId}
-        onSelect={onSelectGuild}
-        onBrowseAll={onBrowseAll}
-      />
+      <div className="hidden min-h-0 overflow-hidden border-e border-sidebar-border bg-sidebar/60 lg:flex lg:flex-col">
+        <GuildRail
+          guilds={guilds}
+          selectedGuildId={selectedGuildId}
+          onSelect={onSelectGuild}
+          onBrowseAll={onBrowseAll}
+        />
+      </div>
 
       {/* ---------------------------------------------------------------- *
        * Sidebar (desktop)
@@ -432,11 +338,6 @@ export function AppShell({
         <ScrollArea className="min-h-0 flex-1">{nav(collapsed)}</ScrollArea>
         <Separator />
         <div className={cn("flex items-center gap-1 p-2", collapsed && "lg:flex-col lg:justify-center")}>
-          {/* The appearance switch lives here on desktop and in the drawer on a
-              phone - one home each. It had drifted out of this row and existed
-              only as a `lg:hidden` header button, which left the desktop with
-              no theme switch at all and the phone with two. */}
-          <AppearanceMenu iconOnly />
           {collapsed ? (
             <AccountMenu
               user={user}
@@ -486,7 +387,7 @@ export function AppShell({
                 <Menu />
               </Button>
             </SheetTrigger>
-            <SheetContent side="right" className="flex h-full w-72 max-w-[85vw] flex-col p-0">
+            <SheetContent side="right" className="flex h-full w-[22rem] max-w-[92vw] flex-col p-0">
               {/* pr-12 reserves the corner where the sheet's absolute close
                   button (right-4) sits — without it the X lands on the brand
                   mark, which starts the title row from the same edge in RTL. */}
@@ -496,44 +397,42 @@ export function AppShell({
                   AL AI
                 </SheetTitle>
               </SheetHeader>
-              {/* The server rail lives beside the nav on desktop; on a phone
-                  the sidebar is this drawer, so the drawer carries the same
-                  list — otherwise there is no way to switch servers without
-                  editing the address bar. */}
-              <GuildRail
-                guilds={guilds}
-                selectedGuildId={selectedGuildId}
-                onSelect={guildId => {
-                  onSelectGuild(guildId);
-                  setMobileOpen(false);
-                }}
-                onBrowseAll={() => {
-                  onBrowseAll();
-                  setMobileOpen(false);
-                }}
-                variant="list"
-              />
-              <Separator />
-              {/* `min-h-0 flex-1` is what keeps the account/appearance row at
-                  the bottom of the drawer instead of pushing it below the
-                  viewport on a short phone. */}
-              <ScrollArea className="min-h-0 flex-1">{nav(false)}</ScrollArea>
-              <div className="shrink-0 border-t border-border">
-                <div className="p-2">
-                  <AppearanceMenu />
-                </div>
-                <Separator />
-                <div className="p-2">
-                  <AccountMenu
-                    user={user}
-                    guild={guild}
-                    onLogout={onLogout}
-                    onOpenSettings={() => {
+              {/* The rail leads the drawer: a `flex` row puts its first child on
+                  the right edge in RTL, so the server list sits against the
+                  reading edge with the settings nav immediately beside it — the
+                  same relationship the desktop frame has, folded into the sheet.
+                  Below `lg` the frame has no rail of its own; this is the only
+                  copy on a phone. */}
+              <div className="flex min-h-0 flex-1">
+                <div className="flex w-[4.5rem] shrink-0 flex-col border-e border-sidebar-border bg-sidebar/60">
+                  <GuildRail
+                    guilds={guilds}
+                    selectedGuildId={selectedGuildId}
+                    onSelect={guildId => {
+                      onSelectGuild(guildId);
                       setMobileOpen(false);
-                      onOpenSettings?.();
+                    }}
+                    onBrowseAll={() => {
+                      setMobileOpen(false);
+                      onBrowseAll();
                     }}
                   />
                 </div>
+                {/* `min-h-0 flex-1` is what keeps the account row at the bottom
+                    of the drawer instead of pushing it below the viewport on a
+                    short phone. */}
+                <ScrollArea className="min-h-0 flex-1">{nav(false)}</ScrollArea>
+              </div>
+              <div className="shrink-0 border-t border-border p-2">
+                <AccountMenu
+                  user={user}
+                  guild={guild}
+                  onLogout={onLogout}
+                  onOpenSettings={() => {
+                    setMobileOpen(false);
+                    onOpenSettings?.();
+                  }}
+                />
               </div>
             </SheetContent>
           </Sheet>
@@ -644,17 +543,17 @@ function SidebarNav({
   hide: (item: NavItem) => boolean;
   onView: (key: ViewKey) => void;
 }) {
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    server: true,
-    moderation: true,
-    logs: true,
-    system: true
-  });
   const { t } = useI18n();
+  // Which groups are open. Every group starts open so a first visit shows the
+  // whole menu; the toggle is there to collapse the ones an operator does not
+  // use, and the choice lives for the life of the mount.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(navSections.map(section => [section.id, true]))
+  );
 
   if (collapsed) {
-    // The rail shows the same screens as icons, in the same order, so the
-    // collapsed layout is the same product rather than a different one.
+    // The collapsed sidebar shows the same screens as icons, in the same order,
+    // so it is the same product rather than a different one.
     return (
       <nav className="flex flex-col items-center gap-1 px-2 py-3">
         {navSections.flatMap(section => section.items).filter(item => !hide(item)).map(item => {
@@ -669,7 +568,7 @@ function SidebarNav({
               aria-current={view === item.key ? "page" : undefined}
               aria-label={label}
               className={cn(
-                "grid size-9 place-items-center rounded-lg transition-ui",
+                "relative grid size-9 place-items-center rounded-lg transition-ui",
                 view === item.key
                   ? "bg-sidebar-primary/15 text-sidebar-primary"
                   : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -694,55 +593,62 @@ function SidebarNav({
   }
 
   return (
-    <nav className="space-y-1 px-3 py-3">
+    <nav className="space-y-4 px-3 py-3">
       {navSections.map(section => {
         // Owner-only entries vanish outright — the sidebar must not advertise a
         // surface the caller cannot reach — while guild-level gates stay as
-        // disabled buttons that name their reason ("أضف AL AI أولاً"…).
-        const items = section.items
-          .filter(item => !hide(item))
-          .map(item => (
-            <NavButton
-              key={item.key}
-              label={navText(t, item.key).label}
-              icon={item.icon}
-              active={view === item.key}
-              disabled={!allowed(item)}
-              reason={denyReason(item)}
-              onClick={() => onView(item.key)}
-            />
-          ));
+        // disabled rows that name their reason ("أضف AL AI أولاً"…).
+        const items = section.items.filter(item => !hide(item));
 
-        // The first section has no heading and is always visible.
-        if (!section.title) return <div key={section.id} className="space-y-1">{items}</div>;
-
-        // A titled section left with nothing (the owner-only «النظام» for a
-        // non-owner) advertises nothing: rendering its heading with zero
-        // entries would read as a broken drawer rather than as "not for you".
+        // A group left with nothing (the owner-only «النظام» for a non-owner)
+        // advertises nothing: rendering its heading with zero entries would read
+        // as a broken drawer rather than as "not for you".
         if (items.length === 0) return null;
 
-        const open = openSections[section.id] ?? true;
         return (
           <Collapsible
             key={section.id}
-            open={open}
+            open={openSections[section.id] ?? true}
             onOpenChange={value => setOpenSections(current => ({ ...current, [section.id]: value }))}
           >
-            <CollapsibleTrigger asChild>
-              <button className="flex w-full items-center justify-between rounded-md px-3 py-2 text-mini font-semibold tracking-wide text-muted-foreground transition-ui hover:text-foreground">
-                {t(`nav.section.${section.id}` as "nav.section.server")}
-                <ChevronsUpDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
-              </button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-0.5 pt-1">{items}</CollapsibleContent>
+            {section.title ? (
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="group flex w-full items-center justify-between rounded-md px-3 py-2 text-mini font-semibold tracking-wide text-muted-foreground transition-ui hover:text-foreground"
+                >
+                  {t(section.title)}
+                  <ChevronDown
+                    className={cn(
+                      "size-3.5 shrink-0 transition-transform",
+                      (openSections[section.id] ?? true) && "rotate-180"
+                    )}
+                  />
+                </button>
+              </CollapsibleTrigger>
+            ) : null}
+            {/* One row per screen, grouped under a heading that opens and closes.
+                The heading is a real toggle so a long menu can be folded down to
+                the groups in use rather than scrolled past in full. */}
+            <CollapsibleContent className="space-y-0.5 pt-1">
+              {items.map(item => (
+                <NavButton
+                  key={item.key}
+                  label={navText(t, item.key).label}
+                  icon={item.icon}
+                  active={view === item.key}
+                  reachable={allowed(item)}
+                  reason={denyReason(item)}
+                  onClick={() => onView(item.key)}
+                />
+              ))}
+            </CollapsibleContent>
           </Collapsible>
         );
       })}
 
       {!guild.botPresent ? (
-        <p className="px-3 pt-3 text-mini leading-relaxed text-muted-foreground">
-          {t("nav.settingsAfterBot")}
-        </p>
+        <p className="px-3 text-mini leading-relaxed text-muted-foreground">{t("nav.settingsAfterBot")}</p>
       ) : null}
     </nav>
   );
@@ -752,17 +658,18 @@ function NavButton({
   label,
   icon: Icon,
   active,
-  disabled,
+  reachable,
   reason,
   onClick
 }: {
   label: string;
   icon: typeof LayoutDashboard;
   active: boolean;
-  disabled?: boolean;
+  reachable: boolean;
   reason?: string | null;
   onClick: () => void;
 }) {
+  const disabled = !reachable;
   const button = (
     <button
       type="button"

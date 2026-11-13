@@ -9,22 +9,26 @@ import { AppShell } from "@/components/app-shell";
 import type { Guild, HealthSnapshot, SessionInfo } from "@/types";
 
 /**
- * One control per screen, on every screen size.
+ * The shell's two layouts, pinned by contract.
  *
- * The shell serves two layouts from one tree: a desktop frame (rail + sidebar
- * + content) and a phone layout (header + drawer). The two drifted apart in
- * exactly the way this file exists to prevent:
+ * One tree serves a desktop frame (rail + sidebar + content) and a phone layout
+ * (drawer + content). The rules that hold on both, and that have been broken
+ * before in ways no render-to-string test can see:
  *
- *  - the theme switch ended up as a `lg:hidden` header button, so the *desktop*
- *    lost its only appearance control while the phone showed two of them;
- *  - the drawer's server list was unbounded, so a long list pushed the settings
- *    nav out of the viewport where it could not be reached or scrolled to.
+ *  - **The server rail is a frame column on desktop, and the drawer's leading
+ *    column on a phone.** On a monitor it sits at the frame's edge, always on
+ *    screen; below `lg` it is *not* a frame column — a strip that ate a
+ *    permanent slice of a 375px content area — but the first column *inside*
+ *    the drawer, so opening the menu reveals the servers beside the settings
+ *    nav. It is never a permanent strip beside the phone content, and never
+ *    missing from the drawer.
+ *  - **The appearance switch lives only on the settings screen.** It used to be
+ *    a popover in the sidebar and the drawer; it is now a tab in `/settings`, so
+ *    the shell must carry *no* appearance trigger at all.
  *
- * Neither is visible to a render-to-string test: the classes are all present
- * and the markup is all there. What is asserted here is the *contract* — one
- * appearance control per layout, one account control per layout, the settings
- * nav present in the drawer, and the server list bounded so it cannot crowd the
- * nav off the screen.
+ * What is asserted here is the contract: the frame rail is desktop-only, the
+ * drawer carries its own rail plus the settings nav and exactly one account
+ * control, and the shell carries no appearance control anywhere.
  */
 
 const guild: Guild = {
@@ -99,45 +103,87 @@ function openDrawer(container: HTMLElement) {
   return dom.window.document.querySelector('[role="dialog"]') as HTMLElement | null;
 }
 
-/** Every appearance trigger on screen, whether the sidebar or the drawer owns it. */
-function appearanceTriggers(root: ParentNode = dom.window.document) {
-  return [...root.querySelectorAll("button")].filter(
-    button => button.getAttribute("aria-label") === "المظهر"
-  );
+/** Every server-rail element on screen, wherever it lives. */
+function railNodes(root: ParentNode = dom.window.document) {
+  return [...root.querySelectorAll('nav[aria-label="البوتات"]')];
 }
 
 function accountTriggers(root: ParentNode = dom.window.document) {
   return [...root.querySelectorAll("button[data-account-trigger]")];
 }
 
-test("the desktop sidebar owns the appearance switch, and nothing else does", () => {
+test("the server rail is a desktop frame column and a drawer column on a phone", () => {
   const { container, root } = mountShell();
   try {
-    // The sidebar is the only element that is a desktop-only column; its
-    // appearance switch must exist there, because the header's used to be
-    // `lg:hidden` and left the desktop with none at all.
-    const sidebar = container.querySelector("aside");
-    assert.ok(sidebar, "the desktop sidebar is rendered");
-    const inSidebar = appearanceTriggers(sidebar);
-    assert.equal(inSidebar.length, 1, "the sidebar carries exactly one appearance switch");
+    // The frame renders exactly one rail, and it is desktop-only: below `lg`
+    // the strip is hidden and the drawer carries its own copy instead.
+    const frameRail = railNodes(container).find(rail => !rail.closest('[role="dialog"]'));
+    assert.ok(frameRail, "the frame renders a server rail");
+    assert.equal(
+      railNodes(container).filter(rail => !rail.closest('[role="dialog"]')).length,
+      1,
+      "the frame renders exactly one server rail"
+    );
+    assert.equal(frameRail!.closest("aside"), null, "the frame rail is not the desktop sidebar");
+    // The frame rail is gated to `lg` — on a phone the drawer owns the list.
+    const wrapper = frameRail!.parentElement;
+    assert.ok(wrapper, "the frame rail is wrapped by its column");
+    assert.match(
+      wrapper!.className,
+      /\bhidden\b/,
+      "the frame rail is hidden below `lg` (the drawer carries it instead)"
+    );
+    assert.match(wrapper!.className, /lg:flex/, "the frame rail shows again at `lg`");
 
-    // The header must not carry a second one: the phone header button was the
-    // duplicate. `lg:hidden` on it is a CSS statement the test cannot evaluate,
-    // so the rule is "the header does not render one at all".
-    const header = container.querySelector("header");
-    assert.ok(header, "the header is rendered");
-    assert.equal(appearanceTriggers(header).length, 0, "the header carries no appearance switch");
+    // The rail holds every administrable server as a link or button.
+    const items = frameRail!.querySelectorAll("a, button");
+    assert.ok(items.length >= 2, "the rail carries the server and the browse control");
 
-    // One account control on desktop, in the sidebar.
-    assert.equal(accountTriggers(sidebar).length, 1, "the sidebar carries one account control");
-    assert.equal(accountTriggers(header).length, 0, "the header carries no account control");
+    // The drawer is the only rail on a phone.
+    const drawer = openDrawer(container);
+    assert.ok(drawer, "the drawer opens");
+    const drawerRails = railNodes(drawer!);
+    assert.equal(drawerRails.length, 1, "the drawer carries exactly one server rail");
+    assert.ok(
+      drawerRails[0].querySelectorAll("a, button").length >= 2,
+      "the drawer rail carries the servers and the browse control"
+    );
   } finally {
     act(() => root.unmount());
     container.remove();
   }
 });
 
-test("the phone drawer carries the settings nav and one of each control", () => {
+test("the shell carries no appearance switch — the settings screen owns it", () => {
+  const { container, root } = mountShell();
+  try {
+    // The appearance control is a tab in `/settings` now. A popover here would
+    // be a second source of truth for the theme.
+    const appearance = [...container.querySelectorAll("button")].filter(
+      button => button.getAttribute("aria-label") === "المظهر"
+    );
+    assert.equal(appearance.length, 0, "the shell renders no appearance trigger");
+
+    const header = container.querySelector("header");
+    assert.ok(header, "the header is rendered");
+    assert.equal(
+      [...header!.querySelectorAll("button")].filter(b => b.getAttribute("aria-label") === "المظهر").length,
+      0,
+      "the header carries no appearance switch"
+    );
+
+    // One account control on desktop, in the sidebar.
+    const sidebar = container.querySelector("aside");
+    assert.ok(sidebar, "the desktop sidebar is rendered");
+    assert.equal(accountTriggers(sidebar!).length, 1, "the sidebar carries one account control");
+    assert.equal(accountTriggers(header!).length, 0, "the header carries no account control");
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});
+
+test("the phone drawer carries the server rail, the settings nav and one account control", () => {
   const { container, root } = mountShell();
   try {
     const drawer = openDrawer(container);
@@ -152,12 +198,14 @@ test("the phone drawer carries the settings nav and one of each control", () => 
       );
     }
 
-    assert.equal(appearanceTriggers(drawer!).length, 1, "the drawer carries exactly one appearance switch");
+    // The rail leads the drawer: the server list is inside it, on the phone,
+    // beside the settings nav.
+    const rails = railNodes(drawer!);
+    assert.equal(rails.length, 1, "the drawer carries the server rail");
     assert.equal(accountTriggers(drawer!).length, 1, "the drawer carries exactly one account control");
 
-    // And the header, with the drawer open, still carries none of either.
+    // And the header, with the drawer open, still carries no account control.
     const header = container.querySelector("header");
-    assert.equal(appearanceTriggers(header!).length, 0, "the header carries no appearance switch");
     assert.equal(accountTriggers(header!).length, 0, "the header carries no account control");
   } finally {
     act(() => root.unmount());
@@ -165,45 +213,64 @@ test("the phone drawer carries the settings nav and one of each control", () => 
   }
 });
 
-test("the drawer's server list is bounded so it cannot crowd out the settings nav", () => {
-  // A long list is what triggers the regression; three servers never did.
-  const many: Guild[] = Array.from({ length: 14 }, (_, index) => ({
-    ...guild,
-    id: `1111111111111111${String(index).padStart(2, "0")}`,
-    name: `سيرفر رقم ${index + 1}`,
-    botPresent: index % 3 !== 0
-  }));
-
-  const { container, root } = mountShell(many);
+test("the settings nav groups are collapsible: a heading toggles its rows", () => {
+  const { container, root } = mountShell();
   try {
     const drawer = openDrawer(container);
     assert.ok(drawer, "the drawer opens");
 
-    // The server list lives in a scroll area with a viewport-height cap. jsdom
-    // has no layout, so the assertion is on the class that carries the cap —
-    // the value the browser turns into a height. Without it the list is
-    // unbounded and the settings nav is pushed off the viewport.
-    const serverNav = drawer!.querySelector('nav[aria-label="البوتات"]');
-    assert.ok(serverNav, "the drawer carries the server list");
-    // The ScrollArea's cap lives on the Root; the viewport is its child. The
-    // cap is what the browser turns into a height.
-    const viewport = serverNav!.querySelector("[data-radix-scroll-area-viewport]");
-    assert.ok(viewport, "the server list is inside a scroll area");
-    const scroller = viewport!.parentElement;
-    assert.ok(scroller, "the scroll area has a root element");
-    assert.match(
-      scroller!.className,
-      /max-h-\[/,
-      "the server list is capped: an uncapped list pushes the settings nav below the viewport"
-    );
+    // Both group headings are present and open by default, so every module is
+    // reachable without a first click.
+    for (const title of ["عام", "إعدادات الأنظمة"]) {
+      const heading: HTMLButtonElement | undefined = [...drawer!.querySelectorAll("button")].find(button =>
+        (button.textContent ?? "").includes(title)
+      );
+      assert.ok(heading, `the drawer has a «${title}» group heading`);
+      assert.equal(heading.getAttribute("data-state"), "open", `«${title}» starts open`);
+    }
 
-    // The settings nav itself is the flex child that takes the rest.
-    const settingsScroll = [...drawer!.querySelectorAll("[data-radix-scroll-area-viewport]")].find(
-      viewport => !viewport.closest('nav[aria-label="البوتات"]')
+    for (const label of ["الأوامر", "رتب الإدارة والمشرفين", "هوية البوت", "المستويات والخبرة"]) {
+      assert.ok(
+        [...drawer!.querySelectorAll("button")].some(button => (button.textContent ?? "").includes(label)),
+        `«${label}» is a row under its group heading`
+      );
+    }
+
+    // Toggling a heading folds its rows away — the accordion behaviour the
+    // request restored. The trigger points at its region through `aria-controls`,
+    // so the region's own state is read from the element it names.
+    const modulesHeading = [...drawer!.querySelectorAll("button")].find(button =>
+      (button.textContent ?? "").includes("إعدادات الأنظمة")
+    )!;
+    const regionId = modulesHeading.getAttribute("aria-controls");
+    const region = regionId ? drawer!.querySelector(`#${CSS.escape(regionId)}`) : null;
+    assert.ok(region, "the heading controls a region");
+    act(() => {
+      modulesHeading.click();
+    });
+    assert.equal(modulesHeading.getAttribute("data-state"), "closed", "the heading closes its group");
+    assert.equal(region!.getAttribute("data-state"), "closed", "the group's rows are folded away");
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});
+
+test("a server without the bot is a direct invite link, not a settings route", () => {
+  const absent: Guild = { ...guild, id: "222222222222222222", name: "سيرفر بدون البوت", botPresent: false };
+  const { container, root } = mountShell([guild, absent]);
+  try {
+    const rail = railNodes(container)[0];
+    assert.ok(rail, "the rail is rendered");
+    const invite = [...rail.querySelectorAll("a")].find(anchor =>
+      (anchor.getAttribute("href") ?? "").includes("/invite")
     );
-    assert.ok(settingsScroll, "the settings nav has its own scroll region");
-    const settingsRoot = settingsScroll!.closest(".flex-1");
-    assert.ok(settingsRoot, "the settings nav grows into the space the server list does not take");
+    assert.ok(invite, "an uninvited server links straight to the invite flow");
+    assert.equal(
+      invite!.getAttribute("href"),
+      `/api/guilds/${absent.id}/invite`,
+      "the invite link targets that server"
+    );
   } finally {
     act(() => root.unmount());
     container.remove();
