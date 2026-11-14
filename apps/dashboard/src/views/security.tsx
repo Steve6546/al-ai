@@ -491,7 +491,7 @@ function AntiNukePanel({ guild }: { guild: Guild }) {
                   >
                     <Icon className="size-3.5 shrink-0" aria-hidden />
                     <span className="truncate">{t(`security.family.${entry}` as TranslationKey)}</span>
-                    <span className="tabular text-mini opacity-80">
+                    <span className="tabular text-mini">
                       {live}/{rows.length}
                     </span>
                   </button>

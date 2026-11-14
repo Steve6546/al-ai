@@ -68,6 +68,17 @@ async function liveSession() {
         })
     ).DATABASE_URL;
   if (!connectionString) throw new Error("DATABASE_URL is not set - run through npm so --env-file=.env applies");
+  // The cookie the server will accept depends on its own NODE_ENV, which may
+  // only exist in `.env` when the script is run directly.
+  const envFileNodeEnv = Object.fromEntries(
+    (await readFile(join(process.cwd(), ".env"), "utf8"))
+      .split(/\r?\n/)
+      .filter(line => line && !line.startsWith("#") && line.includes("="))
+      .map(line => {
+        const index = line.indexOf("=");
+        return [line.slice(0, index).trim(), line.slice(index + 1).trim()];
+      })
+  ).NODE_ENV;
   const client = new Client({ connectionString, application_name: "al-ai-ui-check" });
   await client.connect();
   const session = await client.query(
@@ -79,7 +90,7 @@ async function liveSession() {
   await client.end();
   if (!session.rows.length) throw new Error("no valid session in the database - run `npm run dev:session` first");
   if (!guild.rows.length) throw new Error("no guild with the bot in it - the pages would all be empty");
-  return { session: session.rows[0].id, guild: guild.rows[0].id };
+  return { session: session.rows[0].id, guild: guild.rows[0].id, nodeEnv: envFileNodeEnv };
 }
 
 /** The pages of the dashboard, in the order an operator meets them. */
@@ -188,6 +199,33 @@ async function waitForShell(cdp, sessionId, timeoutMs = 10_000) {
     await sleep(300);
   }
   return state;
+}
+
+/**
+ * Opens a live page and waits for the signed-in shell, surviving the throttle.
+ *
+ * The BFF caps a session at 120 requests a minute. A sweep of every page in
+ * both palettes is paced for that, but the margin is thin enough that a burst
+ * (a slow render that retries, a machine under load) can tip one navigation
+ * over the limit. The refused call is answered `429`, the SPA treats that as a
+ * lost session and paints the login card - and the check would report a
+ * dashboard that never rendered when the only thing that happened is that it
+ * was asked to work faster than the protection allows.
+ *
+ * The bucket refills on a one-minute window, so a refusal is waited out rather
+ * than counted as a failure. `waitForShell` returning "login" is the signal:
+ * a genuinely signed-out session would also be "login", but the live pass has
+ * already proven the cookie works, so a login card here is the throttle.
+ */
+async function openLivePage(cdp, sessionId, url, { attempts = 3 } = {}) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    await cdp.send("Page.navigate", { url }, sessionId);
+    await waitForApp(cdp, sessionId);
+    const shell = await waitForShell(cdp, sessionId);
+    if (shell === "shell" || attempt === attempts) return shell;
+    await sleep(20_000);
+  }
+  return "login";
 }
 
 /**
@@ -622,11 +660,20 @@ async function main() {
 
     // The live pass signs the browser in with the session the database holds,
     // so the pages answer with the real data. The cookie is never printed.
+    //
+    // The name is environment-dependent, exactly as `SESSION_COOKIE_NAME` in
+    // packages/core is: production issues `__Host-al_ai_session` (a browser
+    // refuses that prefix without Secure), development keeps the unprefixed
+    // one. Writing the prefixed name unconditionally made the cookie invisible
+    // to a development server, so the sweep toured the login card instead of
+    // the pages — the failure looked like a refused session, not a wrong name.
     if (live) {
+      const cookieName =
+        (process.env.NODE_ENV ?? live.nodeEnv) === "production" ? "__Host-al_ai_session" : "al_ai_session";
       const { success } = await cdp.send(
         "Network.setCookie",
         {
-          name: "__Host-al_ai_session",
+          name: cookieName,
           value: live.session,
           url: "http://127.0.0.1:3000",
           path: "/",
@@ -752,12 +799,12 @@ async function main() {
           );
           for (const page of LIVE_PAGES) {
             const path = `/dashboard/${guild}${page.view ? `/${page.view}` : ""}`;
-            await cdp.send("Page.navigate", { url: `${origin}${path}` }, sessionId);
-            await waitForApp(cdp, sessionId);
             // A page that lost its session renders the login card, which is
             // also "rendered" - the overflow numbers would then describe a
-            // card, and pass. The shell is the thing this sweep measures.
-            const shell = await waitForShell(cdp, sessionId);
+            // card, and pass. The shell is the thing this sweep measures, and
+            // `openLivePage` waits out the session throttle rather than
+            // mistaking it for a signed-out screen.
+            const shell = await openLivePage(cdp, sessionId, `${origin}${path}`);
             if (shell !== "shell") {
               failures.push(`live ${palette.name}/${width}px ${page.label}: the signed-in shell did not render (${shell})`);
               console.log(`FAIL  live ${palette.name.padEnd(5)} ${String(width).padStart(4)}px ${page.label.padEnd(17)} shell=${shell}`);
@@ -825,9 +872,7 @@ async function main() {
         );
         for (const page of LIVE_PAGES) {
           const path = `/dashboard/${live.guild}${page.view ? `/${page.view}` : ""}`;
-          await cdp.send("Page.navigate", { url: `${origin}${path}` }, sessionId);
-          await waitForApp(cdp, sessionId);
-          const shell = await waitForShell(cdp, sessionId);
+          const shell = await openLivePage(cdp, sessionId, `${origin}${path}`);
           if (shell !== "shell") {
             failures.push(`live ${palette.name}px ${page.label}: the signed-in shell did not render (${shell})`);
             console.log(`FAIL  live ${palette.name.padEnd(5)} ${String(1440).padStart(4)}px ${page.label.padEnd(17)} shell=${shell}`);

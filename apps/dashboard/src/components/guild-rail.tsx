@@ -167,7 +167,7 @@ function RailItem({ guild, selected, onSelect }: { guild: Guild; selected: boole
             )}
           >
             {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
-            <AvatarFallback className="rounded-2xl text-micro">{initials(guild.name)}</AvatarFallback>
+            <AvatarFallback className="rounded-2xl text-micro" data-initials={initials(guild.name)} />
           </Avatar>
           <span
             aria-hidden="true"

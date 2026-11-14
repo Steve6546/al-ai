@@ -171,7 +171,11 @@
   --accent-foreground: oklch(0.97 0 0);
 
   --destructive: oklch(0.65 0.2 25);
-  --destructive-foreground: oklch(0.99 0 0);
+  /* Dark text on the light destructive fill, exactly like `--warning-foreground`
+     and `--success-foreground` in this block: at L=0.65 the red is bright
+     enough that white text lands at 3.45:1 — below AA for a badge — while a
+     near-black foreground reads at 5.9:1. */
+  --destructive-foreground: oklch(0.16 0.02 25);
 
   --success: oklch(0.72 0.15 152);
   --success-foreground: oklch(0.16 0.02 152);
@@ -356,6 +360,22 @@
   .tabular {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
+  }
+
+  /*
+   * Decorative text drawn as generated content.
+   *
+   * A server's fallback initials ("PL") sit inside the rail button whose
+   * accessible name is the full `aria-label` ("Player066514 — البوت غير مضاف").
+   * When the initials are a real text node, axe reads them as the button's
+   * *visible* text and flags `label-content-name-mismatch`: the visible text is
+   * not part of the name. `aria-hidden` does not help — the rule inspects the
+   * rendered glyphs, not the accessibility tree — but generated content is not
+   * part of the accessible name computation, so the glyph stays on screen while
+   * the name stays authoritative. `data-initials` carries the value.
+   */
+  [data-initials]::after {
+    content: attr(data-initials);
   }
 
   /*
