@@ -1,497 +1,151 @@
 # AL AI
 
-Arabic RTL Discord management bot and secure control dashboard.
+Arabic-first (RTL) Discord management bot with a secure control dashboard.
+Three workspaces, three processes, one shared contract package.
 
-- `apps/bot` — the long-lived Discord Gateway client and the integration adapter.
-- `apps/dashboard` — the RTL dashboard UI **and** its BFF (Fastify, TypeScript).
-- `packages/core` — shared contracts: event schema, permissions, crypto, session
-  policy, appearance normalisation. The single source of truth for every shape
-  that crosses a process boundary.
-- `infra` — Dockerfiles, `docker-compose.yml`, and `schema.sql`.
+| Layer | Stack | Path |
+|---|---|---|
+| Bot | discord.js 14, Gateway + REST v10, PostgreSQL | `apps/bot` |
+| Dashboard SPA | React 19, Vite, Tailwind 4, HeroUI, RTL | `apps/dashboard/src` |
+| BFF | Fastify 5, TypeScript, session/2FA, repositories | `apps/dashboard/server` |
+| Contracts | TypeScript types, permissions, event/crypto schema | `packages/core` |
+| Infra | PostgreSQL 17, Docker Compose, schema | `infra` |
 
-The rules that keep this codebase coherent are in [`docs/GOVERNANCE.md`](docs/GOVERNANCE.md).
-Several of them are enforced by tests in `apps/bot/test/governance.test.ts`.
-
-> **Delivery note.** The working tree holds a large body of work that is *not*
-> in Git yet: the PowerShell entry points (`scripts/*.ps1`), the verification
-> tools (`scripts/*.mjs`), the theme engine and the new dashboard components,
-> and the test files that go with them. **A copy of only the tracked files does
-> not build** - the first missing module is `src/lib/theme.ts`. The project
-> becomes reproducible the moment those paths are added; the list of what has to
-> be included is in the delivery report, and `git status --short` is the
-> authority on it. Nothing here is a secret, and `.env` stays out of Git.
+Node **24.22** (`.nvmrc`), npm **11**, floor Node >= 22.19.
 
 ## Architecture
 
 ```
-┌──────────────────────┐
-│  Browser (RTL SPA)   │  React 19 + Vite, no token ever reaches it
-│  apps/dashboard/src  │
-└──────────┬───────────┘
-           │ same-origin fetch, httpOnly session cookie
-           ▼
-┌──────────────────────┐        ┌──────────────────────────────┐
-│   Fastify BFF :3000  │───────▶│  PostgreSQL :55432           │
-│  apps/dashboard/     │  SQL   │  guilds, logging, commands,  │
-│  server/             │        │  bot_identity, audit trail   │
-│                      │        └──────────────────────────────┘
-│  • session + tier    │
-│  • TtlCache 60s      │        ┌──────────────────────────────┐
-│  • RequestThrottle   │───────▶│  Discord REST API v10        │
-│  • appearance writer │  HTTPS │  (the BFF is the only writer│
-└──────────────────────┘        │   of every appearance field) │
-           ▲                    └──────────────────────────────┘
-           │ signed HMAC heartbeat every 30s  ▲
-           │ (/internal/, loopback only)       │
-┌──────────┴───────────┐        ┌──────────────┴───────────────┐
-│ Integration adapter  │        │  Discord Gateway (WebSocket) │
-│ 127.0.0.1:3400       │◀───────│  apps/bot/src/lib/discord.ts │
-│ inbound reads only   │        └──────────────────────────────┘
-└──────────────────────┘
+ Browser (RTL SPA) --same-origin/httpOnly cookie--> Fastify BFF :3000 --REST v10--> Discord
+                                                      │  ├── PostgreSQL (55432 / 5432 in Compose)
+                                                      │  └── signed HMAC heartbeat (loopback)
+ Discord Gateway (WebSocket) <--> bot <--> adapter 127.0.0.1:3400
 ```
 
-**Data-flow rules that are load-bearing:**
+`packages/core` is the single source of truth for every shape crossing a
+process boundary. The dashboard never holds a Discord token; the bot never
+writes appearance fields. Full diagram, data-flow rules and module map:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-1. **The dashboard never holds a Discord token.** Every write re-resolves the
-   caller's tier on the server (`requireTierForGuild`) before it is allowed. A
-   guild ID is not a secret — it appears in every invite link — so
-   `requireSession` alone would let any signed-in account read any guild by
-   pasting its ID.
-2. **`apps/bot/src/lib/discord.ts` is the only file that imports `discord.js`**
-   (GOVERNANCE rule 2). The BFF talks REST over `fetch`; the bot owns the Gateway.
-3. **One writer per field.** The dashboard writes every appearance field
-   (nickname, avatar, banner, bio, role colour, role icon). The bot's only write
-   is the **presence** — status and activity live on the Gateway connection and
-   have no REST route. Claiming otherwise in the UI would be a promise nobody
-   keeps.
-4. **The bot's Gateway cache is the cheap read path.** `listChannels` on the
-   adapter answers from `client.guilds.cache`, which costs no REST quota.
+## Quick start
 
-## 1. Configure
+```bash
+cp .env.example .env      # fill in the values (see below)
+npm ci
+```
+
+**Windows — supervised (database, dashboard, bot, optional tunnel):**
+
+```bash
+npm run dev                            # localhost only; supervises and handles Ctrl+C
+npm run dev -- -Lan                    # + devices on the same Wi-Fi/router
+npm run dev -- -Lan -OpenFirewall      # + Windows Firewall inbound rule (run as Administrator)
+npm run dev -- -Tunnel                 # + the ngrok tunnel (public HTTPS)
+npm run dev:status                     # what is up, both URLs, and firewall state
+npm run dev:restart                    # pick up a backend change (no hot reload)
+npm run dev:stop
+```
+
+The dashboard BFF binds `0.0.0.0`; its **Host gate** is what limits reach.
+`-Lan` (or the «الوصول للشبكة» screen → «الشبكة المحلية») opens that gate
+without starting ngrok. Both launchers print the exact localhost and LAN URLs
+at startup, detected from the live interface table — no address is hardcoded.
+
+**Linux / macOS / VPS — portable, no PowerShell:**
+
+```bash
+npm start                   # two Node children; bring your own PostgreSQL
+AL_AI_REMOTE_ACCESS=lan npm start      # also answer the router's devices
+npm start -- --dry-run      # show the resolved commands and both URLs
+npm start -- --service=bot  # one service
+```
+
+**Docker Compose (fresh VPS):**
 
 ```bash
 cp .env.example .env
+docker compose -f infra/docker-compose.yml up --build -d   # http://localhost:3000
 ```
 
-Fill in `BOT_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, and generate
-the three secrets with:
+Compose applies `infra/schema.sql` on the first initialisation of a fresh
+volume and waits for the database healthcheck. Slash commands are deployed
+separately, never at runtime: `npm run deploy-commands --workspace=@al-ai/bot`.
 
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
+## Environment variables
 
-`KEY_ROTATION_DAYS` and `AUDIT_RETENTION_DAYS` are required whenever
-`NODE_ENV=production`. They are never guessed.
+`.env` is gitignored; `.env.example` is the contract. Full table and
+production requirements: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-### Discord Developer Portal checklist
-
-The bot will not work with default portal settings. Enable these toggles:
-
-**Bot → Privileged Gateway Intents** (two of the three are required):
-
-| Intent | Required? | Why |
-|---|---|---|
-| `SERVER MEMBERS INTENT` | **yes** | member joins/leaves, role changes, nickname updates — the member log, the tier resolver, and the anti-nuke join-flood detector all depend on it |
-| `MESSAGE CONTENT INTENT` | **yes** | the automod path reads message text; without it those events arrive empty |
-| `PRESENCE INTENT` | **no — leave it OFF** | AL AI sets its *own* presence (that is an outbound call and needs no intent) but never reads anyone else's. Reading them is forbidden by GOVERNANCE rule 8, so the toggle is deliberately not requested |
-
-The intents the code actually requests, for reference, are in
-`apps/bot/src/lib/discord.ts`: `Guilds`, `GuildMembers`, `GuildMessages`,
-`MessageContent`, `GuildVoiceStates`, `GuildModeration`, `GuildInvites`,
-`GuildExpressions`.
-
-**OAuth2 → Scopes:** `bot` and `applications.commands`.
-The dashboard itself uses the separate `identify` + `guilds` scopes on its own
-login flow — that is a different client credential path and needs no intent.
-
-**Recommended permissions:** `permissions=8` (Administrator). AL AI manages
-roles, channels, bans and the colour/icon of its own role; the narrower
-equivalent is a long list that is easy to get subtly wrong, and a missing bit
-shows up as a silent no-op rather than an error. Note that **Administrator
-(0x8) supersedes every other bit and does not expand into them** — AL AI's
-permission checks test `0x8` first for exactly that reason, so a naive bitwise
-test does not report a missing permission for a bot that holds Administrator.
-
-**OAuth2 → Redirects:** add both exact values (no trailing slash, no query):
-
-- `http://localhost:3000/auth/discord/callback` — sign-in on this machine
-- `https://<your-ngrok-dev-domain>/auth/discord/callback` — sign-in through the tunnel
-
-Discord accepts HTTPS redirect URIs and loopback HTTP only, and compares the
-`redirect_uri` exactly. The dashboard builds the public value from the origin
-the browser is on; a static ngrok dev domain keeps it stable across restarts.
-If the tunnel hostname changes, add the new URI before the next sign-in.
-
-Set `DASHBOARD_URL` to the public HTTPS origin so the bot's `/settings` and
-`/dashboard` replies link where members can reach them. `DASHBOARD_INTERNAL_URL`
-is optional and defaults to `DASHBOARD_URL`; point it at `http://127.0.0.1:3000`
-to keep signed health snapshots off the tunnel.
-
-## 2. Run with Docker (recommended)
-
-```bash
-docker-compose -f infra/docker-compose.yml up --build
-```
-
-Then open <http://localhost:3000>.
-
-If your machine already runs PostgreSQL on 5432, set `POSTGRES_HOST_PORT` in
-`.env` to a free port (the compose file publishes the container there).
-
-The images are built on `node:24.22.0-bookworm-slim` - the version in
-`.nvmrc`, which is the version the project is developed and verified on. They
-run `node_modules/.bin/tsx` rather than `npx tsx`, so the stop signal reaches
-the program instead of a wrapper.
-
-## 3. Run against a local PostgreSQL
-
-The stack runs without Docker as well. In this workspace PostgreSQL 17 lives at
-`C:\Users\dlwta\.al-ai\pgdata` on port **55432**, and that data directory is
-deliberately outside the repository.
-
-### The toolchain
-
-| Tool | Version | Why |
-|---|---|---|
-| Node | **24.22.0** (`.nvmrc`) | the current LTS; the floor the project supports is 22.19.0 (`engines`), and CI tests both |
-| npm | **11.19.1** (`packageManager`) | the npm that ships with that Node, and the one the lock was resolved against |
-
-`npm ci` reproduces the locked tree exactly. It needs the services **stopped**:
-the bot holds `@napi-rs/canvas`'s native binary open, and `npm ci` cannot
-replace a file that is in use.
-
-### One command
-
-```bash
-npm run dev                # database (on demand) + dashboard + bot, then supervise
-npm run dev -- -Tunnel     # the same, plus the ngrok tunnel
-npm run dev -- -Detach      # start and return to the prompt (fire and forget)
-npm run dev:status         # what is up, on which ports, and the health verdict
-npm run dev:restart        # stop, then start
-npm run dev:stop           # graceful stop (a real Ctrl-C to each service)
-```
-
-`scripts/dev.ps1` starts the database only if its port is closed and waits for it
-before launching anything, sends each service's output to `.al-ai/logs/`, and
-records the running pids in `.al-ai/dev.json`. **By default it supervises**: it
-stays in the foreground, and a Ctrl+C there stops the whole stack — the trap
-turns the interrupt into a graceful stop, so the bot flushes its pipeline and
-releases its lock while the dashboard closes its pool. Nothing is orphaned: each
-child is named by port owner, command line, remembered pid, **and the bot's own
-lock file**, rather than assumed to have died with the shell. A forced kill is
-the fallback, not the norm.
-The tunnel is managed by the dashboard through ngrok. A fixed ngrok hostname
-set on the network screen (or in `NGROK_DOMAIN`) survives restarts and keeps the
-registered OAuth callback stable; a random ngrok URL does not, and is labelled
-«رابط مؤقت» in the screen. ngrok's own config file carries the account token, so
-the dashboard never stores a second copy of it. Stopping the stack leaves a
-running tunnel alone — use the network screen's «هذا الجهاز فقط» / «الشبكة
-المحلية» choice to end it. The free ngrok plan includes one dev domain and shows
-a one-time browser interstitial; its monthly request and bandwidth limits are
-listed at <https://ngrok.com/docs/pricing-limits/free-plan-limits>.
-`-Detach` skips supervision when you want the prompt back; `npm run dev:stop`
-then stops that stack later.
-Extra flags go after `--`: `-Tunnel`, `-Detach`, `-NoDb`, `-NoDashboard`, `-NoBot`.
-
-#### Exactly one copy of each service
-
-`npm run dev` is the only launcher. `npm run dev:bot` and `npm run dev:dashboard`
-delegate to it (`-NoDashboard` / `-NoBot`), and each workspace's `dev` script runs
-its service in **one** process (`node --import tsx`) instead of under a file
-watcher. That is not tidiness: `tsx watch` is a second supervisor. It keeps its
-own child, restarts it behind the bootstrapper's back, and appears in the task
-list as a second `Node.js JavaScript Runtime` for a single bot.
-
-Three independent guards stop a duplicate, and each one fails closed:
-
-| Guard | Process | Refuses when |
-|---|---|---|
-| `.al-ai-bot.lock` — atomic `open(…, "wx")`, then pid **and** start-time checks | bot | a live bot already owns the lock |
-| integration adapter port `3400` (loopback only) | bot | the port is taken — the bot exits **before** `client.login()`, so two Gateways can never share one token |
-| `PORT` (`3000`) | dashboard | the port is taken — the dashboard exits instead of starting a second ngrok agent on the same domain |
-
-`dev.ps1` and `watchdog.ps1` read that same lock, so a bot that is alive but not
-listening — adapter switched off, still binding, or started by hand from
-`apps/bot` — is adopted rather than duplicated, and `dev:stop` still stops it.
-
-The bot has no file watcher on purpose. To pick up a change, `npm run dev:restart`;
-the database stays up, so it is a few seconds.
-
-`npm run dev:ui` is the raw Vite server (`:5173`) for front-end work. It serves
-the SPA only and has no `/api` proxy, so it needs the BFF from `npm run dev`.
-
-The database alone has its own entry point (`npm run db:start`, `db:stop`,
-`db:status`, `db:verify`). `db:verify` reads `DATABASE_URL`, connects with those
-credentials using the same `pg` driver the dashboard uses, and runs one read-only
-query (`SELECT 1`). It exits non-zero on a missing variable, a bad URL, a refused
-connection, failed authentication, or a database mismatch, and it never prints
-the password or the URL - the right check to gate a deploy or a CI step.
-`scripts/postgres.ps1 -Action verify` is the faster protocol-level probe
-(`pg_isready`, no login); PostgreSQL documents that it can succeed with wrong
-credentials, which is why it is not the deploy gate. To
-make the database an auto-starting Windows service instead, run
-`scripts/setup-db-service.ps1` once from an elevated shell.
-
-### By hand
-
-```bash
-# 1. PostgreSQL — start it as a *background task*, not with pg_ctl.
-#    `pg_ctl start` forks a child that the sandbox kills when the command
-#    returns, so the server dies silently a second later.
-"C:/Program Files/PostgreSQL/17/bin/postgres.exe" \
-  -D C:/Users/dlwta/.al-ai/pgdata -p 55432 -c listen_addresses=127.0.0.1
-
-# 2. Apply the schema (psql hangs without -w and a redirected stdin)
-"/c/Program Files/PostgreSQL/17/bin/psql.exe" "$DATABASE_URL" -w -f infra/schema.sql < /dev/null
-
-# 3. Dashboard (background task) — it does NOT read .env on its own
-cd apps/dashboard && ../../node_modules/.bin/tsx --env-file=../../.env server/index.ts
-#    → http://127.0.0.1:3000
-
-# 4. Bot (background task) — it loads .env through `dotenv/config`
-cd apps/bot && ../../node_modules/.bin/tsx --env-file=../../.env src/index.ts
-#    → adapter on http://127.0.0.1:3400
-```
-
-Use the local `tsx` binary directly rather than through `npx`: `npx` adds a
-wrapper process per service, worth roughly 70 MB each while running. The
-bootstrapper avoids the wrapper a third way, `node --import tsx`, which loads the
-loader in the service's own process so there is nothing extra to orphan.
-
-`node server/index.ts` **does not work** — on Node 22.22 with
-`process.features.typescript === "strip"`, the source imports `./env.js` while
-the file is `env.ts`, and Node does not rewrite the extension. That is a
-tsx/esbuild feature, not type-stripping.
-
-The dashboard binds `0.0.0.0:3000`; set `PORT` to move it. The bot holds a lock
-file (`.al-ai-bot.lock`) recording the owning pid, its image, and when the lock
-was taken. A lock left by a process that has since exited is reclaimed on the
-next start, and so is one whose pid was recycled: the holder must be a Node
-process that started no later than the lock was written, so neither an unrelated
-program nor *another* Node process that took over the number can wedge startup.
-Only a lock held by a still-running bot blocks a second instance.
-
-### Ports
-
-| Service | Port | Bind |
-|---|---|---|
-| Dashboard (BFF + SPA) | 3000 | `0.0.0.0` |
-| Integration adapter | 3400 | `127.0.0.1` only |
-| PostgreSQL | 55432 locally, 5432 by Compose default | `127.0.0.1` |
-
-## 4. Deploy slash commands
-
-Slash commands are **never** published at runtime. Deployment is a separate,
-deliberate step:
-
-```bash
-npm run deploy-commands --workspace=@al-ai/bot
-```
-
-`required: true` on a slash option is **frozen at registration time**, so making
-an option required in Discord makes the setting one-way — it can never be turned
-back off. AL AI therefore marks no option required and enforces the requirement
-in the bot instead.
-
-## 5. Verify
-
-```bash
-npm run verify   # lint → check:schema → test → build, in that order
-```
-
-| Suite | Tests | Covers |
-|---|---|---|
-| `apps/bot/test` | 301 | crypto, nonces, routing, permissions, pipeline, presence sync, governance, Discord-constant alignment, anti-nuke, adapter, security, the instance lock (including the two starters racing for it), the mention policy |
-| `apps/dashboard/test` | 345 | every screen renders without throwing (real jsdom mount, not `renderToString`); the error boundary contains a failure and recovers on retry; a gated role icon is disabled and omitted from the write; the unsaved-changes bar driven through the interface — absent until an edit, cleared by «إعادة ضبط», cleared by a clean save, and kept with the server's reason when the save is refused; Discord read shapes; the upstream retry policy (a read survives one 5xx, a write does not); the image-by-URL policy (private hosts, redirects, pinned addresses, size and type ceilings); storage round-trips; appearance field outcomes; route guards; cache |
-| `packages/core/test` | 203 | event schema, tiers, session policy, appearance normalisation, commands, metrics, hierarchy, anti-nuke limits |
-
-**Read `# skipped`, not `# pass`.** `apps/dashboard/test/storage.test.ts` reads
-`DATABASE_URL`; with no reachable database it logs
-`{ skip: "no reachable database" }` for each case. The suite still *reports* the
-same number of tests with every one of them skipped, and `npm run verify`
-**still exits 0**. Start PostgreSQL first or the green tick means nothing.
-
-Three more checks live beside it, each with its own command:
-
-```bash
-npm run check:dead   # knip: unused files, exports and dependencies
-npm run check:ui     # a real browser: both palettes, every width, the shell and its panels
-npm run check:ui:live # the real pages, against the running stack (needs a session and a guild)
-npm run check:oauth  # the OAuth leg and the cross-site guard, against a running stack
-npm run check:load   # latency, event-loop delay and memory under local load
-npm run db:verify    # an authenticated query against the real database
-```
-
-`check:ui` needs a built dashboard (it builds one) and a Chrome or Edge binary;
-it writes its screenshots to `.al-ai/ui-check/`. It launches the browser with
-extensions disabled, which is what makes a clean console a statement about
-this app rather than about whatever the operator has installed. It measures
-**both palettes** (the light and the dark one, by emulating the system's
-colour preference) at 320, 375, 390, 430, 768, 1024 and 1440 pixels, opens
-the account menu and the appearance panel for real - the palette it switches
-to is read back off the document, so the check is of the behaviour and not of
-a screenshot - and runs **axe-core** over the two main screens, so the
-accessibility result is a measurement (WCAG 2.2 A/AA rules, colour-contrast
-included) rather than a claim. The findings are in `.al-ai/ui-check/axe.json`.
-
-`check:ui:live` drives the **real** pages - the dashboard, the levels, the
-commands, the logs, the welcome messages, the security screen, the audit trail, the
-network settings and the bot identity - against the running BFF and the real
-database, in both palettes and at 375 and 1440 pixels, with axe-core over each
-of them. It signs the browser in with the session the database holds (never
-printed) and paces itself, because the dashboard throttles a session to 120
-requests a minute and a page load spends five or six of them. It takes about
-five minutes.
-
-`check:2fa` drives the admin second factor against the running BFF and the real
-database. It creates one throwaway admin (never a real Discord account), a
-pending login per case, and deletes every row it created — including the session
-a successful verification mints. It proves that no session exists before the
-code is verified, that the enrolment secret stays stable across a retry, that a
-replayed TOTP and a spent recovery code are both refused, and that an expired,
-cancelled or over-guessed login is dead. It needs a running dashboard and the
-database (`npm run dev`), because the browser's real HTTP surface is what it
-measures.
-
-`check:oauth` and `check:load` need a running stack (`npm run dev -- -Detach`).
-`check:oauth` follows the login leg, checks the state cookie's attributes,
-refuses a callback with a missing or a wrong state, proves a failed token
-exchange mints no session, and checks that a request from another site is
-refused. It does **not** sign a human in: that needs a real Discord account
-and a real authorisation code, and is still to be done before a public
-deployment.
-
-`check:load` measures the local routes only. The guild routes are deliberately
-not measured, because every one of them spends Discord's rate-limit budget.
-
-Two more checks are enforced by tests rather than by eye:
-`apps/bot/test/governance.test.ts` fails if `docs/GOVERNANCE.md` and the source
-disagree about which rules exist, and `apps/bot/test/discord-standards.test.ts`
-holds the shared permission and activity-type values against discord.js's own
-`PermissionFlagsBits` and `ActivityType`.
-
-## Performance: how the rate limit was eliminated
-
-Discord's REST API answers a burst with `429` and the operator saw a red
-"Discord يحدّ عدد الطلبات" bar. Three independent layers now prevent it, and all
-three are needed — a retry in the client alone treats the symptom:
-
-1. **The TTL cache on the BFF** (`apps/dashboard/server/cache.ts`).
-   `TtlCache.resolve(key, load)` returns a fresh hit from memory, and — more
-   importantly — **coalesces in-flight requests**: a second call for the same key
-   awaits the promise already running instead of starting a second HTTP call.
-   That coalescing, not the TTL, is what kills the burst when three tabs open at
-   once. On a failed refresh it serves the stale value ("old beats wrong"), and a
-   `finally` releases the in-flight slot — without it, the first failure would
-   poison every later call for that key forever.
-   - `GUILD_READ_CACHE_MS = 60_000` for channels and roles.
-   - `BOT_GUILD_CACHE_MS = 15_000` for the bot's guild list.
-   - Call `invalidateGuildReadCache(guildId)` after any write, or the screen
-     shows the old value for the full 60 seconds.
-2. **The bot's live Gateway cache.** The adapter's `listChannels` reads
-   `client.guilds.cache`, which is already in memory in the connected client and
-   spends **zero** REST quota. A read answered from the Gateway can never
-   contribute to a 429.
-3. **Failure classification.** `isAuthFailure` matches **401 only** and
-   `isRateLimited` matches **429 only**. Before that split, every Discord error
-   was treated as "token expired", so a momentary rate limit destroyed a
-   perfectly valid session and threw the operator back to the sign-in screen —
-   that was the real cause of the "glitch when refreshing quickly". A 429 now
-   keeps the session and answers with a `retry-after` header; the client retries
-   **exactly once** after `min(retry_after × 1000, 5000)` ms.
-
-## Behaviour worth knowing
-
-- The bot refuses to connect when any required secret is missing, and says which ones.
-- A single-instance lock prevents two bot processes from sharing one token.
-- The Gateway ceiling (120 events per 60 seconds) is respected by rescheduling work,
-  never by dropping it. Voice churn is debounced for 2 seconds into one entry.
-- `warning` and `critical` events are written to an append-only, AES-256-GCM
-  encrypted audit trail, because Discord's own audit logs expire after 45 days.
-- The bot does **not** log punishments itself — the Gateway records them once from
-  the audit log, so a ban produces one entry and not two.
-- **Administrative sign-ins require a second factor.** The platform owner
-  (`OWNER_ID`) and anyone who owns or may administer a Discord guild must clear
-  TOTP (or a single-use recovery code) before the OAuth callback mints a
-  session. An unreadable Discord guild list fails *closed* — an outage adds one
-  step, it does not switch 2FA off. A first sign-in enrols the authenticator
-  itself: the base32 key, the `otpauth://` link and ten recovery codes are shown
-  once, and the first generated code confirms them. Secrets are AES-256-GCM
-  envelopes at rest, recovery codes only keyed HMACs, and the accepted TOTP
-  counter is stored so a replay cannot log in. `npm run keys:rotate`
-  re-encrypts the stored TOTP secret and any pending login; rotating
-  `SESSION_SECRET` invalidates outstanding recovery codes (the TOTP key keeps
-  working). Sessions that already existed before this shipped are left alone,
-  so enabling it never signs the operator out mid-work.
-- **"Saved" is not "applied".** A save is stored even when Discord refuses it (a
-  rate limit is momentary; a lost form is not), but the response reports each
-  field's outcome separately, so the two can never be conflated in the UI.
-
-## Your account, language and security
-
-The account menu's **Settings / الإعدادات** entry opens a real account screen at
-`/dashboard/:guildId/settings`. It is not a guild section: identity, language,
-appearance and security belong to the signed-in person, so the screen stays
-reachable even when AL AI has not been added to the selected server.
-
-| Section | What it changes |
+| Required | Purpose |
 |---|---|
-| **Account** | Show the Discord identity the session actually carries, its id and the session's expiry |
-| **Appearance** | Light / dark / system and the five accent colours; stored on this device only |
-| **Language** | Arabic (RTL) or English (LTR), applied instantly and saved to `user_preferences` for every device |
-| **Security** | Enable, replace or disable the authenticator; regenerate the recovery codes; see the protection state and how many codes remain |
-| **Sessions** | List the live sign-ins for the account (device, last use, expiry) and sign out every other browser |
+| `BOT_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | Discord credentials |
+| `DISCORD_REDIRECT_URI` | exact OAuth callback, registered in the Developer Portal |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `SESSION_SECRET`, `EVENT_HMAC_SECRET`, `ENCRYPTION_KEY` | 32-byte hex, 32-byte hex, 64 hex |
+| `KEY_ROTATION_DAYS`, `AUDIT_RETENTION_DAYS` | mandatory when `NODE_ENV=production`; never guessed |
 
-Changing or disabling the authenticator and replacing recovery codes require a
-current TOTP or an unused recovery code. The server verifies and consumes that
-code, so a stolen session cannot quietly swap the second factor, and the code
-cannot be replayed at the login gate. The setup QR is rendered in this browser
-from the `otpauth://` URI — a TOTP secret is never sent to an external image
-service. New recovery codes are shown once, and the dialog cannot close until
-the operator confirms they are saved. Only encrypted TOTP envelopes and keyed
-recovery-code hashes are stored; plaintext secrets never reach the database.
+Generate secrets with
+`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
 
-## The dashboard's appearance
+Portal: enable `SERVER MEMBERS INTENT` + `MESSAGE CONTENT INTENT`, leave
+`PRESENCE INTENT` **off**; scopes `bot` + `applications.commands` (dashboard
+login uses `identify` + `guilds`); register both redirect URIs exactly.
 
-The dashboard has two palettes and one accent, and the reader picks them.
+**Ports:** 3000 BFF (`0.0.0.0`) · 3400 integration adapter (loopback only) ·
+55432 local PostgreSQL (5432 in Compose) · 4040 ngrok agent inspection API
+(loopback only) · 5173 Vite dev server (`0.0.0.0`).
 
-| Control | Where | What it does |
-|---|---|---|
-| **الوضع** (light / dark / system) | the sun button next to the account, in the sidebar and in the phone drawer | switches the palette; "system" follows the operating system as it changes |
-| **لون التمييز** (five swatches) | the same panel | recolours the brand: the primary button, the active navigation marker, the focus ring |
+**LAN sign-in:** Discord only registers HTTPS redirect URIs (plus HTTP
+`localhost`/`127.0.0.1` for local development), so a phone on
+`http://<LAN_IP>:3000` cannot complete the OAuth round trip *directly*. The
+dashboard and its APIs are reachable there. To sign in, enable the tunnel once:
+the LAN login route sends the browser to the tunnel origin, completes OAuth
+(and 2FA) there, then returns it to the LAN origin with a 60-second single-use
+ticket that mints a cookie the phone can keep. Without a tunnel the route says
+so instead of walking into Discord's `Invalid OAuth2 redirect_uri`. Cookies are
+origin-aware:
+on a plain-HTTP LAN address the session cookie is unprefixed and non-`Secure`,
+because a `Secure`/`__Host-` cookie would be silently discarded by the browser.
+`SameSite=Lax`, `HttpOnly`, `Path=/`, the same-origin write guard and the exact
+Host allow-list are unchanged on every origin.
 
-Both are stored in this browser's `localStorage` (`al-ai.appearance`) and
-applied **before the first paint** — an inline script in `index.html` reads the
-same value, so the page never flashes the wrong palette. Nothing is stored on
-the server: a theme is a preference of the person looking at the screen, not a
-setting of the deployment.
+## Verify
 
-The two palettes are one design with the lightness flipped: the same neutrals,
-the same spacing, the same radii, and the same accent in both. The tokens live
-in `apps/dashboard/src/index.css` (`--background`, `--card`, `--border`,
-`--primary`, `--success`, `--warning`, `--destructive`, and the sidebar set);
-HeroUI's own variables are bridged through `[data-heroui]`, so the screens
-migrated to HeroUI keep the brand colour.
+```bash
+npm run verify       # lint → check:schema → test → build → check:secrets → audit
+npm run typecheck    # tsc --noEmit in every workspace
+npx knip             # zero unused files / exports / dependencies
+npm run check:ui     # real browser, both palettes, axe-core
+npm run check:oauth  # OAuth leg, state cookie, CSRF guard (needs a running stack)
+npm run db:verify    # authenticated SELECT 1
+```
 
-The navigation is grouped by what the operator is doing - overview, the
-server's own configuration, moderation and commands, the logs, and the
-deployment-wide screens that belong to the platform owner - and every screen
-the project has appears exactly once. The sidebar can be folded into an icon
-rail on the desktop; the state is a layout preference of this machine and is
-stored the same way the appearance is.
+**Read `# skipped`, not `# pass`**: with no reachable database,
+`storage.test.ts` skips every case and `npm run verify` still exits 0. Tests
+run through `scripts/test-runner.mjs` (≤2 workers, ≤768 MiB heap each) so a
+20-core machine cannot consume 8-15 GiB.
 
-## Bot appearance
+## Documentation
 
-Discord gives an application **one** global avatar and banner, so a per-server
-avatar is not something the API can express. The customization screen is
-therefore split by what Discord can actually honour:
+| Guide | Covers |
+|---|---|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | processes, data-flow rules, module map, decomposition status |
+| [API.md](docs/API.md) | route groups, guards, error semantics, Discord API boundary |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | env reference, ports, single-instance guards, ngrok quota, troubleshooting |
+| [GOVERNANCE.md](docs/GOVERNANCE.md) | 29 test-enforced rules — never renumber without updating the test |
+| [BOOK.md](docs/BOOK.md) | illustrated operator guide (Arabic) |
+| [docs index](docs/README.md) | full directory, including historical documents |
 
-**Global** (stored in `bot_identity`, one row, enforced by `CHECK (id)`):
-avatar, banner, status, activity, bio.
+## Rules worth knowing before you edit
 
-**Per guild** (stored in `guild_customization`):
-nickname, own-role colour, own-role icon.
-
-The writer for every one of those fields is `apps/dashboard/server/appearance.ts`.
-The bot reads `bot_identity` on a 15-second tick and applies only the presence;
-see GOVERNANCE rule 18.
+- **One instance only:** `.al-ai-bot.lock` (pid + start-time), adapter port 3400
+  bound before `client.login()`, and `PORT` 3000 all fail closed. `dev.ps1` is
+  the only Windows supervisor; there is no `tsx watch`.
+- **ngrok free plan:** 20,000 HTTP requests/month. Liveness checks are loopback
+  only; public verification is one request/hour; `ERR_NGROK_727` is an account
+  fact that must never re-mint the agent. See [DEPLOYMENT.md](docs/DEPLOYMENT.md#5-the-ngrok-request-budget).
+- **Governance:** `apps/bot/test/governance.test.ts` enforces exactly 29
+  numbered rules in `docs/GOVERNANCE.md`, source citations, and that
+  `apps/bot/src/lib/discord.ts` is the only `discord.js` importer.
+- **No secrets:** `.env`, database dumps and generated previews are ignored;
+  `.workbuddy-ai/memory/` holds tracked project rules, not scratch data.
