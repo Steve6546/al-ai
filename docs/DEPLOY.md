@@ -132,7 +132,23 @@ restarts the process instead of the node (the Dockerfiles do the same at 2048/51
 
 ## What is blocked today
 
-Everything above except step 1. The account has no free slot, and no route on the panel
-creates one — `POST /api/user/servers/create` does not exist, and the store/billing
-endpoints are absent from this build. The upgrade has to happen in the panel UI
+The key is in place and authenticates; the connector is not the blocker. The account is
+**Free**, and its only slot is occupied by the existing `Al` deployment (nodejs 24,
+offline, already linked to `Steve6546/al-ai` `main` with auto-pull on, 142 MB of the
+512 MB disk in use). A database is a deployment of its own, so the layout above needs
+**three** slots:
+
+```
+deployments_create({ runtime: "postgresql" })
+→ SLOTS_EXHAUSTED: All slots in your plan are in use.
+```
+
+Nothing on the panel creates a slot: `deployments_resize` can shrink a deployment inside
+the current pool, but the pool itself is 1 slot / 256 MB RAM / 512 MB disk, and the MCP
+surface has no billing or plan-change tool. The upgrade must be made in the panel UI
 (Billing → Starter+), after which the three deployments can be created in one session.
+
+`Al` does not need to be deleted to make room: on Starter+ it can be reconfigured as the
+dashboard (same repository, same auto-pull) and the other two created beside it, so no
+existing file or backup is lost.
+
