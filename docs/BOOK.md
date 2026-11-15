@@ -255,10 +255,38 @@ npm run dev:status       # ما الذي يعمل، على أي منفذ، وح�
 npm run dev:stop         # إيقاف رشيق
 npm run db:start|stop|status|verify
 npm run backup           # نسخة consistent من القاعدة
+npm run deploy           # نشر الواجهة: بناء + بوابة الأسرار + تأكيد النسخة المخدومة
 ```
 
 **قاعدة تشغيل:** الـBFF يعمل عبر `tsx` **بلا hot-reload** ⇒ أعد التشغيل بعد كل تعديل خلفي، وإلا
 خدمت مسارات قديمة. البصمة على القرص تثبت حداثة **الواجهة** فقط.
+
+### نشر تحديث الواجهة — `npm run deploy`
+
+الواجهة تُخدَم من `dist/` على القرص، ويقرأ الـBFF كل من `dist/index.html` و`/api/version`
+عند كل طلب ⇒ **تعديل الواجهة لا يحتاج إعادة تشغيل**، وتعديل `apps/dashboard/server` يحتاجه.
+
+`npm run deploy` يقوم بالخطوات الأربع التي كانت يدوية: يقرأ بصمة الحزمة المخدومة، يبني، يشغّل
+بوابة الأسرار على الحزمة الجديدة (الحزمة المبنية سطح تسريب حقيقي لا يقرأه اختبار)، ثم **يقارن**
+بصمة القرص بما يخدمه الخادم الحيّ ويقول النتيجة صريحة. الفائدة: نسيان خطوة لا يبقى صامتاً —
+البناء ينجح والصفحة القديمة تعمل و«شارة التحديث» لا تظهر أبداً، وهذا هو العطل الذي يمنعه السكربت.
+
+```bash
+npm run deploy                # بناء + بوابة + تأكيد
+npm run deploy -- --no-build  # تأكيد ما يُخدَم الآن فقط
+npm run deploy -- --port 3001 # خادم على منفذ غير الافتراضي
+```
+
+**شارة «تحديث جديد متاح»** (‏`apps/dashboard/src/components/update-banner.tsx`): تقارن الحزمة التي
+حمّلها التبويب فعلاً — مقروءة من وسم `<script type="module">` الخاص به — بما يعيده `/api/version`،
+عند التحميل وكل 20 ثانية وعند العودة للتبويب. تظهر مرة واحدة لكل جلسة، ولا تُظهر شيئاً عند فشل
+الفحص، ولا تُعيد التحميل بنفسها (حتى لا يُفقد مسوّد غير محفوظ). **الأساس هو الحزمة المحمَّلة لا أول
+استطلاع** — وهذا ما يجعل تبويباً فُتح *قبل* النشر يرى الشارة، وهو الحالة التي يهمّ فيها الأمر.
+عقدها مثبَّت في `apps/dashboard/test/update-banner.test.tsx` (٦ حالات).
+
+**تنبيه:** تغيير أوامر السلاش لا يظهر بتشغيل البوت — يحتاج
+`npm run deploy-commands --workspace=@al-ai/bot` (و`-- --guild <id>` لنشر فوري في سيرفر واحد).
+
 
 ---
 
@@ -301,6 +329,7 @@ npm run backup           # نسخة consistent من القاعدة
 | `apps/dashboard/server/appearance.ts` | كاتب المظهر الوحيد + جلب الصور (SSRF) |
 | `apps/dashboard/server/db.ts` | كل SQL |
 | `apps/dashboard/src/components/app-shell.tsx` | الإطار: القائمة، الرأس، الحساب |
+| `apps/dashboard/src/components/update-banner.tsx` | شارة «تحديث جديد متاح» (عقدها في `test/update-banner.test.tsx`) |
 | `apps/dashboard/src/lib/theme.ts` | محرّك المظهر (وضع + لون تمييز) |
 | `apps/dashboard/src/components/welcome-message-preview.tsx` | معاينة الرسالة الحيّة (مرتبطة بالمحرّر) |
 | `apps/dashboard/src/views/settings/welcome-image-canvas.tsx` | مصمم صورة الترحيب (مشاركة الإحداثيات) |
@@ -309,5 +338,7 @@ npm run backup           # نسخة consistent من القاعدة
 | `packages/core/src/*` | العقود المشتركة |
 | `infra/schema.sql` | مخطّط القاعدة (إضافي فقط) |
 | `scripts/*.ps1` | `dev` · `db` · الإيقاف الرشيق |
-| `scripts/*.mjs` | `verify-db` · `ui-check` · `oauth-check` · `load-check` |
+| `scripts/*.mjs` | `verify-db` · `ui-check` · `oauth-check` · `load-check` · **`deploy`** |
+| `scripts/run-linux-stack.sh` | مُشغّل Linux (dockerd → postgres → لوحة → جسر → بوت) |
+| `scripts/linux/port-forward.mjs` | جسر loopback: منفذ أو قائمة منافذ بعملية واحدة |
 | `docs/GOVERNANCE.md` | ٢٧ قاعدة |

@@ -174,6 +174,24 @@ test("the shell is a fixed frame with one scrolling region", () => {
   assert.ok(aside.includes("overflow-hidden"), "…and its own nav scrolls inside it");
 });
 
+test("the server rail is a desktop frame column, and the drawer's column on a phone", () => {
+  // On desktop the rail is the first grid column. Below `lg` it is not a frame
+  // column at all — it moves *inside* the navigation drawer — so the frame's
+  // rail column is `hidden` until `lg` and comes back at `lg`. A rail that is
+  // hidden with no `lg:` counterpart would leave a phone with no server list;
+  // one that is visible at every width would eat a permanent slice of the
+  // content (the regression this pins).
+  const railColumn = shellHtml.match(/<div class="([^"]*)"[^>]*><nav aria-label="البوتات"/);
+  assert.ok(railColumn, "the frame wraps the rail in its own column");
+  const classes = railColumn![1].split(/\s+/);
+  assert.ok(classes.includes("hidden"), "the frame rail is hidden below `lg`");
+  assert.ok(classes.includes("lg:flex"), "…and it is a column again at `lg`");
+
+  const rail = classesOf(shellHtml, "nav");
+  assert.ok(rail.includes("flex"), "the rail is a flex column");
+  assert.ok(rail.includes("min-h-0"), "…bounded by its column, so its own list can scroll");
+});
+
 test("exactly one region in the shell scrolls", () => {
   const scrollers = shellHtml.match(/overflow-y-auto/g) ?? [];
   assert.equal(

@@ -187,7 +187,14 @@ npm run check:dead      # same knip check, wrapped
 npm run db:verify       # authenticated SELECT 1 against the real database
 npm run check:ui        # real browser, both palettes, axe-core
 npm run check:oauth     # OAuth leg + CSRF guard (needs a running stack)
+npm run deploy          # build + secret gate on dist + confirm the served hash
 ```
+
+`npm run deploy` is the publishing step, not a second build command: it reads
+the bundle hash the live server is serving, rebuilds, scans the fresh `dist/`
+(the one artefact no unit test reads), then compares disk with `/api/version`.
+Use `--no-build` to only confirm what is already served, `--port` when the BFF
+is not on 3000.
 
 **Read `# skipped`, not `# pass`.** With no reachable database,
 `storage.test.ts` skips every case and `npm run verify` still exits 0.

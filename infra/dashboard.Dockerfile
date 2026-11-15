@@ -27,10 +27,11 @@ COPY apps/dashboard/package.json apps/dashboard/package.json
 COPY --from=build /app/apps/dashboard/dist apps/dashboard/dist
 WORKDIR /app/apps/dashboard
 EXPOSE 3000
-# The local `tsx` binary, not `npx` - the same reason as the bot image: `npx`
-# wraps the program, and the wrapper is what receives the stop signal.
+# The loader runs in-process (`--import tsx`), not through the `tsx` shim - the
+# same reason as the bot image: the shim wraps the program, and the wrapper is
+# what receives the stop signal. One process also means one heap to bound.
 # A heap ceiling, so a leak restarts the container instead of
 # consuming the host's memory.
 ENV NODE_OPTIONS="--max-old-space-size=512"
 
-CMD ["../../node_modules/.bin/tsx", "server/index.ts"]
+CMD ["node", "--import", "tsx", "server/index.ts"]

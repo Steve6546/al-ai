@@ -16,12 +16,12 @@ RUN npm ci
 COPY packages/core packages/core
 COPY apps/bot apps/bot
 
-# The local `tsx` binary, not `npx`: `npx` adds a wrapper process, so the
-# SIGTERM an orchestrator sends reaches the wrapper instead of the supervisor
-# and the graceful shutdown never runs. exec form, one process, the signal
-# lands on the program that has to handle it.
+# The loader runs in-process (`--import tsx`), not through the `tsx` shim: the
+# shim adds a wrapper process, so the SIGTERM an orchestrator sends reaches the
+# wrapper instead of the supervisor and the graceful shutdown never runs, and it
+# also costs a third process for esbuild. One process, one signal target.
 # A heap ceiling, so a leak restarts the container instead of
 # consuming the host's memory.
 ENV NODE_OPTIONS="--max-old-space-size=2048"
 
-CMD ["node_modules/.bin/tsx", "apps/bot/src/index.ts"]
+CMD ["node", "--import", "tsx", "apps/bot/src/index.ts"]

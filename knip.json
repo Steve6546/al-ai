@@ -4,6 +4,7 @@
     ".": {
       "entry": ["scripts/*.mjs", "scripts/*.mts"],
       "project": ["scripts/**/*.mjs", "scripts/**/*.mts"],
+      "ignore": ["scripts/linux/port-forward.mjs"],
       "ignoreDependencies": ["pg"]
     },
     "apps/bot": {
@@ -36,7 +37,8 @@
   ],
   "ignoreBinaries": [
     "tasklist",
-    "tsx"
+    "tsx",
+    "pgrep"
   ],
   "ignoreExportsUsedInFile": true,
   "includeEntryExports": false

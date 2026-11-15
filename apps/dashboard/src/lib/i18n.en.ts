@@ -129,11 +129,9 @@ export const en = {
   "nav.settings.label": "Settings",
   "nav.settings.hint": "Your account, language and security",
 
-  "nav.section.server": "Server management",
-  "nav.section.moderation": "Moderation and commands",
-  "nav.section.logs": "Logs",
-  "nav.section.system": "System",
   "nav.section.general": "General",
+  "nav.section.modules": "Module settings",
+  "nav.section.system": "System",
 
   "nav.denyOwner": "Platform-owner features only.",
   "nav.denyBot": "Add AL AI to this server first.",
@@ -144,11 +142,7 @@ export const en = {
   "nav.menu": "Menu",
   "nav.collapse": "Collapse the menu",
   "nav.expand": "Expand the menu",
-  "nav.guildSelected": "Selected server",
-  "nav.guilds": "Servers",
   "nav.noBotGuild": "No server has AL AI yet",
-  "nav.allGuilds": "All servers",
-  "nav.addBotHere": "Add AL AI to this server",
   "nav.bots": "Bots",
   "nav.botAdded": "Bot added",
   "nav.botMissing": "Bot not added",
@@ -228,14 +222,12 @@ export const en = {
   /* ---------------------------------------------------------------- *
    * Appearance
    * ---------------------------------------------------------------- */
-  "appearance.title": "Appearance",
   "appearance.mode": "Mode",
   "appearance.modeLabel": "Appearance mode",
   "appearance.light": "Light",
   "appearance.dark": "Dark",
   "appearance.system": "System",
   "appearance.accent": "Accent colour",
-  "appearance.localOnly": "This preference is saved on this device only.",
   "appearance.blue": "Blue",
   "appearance.violet": "Violet",
   "appearance.emerald": "Emerald",

@@ -156,7 +156,15 @@ const CHROME_CANDIDATES = [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"
+  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+  // The Linux stack (scripts/run-linux-stack.sh) is supported, so the check has
+  // to find a browser there too. Without these the run printed "no Chrome or Edge
+  // binary found" and skipped every visual assertion on a host that had one.
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/microsoft-edge"
 ].filter(Boolean);
 
 const VIEWPORTS = [
@@ -367,15 +375,28 @@ const MIME = {
 const API_STUB = `
 (() => {
   const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  // A 1x1 PNG as a data URL. It exercises the whole image path - the server
+  // field, the Avatar component, the <img> load - without depending on the
+  // network, so "the icon renders" is asserted rather than assumed. Every stub
+  // used to carry null here, which is why a broken image path could ship unseen.
+  const ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
   const routes = {
     "/api/session": {
       authenticated: true,
-      user: { id: "1", username: "owner", avatarUrl: null, expiresAt: new Date(Date.now() + 86400000).toISOString(), isPlatformOwner: true }
+      user: { id: "1", username: "owner", avatarUrl: ICON, expiresAt: new Date(Date.now() + 86400000).toISOString(), isPlatformOwner: true }
     },
     // The account's language is read at boot and applied to every label. An
     // empty answer here leaves the dictionary undefined, and the first screen
     // then throws on t(...) instead of being measured.
     "/api/me/preferences": { language: "ar" },
+    // The settings screen's security section reads this on mount. It is not the
+    // subject of a check here, but a 404 would leave the screen in its error
+    // state, and the appearance tab the check *does* drive shares that screen.
+    "/api/me/security": {
+      twoFactor: { enrolled: false, confirmedAt: null, recoveryCodesRemaining: 0 },
+      sessions: [],
+      platformOwner: true
+    },
     "/api/health": {
       status: "healthy",
       dashboard: "online",
@@ -388,7 +409,7 @@ const API_STUB = `
       guilds: [{
         id: "111111111111111111",
         name: "سيرفر الاختبار",
-        iconUrl: null,
+        iconUrl: ICON,
         memberCount: 42,
         tier: "owner",
         botPresent: true,
@@ -416,7 +437,25 @@ const API_STUB = `
         canManageTiers: true,
         canInvite: true,
         canAdminInstance: false
-      }]
+      },
+      // The rest exist so the drawer is measured the way a busy operator sees
+      // it. Two servers never crowded the settings nav out of the viewport; a
+      // dozen do, and that is the state the reach check has to fail on.
+      ...Array.from({ length: 10 }, (_, index) => ({
+        id: "3333333333333333" + String(index).padStart(2, "0"),
+        name: "سيرفر إضافي " + (index + 1),
+        iconUrl: ICON,
+        memberCount: 5 + index,
+        tier: "admin",
+        botPresent: index % 2 === 0,
+        canManage: true,
+        canManageIdentity: true,
+        canManageLogging: true,
+        canManageCommands: true,
+        canManageTiers: true,
+        canInvite: true,
+        canAdminInstance: false
+      }))]
     },
     "/api/guilds/111111111111111111/metrics": {
       bot: { online: true, pingMs: 42, lastSeenAt: new Date().toISOString() },
@@ -518,6 +557,59 @@ async function findChrome() {
     }
   }
   return null;
+}
+
+/** True once the browser has written its debugging port into `portFile`. */
+async function portFileAppears(portFile, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const text = await readFile(portFile, "utf8");
+      const port = Number(text.split("\n")[0].trim());
+      if (Number.isFinite(port) && port > 0) return true;
+    } catch {
+      /* not written yet */
+    }
+    await sleep(120);
+  }
+  return false;
+}
+
+/**
+ * Starts the browser and returns the child process.
+ *
+ * Chrome's sandbox needs privileges a container or a root run does not have —
+ * there the browser exits before it writes its debugging port, and the whole
+ * check dies at startup instead of running its assertions. So the first attempt
+ * keeps the sandbox, and only when no port appears is the browser relaunched
+ * once with `--no-sandbox`. A host with a working sandbox is unaffected; a
+ * restricted one still runs the checks rather than skipping them.
+ */
+async function launchBrowser(chrome, profile) {
+  const baseArgs = [
+    "--headless=new",
+    "--disable-gpu",
+    "--no-first-run",
+    "--no-default-browser-check",
+    // The point of the check: a browser without extensions, so a
+    // `chrome-extension://` message cannot be blamed on this app.
+    "--disable-extensions"
+  ];
+  for (const extra of [[], ["--no-sandbox"]]) {
+    const child = spawn(
+      chrome,
+      [...baseArgs, ...extra, "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"],
+      { stdio: "ignore", windowsHide: true }
+    );
+    if (await portFileAppears(join(profile, "DevToolsActivePort"), 20_000)) return child;
+    child.kill();
+    await new Promise(resolve => {
+      if (child.exitCode !== null || child.signalCode !== null) return resolve(undefined);
+      child.once("exit", () => resolve(undefined));
+      setTimeout(() => resolve(undefined), 3_000);
+    });
+  }
+  throw new Error("the browser did not report a debugging port");
 }
 
 /** Serves `dist/` the way the production server does, with an SPA fallback. */
@@ -631,22 +723,7 @@ async function main() {
   const { server, origin: stubOrigin } = await serveDist();
   const origin = live ? "http://127.0.0.1:3000" : stubOrigin;
   const profile = mkdtempSync(join(tmpdir(), "al-ai-ui-"));
-  const browser = spawn(
-    chrome,
-    [
-      "--headless=new",
-      "--disable-gpu",
-      "--no-first-run",
-      "--no-default-browser-check",
-      // The point of the check: a browser without extensions, so a
-      // `chrome-extension://` message cannot be blamed on this app.
-      "--disable-extensions",
-      "--remote-debugging-port=0",
-      `--user-data-dir=${profile}`,
-      "about:blank"
-    ],
-    { stdio: "ignore", windowsHide: true }
-  );
+  const browser = await launchBrowser(chrome, profile);
 
   const failures = [];
   const consoleMessages = [];
@@ -678,6 +755,12 @@ async function main() {
     // The live pass signs the browser in with the session the database holds,
     // so the pages answer with the real data. The cookie is never printed.
     if (live) {
+      // The cookie name is not inferred from this process's NODE_ENV: this
+      // script runs under plain `node`, while the dashboard may have been
+      // started with a different environment (and now also chooses the name per
+      // request, so a plain-HTTP LAN origin gets the unprefixed cookie). The
+      // preflight in `liveSession()` asks the running server which name it
+      // accepts and returns that one.
       const { success } = await cdp.send(
         "Network.setCookie",
         {
@@ -685,7 +768,9 @@ async function main() {
           value: live.session,
           url: "http://127.0.0.1:3000",
           path: "/",
-          secure: true,
+          // A `__Host-` cookie is only accepted with `Secure`; the unprefixed
+          // one is only sent over the plain-HTTP origin this sweep uses.
+          secure: live.cookieName.startsWith("__Host-"),
           httpOnly: true
         },
         sessionId
@@ -1287,9 +1372,14 @@ async function main() {
      *
      * Every guild the account may administer is on screen at once - no dropdown
      * to open - and the hover card names the guild and states whether the bot
-     * is in it. The guild without the bot must not open a settings screen: the
-     * click has to land on the invite panel, because nothing on the settings
-     * screens can be applied by a bot that is not there.
+     * is in it. The rail is a column of the frame, so it is on screen at every
+     * width and switching servers is one click.
+     *
+     * A guild the bot is not in cannot apply a single setting, so its rail entry
+     * is a link straight into the invite flow, not a route into the dashboard.
+     * A guild it *is* in is a button that changes the route. Both halves are
+     * asserted here: the invite entry's href, and a real switch between two
+     * servers the bot is in.
      *
      * Radix opens a tooltip on real pointer movement and after its own delay,
      * so the hover is a dispatched `mouseMoved`, not a synthesised event on the
@@ -1309,13 +1399,14 @@ async function main() {
         expression: `(() => {
           const rail = document.querySelector('nav[aria-label="البوتات"]');
           if (!rail) return JSON.stringify({ found: false });
-          const buttons = [...rail.querySelectorAll("button")];
-          const target = buttons.find(button => (button.getAttribute("aria-label") ?? "").includes("سيرفر بدون البوت"));
-          if (!target) return JSON.stringify({ found: true, count: buttons.length, target: null });
+          const target = rail.querySelector('a[aria-label*="سيرفر بدون البوت"]');
+          if (!target) return JSON.stringify({ found: true, target: null });
           const rect = target.getBoundingClientRect();
           return JSON.stringify({
             found: true,
-            count: buttons.length,
+            count: rail.querySelectorAll("a, button").length,
+            href: target.getAttribute("href"),
+            onScreen: rect.width > 0 && rect.height > 0,
             target: {
               x: Math.round(rect.left + rect.width / 2),
               y: Math.round(rect.top + rect.height / 2),
@@ -1328,10 +1419,16 @@ async function main() {
       sessionId
     );
     const rail = JSON.parse(railHover.result.value);
-    if (!rail.found || !rail.target) {
+    if (!rail.found || !rail.target || !rail.onScreen) {
       failures.push("the server rail does not offer the guild the bot is missing from");
-      console.log(`FAIL  server rail       found=${rail.found} buttons=${rail.count ?? 0}`);
+      console.log(`FAIL  server rail       found=${rail.found} target=${Boolean(rail.target)}`);
     } else {
+      const hrefOk = rail.href === "/api/guilds/222222222222222222/invite";
+      if (!hrefOk) {
+        failures.push(`the rail entry for the guild without the bot is not an invite link (href=${rail.href})`);
+      }
+      console.log(`${hrefOk ? "PASS" : "FAIL"}  rail invite link   href=${rail.href}`);
+
       await cdp.send(
         "Input.dispatchMouseEvent",
         { type: "mouseMoved", x: rail.target.x, y: rail.target.y },
@@ -1343,11 +1440,7 @@ async function main() {
         {
           expression: `(() => {
             const card = document.querySelector('[role="tooltip"]');
-            return JSON.stringify({
-              shown: Boolean(card),
-              text: (card?.textContent ?? "").trim(),
-              state: document.querySelector('nav[aria-label="البوتات"] button[aria-label*="سيرفر بدون البوت"]')?.getAttribute("aria-label") ?? ""
-            });
+            return JSON.stringify({ shown: Boolean(card), text: (card?.textContent ?? "").trim() });
           })()`,
           returnByValue: true
         },
@@ -1363,63 +1456,66 @@ async function main() {
           `the rail hover card does not name the guild and its bot state (shown=${card.shown}, text="${card.text.slice(0, 80)}")`
         );
       }
-      console.log(
-        `${card.shown && named && missing ? "PASS" : "FAIL"}  rail hover card    state="${card.state}" text="${card.text.slice(0, 60)}"`
-      );
+      console.log(`${card.shown && named && missing ? "PASS" : "FAIL"}  rail hover card    text="${card.text.slice(0, 60)}"`);
+    }
 
-      /*
-       * Picking the guild the bot is missing from. The click is a real press
-       * and release: the rail switches route and the invite panel has to be
-       * the screen that answers, not a settings form the bot cannot apply.
-       */
+    /*
+     * Switching servers. The guild the bot is in is a button; a press has to
+     * change the route. This is the move the rail exists for, so it is asserted
+     * by clicking a second server the bot is in and reading the address bar.
+     */
+    const switchProbe = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const rail = document.querySelector('nav[aria-label="البوتات"]');
+          const target = rail?.querySelector('button[aria-label*="سيرفر إضافي 1 "]');
+          if (!target) return JSON.stringify({ found: false });
+          const rect = target.getBoundingClientRect();
+          return JSON.stringify({
+            found: true,
+            x: Math.round(rect.left + rect.width / 2),
+            y: Math.round(rect.top + rect.height / 2)
+          });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const switchTarget = JSON.parse(switchProbe.result.value);
+    if (!switchTarget.found) {
+      failures.push("the rail does not offer a second guild the bot is in as a button");
+      console.log("FAIL  rail switch guild  target=null");
+    } else {
       await cdp.send(
         "Input.dispatchMouseEvent",
-        { type: "mousePressed", x: rail.target.x, y: rail.target.y, button: "left", clickCount: 1, buttons: 1 },
+        { type: "mousePressed", x: switchTarget.x, y: switchTarget.y, button: "left", clickCount: 1, buttons: 1 },
         sessionId
       );
       await cdp.send(
         "Input.dispatchMouseEvent",
-        { type: "mouseReleased", x: rail.target.x, y: rail.target.y, button: "left", clickCount: 1, buttons: 0 },
+        { type: "mouseReleased", x: switchTarget.x, y: switchTarget.y, button: "left", clickCount: 1, buttons: 0 },
         sessionId
       );
-      await sleep(1500);
-      const invite = await cdp.send(
+      await sleep(1200);
+      const afterSwitch = await cdp.send(
         "Runtime.evaluate",
-        {
-          expression: `(() => {
-            const text = (document.querySelector("#root")?.textContent ?? "").trim();
-            return JSON.stringify({
-              path: window.location.pathname,
-              notAdded: text.includes("البوت غير مضاف إلى هذا السيرفر بعد"),
-              add: text.includes("إضافة AL AI إلى هذا السيرفر"),
-              railButtons: document.querySelectorAll('nav[aria-label="البوتات"] button').length
-            });
-          })()`,
-          returnByValue: true
-        },
+        { expression: `window.location.pathname`, returnByValue: true },
         sessionId
       );
-      const picked = JSON.parse(invite.result.value);
-      const onRoute = picked.path === "/dashboard/222222222222222222";
-      const inviteShot = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
-      await writeFile(join(outDir, "rail-missing-bot.png"), Buffer.from(inviteShot.data, "base64"));
-      if (!onRoute || !picked.notAdded || !picked.add) {
-        failures.push(
-          `picking the guild without the bot did not land on the invite panel (path=${picked.path}, notAdded=${picked.notAdded}, add=${picked.add})`
-        );
+      const switched = afterSwitch.result.value === "/dashboard/333333333333333300";
+      if (!switched) {
+        failures.push(`picking another guild in the rail did not switch to it (path=${afterSwitch.result.value})`);
       }
-      console.log(
-        `${onRoute && picked.notAdded && picked.add ? "PASS" : "FAIL"}  rail pick missing  path=${picked.path} notAdded=${picked.notAdded} add=${picked.add}`
-      );
+      console.log(`${switched ? "PASS" : "FAIL"}  rail switch guild  path=${afterSwitch.result.value}`);
     }
 
     /*
      * The rail on a phone.
      *
-     * At 375px the rail column is gone, so the drawer has to carry the same
-     * list - otherwise there is no way to switch servers on a phone at all.
-     * The drawer renders it as labelled rows: an icon-only strip inside a
-     * 288px sheet would name nothing.
+     * Below `lg` the frame has no rail column: a permanent 4.5rem strip ate a
+     * slice of a 375px content area. With the drawer closed there is no server
+     * list on screen at all, and the content gets the full width.
      */
     await cdp.send(
       "Emulation.setDeviceMetricsOverride",
@@ -1428,13 +1524,46 @@ async function main() {
     );
     await cdp.send("Page.navigate", { url: `${origin}/dashboard/111111111111111111` }, sessionId);
     await sleep(1500);
+    const phoneRail = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const rails = [...document.querySelectorAll('nav[aria-label="البوتات"]')];
+          const onScreen = rails.filter(rail => {
+            const r = rail.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+          });
+          return JSON.stringify({ rails: rails.length, onScreen: onScreen.length });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const phone = JSON.parse(phoneRail.result.value);
+    const phoneShot = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
+    await writeFile(join(outDir, "rail-phone.png"), Buffer.from(phoneShot.data, "base64"));
+    const phoneOk = phone.rails === 1 && phone.onScreen === 0;
+    if (!phoneOk) {
+      failures.push(`the phone keeps a server rail on screen instead of the drawer: ${JSON.stringify(phone)}`);
+    }
+    console.log(
+      `${phoneOk ? "PASS" : "FAIL"}  rail phone         rails=${phone.rails} onScreen=${phone.onScreen}`
+    );
+
+    /*
+     * The drawer as a phone actually uses it.
+     *
+     * The drawer leads with the server rail - the servers on the reading edge
+     * with the settings nav immediately beside them - and the settings nav has
+     * to be *inside the viewport* and reachable to its end. The shell carries
+     * no appearance switch and exactly one account control.
+     */
     await cdp.send(
       "Runtime.evaluate",
       {
         expression: `(() => {
           const button = [...document.querySelectorAll("button")].find(node => node.getAttribute("aria-label") === "القائمة");
-          if (!button) return "no trigger";
-          button.click();
+          if (button) button.click();
           return "clicked";
         })()`,
         returnByValue: true
@@ -1442,40 +1571,163 @@ async function main() {
       sessionId
     );
     await sleep(800);
-    const drawer = await cdp.send(
+    const drawerReach = await cdp.send(
       "Runtime.evaluate",
       {
         expression: `(() => {
-          const dialog = document.querySelector('[role="dialog"]');
-          const list = dialog?.querySelector('nav[aria-label="البوتات"]');
-          const text = (list?.textContent ?? "").trim();
+          const sheet = document.querySelector('[role="dialog"]');
+          if (!sheet) return JSON.stringify({ error: "no sheet" });
+          const vh = window.innerHeight;
+          const inView = el => { const r = el.getBoundingClientRect(); return r.height > 0 && r.top >= 0 && r.bottom <= vh; };
+          const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+          const buttons = [...sheet.querySelectorAll("button")];
+          const labelled = name => buttons.find(b => (b.textContent || "").includes(name));
+          const settingsRoot = labelled("لوحة التحكم")?.closest('[data-radix-scroll-area-viewport]');
+          let lastReachable = null;
+          if (settingsRoot) {
+            settingsRoot.scrollTop = settingsRoot.scrollHeight;
+            const last = labelled("الوصول للشبكة");
+            lastReachable = last ? inView(last) : null;
+          }
+          const rail = sheet.querySelector('nav[aria-label="البوتات"]');
+          const railRect = rail?.getBoundingClientRect();
+          const settingsNav = labelled("لوحة التحكم")?.closest("nav");
+          const navRect = settingsNav?.getBoundingClientRect();
           return JSON.stringify({
-            found: Boolean(list),
-            inDialog: Boolean(dialog),
-            rows: list ? list.querySelectorAll("button").length : 0,
-            names: text.includes("سيرفر الاختبار") && text.includes("سيرفر بدون البوت"),
-            labelled: text.includes("البوت مضاف") && text.includes("البوت غير مضاف")
+            welcomeInView: inView(labelled("رسائل الترحيب")),
+            lastReachable,
+            railInDrawer: sheet.querySelectorAll('nav[aria-label="البوتات"]').length,
+            railEntries: rail ? rail.querySelectorAll("a, button").length : 0,
+            railAgainstReadingEdge: railRect ? Math.abs(railRect.right - window.innerWidth) < 2 : false,
+            navBesideRail: railRect && navRect ? navRect.right <= railRect.left + 1 : null,
+            appearanceCount: [...document.querySelectorAll("button")].filter(b => (b.getAttribute("aria-label") || "") === "المظهر").length,
+            accountCount: [...document.querySelectorAll("button[data-account-trigger]")].filter(visible).length,
+            accountInHeader: document.querySelectorAll("header button[data-account-trigger]").length
           });
         })()`,
         returnByValue: true
       },
       sessionId
     );
-    const phoneRail = JSON.parse(drawer.result.value);
+    const reach = JSON.parse(drawerReach.result.value);
     const drawerShot = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
     await writeFile(join(outDir, "rail-drawer.png"), Buffer.from(drawerShot.data, "base64"));
-    if (!phoneRail.found || phoneRail.rows < 3 || !phoneRail.names || !phoneRail.labelled) {
-      failures.push(
-        `the phone drawer does not carry the server list (found=${phoneRail.found}, rows=${phoneRail.rows}, names=${phoneRail.names}, labelled=${phoneRail.labelled})`
-      );
+    const reachOk =
+      reach.welcomeInView &&
+      reach.lastReachable === true &&
+      reach.railInDrawer === 1 &&
+      reach.railEntries >= 3 &&
+      reach.railAgainstReadingEdge &&
+      reach.navBesideRail === true &&
+      reach.appearanceCount === 0 &&
+      reach.accountCount === 1 &&
+      reach.accountInHeader === 0;
+    if (!reachOk) {
+      failures.push(`the phone drawer is not usable: ${JSON.stringify(reach)}`);
     }
     console.log(
-      `${phoneRail.found && phoneRail.rows >= 3 && phoneRail.names && phoneRail.labelled ? "PASS" : "FAIL"}  rail phone drawer  rows=${phoneRail.rows} names=${phoneRail.names} labelled=${phoneRail.labelled}`
+      `${reachOk ? "PASS" : "FAIL"}  phone drawer usable  welcomeInView=${reach.welcomeInView} lastReachable=${reach.lastReachable} railEdge=${reach.railAgainstReadingEdge} navBeside=${reach.navBesideRail} appearance=${reach.appearanceCount} account=${reach.accountCount}`
     );
 
-    // The account menu and the appearance panel, opened for real: the account
-    // menu has to offer the actions that exist, and the appearance panel has to
-    // change the palette when a mode is picked.
+    /*
+     * The desktop frame.
+     *
+     * The rail is a tall column on the reading edge, and the shell carries no
+     * appearance switch at all - the theme lives on the settings screen now, so
+     * a stray popover here would be a second source of truth.
+     */
+    await cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false },
+      sessionId
+    );
+    await cdp.send("Page.navigate", { url: `${origin}/dashboard/111111111111111111` }, sessionId);
+    await sleep(1200);
+    const desktopControls = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+          const rail = document.querySelector('nav[aria-label="البوتات"]');
+          const railRect = rail?.getBoundingClientRect();
+          const account = [...document.querySelectorAll("button[data-account-trigger]")];
+          return JSON.stringify({
+            railVisible: Boolean(rail) && visible(rail),
+            railIsColumn: Boolean(railRect) && railRect.height > railRect.width,
+            appearanceVisible: [...document.querySelectorAll("button")].filter(b => (b.getAttribute("aria-label") || "") === "المظهر" && visible(b)).length,
+            accountVisible: account.filter(visible).length,
+            accountInSidebar: account.filter(b => b.closest("aside") && visible(b)).length
+          });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const desktop = JSON.parse(desktopControls.result.value);
+    const desktopOk =
+      desktop.railVisible &&
+      desktop.railIsColumn &&
+      desktop.appearanceVisible === 0 &&
+      desktop.accountVisible === 1 &&
+      desktop.accountInSidebar === 1;
+    if (!desktopOk) {
+      failures.push(`the desktop shell is not the expected frame: ${JSON.stringify(desktop)}`);
+    }
+    console.log(
+      `${desktopOk ? "PASS" : "FAIL"}  desktop controls  railColumn=${desktop.railIsColumn} appearance=${desktop.appearanceVisible} account=${desktop.accountVisible}`
+    );
+
+    /*
+     * The images, actually loaded.
+     *
+     * Every stub used to answer with `iconUrl: null`, so no image path was ever
+     * exercised: a broken icon - a blocked host, a wrong field, a missing
+     * fallback - would ship unseen. The stub now carries a real data URL for
+     * most servers and `null` for one, and this check asserts what the operator
+     * sees: the ones with an icon render an <img> that finished loading, and the
+     * one without falls back to its initial rather than a blank tile.
+     *
+     * `complete && naturalWidth > 0` is the load test: an <img> element is
+     * always in the DOM, so counting elements would pass on a 404. Only a
+     * decoded bitmap has a non-zero natural size.
+     */
+    const images = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const rail = document.querySelector('nav[aria-label="البوتات"]');
+          const loaded = el => el.tagName === "IMG" && el.complete && el.naturalWidth > 0;
+          const imgs = rail ? [...rail.querySelectorAll("img")] : [];
+          // The fallback is the initial letter rendered as text where there is
+          // no icon. Radix keeps it in the DOM only while the image is absent.
+          const rows = rail ? [...rail.querySelectorAll("a, button")] : [];
+          const withoutIcon = rows.find(b => (b.getAttribute("aria-label") ?? "").includes("سيرفر بدون البوت"));
+          return JSON.stringify({
+            railImages: imgs.length,
+            railImagesLoaded: imgs.filter(loaded).length,
+            fallbackForIconless: withoutIcon ? (withoutIcon.textContent ?? "").trim().length > 0 : null,
+            brokenImages: imgs.filter(el => el.complete && el.naturalWidth === 0).length
+          });
+        })()`,
+        returnByValue: true
+      },
+      sessionId
+    );
+    const media = JSON.parse(images.result.value);
+    const mediaOk =
+      media.railImages > 0 &&
+      media.railImagesLoaded === media.railImages &&
+      media.brokenImages === 0 &&
+      media.fallbackForIconless === true;
+    if (!mediaOk) {
+      failures.push(`server icons do not render: ${JSON.stringify(media)}`);
+    }
+    console.log(
+      `${mediaOk ? "PASS" : "FAIL"}  server icons  loaded=${media.railImagesLoaded}/${media.railImages} broken=${media.brokenImages} fallback=${media.fallbackForIconless}`
+    );
+
+    // The account menu, opened for real: it has to offer the actions that
+    // exist (the Discord profile and sign-out).
     await cdp.send(
       "Emulation.setDeviceMetricsOverride",
       { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false },
@@ -1527,91 +1779,75 @@ async function main() {
     }
     console.log(`${menuResult.open ? "PASS" : "FAIL"}  account menu       ${accountClicked.result.value}  open=${menuResult.open}`);
 
-    // The appearance panel: open it from the sidebar and pick the light mode,
-    // then read the palette back - the panel has to change the document, not
-    // just look like it does.
-    //
-    // The account menu is closed first: an open menu is a dismissable layer,
-    // and it swallows the pointer events aimed at the button underneath it.
+    /*
+     * The appearance control, on the settings screen it now lives on.
+     *
+     * The theme switch is a tab in `/settings`, not a popover in the shell, so
+     * the check navigates there, opens the tab, picks the light mode and reads
+     * the palette back. The panel has to change the document and remember the
+     * choice, not just look like it does.
+     */
     await cdp.send(
-      "Runtime.evaluate",
-      {
-        expression: `(() => {
-          const account = document.querySelector("button[data-account-trigger]");
-          if (account) {
-            const options = { bubbles: true, cancelable: true, button: 0, pointerType: "mouse", isPrimary: true };
-            account.dispatchEvent(new PointerEvent("pointerdown", options));
-            account.dispatchEvent(new PointerEvent("pointerup", options));
-          }
-          return "closed";
-        })()`,
-        returnByValue: true
-      },
+      "Emulation.setDeviceMetricsOverride",
+      { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false },
       sessionId
     );
-    await sleep(400);
-    await cdp.send(
+    await cdp.send("Page.navigate", { url: `${origin}/dashboard/111111111111111111/settings` }, sessionId);
+    await sleep(1500);
+    const appearanceOpened = await cdp.send(
       "Runtime.evaluate",
       {
         expression: `(() => {
-          const trigger = document.querySelector("button[aria-label='المظهر']");
-          if (!trigger) return JSON.stringify({ clicked: false, reason: "no appearance button" });
-          const options = { bubbles: true, cancelable: true, button: 0, pointerType: "mouse", isPrimary: true };
-          trigger.dispatchEvent(new PointerEvent("pointerdown", options));
-          trigger.dispatchEvent(new PointerEvent("pointerup", options));
-          trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
-          return JSON.stringify({ clicked: true, before: document.documentElement.dataset.theme });
+          const trigger = [...document.querySelectorAll("button")].find(b => (b.textContent ?? "").trim() === "المظهر");
+          if (!trigger) return JSON.stringify({ opened: false, reason: "no appearance tab" });
+          trigger.click();
+          return JSON.stringify({ opened: true, before: document.documentElement.dataset.theme });
         })()`,
         returnByValue: true
       },
       sessionId
     );
     await sleep(600);
-    const pick = await cdp.send(
-      "Runtime.evaluate",
-      {
-        expression: `(() => {
-          const light = [...document.querySelectorAll("button")].find(button => button.textContent?.trim() === "فاتح");
-          if (!light) {
-            const trigger = document.querySelector("button[aria-label='المظهر']");
-            return JSON.stringify({
-              picked: false,
-              triggerState: trigger?.getAttribute("data-state") ?? "(none)",
-              poppers: document.querySelectorAll("[data-radix-popper-content-wrapper]").length,
-              menus: document.querySelectorAll("[role='dialog']").length
-            });
-          }
-          const options = { bubbles: true, cancelable: true, button: 0, pointerType: "mouse", isPrimary: true };
-          light.dispatchEvent(new PointerEvent("pointerdown", options));
-          light.dispatchEvent(new PointerEvent("pointerup", options));
-          light.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
-          return JSON.stringify({ picked: true });
-        })()`,
-        returnByValue: true
-      },
-      sessionId
-    );
-    const pickResult = pick.result.value;
-    await sleep(500);
-    const afterTheme = await cdp.send(
-      "Runtime.evaluate",
-      {
-        expression: `JSON.stringify({
-          theme: document.documentElement.dataset.theme,
-          stored: window.localStorage.getItem("al-ai.appearance")
-        })`,
-        returnByValue: true
-      },
-      sessionId
-    );
-    const themeResult = JSON.parse(afterTheme.result.value);
-    const switched = themeResult.theme === "light" && (themeResult.stored ?? "").includes("light");
-    if (!switched) {
-      failures.push(`the appearance panel did not switch the palette (theme=${themeResult.theme}, stored=${themeResult.stored})`);
+    const appearanceState = JSON.parse(appearanceOpened.result.value);
+    if (!appearanceState.opened) {
+      failures.push(`the settings screen offers no appearance tab: ${appearanceState.reason}`);
+      console.log("FAIL  appearance panel   no tab");
+    } else {
+      const pick = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `(() => {
+            const light = [...document.querySelectorAll("button")].find(button => button.textContent?.trim() === "فاتح");
+            if (!light) return JSON.stringify({ picked: false });
+            light.click();
+            return JSON.stringify({ picked: true });
+          })()`,
+          returnByValue: true
+        },
+        sessionId
+      );
+      const pickResult = pick.result.value;
+      await sleep(500);
+      const afterTheme = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `JSON.stringify({
+            theme: document.documentElement.dataset.theme,
+            stored: window.localStorage.getItem("al-ai.appearance")
+          })`,
+          returnByValue: true
+        },
+        sessionId
+      );
+      const themeResult = JSON.parse(afterTheme.result.value);
+      const switched = themeResult.theme === "light" && (themeResult.stored ?? "").includes("light");
+      if (!switched) {
+        failures.push(`the appearance tab did not switch the palette (theme=${themeResult.theme}, stored=${themeResult.stored})`);
+      }
+      console.log(
+        `${switched ? "PASS" : "FAIL"}  appearance panel   pick=${pickResult} theme=${themeResult.theme} stored=${themeResult.stored}`
+      );
     }
-    console.log(
-      `${switched ? "PASS" : "FAIL"}  appearance panel   pick=${pickResult} theme=${themeResult.theme} stored=${themeResult.stored}`
-    );
 
     // The designer's canvas, measured for real: the selection box must hug
     // the text it belongs to (a box in the interface's font is a fraction of

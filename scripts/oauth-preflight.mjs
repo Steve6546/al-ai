@@ -25,6 +25,10 @@
  */
 const API = "https://discord.com/api/v10";
 
+// Discord's documented User-Agent shape. A request without one "may be blocked
+// and return a Cloudflare error", and a bare `fetch` from Node sends none.
+const USER_AGENT = "DiscordBot (https://github.com/Steve6546/al-ai, 0.1.0)";
+
 function arg(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
@@ -70,7 +74,9 @@ async function main() {
     return 2;
   }
 
-  const response = await fetch(`${API}/applications/@me`, { headers: { Authorization: `Bot ${token}` } });
+  const response = await fetch(`${API}/applications/@me`, {
+    headers: { Authorization: `Bot ${token}`, "User-Agent": USER_AGENT }
+  });
   if (!response.ok) {
     console.log(`UNKNOWN  Discord answered ${response.status} — the registered list could not be read`);
     return 2;

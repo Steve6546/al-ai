@@ -20,14 +20,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DiscordApiError, requestJson } from "../server/discord.js";
 
-type Call = { url: string; method?: string };
+type Call = { url: string; method?: string; headers?: Record<string, string> };
 
 function stubFetch(responses: Array<{ status: number; body?: string; throws?: Error }>) {
   const original = globalThis.fetch;
   const calls: Call[] = [];
   let index = 0;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-    calls.push({ url: String(input), method: init?.method });
+    calls.push({ url: String(input), method: init?.method, headers: (init?.headers ?? {}) as Record<string, string> });
     const next = responses[Math.min(index, responses.length - 1)];
     index += 1;
     if (next.throws) throw next.throws;
@@ -40,6 +40,21 @@ function stubFetch(responses: Array<{ status: number; body?: string; throws?: Er
     }
   };
 }
+
+test("every Discord call identifies itself with the documented User-Agent", async () => {
+  // Discord's API reference requires `User-Agent: DiscordBot ($url, $version)`
+  // and warns that a request without one "may be blocked and return a Cloudflare
+  // error". A bare `fetch` from Node sends none, so this pins the header on the
+  // JSON helper — the one every guild read and write goes through.
+  const stub = stubFetch([{ status: 200, body: '{"ok":true}' }]);
+  try {
+    await requestJson("/users/@me/guilds", { token: "t", method: "GET" });
+    const userAgent = stub.calls[0]?.headers?.["User-Agent"];
+    assert.match(String(userAgent), /^DiscordBot \(.+\)$/, "the shape Discord documents, not a bare token or an empty header");
+  } finally {
+    stub.restore();
+  }
+});
 
 test("a read is retried once when Discord answers 5xx", async () => {
   const stub = stubFetch([

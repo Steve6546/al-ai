@@ -58,22 +58,23 @@ appearance normalisation, command registry, anti-nuke limits.
 
 ### Decomposition status
 
-`i18n.tsx` was split first: 3,642 lines → 183, with the English and Arabic
-dictionaries moved to pure-data modules and every public export preserved on
-the barrel. It is the safest extraction because it is data only, has a German
-precedent, and no textual governance test pins the file's contents.
+`i18n.tsx` was split first: 3,642 lines → 182, with all three dictionaries
+(`i18n.en.ts`, `i18n.ar.ts`, `i18n.de.ts`) moved to pure-data modules and every
+public export preserved on the barrel. It is the safest extraction because it
+is data only, has no runtime side effects, and no textual governance test pins
+the file's contents.
 
 The remaining large modules are **not** split yet, on purpose:
 
 | File | LOC | Why a mechanical split is not yet safe |
 |---|---|---|
-| `apps/dashboard/server/index.ts` | 3,874 | mutable top-level `app`/`pool`/`db`/`network`; three tests read the file as raw text |
+| `apps/dashboard/server/index.ts` | 4,200 | mutable top-level `app`/`pool`/`db`/`network`; three tests read the file as raw text |
 | `apps/bot/src/lib/discord.ts` | 2,940 | governance pins `discord.js` to this exact path and `sendLogEmbed`/`applyBotPresence`/`setNickname` to it |
 | `apps/bot/src/index.ts` | 2,761 | mutable cooldown/cache state; two tests scan the file textually |
 | `apps/dashboard/src/views/settings/levels.tsx` | 1,720 | hook-bearing parts; render/mount tests catch hook-order regressions |
-| `apps/dashboard/server/db.ts` | 1,495 | one cohesive repository layer |
+| `apps/dashboard/server/db.ts` | 1,513 | one cohesive repository layer |
 | `apps/bot/src/storage/database.ts` | 1,322 | one cohesive repository layer |
-| `apps/dashboard/server/network.ts` | 1,302 | one cohesive state machine |
+| `apps/dashboard/server/network.ts` | 1,403 | one cohesive state machine |
 
 Split these incrementally, one module at a time, with a green `npm run verify`
 after each. A big-bang split would break path-pinned textual tests, the

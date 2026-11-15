@@ -71,6 +71,11 @@ Compose applies `infra/schema.sql` on the first initialisation of a fresh
 volume and waits for the database healthcheck. Slash commands are deployed
 separately, never at runtime: `npm run deploy-commands --workspace=@al-ai/bot`.
 
+**Publishing a dashboard change:** `npm run deploy` builds, runs the secret
+gate over the fresh bundle, and confirms the hash on disk is the one the live
+server answers — the step a manual build forgets. `--no-build` only verifies
+what is being served.
+
 ## Environment variables
 
 `.env` is gitignored; `.env.example` is the contract. Full table and
