@@ -6,8 +6,10 @@
     "dev": "node --import tsx --env-file=../../.env src/index.ts",
     "start": "node --import tsx --env-file=../../.env src/index.ts",
     "deploy-commands": "tsx --env-file=../../.env scripts/deploy-commands.ts",
-    "test": "tsx --test test/*.test.ts",
-    "lint": "tsc --noEmit"
+    "test": "node ../../scripts/test-runner.mjs test/*.test.ts",
+    "build": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@al-ai/core": "*",

@@ -34,13 +34,22 @@ export type PreviewProfile = {
   username: string;
   /** The nickname typed on this screen. Empty means "the account's own name". */
   nickname: string;
+  /** The nickname Discord itself serves for this guild, when no draft replaced it. */
+  liveNickname?: string | null;
   /** The picture uploaded for THIS server, or null. */
   serverAvatarDataUrl: string | null;
   /** The banner uploaded for THIS server, or null. */
   serverBannerDataUrl: string | null;
+  /** CDN URLs built from the live guild-member hashes, between the two above. */
+  guildAvatarUrl?: string | null;
+  guildBannerUrl?: string | null;
   /** What members see where this server has no override, or null. */
   accountAvatarUrl: string | null;
   accountBannerUrl: string | null;
+  /** `accent_color` from Discord, used when there is no banner and no role colour. */
+  accentColor?: number | null;
+  /** The readable application description — not a member bio. */
+  accountBio?: string | null;
   /**
    * Nullable because a stored row is the input here, and a stored row is not a
    * validated type: `bio` is a column that can hold NULL, and a column can hold
@@ -216,16 +225,34 @@ export function BotLivePreview({
    */
   const serverAvatar = profile.serverAvatarDataUrl ?? null;
   const serverBanner = profile.serverBannerDataUrl ?? null;
-  const avatar = serverAvatar ?? profile.accountAvatarUrl;
-  const banner = serverBanner ?? profile.accountBannerUrl;
+  /*
+   * Three levels, in Discord's own order. The middle one is the live
+   * guild-member CDN image built from `GET /guilds/{id}/members/{botId}`;
+   * skipping it is why a per-server banner set outside this dashboard used to
+   * read «لا يوجد غلاف» while the account had no banner either.
+   */
+  const guildAvatar = profile.guildAvatarUrl ?? null;
+  const guildBanner = profile.guildBannerUrl ?? null;
+  const avatar = serverAvatar ?? guildAvatar ?? profile.accountAvatarUrl;
+  const banner = serverBanner ?? guildBanner ?? profile.accountBannerUrl;
 
   // Normalised once, at the point a stored row meets the DOM: `bio` is trimmed
   // and would be a TypeError if it arrived as a non-string, and a presentational
   // component that throws takes the whole screen with it.
-  const bio = (profile.bio ?? "").trim();
+  const storedBio = (profile.bio ?? "").trim();
+  const accountBio = (profile.accountBio ?? "").trim();
+  const bio = storedBio || accountBio;
   const nickname = profile.nickname.trim();
-  const displayName = nickname || profile.username;
+  const liveNickname = (profile.liveNickname ?? "").trim();
+  const displayName = nickname || liveNickname || profile.username;
   const roleColor = profile.roleColor && /^#[0-9a-f]{6}$/i.test(profile.roleColor) ? profile.roleColor : null;
+  // A real Discord `accent_color` beats the generic dark grey when neither the
+  // role colour nor a banner exists. It is an integer, so it is formatted here
+  // rather than handed to CSS as a number.
+  const accentColor =
+    typeof profile.accentColor === "number" && Number.isInteger(profile.accentColor) && profile.accentColor >= 0
+      ? `#${profile.accentColor.toString(16).padStart(6, "0").slice(-6)}`
+      : null;
 
   return (
     <div className="space-y-3">
@@ -268,7 +295,7 @@ export function BotLivePreview({
           style={
             banner
               ? { backgroundImage: `url(${banner})`, backgroundSize: "cover", backgroundPosition: "center" }
-              : { backgroundColor: roleColor ?? "#4e5058" }
+              : { backgroundColor: roleColor ?? accentColor ?? "#4e5058" }
           }
         >
           {!banner ? <span className="absolute inset-0 grid place-items-center text-mini text-white/70">{t("preview.noBanner")}</span> : null}
@@ -429,9 +456,23 @@ export function BotLivePreview({
        * ---------------------------------------------------------------- */}
       <div className="rounded-xl border border-border bg-card px-3 py-1">
         <InfoRow label={t("preview.displayName")}>{displayName}</InfoRow>
-        <InfoRow label={t("preview.bio")}>{bio ? t("preview.saved") : <span className="text-muted-foreground">{t("preview.none")}</span>}</InfoRow>
+        <InfoRow label={t("preview.bio")}>
+          {bio ? (
+            <span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5">
+              <span className="truncate">{bio}</span>
+              {/* Where the text came from is part of the truth: a saved
+                  per-guild bio and the application description are not the
+                  same value, and the latter cannot be edited on this screen. */}
+              <span className="text-mini text-muted-foreground">
+                {storedBio ? t("preview.saved") : t("preview.accountBio")}
+              </span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">{t("preview.none")}</span>
+          )}
+        </InfoRow>
         <InfoRow label={t("preview.image")}>
-          {serverAvatar ? (
+          {serverAvatar || guildAvatar ? (
             t("preview.serverAvatar")
           ) : profile.accountAvatarUrl ? (
             <span className="text-muted-foreground">{t("preview.accountAvatar")}</span>
@@ -440,7 +481,7 @@ export function BotLivePreview({
           )}
         </InfoRow>
         <InfoRow label={t("preview.banner")}>
-          {serverBanner ? (
+          {serverBanner || guildBanner ? (
             t("preview.serverBanner")
           ) : profile.accountBannerUrl ? (
             <span className="text-muted-foreground">{t("preview.accountBanner")}</span>

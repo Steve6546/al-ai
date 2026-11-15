@@ -890,10 +890,14 @@ export async function applyAppearance(plan: AppearancePlan): Promise<FieldOutcom
  * perfectly visible to every member — a preview that lies in the one place it
  * exists to be believed.
  *
- * The bio is deliberately absent. Discord validates it on write and never
+ * A member bio is deliberately absent. Discord validates it on write and never
  * returns it on read — there is no member-bio field in the API at all — so the
- * stored row is the only source for it and the preview takes it from there. A
- * snapshot type carrying a `bio` would have to invent one.
+ * stored row is the only source for the per-guild bio and the preview takes it
+ * from there. A snapshot type carrying a member `bio` would have to invent one.
+ *
+ * The *application* description is a different field and is genuinely readable
+ * (`GET /applications/@me`), so `readBotAccountProfile` fetches it separately
+ * as an honest fallback when no per-guild bio was saved here.
  *
  * Raw hashes, not URLs: turning a hash into a CDN address is the one job
  * `userAvatarUrl` owns, and a second implementation here is how the animated-
@@ -907,6 +911,8 @@ export type GuildMemberProfile = {
   banner: string | null;
   accountAvatar: string | null;
   accountBanner: string | null;
+  /** `accent_color` from `GET /users/@me`; null when Discord did not supply it. */
+  accentColor: number | null;
 };
 
 /**
@@ -965,7 +971,10 @@ export async function readGuildMemberProfile(
           banner?: string | null;
           user: { username: string; avatar: string | null };
         }>(`/guilds/${guildId}/members/${botUserId}`, { token, method: "GET" }),
-        requestJson<{ avatar: string | null; banner: string | null }>("/users/@me", { token, method: "GET" }).catch(() => null)
+        requestJson<{ avatar: string | null; banner: string | null; accent_color?: number | null }>("/users/@me", {
+          token,
+          method: "GET"
+        }).catch(() => null)
       ]);
       return {
         username: member.user.username,
@@ -975,7 +984,10 @@ export async function readGuildMemberProfile(
         // The member's own user object already carries the account avatar, so
         // the fallback survives even when `/users/@me` does not answer.
         accountAvatar: account?.avatar ?? member.user.avatar ?? null,
-        accountBanner: account?.banner ?? null
+        accountBanner: account?.banner ?? null,
+        // A forced REST read of the full user object, not the gateway-cached
+        // `ClientUser`: the cached object omits `banner` and `accent_color`.
+        accentColor: typeof account?.accent_color === "number" ? account.accent_color : null
       };
     });
   } catch {
@@ -997,4 +1009,47 @@ export async function readGuildMemberProfile(
  */
 export function invalidateGuildMemberProfile(token: string, guildId: string) {
   guildMemberProfileCache.clear(guildMemberProfileKey(token, guildId));
+}
+
+/* ------------------------------------------------------------------ *
+ * The bot's account-wide profile.
+ *
+ * A member bio is write-only: `PATCH /guilds/{id}/members/@me` accepts it and
+ * no read returns it. The one genuine Discord source for a bot's "about me" is
+ * the *application* description, which `GET /applications/@me` does return.
+ * Reading it here keeps the preview honest: when this server has no saved bio,
+ * the card can show the real description instead of «لا توجد» — and it can say
+ * where the text came from rather than pretending it was saved here.
+ *
+ * Cached like the guild read because the same rate-limit budget applies, and
+ * invalidated by the same `?refresh=1` request that forces the member read.
+ * ------------------------------------------------------------------ */
+export type BotAccountProfile = {
+  name: string | null;
+  description: string | null;
+};
+
+const botAccountProfileCache = new TtlCache<string, BotAccountProfile>(GUILD_MEMBER_CACHE_MS);
+
+export async function readBotAccountProfile(token: string): Promise<BotAccountProfile | null> {
+  try {
+    return await botAccountProfileCache.resolve(token, async () => {
+      const application = await requestJson<{ name?: string | null; description?: string | null }>(
+        "/applications/@me",
+        { token, method: "GET" }
+      );
+      return {
+        name: application.name?.trim() || null,
+        description: application.description?.trim() || null
+      };
+    });
+  } catch {
+    // Advisory. An application without a visible description, or a token that
+    // cannot read it, is "unknown", never a fabricated bio.
+    return null;
+  }
+}
+
+export function invalidateBotAccountProfile(token: string) {
+  botAccountProfileCache.clear(token);
 }

@@ -4,6 +4,11 @@ dist/
 coverage/
 *.log
 
+# Source maps are generated output, never source. No .map file belongs in
+# history or in a production bundle's source tree.
+*.map
+**/*.map
+
 # Secrets: never commit real values. Template lives in .env.example
 .env
 .env.*

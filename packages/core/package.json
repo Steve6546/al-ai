@@ -7,8 +7,10 @@
     "./browser": "./src/browser.ts"
   },
   "scripts": {
-    "test": "tsx --test test/*.test.ts",
-    "lint": "tsc --noEmit"
+    "test": "node ../../scripts/test-runner.mjs test/*.test.ts",
+    "build": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {},
   "devDependencies": {

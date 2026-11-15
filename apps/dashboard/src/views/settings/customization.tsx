@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, IdCard, Loader2, Lock, Palette, Pencil, TriangleAlert, Upload, X } from "lucide-react";
+import { Check, IdCard, Loader2, Lock, Palette, Pencil, RefreshCw, TriangleAlert, Upload, X } from "lucide-react";
 import {
   DEFAULT_CUSTOMIZATION,
   MAX_BIO_LENGTH,
@@ -98,6 +98,7 @@ export function CustomizationView({ guild }: { guild: Guild }) {
   const [roleIcon, setRoleIcon] = useState<RoleIconGate | null>(null);
 
   const [editing, setEditing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [imageWarning, setImageWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -137,13 +138,25 @@ export function CustomizationView({ guild }: { guild: Guild }) {
   const preview = useMemo(() => {
     const draft = guildForm.draft ?? guildForm.saved ?? DEFAULT_CUSTOMIZATION;
     const enabled = draft.enabled;
+    /*
+     * Resolution order is Discord's own: what the operator just picked, then
+     * what THIS guild's member record serves, then the account-wide picture.
+     * The guild member CDN URLs used to be fetched by the BFF and thrown away
+     * here — a bot with a per-server banner still rendered «لا يوجد غلاف».
+     * Every live value is bound to both the card and the summary table below.
+     */
     return {
       username: profile?.username ?? "AL AI",
       nickname: enabled ? draft.nickname : "",
+      liveNickname: profile?.nickname ?? null,
       serverAvatarDataUrl: enabled ? firstImage(draft.avatarDataUrl) : null,
       serverBannerDataUrl: enabled ? firstImage(draft.bannerDataUrl) : null,
+      guildAvatarUrl: profile?.avatarUrl ?? null,
+      guildBannerUrl: profile?.bannerUrl ?? null,
       accountAvatarUrl: profile?.accountAvatarUrl ?? null,
       accountBannerUrl: profile?.accountBannerUrl ?? null,
+      accentColor: profile?.accentColor ?? null,
+      accountBio: profile?.accountBio ?? null,
       bio: enabled ? draft.bio : "",
       roleColor: draft.roleColor,
       roleIconUrl: draft.roleIconUrl
@@ -288,6 +301,31 @@ export function CustomizationView({ guild }: { guild: Guild }) {
     setImageWarning(null);
   };
 
+  /**
+   * Force a fresh Discord read. The BFF memoises the member/application reads
+   * for a minute, so a profile changed outside this dashboard can otherwise
+   * keep showing «لا يوجد غلاف» for that long. `?refresh=1` drops both cached
+   * entries before reading; only the live snapshot is replaced, so an unsaved
+   * draft is never lost.
+   */
+  const refreshFromDiscord = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const result = await api.customization(guild.id, { refresh: true });
+      setPermissions(result.permissions);
+      setRoleIcon(result.roleIcon);
+      setProfile(result.profile ?? null);
+    } catch (cause) {
+      push({
+        title: cause instanceof Error ? cause.message : t("customization.loadFailed"),
+        tone: "error"
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4 pb-24">
       <Toaster toasts={toasts} onDismiss={dismiss} />
@@ -317,6 +355,19 @@ export function CustomizationView({ guild }: { guild: Guild }) {
               aria-label={t("customization.enable")}
             />
           </label>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => void refreshFromDiscord()}
+            disabled={refreshing}
+            className="gap-1.5"
+            aria-label={t("customization.refresh")}
+            title={t("customization.refresh")}
+          >
+            <RefreshCw className={`size-4 ${refreshing ? "animate-spin" : ""}`} />
+            <span className="hidden sm:inline">{t("customization.refresh")}</span>
+          </Button>
           <Button
             type="button"
             size="sm"

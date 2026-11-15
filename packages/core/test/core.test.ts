@@ -35,7 +35,16 @@ import {
   requireEvent,
   resolveTier,
   SESSION_COOKIE_OPTIONS,
+  SESSION_COOKIE_NAME_HARDENED,
+  SESSION_COOKIE_NAME_PLAIN,
   SESSION_MAX_AGE_SECONDS,
+  cookieHostname,
+  isReachableLanHost,
+  isPrivateLanAddress,
+  isVpnAdapter,
+  lanUrlFor,
+  reachableLanEntries,
+  sessionCookiePolicyFor,
   signActor,
   normaliseRemoteAccessMode,
   normaliseWelcomeSettings,
@@ -621,4 +630,115 @@ test("remote access mode normalises to the safe default", () => {
   // The three real values survive verbatim, including "tunnel" — the widest.
   assert.equal(normaliseRemoteAccessMode("lan"), "lan");
   assert.equal(normaliseRemoteAccessMode("tunnel"), "tunnel");
+});
+
+/* ------------------------------------------------------------------ *
+ * LAN reach — which addresses are real doors onto this machine
+ * ------------------------------------------------------------------ */
+
+test("the LAN filter keeps the Wi-Fi address and drops the adapters that are not reachable", () => {
+  // The exact shape `os.networkInterfaces()` reports on the development
+  // machine: a VPN, a VirtualBox host-only NIC and the real Wi-Fi adapter.
+  const entries = [
+    { host: "10.234.0.9", label: "HotspotShield_Wireguard" },
+    { host: "192.168.56.1", label: "Ethernet 4" },
+    { host: "192.168.1.195", label: "Wi-Fi" },
+    { host: "fe80::1234", label: "Wi-Fi" },
+    { host: "169.254.12.7", label: "Wi-Fi" }
+  ];
+  assert.deepEqual(reachableLanEntries(entries), [{ host: "192.168.1.195", label: "Wi-Fi" }]);
+  assert.equal(lanUrlFor("192.168.1.195", 3000), "http://192.168.1.195:3000");
+});
+
+test("the LAN filter keeps 10.x and 172.16.x private ranges", () => {
+  assert.equal(isReachableLanHost("10.0.0.7"), true);
+  assert.equal(isReachableLanHost("172.16.4.9"), true);
+  assert.equal(isReachableLanHost("192.168.1.195"), true);
+  assert.equal(isReachableLanHost("169.254.1.1"), false, "APIPA means DHCP failed");
+  assert.equal(isReachableLanHost("192.168.56.1"), false, "VirtualBox host-only default");
+  assert.equal(isReachableLanHost("fe80::1"), false, "IPv6 link-local needs a scope id");
+  assert.equal(reachableLanEntries([{ host: "10.0.0.7", label: "vEthernet (WSL)" }]).length, 0);
+});
+
+test("VPN/tunnel adapters are recognised and never advertised as LAN", () => {
+  // The names the audit found on the development machine, plus the spelling
+  // variants other VPN clients use. A phone on the Wi-Fi cannot open any of
+  // them, so a QR code must never carry one.
+  for (const name of ["HotspotShield_Wireguard", "Tailscale", "ZeroTier One", "tun0", "utun3", "ppp0", "TAP-Windows Adapter V9"]) {
+    assert.equal(isVpnAdapter(name), true, `${name} is a VPN adapter`);
+    assert.equal(reachableLanEntries([{ host: "10.0.0.9", label: name }]).length, 0, `${name} is not advertised`);
+  }
+  // A physical adapter is not a VPN, and the word "Ethernet" alone must not
+  // make it disappear: it is often the real wired NIC.
+  assert.equal(isVpnAdapter("Wi-Fi"), false);
+  assert.equal(isVpnAdapter("Ethernet 2"), false);
+  assert.equal(reachableLanEntries([{ host: "192.168.1.195", label: "Wi-Fi" }]).length, 1);
+});
+
+test("isPrivateLanAddress covers exactly RFC1918 and unwraps IPv4-mapped peers", () => {
+  for (const host of ["10.0.0.1", "172.16.0.1", "172.31.255.254", "192.168.1.195", "::ffff:192.168.1.195"]) {
+    assert.equal(isPrivateLanAddress(host), true, host);
+  }
+  for (const host of ["172.15.0.1", "172.32.0.1", "192.169.0.1", "8.8.8.8", "fe80::1", "", null, undefined]) {
+    assert.equal(isPrivateLanAddress(host), false, String(host));
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * Session cookies on a LAN origin
+ *
+ * A browser honours `Secure` on http://localhost (a trustworthy origin) but
+ * *refuses* it on http://192.168.1.195. And `__Host-` is refused whenever
+ * `Secure` is absent. A production dashboard bound to 0.0.0.0 therefore used
+ * to hand a phone a cookie it silently discarded: login looked successful and
+ * every API call answered 401. These tests pin the per-request verdict.
+ * ------------------------------------------------------------------ */
+
+test("a production LAN request gets a plain cookie the browser will actually keep", () => {
+  const policy = sessionCookiePolicyFor({ protocol: "http", host: "192.168.1.195:3000" }, true);
+  assert.deepEqual(policy, { name: SESSION_COOKIE_NAME_PLAIN, secure: false });
+  assert.notEqual(policy.name, SESSION_COOKIE_NAME_HARDENED, "the __Host- prefix requires Secure");
+});
+
+test("production localhost, 127.0.0.1 and the HTTPS tunnel keep the hardened cookie", () => {
+  for (const transport of [
+    { protocol: "http", host: "localhost:3000" },
+    { protocol: "http", host: "127.0.0.1:3000" },
+    { protocol: "https", host: "example.ngrok-free.dev" },
+    { protocol: "https", host: "192.168.1.195:3000" }
+  ]) {
+    assert.deepEqual(
+      sessionCookiePolicyFor(transport, true),
+      { name: SESSION_COOKIE_NAME_HARDENED, secure: true },
+      JSON.stringify(transport)
+    );
+  }
+});
+
+test("development never sets Secure, on any origin", () => {
+  // A dev server talks plain HTTP on loopback; a Secure cookie there would be
+  // pointless at best. It must also not claim the __Host- prefix.
+  for (const transport of [
+    { protocol: "http", host: "localhost:3000" },
+    { protocol: "http", host: "192.168.1.195:3000" }
+  ]) {
+    assert.deepEqual(sessionCookiePolicyFor(transport, false), {
+      name: SESSION_COOKIE_NAME_PLAIN,
+      secure: false
+    });
+  }
+});
+
+test("cookieHostname strips ports and brackets without mangling bare hosts", () => {
+  assert.equal(cookieHostname("localhost:3000"), "localhost");
+  assert.equal(cookieHostname("192.168.1.195:3000"), "192.168.1.195");
+  assert.equal(cookieHostname("[::1]:3000"), "[::1]");
+  assert.equal(cookieHostname("EXAMPLE.ngrok-free.dev"), "example.ngrok-free.dev");
+  assert.equal(cookieHostname(undefined), "");
+});
+
+test("the hardened policy keeps HttpOnly, SameSite=Lax and Path=/", () => {
+  assert.equal(SESSION_COOKIE_OPTIONS.httpOnly, true);
+  assert.equal(SESSION_COOKIE_OPTIONS.sameSite, "lax");
+  assert.equal(SESSION_COOKIE_OPTIONS.path, "/");
 });

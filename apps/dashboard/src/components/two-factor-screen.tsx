@@ -163,7 +163,18 @@ export function TwoFactorScreen({
     try {
       // The server distinguishes a 6-digit TOTP from a recovery code by the
       // shape of `code`; the trimmed value is forwarded unchanged either way.
-      await api.verifySecondFactor(value);
+      const result = await api.verifySecondFactor(value);
+      /*
+       * A sign-in that started on a plain-HTTP LAN origin finished here, on the
+       * tunnel. That origin's cookie is not the one the phone can keep, so the
+       * server hands back a single-use URL that mints it there. Navigating is
+       * the whole point — calling `onVerified` would re-read `/api/session` on
+       * the tunnel origin and leave the LAN tab signed out.
+       */
+      if (result.redirectTo) {
+        window.location.assign(result.redirectTo);
+        return;
+      }
       onVerified();
     } catch (cause) {
       if (cause instanceof ApiError) {

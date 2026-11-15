@@ -1261,5 +1261,4 @@ function SessionRow({
   );
 }
 
-/** Kept for the router's exhaustive view list. */
-export type { Section as SettingsSection };
+/* `Section` is internal to this screen; no other module imports it. */

@@ -53,8 +53,27 @@
  * moves both together. One step above the overlay, which is also the toast
  * layer — the operator is looking at the menu they just opened.
  */
+/*
+ * The stacking scale, in one place.
+ *
+ * Measured on this app, from bottom to top:
+ *
+ *   30   header and the server rail's own header (in the flow, never scrolls)
+ *   40   the floating save bar
+ *   50   dialogs, sheets, dropdowns, popovers, tooltips
+ *   100000  HeroUI's modal backdrop (`--z-index-overlay`, library-owned)
+ *   +1   an open Radix menu, so the listbox is never cut by a modal backdrop
+ *   +2   the toast stack, so a notification is never hidden by either
+ *
+ * A toast used to be `z-50` and rendered inside the screen, which put it in
+ * that screen's stacking context: a `framer-motion` transform made the wrapper
+ * the containing block for its `fixed` child, so the header painted over it and
+ * `<main>` clipped it. The value below is only half the fix; the portal in
+ * `toaster.tsx` is the other half.
+ */
 :root {
   --z-menu: calc(var(--z-index-overlay, 100000) + 1);
+  --z-toast: calc(var(--z-index-overlay, 100000) + 2);
 }
 
 [data-accent="violet"] {

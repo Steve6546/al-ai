@@ -25,6 +25,7 @@ import type {
   LevelSyncJob,
   LoggingSettings,
   NetworkSnapshot,
+  NetworkFirewall,
   WelcomeSettings,
   PermissionStatus,
   RemoteAccessMode,
@@ -161,7 +162,7 @@ export const guilds = () => call<{ guilds: Guild[] }>("/api/guilds");
  * ------------------------------------------------------------------ */
 export const secondFactorEnrollment = () => call<TwoFactorEnrollment>("/api/2fa/enrollment");
 export const verifySecondFactor = (code: string) =>
-  call<{ ok: true }>("/api/2fa/verify", { method: "POST", body: JSON.stringify({ code }) });
+  call<{ ok: true; redirectTo?: string }>("/api/2fa/verify", { method: "POST", body: JSON.stringify({ code }) });
 export const cancelSecondFactor = () => call<{ ok: true }>("/api/2fa/cancel", { method: "POST" });
 
 /* ------------------------------------------------------------------ *
@@ -317,7 +318,7 @@ export const saveCommands = (guildId: string, changes: CommandChange[]) =>
 /* ------------------------------------------------------------------ *
  * Settings: customization
  * ------------------------------------------------------------------ */
-export const customization = async (guildId: string) => {
+export const customization = async (guildId: string, options?: { refresh?: boolean }) => {
   const payload = await call<{
     settings: CustomizationSettings;
     permissions: PermissionStatus[];
@@ -335,7 +336,7 @@ export const customization = async (guildId: string) => {
      * owner-gated half left to read.
      */
     profile: GuildProfileSnapshot | null;
-  }>(`/api/guilds/${guildId}/customization`);
+  }>(`/api/guilds/${guildId}/customization${options?.refresh ? "?refresh=1" : ""}`);
 
   /*
    * `settings` is what the form edits, so a dashboard server that predates the
@@ -416,7 +417,22 @@ export const saveBotPresence = (guildId: string, settings: BotPresenceSettings) 
 /* ------------------------------------------------------------------ *
  * Settings: logging
  * ------------------------------------------------------------------ */
-export const logging = (guildId: string) => call<{ settings: LoggingSettings }>(`/api/guilds/${guildId}/logging`);
+/**
+ * The saved logging configuration plus the server's own count of *deliverable*
+ * events, computed from the same PostgreSQL row. `stats` is optional so a
+ * dashboard server predating it still renders the screen (the client computes
+ * the same figure from `settings`); it is authoritative when present.
+ */
+export const logging = (guildId: string) =>
+  call<{
+    settings: LoggingSettings;
+    stats?: {
+      enabledEvents: number;
+      totalEvents: number;
+      boundChannels: number;
+      enabled: boolean;
+    };
+  }>(`/api/guilds/${guildId}/logging`);
 export const saveLogging = (guildId: string, settings: LoggingSettings) =>
   call<{ settings: LoggingSettings; savedAt: string }>(`/api/guilds/${guildId}/logging`, {
     method: "PUT",
@@ -566,4 +582,16 @@ export const saveNetwork = (mode: RemoteAccessMode, domain?: string | null) =>
   call<NetworkSnapshot>("/api/network", {
     method: "PUT",
     body: JSON.stringify(domain === undefined ? { mode } : { mode, domain })
+  });
+/** Read-only: does Windows allow inbound TCP on the dashboard port? */
+export const networkFirewall = () => call<NetworkFirewall>("/api/network/firewall");
+/**
+ * Create/repair the rule. Without `elevate`, an unelevated server answers
+ * `needsAdmin: true`; with it, Windows shows the UAC prompt on the host and the
+ * screen polls the status again.
+ */
+export const ensureNetworkFirewall = (elevate = false) =>
+  call<NetworkFirewall>("/api/network/firewall", {
+    method: "POST",
+    body: JSON.stringify({ elevate })
   });

@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { isCategoryEnabled, isEventEnabled } from "@al-ai/core/browser";
+import {
+  countActiveEvents,
+  countActiveEventsInCategory,
+  countBoundChannels,
+  isCategoryEnabled,
+  isEventEnabled,
+  totalOperatorEvents
+} from "@al-ai/core/browser";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircle,
@@ -596,18 +603,25 @@ export function LogsView({ guild }: { guild: Guild }) {
   const isEnabled = (categoryId: LogDestination, eventId: string) =>
     isEventEnabled(draft.eventFlags, categoryId, eventId);
 
-  const enabledCount = allRecords.filter(record => isEnabled(record.category.id, record.event.id)).length;
-  const channelsInUse = new Set([
-    ...(draft.globalChannelId ? [draft.globalChannelId] : []),
-    ...Object.values(draft.categoryChannels ?? {}),
-    ...Object.values(draft.eventChannels ?? {})
-  ]).size;
+  /*
+   * "Configured on" and "actually live" are different numbers, and the badge
+   * used to show the first while calling it the second. An unset flag reads as
+   * ON (GOVERNANCE rule 6), so counting flags reported 111/111 on a server
+   * where central logging was switched off and no channel was bound — even
+   * though the router would deliver none of them.
+   *
+   * `isEnabled` below stays the *configured* state: it drives the toggles and
+   * the enabled/disabled filter, which must keep showing what the operator
+   * saved. The counters answer the delivery question through the shared core
+   * helpers, the same ones the BFF uses on the PostgreSQL row.
+   */
+  const channelsInUse = countBoundChannels(draft.globalChannelId, draft.categoryChannels, draft.eventChannels);
+  const activity = { enabled: draft.enabled, boundChannels: channelsInUse };
+  const enabledCount = countActiveEvents(draft.eventFlags, activity);
+  const totalEvents = totalOperatorEvents();
 
-  /** How many events in one section are on, for the sidebar's X/N badge. */
-  const enabledInSection = (id: LogDestination) => {
-    const category = logCategories.find(entry => entry.id === id);
-    return category ? category.events.filter(event => isEnabled(id, event.id)).length : 0;
-  };
+  /** How many events in one section can actually be delivered, for the X/N badge. */
+  const enabledInSection = (id: LogDestination) => countActiveEventsInCategory(draft.eventFlags, id, activity);
 
   /** Writes a single event flag, or removes it to fall back to the destination default. */
   const setEventFlag = (eventId: string, value: boolean | null) =>
@@ -731,8 +745,14 @@ export function LogsView({ guild }: { guild: Guild }) {
         * binds - the number the teardown dialog is about to act on.
       */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-card px-4 py-3">
-        <StatPill icon={CheckCircle2} tone="text-success" label={t("logs.stat.enabled")} value={t("logs.stat.enabledValue", { enabled: enabledCount, total: allRecords.length })} />
+        {/* `dir="ltr"` + a plain slash: the Arabic word «من» inside a forced-LTR
+            span is bidi-displaced in an RTL document, leaving «111 111» with no
+            visible separator. The value itself carries no RTL text now. */}
+        <StatPill icon={CheckCircle2} tone="text-success" label={t("logs.stat.enabled")} value={t("logs.stat.enabledValue", { enabled: enabledCount, total: totalEvents })} />
         <StatPill icon={Hash} tone="text-primary" label={t("logs.stat.channels")} value={channelsInUse} />
+        {enabledCount === 0 && totalEvents > 0 ? (
+          <span className="text-xs text-muted-foreground">{t("logs.stat.inactive")}</span>
+        ) : null}
         {coolingDown ? (
           <Badge variant="outline" className="gap-1.5 border-warning/40 text-warning" dir="ltr">
             <Settings className="size-3" />
@@ -1159,9 +1179,11 @@ function StatPill({
   return (
     <span className="flex items-center gap-2 rounded-full border border-border px-3 py-1.5">
       <Icon className={`size-4 ${tone}`} aria-hidden />
-      <span className="text-sm font-semibold tabular-nums" dir="ltr">
+      {/* <bdi> isolates the figure from the surrounding RTL label, so a mixed
+          value can never be visually reordered into «111 111» again. */}
+      <bdi dir="ltr" className="text-sm font-semibold tabular-nums">
         {value}
-      </span>
+      </bdi>
       <span className="text-xs text-muted-foreground">{label}</span>
     </span>
   );

@@ -15,6 +15,9 @@ import {
   commandCategories,
   commandCategoryDescriptions,
   commandCategoryLabels,
+  countActiveEvents,
+  countBoundChannels,
+  totalOperatorEvents,
   decryptSecret,
   encryptSecret,
   buildOtpauthUri,
@@ -58,7 +61,6 @@ import {
   normaliseLevelReward,
   normaliseWelcomeSettings,
   requireCommand,
-  SESSION_COOKIE_NAME,
   summarisePunishments,
   verifyLayerRequest,
   verifyTotpCode,
@@ -83,12 +85,17 @@ import {
   type Tier,
   DISCORD_PERMISSION_BITS,
   LOGIN_SCOPES,
-  normaliseRemoteAccessMode
+  isPrivateLanAddress,
+  lanUrlFor,
+  normaliseRemoteAccessMode,
+  reachableLanEntries,
+  SESSION_COOKIE_NAMES
 } from "@al-ai/core";
 import { loadEnv } from "./env.js";
+import { elevateFirewall, ensureFirewall, firewallStatus } from "./firewall.js";
 import { isPlatformOwner } from "./authorization.js";
 import { createDatabase, createPool } from "./db.js";
-import { clearedCookieHeader, destroySession, issueSession, parseCookies, policyCookieHeader, readSession, sessionAccessToken, sessionCookieHeader } from "./session.js";
+import { clearedCookieHeader, derivedCookieName, destroySession, issueSession, parseCookies, policyCookieHeader, readSession, sessionAccessToken, sessionCookieHeader } from "./session.js";
 import { assertTier, AuthorizationError, botIdentityPermissionStatus, resolveActorTier } from "./authorization.js";
 import { appendAudit } from "./audit.js";
 import {
@@ -130,7 +137,8 @@ import {
   type DiscordRole
 } from "./discord.js";
 import {
-  SECOND_FACTOR_COOKIE_NAME,
+  SECOND_FACTOR_COOKIE_NAMES,
+  secondFactorCookieName,
   SECOND_FACTOR_ISSUER,
   SECOND_FACTOR_MAX_ATTEMPTS,
   SECOND_FACTOR_PENDING_SECONDS,
@@ -160,13 +168,16 @@ import {
   isOAuthCapableOrigin,
   normaliseNgrokDomain,
   packOAuthState,
+  unpackOAuthReturnTo,
   unpackOAuthState
 } from "./network.js";
 import {
   applyAppearance,
   changedAppearanceFields,
   fetchImageAsDataUrl,
+  invalidateBotAccountProfile,
   invalidateGuildMemberProfile,
+  readBotAccountProfile,
   readGuildMemberProfile,
   resolveRoleIconWrite,
   type AppearanceField,
@@ -182,7 +193,7 @@ const secondFactor = createSecondFactorStore(pool);
 const PENDING_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function pendingLoginId(request: FastifyRequest): string | null {
-  const id = parseCookies(request.headers.cookie)[SECOND_FACTOR_COOKIE_NAME];
+  const id = parseCookies(request.headers.cookie)[secondFactorCookieName(request)];
   return id && PENDING_ID_PATTERN.test(id) ? id : null;
 }
 
@@ -442,7 +453,14 @@ app.addHook("onRequest", async (request, reply) => {
   // route's own authentication answers, so the request is left alone.
   if (origin === null && referer === null) {
     const cookies = parseCookies(request.headers.cookie);
-    if (cookies[SESSION_COOKIE_NAME] || cookies[SECOND_FACTOR_COOKIE_NAME]) {
+    // Both names matter: a write from a LAN origin carries the unprefixed
+    // cookie, and a write from localhost/tunnel carries the `__Host-` one.
+    // Refusing to recognise either would silently drop the guard on one of
+    // the two origins this dashboard now serves.
+    if (
+      SESSION_COOKIE_NAMES.some(name => cookies[name]) ||
+      SECOND_FACTOR_COOKIE_NAMES.some(name => cookies[name])
+    ) {
       return reply.code(403).send(refusal);
     }
   }
@@ -474,7 +492,7 @@ app.addHook("onRequest", async (request, reply) => {
   }
 
   const cookies = parseCookies(request.headers.cookie);
-  const sessionKey = cookies[SESSION_COOKIE_NAME];
+  const sessionKey = SESSION_COOKIE_NAMES.map(name => cookies[name]).find(Boolean);
   if (!sessionKey || !/^[0-9a-f-]{36}$/i.test(sessionKey)) return;
   const verdict = throttle.check(`sess:${sessionKey}`, now);
   if (verdict.allowed) return;
@@ -493,7 +511,7 @@ app.addHook("onRequest", async (request, reply) => {
  * ------------------------------------------------------------------ */
 
 async function requireSession(request: FastifyRequest, reply: FastifyReply) {
-  const session = await readSession(db, request as unknown as { headers: Record<string, unknown> });
+  const session = await readSession(db, request);
   if (!session) {
     reply.code(401).send({ error: "UNAUTHENTICATED", message: "الجلسة منتهية أو غير موجودة. سجّل الدخول عبر Discord." });
     return null;
@@ -564,10 +582,10 @@ async function loadUserGuilds(
   // browser falls back to the sign-in screen.
   const accessToken = sessionAccessToken(session, env);
   if (!accessToken) {
-    await destroySession(db, request as unknown as { headers: Record<string, unknown> }).catch(() => undefined);
+    await destroySession(db, request).catch(() => undefined);
     reply
       .code(401)
-      .header("set-cookie", clearedCookieHeader())
+      .header("set-cookie", clearedCookieHeader(request))
       .send({ error: "SESSION_EXPIRED", message: "انتهت صلاحية الدخول عبر Discord. سجّل الدخول من جديد." });
     return null;
   }
@@ -575,10 +593,10 @@ async function loadUserGuilds(
     return await fetchUserGuildsCached(accessToken);
   } catch (error) {
     if (isAuthFailure(error)) {
-      await destroySession(db, request as unknown as { headers: Record<string, unknown> }).catch(() => undefined);
+      await destroySession(db, request).catch(() => undefined);
       reply
         .code(401)
-        .header("set-cookie", clearedCookieHeader())
+        .header("set-cookie", clearedCookieHeader(request))
         .send({ error: "SESSION_EXPIRED", message: "انتهت صلاحية الدخول عبر Discord. سجّل الدخول من جديد." });
       return null;
     }
@@ -785,7 +803,7 @@ app.get("/api/health", async (request): Promise<HealthSnapshot | Omit<HealthSnap
     database,
     gateway: { eventsLastMinute: 0, ceiling: 120 }
   };
-  const session = await readSession(db, request as unknown as { headers: Record<string, unknown> });
+  const session = await readSession(db, request);
   if (!session) return base;
 
   return {
@@ -828,8 +846,8 @@ app.post("/internal/layer/health", async (request, reply) => {
  * next leg overwrites it. Built on the shared policy serializer so it inherits
  * the session cookie's `Secure` flag instead of hand-rolling a second copy.
  */
-function stateCookieHeader(state: string) {
-  return policyCookieHeader(`${SESSION_COOKIE_NAME}_state`, state, 600);
+function stateCookieHeader(state: string, request: FastifyRequest) {
+  return policyCookieHeader(derivedCookieName("_state", request), state, 600, request);
 }
 
 function newOAuthState() {
@@ -859,6 +877,68 @@ function redirectUriForOrigin(origin: string): string {
 }
 
 /**
+ * A one-time ticket from the tunnel origin back to a plain-HTTP LAN origin.
+ *
+ * Discord accepts an HTTP redirect URI only for loopback, so a phone on
+ * `http://192.168.1.195:3000` cannot complete OAuth where it stands. It signs
+ * in on the HTTPS tunnel origin instead, and the callback hands it back here
+ * with a random, single-use code. The code is bound to one LAN origin and to
+ * one already-verified session (2FA included), lives 60 seconds, and is deleted
+ * on first use — it is never the session id itself, so a URL in a history log
+ * is not a credential.
+ */
+const LAN_HANDOFF_TTL_MS = 60_000;
+const lanHandoffs = new Map<string, { sessionId: string; origin: string; expiresAt: number }>();
+
+function createLanHandoff(sessionId: string, origin: string): string {
+  const now = Date.now();
+  for (const [code, entry] of lanHandoffs) if (entry.expiresAt <= now) lanHandoffs.delete(code);
+  const code = randomBytes(24).toString("base64url");
+  lanHandoffs.set(code, { sessionId, origin, expiresAt: now + LAN_HANDOFF_TTL_MS });
+  return code;
+}
+
+function consumeLanHandoff(code: string, origin: string): string | null {
+  const entry = lanHandoffs.get(code);
+  // Deleted before validation, so two concurrent requests cannot both win.
+  lanHandoffs.delete(code);
+  if (!entry || entry.expiresAt <= Date.now() || entry.origin !== origin) return null;
+  return entry.sessionId;
+}
+
+/** A plain-HTTP private LAN origin — the only kind that needs a handoff. */
+function isPrivateOrigin(origin: string): boolean {
+  try {
+    return isPrivateLanAddress(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The LAN return address, carried across the 2FA step in its own short-lived
+ * cookie. It is not part of the pending row because it is not a credential and
+ * a schema migration for one string would be worse than a cookie that expires
+ * with the pending login. Re-validated on every read, never trusted.
+ */
+function returnCookieName(request: FastifyRequest): string {
+  return derivedCookieName("_return", request);
+}
+
+function returnCookieHeader(origin: string, request: FastifyRequest): string {
+  return policyCookieHeader(returnCookieName(request), origin, SECOND_FACTOR_PENDING_SECONDS, request);
+}
+
+function clearedReturnCookie(request: FastifyRequest): string {
+  return policyCookieHeader(returnCookieName(request), "", 0, request);
+}
+
+function requestedReturnOrigin(request: FastifyRequest): string | null {
+  const value = parseCookies(request.headers.cookie as string | undefined)[returnCookieName(request)];
+  return value && isPrivateOrigin(value) && network.isOriginAllowed(value) ? value : null;
+}
+
+/**
  * Where an OAuth leg may begin, given the origin the browser is on.
  *
  * Discord registers HTTPS redirect URIs and loopback only — a plain-HTTP LAN
@@ -881,17 +961,30 @@ function oauthOriginFor(origin: string): string | null {
 
 /**
  * The page a LAN browser lands on when no tunnel exists to hand sign-in to.
- * Discord's own rule makes direct login from such a device impossible, so the
- * honest answer says so and names the working path.
+ * Discord registers HTTPS redirect URIs (and loopback for development only), so
+ * a plain-HTTP router address can never be a callback. The page therefore says
+ * exactly that, names the address the visitor actually opened, and gives the
+ * one working path — rather than a generic "login failed". Every value in it
+ * is live: no placeholder address is ever printed to an operator.
  */
-const OAUTH_ORIGIN_PAGE = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>AL AI — تسجيل الدخول</title>
-<style>body{font-family:system-ui,sans-serif;background:#0b1020;color:#e5e7eb;display:grid;place-items:center;height:100vh;margin:0}div{max-width:34rem;text-align:center;line-height:1.9;padding:1.5rem}</style>
+function oauthOriginPage(origin: string) {
+  const escapeHtml = (value: string) =>
+    value.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
+  const tunnel = network.tunnelOrigin();
+  const login = tunnel
+    ? `<p><a href="${escapeHtml(`${tunnel}/auth/discord/login`)}" style="color:#6ee7b7">افتح تسجيل الدخول عبر النفق</a></p>`
+    : `<p>شغّل «عبر الإنترنت» من شاشة «الوصول للشبكة» على هذا الجهاز، ثم افتح رابط النفق الظاهر هناك.</p>`;
+  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>AL AI — تسجيل الدخول</title>
+<style>body{font-family:system-ui,sans-serif;background:#0b1020;color:#e5e7eb;display:grid;place-items:center;min-height:100vh;margin:0}div{max-width:36rem;text-align:center;line-height:1.9;padding:1.5rem}code{dir:ltr;color:#6ee7b7;word-break:break-all}</style>
 </head><body><div><h1>تسجيل الدخول من هذا الجهاز</h1>
-<p>ديسكورد يقبل روابط الرجوع المشفّرة (HTTPS) فقط خارج الجهاز المضيف، لذلك لا يمكن تسجيل الدخول مباشرة من عنوان الشبكة المحلية.</p>
-<p>شغّل «عبر الإنترنت» من شاشة «الوصول للشبكة»، ثم افتح اللوحة من رابط النفق الظاهر هناك — الدخول من أي جهاز يعمل منه مباشرة.</p></div></body></html>`;
+<p>أنت تفتح اللوحة من <code>${escapeHtml(origin)}</code> على الشبكة المحلية.</p>
+<p>ديسكورد لا يقبل روابط الرجوع بـ HTTP إلا من <code>localhost</code>، لذلك لا يمكن إتمام تسجيل الدخول مباشرة من عنوان الراوتر — اللوحة نفسها والـ API يعملان من هذا العنوان بعد الدخول.</p>
+${login}
+<p style="font-size:.85rem;opacity:.7">سجّل رابط النفق في Developer Portal ← OAuth2 ← Redirects، ثم عُد إلى <code>${escapeHtml(origin)}</code>.</p></div></body></html>`;
+}
 
 app.get("/api/session", async request => {
-  const session = await readSession(db, request as unknown as { headers: Record<string, unknown> });
+  const session = await readSession(db, request);
   if (!session) {
     /**
      * A pending admin login has cleared Discord OAuth but has NOT been given a
@@ -973,11 +1066,42 @@ async function requirePlatformOwner(request: FastifyRequest, reply: FastifyReply
   return session;
 }
 
+/**
+ * The reach payload, with the facts a browser cannot invent.
+ *
+ * `port`, `boundHost` and every address come from the live socket and the live
+ * interface table — never from a constant in the UI. `boundHost` is the real
+ * `server.address()` result, so the screen can say whether the process really
+ * listens on all interfaces (`0.0.0.0`) rather than trusting that the config
+ * asked it to. `lanEnabled` is the host gate's verdict, so a LAN link is never
+ * advertised as working while `off` would answer it with 403.
+ *
+ * GET and PUT share this function: a mode switch returns the same shape as a
+ * read, or the status badges vanish the moment an operator changes the mode.
+ */
+function networkSnapshot() {
+  const address = app.server.address();
+  const bound = address && typeof address !== "string" ? address : null;
+  const port = bound?.port ?? env.port;
+  const base = network.snapshot();
+  return {
+    ...base,
+    port,
+    boundHost: bound?.address ?? null,
+    lanEnabled: base.mode !== "off",
+    lanUrls: reachableLanEntries(base.machineHosts).map(({ host, label }) => ({
+      host,
+      label,
+      url: lanUrlFor(host, port)
+    }))
+  };
+}
+
 /** Read: the current reach, for the «الوصول للشبكة» screen. */
 app.get("/api/network", async (request, reply) => {
   if (!(await requirePlatformOwner(request, reply))) return;
   network.probe();
-  return network.snapshot();
+  return networkSnapshot();
 });
 
 /**
@@ -1042,20 +1166,77 @@ app.put("/api/network", async (request, reply) => {
     }
   });
 
-  return snapshot;
+  return networkSnapshot();
+});
+
+/** The port the socket is really on, not the configured default. */
+function dashboardPort(): number {
+  const address = app.server.address();
+  return address && typeof address !== "string" ? address.port : env.port;
+}
+
+/**
+ * Windows Firewall for the dashboard port.
+ *
+ * A LAN request never reaches the Host gate when Windows drops it, so "the
+ * switch says LAN but the phone cannot connect" is usually a missing inbound
+ * rule, not an application bug. `GET` is read-only; `POST` attempts to create
+ * or repair the rule, and `{ elevate: true }` asks Windows for the UAC prompt
+ * when this process is not elevated. Both are owner-only: the rule decides
+ * whether the whole machine accepts inbound connections on this port.
+ */
+app.get("/api/network/firewall", async (request, reply) => {
+  if (!(await requirePlatformOwner(request, reply))) return;
+  return firewallStatus(dashboardPort());
+});
+
+app.post("/api/network/firewall", async (request, reply) => {
+  const session = await requirePlatformOwner(request, reply);
+  if (!session) return;
+  const body = request.body as { elevate?: unknown } | undefined;
+  const port = dashboardPort();
+  if (body?.elevate === true) {
+    const elevation = elevateFirewall(port);
+    return { ...(await firewallStatus(port)), elevation };
+  }
+  const report = await ensureFirewall(port);
+  await appendAudit(db, env, {
+    guildId: null,
+    eventId: "bot.command-success",
+    actorId: session.discordUserId,
+    payload: { action: "network.firewall", status: report.status, needsAdmin: report.needsAdmin }
+  });
+  return report;
 });
 
 app.get("/auth/discord/login", async (request, reply) => {
   const origin = requestOrigin(request);
   const oauthOrigin = oauthOriginFor(origin);
   if (oauthOrigin !== origin) {
-    if (oauthOrigin) return reply.redirect(`${oauthOrigin}/auth/discord/login`);
-    return reply.code(403).type("text/html; charset=utf-8").send(OAUTH_ORIGIN_PAGE);
+    if (oauthOrigin) {
+      /*
+       * A phone on a plain-HTTP LAN origin cannot hold a Discord callback, so
+       * it signs in on the tunnel origin and is handed back with a one-time
+       * code. The return address travels in the query only as far as the
+       * tunnel leg; the callback re-validates it against the Host gate.
+       */
+      const returnTo = isPrivateOrigin(origin) ? origin : null;
+      const suffix = returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : "";
+      return reply.redirect(`${oauthOrigin}/auth/discord/login${suffix}`);
+    }
+    return reply.code(403).type("text/html; charset=utf-8").send(oauthOriginPage(origin));
   }
+  // On the tunnel leg, accept a returnTo only when it is a private origin this
+  // deployment actually answers at — the same allowlist the Host gate uses.
+  const requestedReturn = (request.query as { returnTo?: unknown } | undefined)?.returnTo;
+  const returnTo =
+    typeof requestedReturn === "string" && isPrivateOrigin(requestedReturn) && network.isOriginAllowed(requestedReturn)
+      ? requestedReturn
+      : null;
   // The state cookie stores the packed value — random plus origin — so the
   // byte-for-byte comparison at the callback covers the origin too.
-  const state = packOAuthState(origin, newOAuthState());
-  reply.header("Set-Cookie", stateCookieHeader(state));
+  const state = packOAuthState(origin, newOAuthState(), returnTo);
+  reply.header("Set-Cookie", stateCookieHeader(state, request));
   return reply.redirect(
     buildAuthorizeUrl({
       clientId: env.clientId,
@@ -1071,7 +1252,8 @@ app.get("/auth/discord/callback", async (request, reply) => {
   // the answer is — a consumed or rejected state must not sit in the jar for
   // its full 10-minute Max-Age. Every exit path goes through `done`, which
   // clears it alongside the redirect.
-  const clearStateCookie = policyCookieHeader(`${SESSION_COOKIE_NAME}_state`, "", 0);
+  const stateCookieName = derivedCookieName("_state", request);
+  const clearStateCookie = policyCookieHeader(stateCookieName, "", 0, request);
   const done = (path: string) => {
     reply.header("Set-Cookie", clearStateCookie);
     return reply.redirect(path);
@@ -1079,9 +1261,18 @@ app.get("/auth/discord/callback", async (request, reply) => {
   const query = request.query as { code?: string; state?: string; error?: string; guild_id?: string };
   if (query.error) return done("/?auth=denied");
   const cookies = parseCookies(request.headers.cookie);
-  if (!query.code || !query.state || cookies[`${SESSION_COOKIE_NAME}_state`] !== query.state) {
+  if (!query.code || !query.state || cookies[stateCookieName] !== query.state) {
     return done("/?auth=state_mismatch");
   }
+
+  /*
+   * The LAN return address rides inside the state. The state was compared to
+   * the cookie, but the origin still has to be one this deployment answers at:
+   * the same allowlist the Host gate uses, re-checked on the way out.
+   */
+  const returnToRaw = unpackOAuthReturnTo(query.state);
+  const returnTo =
+    returnToRaw && isPrivateOrigin(returnToRaw) && network.isOriginAllowed(returnToRaw) ? returnToRaw : null;
 
   // Discord returns `guild_id` only when this leg was a bot authorization — the
   // operator added AL AI to a server — and it answers that leg with an
@@ -1145,9 +1336,9 @@ app.get("/auth/discord/callback", async (request, reply) => {
     // inherit the first one's cached guild list, and an old row must not survive
     // as a usable session once the operator has moved on. Destroying it even for
     // the same account is the standard defence against a fixated session id.
-    const previous = await readSession(db, request as unknown as { headers: Record<string, unknown> });
+    const previous = await readSession(db, request);
     if (previous) {
-      await destroySession(db, request as unknown as { headers: Record<string, unknown> }).catch(() => undefined);
+      await destroySession(db, request).catch(() => undefined);
       if (previous.discordUserId !== identity.id) {
         app.log.info(
           { previousUserId: previous.discordUserId, nextUserId: identity.id },
@@ -1167,15 +1358,17 @@ app.get("/auth/discord/callback", async (request, reply) => {
       app.log.warn({ err: error }, "Could not read the operator's guilds at sign-in; requiring the second factor");
       return null;
     });
-    // 2FA is opt-in: an administrator is challenged only when they have actually
-    // enrolled an authenticator. Enrolment lives in the account settings, so a
-    // first sign-in — or an admin who never set it up — is not blocked by it.
+    // Every administrator is challenged, whether or not they have enrolled
+    // yet: a first sign-in opens the enrolment screen instead of skipping the
+    // second factor. Anyone who already carries a credential is challenged too,
+    // even if Discord no longer reports them as an admin — losing a guild role
+    // must not quietly switch an existing second factor off.
     const needsSecondFactor =
       requiresSecondFactor({
         ownerId: env.ownerId,
         discordUserId: identity.id,
         guilds: adminGuilds
-      }) && (await secondFactor.isEnrolled(identity.id));
+      }) || (await secondFactor.isEnrolled(identity.id));
 
     // A code exchanged through this origin is proof its redirect URI is
     // registered in the Developer Portal — Discord rejects an unregistered one
@@ -1202,7 +1395,11 @@ app.get("/auth/discord/callback", async (request, reply) => {
         enrollmentCiphertext: null,
         expiresAt: new Date(Date.now() + SECOND_FACTOR_PENDING_SECONDS * 1000)
       });
-      reply.header("Set-Cookie", [pendingCookieHeader(pendingId), clearStateCookie]);
+      reply.header("Set-Cookie", [
+        pendingCookieHeader(pendingId, request),
+        clearStateCookie,
+        ...(returnTo ? [returnCookieHeader(returnTo, request)] : [])
+      ]);
       return reply.redirect("/?auth=2fa_required");
     }
 
@@ -1220,7 +1417,23 @@ app.get("/auth/discord/callback", async (request, reply) => {
 
     // The session, the state clearance, and a cleared pending cookie (a
     // non-admin must not inherit an earlier admin's half-finished login).
-    reply.header("Set-Cookie", [sessionCookieHeader(id), clearStateCookie, clearedPendingCookieHeader()]);
+    if (returnTo) {
+      /*
+       * A LAN browser cannot hold this cookie (plain HTTP, different host), so
+       * it is handed back to its own origin with a single-use ticket. The
+       * tunnel-origin session is minted too: closing the tab on the LAN side
+       * must not leave a half-finished login behind.
+       */
+      const code = createLanHandoff(id, returnTo);
+      reply.header("Set-Cookie", [
+        sessionCookieHeader(id, request),
+        clearStateCookie,
+        clearedPendingCookieHeader(request),
+        clearedReturnCookie(request)
+      ]);
+      return reply.redirect(`${returnTo}/auth/lan-handoff?code=${encodeURIComponent(code)}`);
+    }
+    reply.header("Set-Cookie", [sessionCookieHeader(id, request), clearStateCookie, clearedPendingCookieHeader(request)]);
     return reply.redirect("/?auth=ok");
   } catch (error) {
     app.log.error(error, "Discord OAuth callback failed");
@@ -1228,13 +1441,33 @@ app.get("/auth/discord/callback", async (request, reply) => {
   }
 });
 
+/**
+ * The last leg of a LAN sign-in: trade the single-use ticket for a cookie this
+ * origin can actually keep (plain name, no `Secure`, see
+ * `sessionCookiePolicyFor`). The ticket was bound to this exact origin and to a
+ * session that already cleared the second factor; both are re-checked here, so
+ * a revoked or expired session cannot be revived by a stale link.
+ */
+app.get("/auth/lan-handoff", async (request, reply) => {
+  const origin = requestOrigin(request);
+  const code = (request.query as { code?: unknown } | undefined)?.code;
+  const sessionId = typeof code === "string" ? consumeLanHandoff(code, origin) : null;
+  if (!sessionId) return reply.redirect("/?auth=handoff_failed");
+  const session = await db.getSession(sessionId);
+  if (!session || (session.secondFactorRequired && !session.secondFactorSatisfied)) {
+    return reply.redirect("/?auth=handoff_failed");
+  }
+  reply.header("Set-Cookie", sessionCookieHeader(sessionId, request));
+  return reply.redirect("/?auth=ok");
+});
+
 app.post("/auth/logout", async (request, reply) => {
-  await destroySession(db, request as unknown as { headers: Record<string, unknown> });
+  await destroySession(db, request);
   // A half-finished admin login is not a session, but leaving its cookie behind
   // would let the next person at this browser pick the pending login back up.
   const pendingId = pendingLoginId(request);
   if (pendingId) await secondFactor.deletePending(pendingId);
-  reply.header("Set-Cookie", [clearedCookieHeader(), clearedPendingCookieHeader()]);
+  reply.header("Set-Cookie", [clearedCookieHeader(request), clearedPendingCookieHeader(request)]);
   return { ok: true };
 });
 
@@ -1269,7 +1502,7 @@ async function refuseSecondFactor(
   const { attempts, expired } = await secondFactor.recordFailedAttempt(pending.id);
   if (expired || attempts >= SECOND_FACTOR_MAX_ATTEMPTS) {
     await secondFactor.deletePending(pending.id);
-    reply.header("Set-Cookie", clearedPendingCookieHeader());
+    reply.header("Set-Cookie", clearedPendingCookieHeader(reply.request));
     return reply.code(expired ? 401 : 403).send({
       error: expired ? "PENDING_EXPIRED" : "TOO_MANY_ATTEMPTS",
       message: expired
@@ -1310,7 +1543,7 @@ app.get("/api/2fa/enrollment", async (request, reply) => {
     // reason to sign in again, never a 500 and never a new secret mid-login.
     app.log.warn({ err: error }, "Second-factor enrolment material could not be read");
     await secondFactor.deletePending(pending.id);
-    reply.header("Set-Cookie", clearedPendingCookieHeader());
+    reply.header("Set-Cookie", clearedPendingCookieHeader(request));
     return expiredPending(reply);
   }
 });
@@ -1324,6 +1557,7 @@ app.post("/api/2fa/verify", async (request, reply) => {
     return await refuseSecondFactor(reply, pending, "أدخل رمز التحقق أو رمز الاسترداد.");
   }
 
+  let firstEnrollment = false;
   try {
     const enrolled = await secondFactor.isEnrolled(pending.discordUserId);
 
@@ -1357,6 +1591,7 @@ app.post("/api/2fa/verify", async (request, reply) => {
         recoveryHashes,
         lastCounter: counter
       });
+      firstEnrollment = true;
     } else {
       const credential = await secondFactor.credential(pending.discordUserId);
       if (!credential) {
@@ -1381,7 +1616,7 @@ app.post("/api/2fa/verify", async (request, reply) => {
   } catch (error) {
     app.log.warn({ err: error }, "Second-factor verification could not read its material");
     await secondFactor.deletePending(pending.id);
-    reply.header("Set-Cookie", clearedPendingCookieHeader());
+    reply.header("Set-Cookie", clearedPendingCookieHeader(request));
     return expiredPending(reply);
   }
 
@@ -1392,7 +1627,7 @@ app.post("/api/2fa/verify", async (request, reply) => {
     accessToken = decryptSecret(pending.accessTokenCiphertext, env.encryptionKey);
   } catch {
     await secondFactor.deletePending(pending.id);
-    reply.header("Set-Cookie", clearedPendingCookieHeader());
+    reply.header("Set-Cookie", clearedPendingCookieHeader(request));
     return expiredPending(reply);
   }
   const { id } = await issueSession(db, env, {
@@ -1402,17 +1637,34 @@ app.post("/api/2fa/verify", async (request, reply) => {
     discordAvatar: pending.discordAvatar,
     accessToken,
     scopes: pending.scopes,
-    userAgent: safeUserAgent(request.headers["user-agent"])
+    userAgent: safeUserAgent(request.headers["user-agent"]),
+    // The one kind of session allowed to outlive an enrolled credential: this
+    // request just consumed a TOTP counter or a single-use recovery code.
+    secondFactorSatisfied: true
   });
+  // Enrolling during sign-in is the moment the account becomes two-factor:
+  // sessions minted before it are single-factor and must not be left live.
+  if (firstEnrollment) await db.deleteOtherSessions(pending.discordUserId, id);
   await secondFactor.deletePending(pending.id);
-  reply.header("Set-Cookie", [sessionCookieHeader(id), clearedPendingCookieHeader()]);
+  const lanReturn = requestedReturnOrigin(request);
+  const sessionCookies = [sessionCookieHeader(id, request), clearedPendingCookieHeader(request), clearedReturnCookie(request)];
+  reply.header("Set-Cookie", sessionCookies);
+  /*
+   * An admin who started on a LAN origin finishes here, on the tunnel. The
+   * screen is a JSON client, so it cannot be redirected by this response; it
+   * gets the handoff URL and navigates, which is what mints the LAN cookie.
+   */
+  if (lanReturn) {
+    const code = createLanHandoff(id, lanReturn);
+    return { ok: true as const, redirectTo: `${lanReturn}/auth/lan-handoff?code=${encodeURIComponent(code)}` };
+  }
   return { ok: true };
 });
 
 app.post("/api/2fa/cancel", async (request, reply) => {
   const id = pendingLoginId(request);
   if (id) await secondFactor.deletePending(id);
-  reply.header("Set-Cookie", clearedPendingCookieHeader());
+  reply.header("Set-Cookie", clearedPendingCookieHeader(request));
   return { ok: true };
 });
 
@@ -1607,6 +1859,20 @@ app.post("/api/me/2fa/confirm", async (request, reply) => {
     recoveryHashes: remaining.map(candidate => recoveryCodeHash(candidate, env)),
     lastCounter: counter
   });
+  // This session just proved a fresh code, so it is allowed to survive the new
+  // credential. Every other one was minted before 2FA existed for this account
+  // and is now unverifiable — mark ours, and revoke the rest rather than leave
+  // stale single-factor rows behind.
+  await db.markSessionSecondFactorSatisfied(session.id);
+  const revoked = await db.deleteOtherSessions(session.discordUserId, session.id);
+  if (revoked > 0) {
+    await appendAudit(db, env, {
+      guildId: null,
+      eventId: "security.revoked-credential",
+      actorId: session.discordUserId,
+      payload: { credentialType: "session", reason: "2fa-enabled", count: revoked }
+    }).catch(error => app.log.warn({ err: error }, "Could not audit the session revocation"));
+  }
   await appendAudit(db, env, {
     guildId: null,
     eventId: "security.revoked-credential",
@@ -1674,7 +1940,7 @@ app.post("/api/me/2fa/recovery-codes", async (request, reply) => {
  * listed and then refused: an entry that leads to a 403 is worse than no entry.
  * ------------------------------------------------------------------ */
 app.get("/api/guilds", async (request, reply) => {
-  const session = await readSession(db, request as unknown as { headers: Record<string, unknown> });
+  const session = await readSession(db, request);
 
   // No session means no guilds. AL AI has no public read-only mode.
   if (!session) {
@@ -1771,7 +2037,7 @@ app.get("/api/guilds/:guildId/invite", async (request, reply) => {
   const oauthOrigin = oauthOriginFor(origin);
   if (oauthOrigin !== origin) {
     if (oauthOrigin) return reply.redirect(`${oauthOrigin}/api/guilds/${guildId}/invite`);
-    return reply.code(403).type("text/html; charset=utf-8").send(OAUTH_ORIGIN_PAGE);
+    return reply.code(403).type("text/html; charset=utf-8").send(oauthOriginPage(origin));
   }
   const context = await requireGuildAccess(request, reply, guildId);
   if (!context) return;
@@ -1779,7 +2045,7 @@ app.get("/api/guilds/:guildId/invite", async (request, reply) => {
   if (!target) return reply.code(400).send({ error: "INVALID_GUILD_ID", message: "معرّف السيرفر غير صالح." });
 
   const oauthState = packOAuthState(origin, newOAuthState());
-  reply.header("Set-Cookie", stateCookieHeader(oauthState));
+  reply.header("Set-Cookie", stateCookieHeader(oauthState, request));
   return reply.redirect(
     buildBotInviteUrl(env.clientId, target, {
       redirectUri: redirectUriForOrigin(origin),
@@ -2875,18 +3141,37 @@ app.get("/api/guilds/:guildId/customization", async (request, reply) => {
    */
   const botUserId = token ? await resolveBotUserId(token).catch(() => null) : null;
 
+  /*
+   * On-demand sync. The two identity reads are memoised for a minute to stay
+   * inside Discord's per-application rate limit, but an operator who opens this
+   * screen after changing the bot's profile outside the dashboard must be able
+   * to force a fresh REST read. `?refresh=1` drops both cached entries before
+   * the reads below, so the answer is the one Discord serves right now rather
+   * than the one served up to a minute ago.
+   *
+   * This is the read-side counterpart of `client.user.fetch(true)`: a cached
+   * gateway `ClientUser` omits `banner` and `accent_color`, while the REST
+   * objects below carry them.
+   */
+  const refresh = (request.query as { refresh?: string } | undefined)?.refresh === "1";
+  if (refresh && token) {
+    invalidateBotAccountProfile(token);
+    if (botUserId) invalidateGuildMemberProfile(token, guildId);
+  }
+
   // Each of these is advisory. A Discord outage must not stop the operator from
   // seeing their saved settings, so every read degrades to "unknown" instead of
   // failing the request — and an unknown never becomes a warning about a problem
   // that may not exist.
-  const [permissions, premiumTier, hierarchy, member] = token
+  const [permissions, premiumTier, hierarchy, member, account] = token
     ? await Promise.all([
         botIdentityPermissionStatus(token, guildId).catch((): PermissionStatus[] => []),
         fetchGuildPremiumTier(token, guildId).catch(() => null),
         fetchGuildHierarchy(token, guildId).catch(() => null),
-        botUserId ? readGuildMemberProfile(token, guildId, botUserId).catch(() => null) : Promise.resolve(null)
+        botUserId ? readGuildMemberProfile(token, guildId, botUserId).catch(() => null) : Promise.resolve(null),
+        readBotAccountProfile(token).catch(() => null)
       ])
-    : [[] as PermissionStatus[], null, null, null];
+    : [[] as PermissionStatus[], null, null, null, null];
 
   // Discord answers with hashes, never URLs, and an avatar hash starting with
   // `a_` is animated and needs `.gif` — both rules live in the URL builders, so
@@ -2896,18 +3181,32 @@ app.get("/api/guilds/:guildId/customization", async (request, reply) => {
   // at a path that names both the guild and the user, and building it with
   // `userAvatarUrl` would draw the account's picture and look perfectly correct
   // — the operator would conclude their per-server upload had been ignored.
+  /*
+   * Built even when the *member* read failed: the application read is a
+   * separate request, and losing the guild's overrides must not also hide the
+   * account's real name and description. Empty strings are never invented —
+   * every field is either a Discord value or null, and the preview decides
+   * what to say when a value is missing.
+   */
   const profile =
-    member && botUserId
+    member || account
       ? {
-          username: member.username,
-          nickname: member.nickname,
-          avatarUrl: guildMemberAvatarUrl(guildId, botUserId, member.avatar),
-          bannerUrl: guildMemberBannerUrl(guildId, botUserId, member.banner),
+          username: member?.username ?? account?.name ?? null,
+          nickname: member?.nickname ?? null,
+          avatarUrl: member && botUserId ? guildMemberAvatarUrl(guildId, botUserId, member.avatar) : null,
+          bannerUrl: member && botUserId ? guildMemberBannerUrl(guildId, botUserId, member.banner) : null,
           // What members see when this server has no override: the account's own
           // picture. Sent so the preview can draw it instead of the initials —
           // a bot with a perfectly good face must not render as a blank circle.
-          accountAvatarUrl: userAvatarUrl(botUserId, member.accountAvatar),
-          accountBannerUrl: userBannerUrl(botUserId, member.accountBanner)
+          // Only when the member read answered: otherwise the "default avatar"
+          // URL would be a guess about a profile we never saw.
+          accountAvatarUrl: member && botUserId ? userAvatarUrl(botUserId, member.accountAvatar) : null,
+          accountBannerUrl: member && botUserId ? userBannerUrl(botUserId, member.accountBanner) : null,
+          accentColor: member?.accentColor ?? null,
+          // The application description, not a member bio: those are write-only
+          // and unreadable. Used only as a labelled fallback for an empty
+          // per-guild bio.
+          accountBio: account?.description ?? null
         }
       : null;
 
@@ -3366,7 +3665,34 @@ function normaliseEventColors(value: unknown): Record<string, string> {
 app.get("/api/guilds/:guildId/logging", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
   if (!(await requireGuildAccess(request, reply, guildId))) return;
-  return { settings: await db.getLogging(guildId) };
+
+  const settings = await db.getLogging(guildId);
+
+  /*
+   * The saved truth, straight from the PostgreSQL row — not from a client-side
+   * guess. An unset flag means "on" (GOVERNANCE rule 6), so a count of flags
+   * alone claims every event is live even when the master switch is off and no
+   * channel is bound. The router would drop all of them in that state, so the
+   * stat answers the router's question: how many can actually be delivered?
+   *
+   * The screen recomputes the same figure from its draft with the same core
+   * helpers, so unsaved toggles stay live without the two ever defining
+   * "active" differently.
+   */
+  const activity = {
+    enabled: settings.enabled,
+    boundChannels: countBoundChannels(settings.globalChannelId, settings.categoryChannels, settings.eventChannels)
+  };
+
+  return {
+    settings,
+    stats: {
+      enabledEvents: countActiveEvents(settings.eventFlags, activity),
+      totalEvents: totalOperatorEvents(),
+      boundChannels: activity.boundChannels,
+      enabled: activity.enabled
+    }
+  };
 });
 
 app.put("/api/guilds/:guildId/logging", async (request, reply) => {

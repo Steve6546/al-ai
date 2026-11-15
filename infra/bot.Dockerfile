@@ -1,5 +1,5 @@
 # AL AI bot image. Runs the long-lived Gateway client under the supervisor.
-FROM node:24.22.0-bookworm-slim
+FROM node:24.22.1-bookworm-slim
 WORKDIR /app
 
 COPY package*.json ./

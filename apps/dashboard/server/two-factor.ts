@@ -16,6 +16,7 @@
 
 import {
   SESSION_COOKIE_NAME,
+  SESSION_COOKIE_NAMES,
   TOTP_DIGITS,
   buildOtpauthUri,
   constantTimeEqual,
@@ -28,7 +29,7 @@ import {
 } from "@al-ai/core";
 import type { Pool } from "pg";
 import { isAdministrable } from "./guild-access.js";
-import { policyCookieHeader } from "./session.js";
+import { derivedCookieName, policyCookieHeader, type CookieContext } from "./session.js";
 import type { BffEnv } from "./env.js";
 
 /** Five minutes is enough to open an authenticator and read one code. */
@@ -53,13 +54,20 @@ export const SECOND_FACTOR_ISSUER = "AL AI";
  * origin cannot plant a pending login for this dashboard.
  */
 export const SECOND_FACTOR_COOKIE_NAME = `${SESSION_COOKIE_NAME}_2fa`;
+/** Both possible names — a plain-HTTP LAN request uses the unprefixed one. */
+export const SECOND_FACTOR_COOKIE_NAMES = SESSION_COOKIE_NAMES.map(name => `${name}_2fa`);
 
-export function pendingCookieHeader(id: string) {
-  return policyCookieHeader(SECOND_FACTOR_COOKIE_NAME, id, SECOND_FACTOR_PENDING_SECONDS);
+/** The pending cookie's name for this request's origin. */
+export function secondFactorCookieName(context?: CookieContext): string {
+  return derivedCookieName("_2fa", context);
 }
 
-export function clearedPendingCookieHeader() {
-  return policyCookieHeader(SECOND_FACTOR_COOKIE_NAME, "", 0);
+export function pendingCookieHeader(id: string, context?: CookieContext) {
+  return policyCookieHeader(secondFactorCookieName(context), id, SECOND_FACTOR_PENDING_SECONDS, context);
+}
+
+export function clearedPendingCookieHeader(context?: CookieContext) {
+  return policyCookieHeader(secondFactorCookieName(context), "", 0, context);
 }
 
 /**

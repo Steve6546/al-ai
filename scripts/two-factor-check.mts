@@ -116,6 +116,18 @@ try {
   await cleanup();
   console.log(`check:2fa — ${origin} (pending cookie: ${pendingCookieName})`);
 
+  // Control: an account with no authenticator yet keeps a normal session. The
+  // second-factor flag must not lock out people who have not enabled 2FA.
+  const plainSessionId = randomUUID();
+  await client.query(
+    `INSERT INTO oauth_sessions
+       (id, discord_user_id, discord_username, access_token_ciphertext, scopes, expires_at, second_factor_satisfied)
+     VALUES ($1, $2, $3, $4, $5, now() + make_interval(secs => 3600), FALSE)`,
+    [plainSessionId, testUser, "check operator", encryptSecret(`plain-${plainSessionId}`, encryptionKey!), "identify guilds"]
+  );
+  const plain = await request("/api/session", { cookie: `${SESSION_COOKIE_NAME}=${plainSessionId}` });
+  check("an ordinary session works before 2FA is enabled", plain.json.authenticated === true, JSON.stringify(plain.json));
+
   const first = await newPending();
   const firstCookie = `${pendingCookieName}=${first}`;
 
@@ -237,6 +249,20 @@ try {
     last = await request("/api/2fa/verify", { cookie: `${pendingCookieName}=${ceilingId}`, method: "POST", body: { code: "still-not-a-code" } });
   }
   check("the fifth wrong answer destroys the pending login", last.status === 403 && last.json.error === "TOO_MANY_ATTEMPTS", JSON.stringify(last.json));
+
+  // The account is enrolled by now. A session minted before enrolment must not
+  // remain a way around the second factor, even if its cookie is still valid.
+  const staleSessionId = randomUUID();
+  await client.query(
+    `INSERT INTO oauth_sessions
+       (id, discord_user_id, discord_username, access_token_ciphertext, scopes, expires_at, second_factor_satisfied)
+     VALUES ($1, $2, $3, $4, $5, now() + make_interval(secs => 3600), FALSE)`,
+    [staleSessionId, testUser, "check operator", encryptSecret(`stale-${staleSessionId}`, encryptionKey!), "identify guilds"]
+  );
+  const stale = await request("/api/session", { cookie: `${SESSION_COOKIE_NAME}=${staleSessionId}` });
+  check("a session minted before enrolment is refused once 2FA exists", stale.json.authenticated === false, JSON.stringify(stale.json));
+  const staleRow = await client.query(`SELECT count(*)::int AS n FROM oauth_sessions WHERE id = $1`, [staleSessionId]);
+  check("the refused single-factor session is destroyed, not merely hidden", staleRow.rows[0].n === 0);
 
   console.log(`\ncheck:2fa — ${passed} passed, ${failed} failed.`);
   process.exitCode = failed ? 1 : 0;

@@ -43,7 +43,8 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { CREDENTIAL_MARKERS, CREDENTIAL_SHAPES, describeHit, fakeTokenFor, findCredentialShapes } from "./lib/credential-shapes.mjs";
+import { extname } from "node:path";
+import { CREDENTIAL_CONTEXT_SHAPES, CREDENTIAL_MARKERS, CREDENTIAL_SHAPES, describeHit, fakeTokenFor, findCredentialShapes } from "./lib/credential-shapes.mjs";
 
 /** Vendor formats whose match is always an emergency. */
 const BLOCKING_VENDOR_RULES = new Set(["aws-ak", "aliyun-ak", "bailian-apikey", "aliyun-sts", "private-key"]);
@@ -176,6 +177,36 @@ function scanHistory(scanner) {
  * than delegated to the scanner, so this surface runs in CI too, and a directory
  * that has not been built yet is reported as absent instead of counted clean.
  */
+/**
+ * A file with NUL bytes near the start is a program or an archive, not text.
+ *
+ * The artefact pass exists to catch a token printed into a log or a bundle.
+ * A downloaded `zrok2.exe` carries its own PEM trust bundle, and a marker
+ * inside an executable is not a leaked credential — scanning it produced a
+ * false alarm that failed a clean `verify`. Text artefacts are still read in
+ * full; the extension list only saves the read on obvious binaries.
+ *
+ * Returns null for a binary, the UTF-8 text otherwise ("" when unreadable, so
+ * one unreadable file contributes nothing instead of aborting the pass).
+ */
+const BINARY_EXTENSIONS = new Set([
+  ".exe", ".dll", ".node", ".so", ".dylib", ".bin", ".zip", ".gz", ".tgz",
+  ".7z", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2",
+  ".ttf", ".otf", ".pdf", ".mp4", ".mp3", ".wasm"
+]);
+
+function readTextIfText(file) {
+  let buffer;
+  try {
+    buffer = readFileSync(file);
+  } catch {
+    return "";
+  }
+  if (BINARY_EXTENSIONS.has(extname(file).toLowerCase())) return null;
+  if (buffer.subarray(0, 8192).includes(0)) return null;
+  return buffer.toString("utf8");
+}
+
 function scanArtefacts(scanner) {
   const secretHits = [];
   const publicHits = [];
@@ -191,27 +222,20 @@ function scanArtefacts(scanner) {
     present.push(`${dir} (${listed.length} files)`);
     files.push(...listed);
   }
+  const text = [];
+  let binaries = 0;
   for (const file of files) {
-    let text = "";
-    try {
-      text = readFileSync(file, "utf8");
-    } catch {
+    const content = readTextIfText(file);
+    if (content === null) {
+      binaries += 1;
       continue;
     }
-    for (const hit of findCredentialShapes(text)) {
+    text.push(content);
+    for (const hit of findCredentialShapes(content)) {
       (hit.secret ? secretHits : publicHits).push(describeHit(hit, `artefact ${file}`));
     }
   }
-  return { secretHits, publicHits, vendor: vendorHits(files.map(readText).join("\n"), scanner), present, absent };
-}
-
-/** A file that cannot be read contributes nothing rather than throwing. */
-function readText(file) {
-  try {
-    return readFileSync(file, "utf8");
-  } catch {
-    return "";
-  }
+  return { secretHits, publicHits, vendor: vendorHits(text.join("\n"), scanner), present, absent, binaries };
 }
 
 /* ------------------------------------------------------------------ *
@@ -229,9 +253,10 @@ function selfTest() {
     const hits = findCredentialShapes(`token = "${fixture}"`);
     if (!hits.some(hit => hit.rule === shape.rule)) failures.push(`${shape.rule}: a documented shape was NOT detected`);
 
-    // One character short of the documented length is not a token, and must not
-    // be reported — this is the difference between a shape and a keyword.
-    const short = fixture.slice(0, -1);
+    // A near-miss must not be reported. Exact-length shapes use a body one
+    // character short; variable-length patterns declare an explicit invalid
+    // fixture, because dropping one character would still satisfy `{40,}`.
+    const short = shape.invalid ?? fixture.slice(0, -1);
     if (findCredentialShapes(short).some(hit => hit.rule === shape.rule)) {
       failures.push(`${shape.rule}: a truncated body was reported as a credential`);
     }
@@ -242,6 +267,25 @@ function selfTest() {
       if (line.includes(fixture) || line.includes(fixture.slice(shape.prefix.length))) {
         failures.push(`${shape.rule}: the report leaked the value`);
       }
+    }
+  }
+
+  /*
+   * Context shapes need their own near-miss proof: a bare 64-hex string is a
+   * SHA-256 digest, and a template DB URL carries a placeholder password. If
+   * either starts counting as an incident, the gate would fail on normal source
+   * files and be switched off — which is worse than the gap it was closing.
+   */
+  for (const shape of CREDENTIAL_CONTEXT_SHAPES) {
+    const fixture = fakeTokenFor(shape);
+    if (!findCredentialShapes(fixture).some(hit => hit.rule === shape.rule)) {
+      failures.push(`${shape.rule}: a documented context shape was NOT detected`);
+    }
+    if (findCredentialShapes(shape.invalid).some(hit => hit.rule === shape.rule)) {
+      failures.push(`${shape.rule}: a bare value / placeholder was reported as a credential`);
+    }
+    for (const hit of findCredentialShapes(fixture)) {
+      if (describeHit(hit, "self-test").includes(fixture)) failures.push(`${shape.rule}: the report leaked the value`);
     }
   }
 
@@ -271,15 +315,26 @@ function selfTest() {
     failures.push("prose about a private key was reported as a credential");
   }
 
-  // Anti-noise: the vocabulary of secrets is not a credential.
+  // Anti-noise: the vocabulary of secrets is not a credential, and neither is
+  // a realistic source file with a hash, type declarations and comments.
   const prose = 'const hmacSecret = "sessionSecret"; // rotate the API key and the OAuth token';
   if (findCredentialShapes(prose).length) failures.push("keyword-only text was reported as a credential");
+  const benignSource = [
+    "const hmacSecret: string = sessionSecret;",
+    "// rotate the API key and the OAuth token when needed",
+    `const digest = "${"a1b2".repeat(16)}";`,
+    "type Token = { value: string };"
+  ].join("\n");
+  if (findCredentialShapes(benignSource).length) failures.push("a realistic benign source file produced hits");
 
-  // This gate's own source must not contain a shape, or the gate would flag
-  // itself on every run — and the fixtures would be a live token in the repo.
-  const ownSource = readFileSync(new URL("./lib/credential-shapes.mjs", import.meta.url), "utf8");
-  if (findCredentialShapes(ownSource).filter(hit => hit.secret).length) {
-    failures.push("credential-shapes.mjs contains a detectable credential literal");
+  // Both of this gate's own files must not contain a shape, or the gate would
+  // flag itself on every run — and their fixtures would be live tokens in the
+  // repository. Fixtures are concatenated at runtime for exactly this reason.
+  for (const own of ["./lib/credential-shapes.mjs", "./check-secrets.mjs"]) {
+    const ownSource = readFileSync(new URL(own, import.meta.url), "utf8");
+    if (findCredentialShapes(ownSource).filter(hit => hit.secret).length) {
+      failures.push(`${own} contains a detectable credential literal`);
+    }
   }
 
   return failures;
@@ -362,11 +417,11 @@ function main() {
    * fails is a gate whose success nobody can audit.
    */
   const coverage = [
-    `surfaces: ${files.length} tracked files${unreadable ? ` (${unreadable} unreadable — counted as a hole, not as a pass)` : ""} | git history: ${history.commits} commits over all refs${history.shallow ? " (SHALLOW — incomplete)" : ""} | artefacts: ${artefacts.present.join(", ") || "none"}`,
+    `surfaces: ${files.length} tracked files${unreadable ? ` (${unreadable} unreadable — counted as a hole, not as a pass)` : ""} | git history: ${history.commits} commits over all refs${history.shallow ? " (SHALLOW — incomplete)" : ""} | artefacts: ${artefacts.present.join(", ") || "none"}${artefacts.binaries ? ` (${artefacts.binaries} binaries skipped: a program's own PEM bundle is not a leaked key)` : ""}`,
     artefacts.absent.length
       ? `  absent this run, so not claimed: ${artefacts.absent.join(", ")} — the built bundle is only covered once \`npm run build\` has produced it`
       : null,
-    `  rules: ${CREDENTIAL_SHAPES.length} value shapes + ${CREDENTIAL_MARKERS.length} marker, built in (GitHub, Supabase, AWS, Alibaba, Bailian, PEM) | vendor scanner: ${
+    `  rules: ${CREDENTIAL_SHAPES.length} value shapes + ${CREDENTIAL_CONTEXT_SHAPES.length} contextual + ${CREDENTIAL_MARKERS.length} marker, built in (GitHub, Supabase, AWS, Alibaba, Bailian, Discord, OpenAI, Google, Slack, JWT, DB URLs, hex keys, PEM) | vendor scanner: ${
       scanner === "ready"
         ? "ready (adds STS.* temporary credentials)"
         : `NOT RUN (${scanner === "absent" ? "not installed here" : scanner}) — the built-in shapes above still ran; STS.* did not`
@@ -388,7 +443,7 @@ function main() {
   console.log("check:secrets — clean. No value-shaped credential in what the gate actually read.");
   for (const line of coverage) console.log(line);
   console.log(
-    `  detector self-test: ${CREDENTIAL_SHAPES.length * 3 + 5} cases passed (every declared shape: detection, truncation, masking — plus the secret/publishable split, the PEM marker both ways, anti-noise and own source)`
+    `  detector self-test: ${(CREDENTIAL_SHAPES.length + CREDENTIAL_CONTEXT_SHAPES.length) * 3 + 9} cases passed (every declared shape: detection, near-miss, masking — plus the secret/publishable split, the PEM marker both ways, anti-noise, benign source and both gate sources)`
   );
   console.log(
     tracked.ran

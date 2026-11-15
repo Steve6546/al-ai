@@ -17,6 +17,10 @@ export type SessionRecord = {
   accessTokenCiphertext: string;
   scopes: string;
   expiresAt: Date;
+  /** Cleared the second factor at login; FALSE for every older session. */
+  secondFactorSatisfied: boolean;
+  /** The account has a TOTP credential, so this session must have cleared it. */
+  secondFactorRequired: boolean;
 };
 
 export function createPool(databaseUrl: string) {
@@ -1027,11 +1031,13 @@ export function createDatabase(pool: pg.Pool) {
       scopes: string;
       /** A display hint for the security screen; never used for authorisation. */
       userAgent?: string | null;
+      /** TRUE only for the login that just consumed a TOTP/recovery code. */
+      secondFactorSatisfied?: boolean;
     }) {
       const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000);
       await pool.query(
-        `INSERT INTO oauth_sessions (id, discord_user_id, discord_username, discord_handle, discord_avatar, access_token_ciphertext, scopes, user_agent, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        `INSERT INTO oauth_sessions (id, discord_user_id, discord_username, discord_handle, discord_avatar, access_token_ciphertext, scopes, user_agent, expires_at, second_factor_satisfied)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [
           input.id,
           input.discordUserId,
@@ -1041,16 +1047,21 @@ export function createDatabase(pool: pg.Pool) {
           input.accessTokenCiphertext,
           input.scopes,
           input.userAgent ?? null,
-          expiresAt
+          expiresAt,
+          input.secondFactorSatisfied ?? false
         ]
       );
       return expiresAt;
     },
 
     async getSession(id: string): Promise<SessionRecord | null> {
+      // The EXISTS travels with the session read, so deciding whether a
+      // credential exists costs no extra round trip on an authenticated route.
       const { rows } = await pool.query(
-        `SELECT id, discord_user_id, discord_username, discord_handle, discord_avatar, access_token_ciphertext, scopes, expires_at
-         FROM oauth_sessions WHERE id = $1 AND expires_at > now()`,
+        `SELECT s.id, s.discord_user_id, s.discord_username, s.discord_handle, s.discord_avatar,
+                s.access_token_ciphertext, s.scopes, s.expires_at, s.second_factor_satisfied,
+                EXISTS (SELECT 1 FROM admin_two_factor a WHERE a.discord_user_id = s.discord_user_id) AS second_factor_required
+         FROM oauth_sessions s WHERE s.id = $1 AND s.expires_at > now()`,
         [id]
       );
       const row = rows[0];
@@ -1063,8 +1074,15 @@ export function createDatabase(pool: pg.Pool) {
         discordAvatar: row.discord_avatar ?? null,
         accessTokenCiphertext: row.access_token_ciphertext,
         scopes: row.scopes,
-        expiresAt: row.expires_at
+        expiresAt: row.expires_at,
+        secondFactorSatisfied: row.second_factor_satisfied === true,
+        secondFactorRequired: row.second_factor_required === true
       };
+    },
+
+    /** The session that just proved a fresh code survives the new credential. */
+    async markSessionSecondFactorSatisfied(id: string) {
+      await pool.query(`UPDATE oauth_sessions SET second_factor_satisfied = TRUE WHERE id = $1`, [id]);
     },
 
     async touchSession(id: string) {

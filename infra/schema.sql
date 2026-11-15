@@ -234,6 +234,14 @@ ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS discord_handle TEXT;
 -- The browser that opened the session, so the security screen can show a
 -- recognisable device list. It is a display hint, never used for authorisation.
 ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS user_agent TEXT;
+-- Whether this particular session cleared the admin second factor. A session
+-- minted before the operator enrolled (or by any path that skipped the check)
+-- must not keep working once a TOTP credential exists for that account. The
+-- default is FALSE on purpose: an upgrade marks every pre-existing session as
+-- unverified, so enabling 2FA cannot be bypassed by simply holding on to an
+-- older cookie. Only the login that consumed a TOTP/recovery code, and the
+-- session that confirmed a new authenticator, set it to TRUE.
+ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS second_factor_satisfied BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS oauth_sessions_expires_idx ON oauth_sessions (expires_at);
 CREATE INDEX IF NOT EXISTS oauth_sessions_user_idx ON oauth_sessions (discord_user_id);
 

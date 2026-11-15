@@ -51,6 +51,19 @@ const outDir = join(repoRoot, ".al-ai", "ui-check");
  */
 const LIVE = process.argv.includes("--live");
 
+/**
+ * Both spellings of the session cookie, in the order production prefers.
+ *
+ * The name follows NODE_ENV: `__Host-` when the cookie is Secure, plain when
+ * it is not. This script runs under plain `node` without --env-file, so its
+ * own NODE_ENV says nothing about the NODE_ENV the *running dashboard* was
+ * started with. Guessing from this process's environment once produced a
+ * sweep that signed in with the wrong name and reported every page as a UI
+ * failure. The preflight below asks the live server which name it accepts
+ * instead of inferring one, and `live.cookieName` is what the browser uses.
+ */
+const LIVE_COOKIE_NAMES = ["__Host-al_ai_session", "al_ai_session"];
+
 async function liveSession() {
   const requireFrom = createRequire(join(process.cwd(), "apps", "dashboard", "package.json"));
   const { Client } = requireFrom("pg");
@@ -79,7 +92,49 @@ async function liveSession() {
   await client.end();
   if (!session.rows.length) throw new Error("no valid session in the database - run `npm run dev:session` first");
   if (!guild.rows.length) throw new Error("no guild with the bot in it - the pages would all be empty");
-  return { session: session.rows[0].id, guild: guild.rows[0].id };
+
+  /**
+   * A session row is not proof the live sweep can run.
+   *
+   * `npm run dev:session` mints a real row whose Discord token is the literal
+   * `probe-token`. `/api/session` accepts it, but `/api/guilds` cannot resolve
+   * Discord with it and answers 401. The browser then renders the login card
+   * on every page, and the sweep reports 54 separate visual failures - all of
+   * them one missing credential, none of them a UI regression. Ask the one
+   * question the sweep actually depends on, before a browser is started.
+   *
+   * This is deliberately a hard stop, not a skip: a verification pass that
+   * quietly skips its live half would report a green gate it never earned.
+   */
+  const attempts = [];
+  for (const cookieName of LIVE_COOKIE_NAMES) {
+    let probe;
+    try {
+      probe = await fetch("http://127.0.0.1:3000/api/guilds", {
+        headers: { cookie: `${cookieName}=${session.rows[0].id}` }
+      });
+    } catch (error) {
+      // A dashboard that is not running is an environment problem too, and
+      // an ECONNREFUSED stack says less than one line naming the missing port.
+      attempts.push(`${cookieName}: connection failed (${error.cause?.code ?? error.message})`);
+      continue;
+    }
+    const verdict = await probe.json().catch(() => ({}));
+    const count = Array.isArray(verdict.guilds) ? verdict.guilds.length : 0;
+    if (probe.ok && count > 0) {
+      return { session: session.rows[0].id, guild: guild.rows[0].id, cookieName };
+    }
+    attempts.push(`${cookieName}: ${probe.status}/${count} guild(s)`);
+  }
+
+  throw new Error(
+    `the live session cannot reach Discord (${attempts.join(", ")}). ` +
+      "The --live pass also needs the dashboard running on 127.0.0.1:3000. " +
+      "A session minted by `npm run dev:session` carries the placeholder token `probe-token`, " +
+      "so Discord-calling routes refuse it. Sign in through the dashboard with a real Discord " +
+      "account once, then re-run `node scripts/ui-check.mjs --live`. " +
+      "The stubbed pass (no --live) needs no session and still runs on its own."
+  );
 }
 
 /** The pages of the dashboard, in the order an operator meets them. */
@@ -626,7 +681,7 @@ async function main() {
       const { success } = await cdp.send(
         "Network.setCookie",
         {
-          name: "__Host-al_ai_session",
+          name: live.cookieName,
           value: live.session,
           url: "http://127.0.0.1:3000",
           path: "/",

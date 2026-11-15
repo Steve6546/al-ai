@@ -10,7 +10,14 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url))
     }
   },
-  server: { port: 5173 },
+  // The BFF binds 0.0.0.0 so a device on the router can open the dashboard.
+  // Vite's default host is `localhost`, which would make the dev server the one
+  // process in the stack a phone cannot reach — and it is the process an
+  // operator is most likely to use while checking the UI. `allowedHosts` is
+  // left at Vite's default: it already admits IP addresses (the LAN case)
+  // while still refusing arbitrary DNS names, so DNS rebinding stays closed.
+  server: { host: "0.0.0.0", port: 5173 },
+  preview: { host: "0.0.0.0", port: 5173 },
   build: {
     rolldownOptions: {
       output: {

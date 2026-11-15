@@ -1,4 +1,4 @@
-import test, { after } from "node:test";
+import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -70,12 +70,35 @@ type PresenceRow = {
   updated_at: Date | string;
 };
 
-const presenceBefore: PresenceRow | null = reachable
-  ? ((await pool!.query<PresenceRow>(
-      `SELECT status, activity_type, activity_text, status_duration, status_expires_at, updated_at
-         FROM bot_identity WHERE id = true`
-    )).rows[0] ?? null)
-  : null;
+const readPresenceRow = async (): Promise<PresenceRow | null> =>
+  (await pool!.query<PresenceRow>(
+    `SELECT status, activity_type, activity_text, status_duration, status_expires_at, updated_at
+       FROM bot_identity WHERE id = true`
+  )).rows[0] ?? null;
+
+let presenceBefore: PresenceRow | null = reachable ? await readPresenceRow() : null;
+
+/**
+ * A crashed worker used to leave the deployment's single row deleted.
+ *
+ * `bot_identity` belongs to the running app, not to a fixture. One of the tests
+ * below deletes it to prove the save heals a missing seed; if the process is
+ * killed between that DELETE and `after()` — exactly what an out-of-memory kill
+ * of a 20-worker test run does — the snapshot for the *next* run is `null`,
+ * the restore dutifully deletes again, and "the seed guarantees one row" fails
+ * forever on a database that is simply wounded. The RAM-capped runner makes
+ * the kill unlikely, but the invariant still has to be self-healing.
+ *
+ * Re-apply the schema's own seed (`INSERT ... ON CONFLICT DO NOTHING`) and take
+ * the repaired row as the snapshot, so `after()` leaves a healthy deployment
+ * behind either way. The schema itself is still verified by the CHECK tests
+ * below; this only repairs an operational wound.
+ */
+before(async () => {
+  if (!reachable || presenceBefore) return;
+  await pool!.query("INSERT INTO bot_identity (id) VALUES (true) ON CONFLICT (id) DO NOTHING");
+  presenceBefore = await readPresenceRow();
+});
 
 /**
  * Writes the snapshot back, seed row and all.

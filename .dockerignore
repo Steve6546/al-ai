@@ -9,6 +9,16 @@
 .env.*
 !.env.example
 *.log
+**/*.log
+**/*.map
 coverage
+**/coverage
 .workbuddy-ai
+# Local supervisor state, service logs and generated previews. The code that
+# writes them is source; the state itself is never part of an image.
+.al-ai/
 .al-ai-bot.lock
+/backups/
+/evidence/
+/exp1.mts
+/spectator-test-1.png

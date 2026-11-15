@@ -3,7 +3,8 @@ import { closeSync, openSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 import { promisify } from "node:util";
-import { normaliseRemoteAccessMode, type RemoteAccessMode } from "@al-ai/core";
+import { isPrivateLanAddress, isVpnAdapter, normaliseRemoteAccessMode, reachableLanEntries, type RemoteAccessMode } from "@al-ai/core";
+import { ensureFirewall } from "./firewall.js";
 
 /**
  * The deployment's network reach, as one switch the operator controls.
@@ -48,8 +49,20 @@ export type NetworkSnapshot = {
   tunnelStable: boolean;
   tunnelStatus: TunnelStatus;
   tunnelError: string | null;
+  /** ERR_NGROK_727: the account's monthly HTTP quota is spent. The public edge
+   * refuses every request although the agent and the upstream are healthy. */
+  quotaExceeded: boolean;
   /** The machine's own non-loopback addresses, each with its interface name. */
   machineHosts: MachineHostEntry[];
+  /**
+   * Adapter names that look like a VPN/tunnel NIC and currently hold an IPv4
+   * address. Presence is a hint, not a verdict: the LAN address can still work
+   * while the VPN is up, but a *client* on a VPN often cannot route to
+   * `192.168.x.x` until local-LAN traffic is allowed.
+   */
+  vpnAdapters: string[];
+  /** The address a phone on the same router should scan, or null when none. */
+  primaryLanHost: string | null;
   port: number;
   /**
    * Whether a sign-in has completed through the tunnel address, which is the
@@ -98,6 +111,35 @@ export function lanHostEntriesFrom(
   return entries;
 }
 
+
+/**
+ * Adapter names that are VPN/tunnel NICs **and** currently hold an IPv4
+ * address. A disconnected VPN adapter reports no address and is not worth
+ * warning about; a live one is exactly what makes a phone on the Wi-Fi fail.
+ */
+export function vpnAdaptersFrom(
+  interfaces: Record<string, NetworkInterfaceInfo[] | undefined>
+): string[] {
+  const names: string[] = [];
+  for (const [name, list] of Object.entries(interfaces)) {
+    if (!isVpnAdapter(name)) continue;
+    if (!(list ?? []).some(entry => !entry.internal && entry.family === "IPv4")) continue;
+    if (!names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+/**
+ * The one address a QR code should carry: the first physical private LAN
+ * adapter after the shared "can another device open this?" filter. VPN,
+ * virtual, APIPA and the VirtualBox host-only default are already excluded, so
+ * this is the Wi-Fi/Ethernet address the router routes.
+ */
+export function primaryLanHostFrom(
+  interfaces: Record<string, NetworkInterfaceInfo[] | undefined>
+): string | null {
+  return reachableLanEntries(lanHostEntriesFrom(interfaces))[0]?.host ?? null;
+}
 
 /**
  * Splits a Host header (or an origin's host part) into hostname and port.
@@ -181,6 +223,16 @@ export function isHostAllowed(
   if (LOOPBACK_HOSTNAMES.has(hostname)) return peerIsLocal;
   if (options.mode === "off") return false;
   if (options.machineHosts.includes(hostname)) return true;
+  /*
+   * A device on the router may address this machine by an RFC1918 address that
+   * is not the one `os.networkInterfaces()` reported (a second subnet, a
+   * router-assigned alias, a VPN-split address). Accept it only when the TCP
+   * peer is private too: a tunnel request arrives from loopback, so a private
+   * Host on that socket stays refused, and a browser on the public internet
+   * cannot claim `192.168.x.x` to slip past the gate. This is the narrow form
+   * of "allow the private LAN" — not "trust any private Host header".
+   */
+  if (isPrivateLanAddress(hostname) && isPrivateLanAddress(options.remoteAddress)) return true;
   if (options.mode === "tunnel" && options.tunnelHost && hostname === options.tunnelHost) return peerIsLocal;
   return false;
 }
@@ -197,26 +249,46 @@ export function isHostAllowed(
  * storage. The callback validates the unpacked origin against the same
  * allowlist before using it, so a forged state cannot pick an arbitrary host.
  */
-export function packOAuthState(origin: string, random: string): string {
-  return `${random}.${Buffer.from(origin, "utf8").toString("base64url")}`;
+export function packOAuthState(origin: string, random: string, returnTo?: string | null): string {
+  /*
+   * `returnTo` is a plain-HTTP LAN origin that cannot hold a Discord callback
+   * (Discord accepts HTTP for loopback only). It rides along on the tunnel leg
+   * and is consumed by `/auth/lan-handoff`, which mints a session cookie the
+   * LAN browser will actually keep. Newline-separated because neither an origin
+   * nor a base64url random can contain one, so a forged value cannot smuggle a
+   * second field.
+   */
+  const payload = returnTo ? `${origin}\n${returnTo}` : origin;
+  return `${random}.${Buffer.from(payload, "utf8").toString("base64url")}`;
 }
 
 const OAUTH_RANDOM_PATTERN = /^[A-Za-z0-9_-]{8,}$/;
 const ORIGIN_PATTERN = /^https?:\/\/[^\s/]+$/;
 
-/** The origin a state value carries, or null when it does not carry one. */
-export function unpackOAuthState(state: string | undefined | null): string | null {
+/** The decoded state payload, or null when the envelope is malformed. */
+function decodeOAuthState(state: string | undefined | null): string | null {
   if (!state) return null;
   const dot = state.indexOf(".");
   if (dot <= 0) return null;
-  const random = state.slice(0, dot);
-  if (!OAUTH_RANDOM_PATTERN.test(random)) return null;
+  if (!OAUTH_RANDOM_PATTERN.test(state.slice(0, dot))) return null;
   try {
-    const origin = Buffer.from(state.slice(dot + 1), "base64url").toString("utf8");
-    return ORIGIN_PATTERN.test(origin) ? origin : null;
+    return Buffer.from(state.slice(dot + 1), "base64url").toString("utf8");
   } catch {
     return null;
   }
+}
+
+/** The origin a state value carries, or null when it does not carry one. */
+export function unpackOAuthState(state: string | undefined | null): string | null {
+  const origin = decodeOAuthState(state)?.split("\n")[0];
+  return origin && ORIGIN_PATTERN.test(origin) ? origin : null;
+}
+
+/** The LAN origin a tunnel sign-in should hand back to, or null. */
+export function unpackOAuthReturnTo(state: string | undefined | null): string | null {
+  const parts = decodeOAuthState(state)?.split("\n");
+  if (!parts || parts.length !== 2) return null;
+  return ORIGIN_PATTERN.test(parts[1]) ? parts[1] : null;
 }
 
 const NGROK_FREE_URL = /https:\/\/[a-z0-9][a-z0-9.-]*\.(?:ngrok-free\.app|ngrok-free\.dev|ngrok\.app|ngrok\.io)/i;
@@ -332,10 +404,108 @@ export const TUNNEL_UNREACHABLE_ERROR =
 
 export const PROBE_TIMEOUT_MS = 5_000;
 
-export type ProbeVerdict = { status: TunnelStatus; error: string | null };
+/**
+ * ngrok's free plan budgets **20,000 HTTP requests per month** (about 667 a
+ * day). A self-probe of the public URL every 15 seconds spends 5,760 requests a
+ * day; the browser's own 20-second health poll spends another 4,320 a day for
+ * every open tab. The quota is therefore exhausted in days, and ngrok then
+ * answers *every* public request with `403 ERR_NGROK_727` at the edge — the
+ * page the operator sees instead of the dashboard.
+ *
+ * The old healer read that 403 as "the URL stopped answering" and re-minted the
+ * agent. Re-minting cannot fix an account-level quota, so it looped forever,
+ * spawning agent after agent. Two rules end that:
+ *
+ * 1. **Liveness is local and free.** ngrok's own agent inspection API
+ *    (`127.0.0.1:4040/api/status` + `/api/tunnels`) and the loopback BFF's
+ *    `/api/health` prove the session, the URL and the upstream. None of those
+ *    requests leave the machine, so none spend the monthly quota.
+ * 2. **Public verification is budgeted.** One end-to-end request per hour at
+ *    most (120/month, 0.6% of the free quota), and one per six hours while the
+ *    account is known to be over quota. That single request is what detects
+ *    `ERR_NGROK_727` and turns it into an honest, actionable message instead
+ *    of a restart loop.
+ */
+export const PUBLIC_VERIFY_INTERVAL_MS = 60 * 60 * 1000;
+export const PUBLIC_VERIFY_QUOTA_RECHECK_MS = 6 * 60 * 60 * 1000;
+
+/** A heal may not fire again inside this window, however broken the edge looks. */
+export const REMINT_COOLDOWN_MS = 5 * 60 * 1000;
+
+/** The ngrok agent's loopback inspection API. Never a remote origin (SSRF guard). */
+export const NGROK_AGENT_API_ORIGIN = "http://127.0.0.1:4040";
+
+export const TUNNEL_QUOTA_ERROR =
+  "حساب ngrok بلغ حدّ طلبات HTTP لهذا الشهر (ERR_NGROK_727)؛ حافة ngrok ترفض كل طلب عام. " +
+  "لن يُعاد تشغيل النفق تلقائياً لأن السبب ليس النفق. انتظر تجديد الحصة أو ترقِّ الخطة من " +
+  "dashboard.ngrok.com/billing، واستخدم localhost أو الشبكة المحلية حتى ذلك الحين.";
+
+/** Optional field: absent on every normal verdict, so existing callers stay cheap. */
+export type ProbeVerdict = { status: TunnelStatus; error: string | null; quotaExceeded?: boolean };
 
 /** Consecutive unreachable probes that justify re-minting the agent. */
 export const RESTART_AFTER_FAILURES = 2;
+
+/**
+ * ngrok reports an exhausted monthly quota as a 403 HTML page carrying
+ * `ERR_NGROK_727`. A 403 from our own app, from a proxy, or from a wrong Host
+ * header must NOT be mistaken for it: only the marker plus the status counts.
+ */
+export function isNgrokQuotaResponse(status: number, body: string): boolean {
+  return (
+    (status === 403 || status === 429) &&
+    /ERR_NGROK_727|HTTP requests limit|HTTP Requests exceeded/i.test(body)
+  );
+}
+
+/**
+ * Cheap, quota-free liveness. Three loopback reads: the agent's session state,
+ * its advertised public URL, and the upstream BFF. `reconnecting` is treated as
+ * alive — ngrok heals an edge reconnect on its own, and killing the agent for
+ * it is what used to make the tunnel "die every few minutes".
+ */
+export type LocalTunnelVerdict = { healthy: boolean; reason: string | null; urls: string[] };
+
+export async function probeTunnelLocally(
+  options: { agentApi: string; upstream: string; expectedUrl: string | null },
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs: number = 2_000
+): Promise<LocalTunnelVerdict> {
+  // A non-loopback agent API would turn a health check into an outbound request
+  // against an arbitrary host. Refuse it rather than trust configuration.
+  if (!isLoopbackOrigin(options.agentApi) || !isLoopbackOrigin(options.upstream)) {
+    return { healthy: false, reason: "agent/upstream origin is not loopback", urls: [] };
+  }
+  const get = (url: string) => fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
+  try {
+    const [statusRes, tunnelsRes, upstreamRes] = await Promise.all([
+      get(`${options.agentApi}/api/status`),
+      get(`${options.agentApi}/api/tunnels`),
+      get(`${options.upstream}/api/health`)
+    ]);
+    if (!statusRes.ok) return { healthy: false, reason: `agent status ${statusRes.status}`, urls: [] };
+    const status = (await statusRes.json()) as { status?: string };
+    if (status.status !== "online" && status.status !== "reconnecting") {
+      return { healthy: false, reason: `agent ${status.status ?? "unknown"}`, urls: [] };
+    }
+    if (!tunnelsRes.ok) return { healthy: false, reason: `agent tunnels ${tunnelsRes.status}`, urls: [] };
+    const listed = (await tunnelsRes.json()) as { tunnels?: { public_url?: string }[] };
+    const urls = (listed.tunnels ?? [])
+      .map(tunnel => normaliseOrigin(tunnel.public_url ?? null))
+      .filter((url): url is string => url !== null && url.startsWith("https://"));
+    const expected = normaliseOrigin(options.expectedUrl);
+    if (expected && !urls.includes(expected)) {
+      return { healthy: false, reason: "agent advertises a different URL", urls };
+    }
+    if (!expected && urls.length === 0) {
+      return { healthy: false, reason: "agent advertises no URL", urls };
+    }
+    if (!upstreamRes.ok) return { healthy: false, reason: `upstream ${upstreamRes.status}`, urls };
+    return { healthy: true, reason: null, urls };
+  } catch (error) {
+    return { healthy: false, reason: error instanceof Error ? error.message : "loopback probe failed", urls: [] };
+  }
+}
 
 /**
  * The heal decision, kept pure so the dangerous case is testable without a real
@@ -351,10 +521,21 @@ export function nextProbeState(state: {
   url: string | null;
   verdict: TunnelStatus;
   failures: number;
+  /** An account-level quota is not a wedged agent: never re-mint for it. */
+  quotaExceeded?: boolean;
+  lastRemintAt?: number;
+  now?: number;
 }): { failures: number; remint: boolean } {
-  if (!state.url) return { failures: 0, remint: false };
+  if (!state.url || state.quotaExceeded) return { failures: 0, remint: false };
   const failures = state.verdict === "running" ? 0 : state.failures + 1;
-  return failures >= RESTART_AFTER_FAILURES ? { failures: 0, remint: true } : { failures, remint: false };
+  if (failures < RESTART_AFTER_FAILURES) return { failures, remint: false };
+  // Even a genuinely wedged agent gets a ceiling. Without it, a persistent
+  // upstream failure re-mints every 30 seconds and leaves a trail of agents.
+  const now = state.now ?? Date.now();
+  if (state.lastRemintAt !== undefined && now - state.lastRemintAt < REMINT_COOLDOWN_MS) {
+    return { failures: 0, remint: false };
+  }
+  return { failures: 0, remint: true };
 }
 
 export async function probeTunnelReachability(
@@ -370,8 +551,20 @@ export async function probeTunnelReachability(
     return { status: state.status, error: null };
   }
   try {
-    const response = await fetchImpl(`${state.url}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
-    if (!response.ok) throw new Error(`health check returned ${response.status}`);
+    // The free plan puts an HTML interstitial in front of browser traffic.
+    // This header makes the one budgeted verification an API request, so it
+    // never pays for a second request just to click through the warning.
+    const response = await fetchImpl(`${state.url}/api/health`, {
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { "ngrok-skip-browser-warning": "al-ai-health" }
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      if (isNgrokQuotaResponse(response.status, body)) {
+        return { status: "error", error: TUNNEL_QUOTA_ERROR, quotaExceeded: true };
+      }
+      throw new Error(`health check returned ${response.status}`);
+    }
     return { status: "running", error: null };
   } catch {
     return { status: "error", error: TUNNEL_UNREACHABLE_ERROR };
@@ -464,6 +657,11 @@ function envNgrokDomain(): string | null {
 function remoteAccessOverride(): RemoteAccessMode | null {
   const value = process.env.AL_AI_REMOTE_ACCESS?.trim().toLowerCase();
   if (value === "off") return "off";
+  // `lan` is the router-only reach: bind wide, admit the machine's own private
+  // addresses, and never spawn the tunnel. It exists as a one-process override
+  // so `npm run dev -- -Lan` can open the dashboard to other devices on the
+  // Wi-Fi without spending a single ngrok request or changing the saved mode.
+  if (value === "lan" || value === "local-network") return "lan";
   if (value === "on" || value === "tunnel") return "tunnel";
   return null;
 }
@@ -577,7 +775,6 @@ export function createNetworkManager(input: {
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   const machineHosts = () => lanHostsFrom(networkInterfaces());
-  const machineHostEntries = () => lanHostEntriesFrom(networkInterfaces());
 
   const ngrokPath = resolveNgrokPath();
 
@@ -748,26 +945,41 @@ export function createNetworkManager(input: {
     startTunnel();
   }
 
-  /** Does `url` reach this dashboard's own health check? */
-  async function urlAnswers(url: string): Promise<boolean> {
+  /**
+   * The URLs the *live* agent advertises, read from its loopback inspection
+   * API. This is ngrok's own answer to "what is my public URL", so it replaces
+   * both log scraping and — the expensive part — a request through the public
+   * edge. Boot happens before `app.listen`, when no local upstream is serving
+   * yet; the agent API is independent of that and is already up.
+   */
+  async function agentPublicUrls(): Promise<string[]> {
     try {
-      const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
-      return response.ok;
+      const response = await fetch(`${NGROK_AGENT_API_ORIGIN}/api/tunnels`, {
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS)
+      });
+      if (!response.ok) return [];
+      const body = (await response.json()) as { tunnels?: { public_url?: string }[] };
+      return (body.tunnels ?? [])
+        .map(tunnel => normaliseOrigin(tunnel.public_url ?? null))
+        .filter((url): url is string => url !== null && url.startsWith("https://"));
     } catch {
-      return false;
+      return [];
     }
   }
 
-  /**
-   * A newer tunnel URL in the log than `stale`, when the persisted one no
-   * longer answers. ngrok prints a replacement after a reconnect, so the newest
-   * URL in the file is the candidate — provided it answers, since a log line
-   * alone does not prove the edge is up.
-   */
+  /** Is `url` the address the live agent actually serves? Zero public requests. */
+  async function urlAnswers(url: string): Promise<boolean> {
+    const expected = normaliseOrigin(url);
+    return expected !== null && (await agentPublicUrls()).includes(expected);
+  }
+
+  /** A reconnect changed the random URL: trust the agent, then the log. */
   async function replacementTunnelUrl(stale: string): Promise<string | null> {
+    const live = (await agentPublicUrls()).find(url => url !== normaliseOrigin(stale));
+    if (live) return live;
     const candidate = readTunnelUrlFromLog();
-    if (!candidate || candidate === stale.toLowerCase()) return null;
-    return (await urlAnswers(candidate)) ? candidate : null;
+    if (!candidate || normaliseOrigin(candidate) === normaliseOrigin(stale)) return null;
+    return candidate;
   }
 
   function startTunnel() {
@@ -913,25 +1125,59 @@ export function createNetworkManager(input: {
   }
 
   /**
-   * Verify the tunnel actually answers, instead of trusting that a live
-   * `ngrok` pid means a working URL.
+   * Liveness every 15 seconds, entirely on loopback; end-to-end verification
+   * at most once an hour.
    *
-   * An adopted tunnel from a previous boot is believed on pid alone, and a
-   * quick tunnel can stay alive while its edge connection is dead — a VPN or
-   * a filtering proxy on this machine breaks the handshake to ngrok's edge
-   * without killing the process. The URL then stays in the
-   * snapshot as "running" while nothing on the internet can reach it, which is
-   * worse than no answer at all: the screen offers a link that cannot work and
-   * gives no reason. So the read probes its own public address.
+   * A live `ngrok` pid is not proof the URL works, but ngrok's *own* local
+   * inspection API answers that question without spending the account's
+   * monthly HTTP quota. The old design asked the public address on every
+   * probe; at four requests a minute that burned the free plan's 20,000
+   * requests in a few days, and the resulting `403 ERR_NGROK_727` was then
+   * misread as a dead URL and "healed" by re-minting the agent forever.
    *
-   * Fire-and-forget and throttled: the caller gets the snapshot it asked for
-   * immediately, and the next read sees the corrected status. Blocking here
-   * would make every poll pay a dead tunnel's timeout.
+   * Both checks are fire-and-forget and throttled: the caller gets the
+   * snapshot it asked for immediately, and the next read sees the corrected
+   * status. Blocking here would make every poll pay a dead tunnel's timeout.
    */
   let lastProbeAt = 0;
   const PROBE_INTERVAL_MS = 15_000;
+  let lastPublicVerifyAt = 0;
   let probeFailures = 0;
   let healing = false;
+  let quotaExceeded = false;
+  let lastRemintAt = 0;
+
+  /**
+   * The one request that is allowed to leave through the public edge — and it
+   * is budgeted. It exists for a single reason: a local check cannot see an
+   * account-level quota, because the ngrok agent happily reports `online`
+   * while the edge refuses every visitor with ERR_NGROK_727. Detecting that
+   * turns a confusing "link does not respond" into the truth, and stops the
+   * healer from re-minting against a wall no restart can move.
+   */
+  async function verifyPublicTunnel(url: string | null): Promise<void> {
+    if (!url) return;
+    const interval = quotaExceeded ? PUBLIC_VERIFY_QUOTA_RECHECK_MS : PUBLIC_VERIFY_INTERVAL_MS;
+    if (Date.now() - lastPublicVerifyAt < interval) return;
+    lastPublicVerifyAt = Date.now();
+    const verdict = await probeTunnelReachability({ mode: "tunnel", url, status: tunnelStatus });
+    if (mode !== "tunnel" || tunnelUrl !== url) return;
+
+    if (verdict.quotaExceeded) {
+      quotaExceeded = true;
+      probeFailures = 0;
+      tunnelStatus = "error";
+      tunnelError = TUNNEL_QUOTA_ERROR;
+      input.log.warn({ tunnelUrl: url }, "ngrok account HTTP request quota exceeded (ERR_NGROK_727); no automatic re-mint");
+      return;
+    }
+    if (quotaExceeded && verdict.status === "running") {
+      quotaExceeded = false;
+      tunnelStatus = "running";
+      tunnelError = null;
+      input.log.info({ tunnelUrl: url }, "ngrok HTTP request quota recovered");
+    }
+  }
 
   function probeTunnel(): void {
     if (mode !== "tunnel" || healing) return;
@@ -939,17 +1185,44 @@ export function createNetworkManager(input: {
     lastProbeAt = Date.now();
     const url = tunnelUrl;
     const status = tunnelStatus;
-    void probeTunnelReachability({ mode, url, status }).then(async verdict => {
+    // Nothing to check yet: `startTunnel`'s own log poll promotes `starting`
+    // to `running`, and the retry ladder owns a tunnel that never got a URL.
+    if (!url) return;
+
+    void verifyPublicTunnel(url);
+
+    void probeTunnelLocally({
+      agentApi: NGROK_AGENT_API_ORIGIN,
+      upstream: `http://127.0.0.1:${input.port}`,
+      expectedUrl: url
+    }).then(async local => {
       // Re-test against the state as it is now, not as it was at send time:
       // a mode switch to "off" in between must not be overwritten.
       if (mode !== "tunnel" || tunnelUrl !== url) return;
-      if (verdict.status !== status) {
-        tunnelStatus = verdict.status;
-        tunnelError = verdict.error;
+      // The quota is an account fact; a healthy local agent must not paper
+      // over it and advertise a public link that ngrok is refusing.
+      if (!quotaExceeded) {
+        if (local.healthy) {
+          if (status === "starting" || status === "error") {
+            tunnelStatus = "running";
+            tunnelError = null;
+          }
+        } else {
+          tunnelStatus = "error";
+          tunnelError = TUNNEL_UNREACHABLE_ERROR;
+          input.log.warn({ tunnelUrl: url, reason: local.reason }, "Local tunnel liveness check failed");
+        }
       }
-      const heal = nextProbeState({ url, verdict: verdict.status, failures: probeFailures });
+      const heal = nextProbeState({
+        url,
+        verdict: local.healthy ? "running" : "error",
+        failures: probeFailures,
+        quotaExceeded,
+        lastRemintAt
+      });
       probeFailures = heal.failures;
       if (!heal.remint) return;
+      lastRemintAt = Date.now();
 
       /*
        * The URL is dead and the process that owns it is alive — the one failure
@@ -979,8 +1252,32 @@ export function createNetworkManager(input: {
     });
   }
 
+  /**
+   * Best-effort: a LAN switch is meaningless when Windows drops the packet
+   * before the Host gate runs. This process is not elevated, so it can only
+   * report the rule's state — creating it needs the UAC prompt behind the
+   * screen's button. Never awaited: a slow PowerShell read must not delay
+   * `app.listen`.
+   */
+  function ensureReachFirewall(): void {
+    if (mode === "off") return;
+    void ensureFirewall(input.port)
+      .then(report => {
+        if (report.status !== "allowed") {
+          input.log.warn(
+            { status: report.status, needsAdmin: report.needsAdmin, rule: report.ruleName },
+            "Windows Firewall does not allow the dashboard port; a LAN device is refused before the Host gate"
+          );
+        }
+      })
+      .catch(() => undefined);
+  }
+
   function snapshot(): NetworkSnapshot {
     const stable = Boolean(domain && tunnelUrl && new URL(tunnelUrl).hostname === domain);
+    // One read of the interface table per snapshot: the gate list, the VPN hint
+    // and the QR address must all describe the same instant.
+    const interfaces = networkInterfaces();
     return {
       mode,
       tunnelProvider: "ngrok",
@@ -989,7 +1286,10 @@ export function createNetworkManager(input: {
       tunnelStable: stable,
       tunnelStatus,
       tunnelError,
-      machineHosts: machineHostEntries(),
+      quotaExceeded,
+      machineHosts: lanHostEntriesFrom(interfaces),
+      vpnAdapters: vpnAdaptersFrom(interfaces),
+      primaryLanHost: primaryLanHostFrom(interfaces),
       port: input.port,
       tunnelCallbackVerified: isCallbackRegisteredFor(verifiedOrigin, tunnelUrl)
     };
@@ -1034,6 +1334,7 @@ export function createNetworkManager(input: {
      */
     setInterval(() => probeTunnel(), PROBE_INTERVAL_MS).unref();
     input.log.info({ mode, domain, ...(override ? { overrideFrom: "AL_AI_REMOTE_ACCESS" } : {}) }, "AL AI network access loaded");
+    ensureReachFirewall();
   }
 
   /**
@@ -1077,6 +1378,7 @@ export function createNetworkManager(input: {
     }
 
     input.log.info({ mode, domain, modeChanged, domainChanged }, "AL AI network access changed");
+    ensureReachFirewall();
     return snapshot();
   }
 

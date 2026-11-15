@@ -5,6 +5,7 @@ import {
   isCallbackRegisteredFor,
   isHostAllowed,
   isLoopbackOrigin,
+  isNgrokQuotaResponse,
   isOAuthCapableOrigin,
   lanHostEntriesFrom,
   lanHostsFrom,
@@ -13,10 +14,18 @@ import {
   normaliseOrigin,
   packOAuthState,
   parseTunnelUrl,
+  primaryLanHostFrom,
+  probeTunnelLocally,
   probeTunnelReachability,
   splitHostPort,
   tunnelHostForGate,
-  unpackOAuthState
+  unpackOAuthReturnTo,
+  unpackOAuthState,
+  vpnAdaptersFrom,
+  NGROK_AGENT_API_ORIGIN,
+  PUBLIC_VERIFY_INTERVAL_MS,
+  REMINT_COOLDOWN_MS,
+  TUNNEL_QUOTA_ERROR
 } from "../server/network.js";
 
 /**
@@ -91,6 +100,42 @@ test("lan adds the machine's own addresses, still refusing strangers", () => {
   assert.equal(isHostAllowed("203.0.113.7:3000", options), false);
 });
 
+test("lan admits an RFC1918 Host only from an RFC1918 peer", () => {
+  // A router-assigned alias the interface table did not report is still this
+  // machine to a device on the LAN...
+  assert.equal(isHostAllowed("192.168.1.200:3000", { ...remote, mode: "lan" as const }), true);
+  // ...but the same header from loopback (the tunnel's peer) is a Host-header
+  // claim, not a LAN visit, and stays refused.
+  assert.equal(isHostAllowed("192.168.1.200:3000", { ...local, mode: "lan" as const }), false);
+  // "off" refuses it even from a private peer: the switch means loopback only.
+  assert.equal(isHostAllowed("192.168.1.200:3000", { ...remote, mode: "off" as const }), false);
+  // A public Host from a private peer is still a stranger.
+  assert.equal(isHostAllowed("203.0.113.7:3000", { ...remote, mode: "lan" as const }), false);
+});
+
+test("vpnAdaptersFrom reports live VPN NICs and ignores disconnected ones", () => {
+  const interfaces = {
+    HotspotShield_Wireguard: [{ address: "10.234.0.9", internal: false, family: "IPv4" } as NetworkInterfaceInfo],
+    Tailscale: [{ address: "100.101.102.103", internal: false, family: "IPv4" } as NetworkInterfaceInfo],
+    tun0: [{ address: "10.8.0.2", internal: false, family: "IPv4" } as NetworkInterfaceInfo],
+    utun3: [{ address: "192.168.99.1", internal: false, family: "IPv6" } as NetworkInterfaceInfo],
+    "Wi-Fi": [{ address: "192.168.1.195", internal: false, family: "IPv4" } as NetworkInterfaceInfo]
+  };
+  assert.deepEqual(vpnAdaptersFrom(interfaces), ["HotspotShield_Wireguard", "Tailscale", "tun0"]);
+});
+
+test("primaryLanHostFrom prefers the physical private adapter", () => {
+  const interfaces = {
+    HotspotShield_Wireguard: [{ address: "10.234.0.9", internal: false, family: "IPv4" } as NetworkInterfaceInfo],
+    "Ethernet 4": [{ address: "192.168.56.1", internal: false, family: "IPv4" } as NetworkInterfaceInfo],
+    "Wi-Fi": [{ address: "192.168.1.195", internal: false, family: "IPv4" } as NetworkInterfaceInfo]
+  };
+  // The VPN address and the VirtualBox host-only default are not scannable by
+  // a phone on the router; the Wi-Fi address is.
+  assert.equal(primaryLanHostFrom(interfaces), "192.168.1.195");
+  assert.equal(primaryLanHostFrom({}), null);
+});
+
 test("the loopback and tunnel hostname branches need a loopback peer", () => {
   // A LAN peer presenting Host: localhost is impersonating the trusted origin —
   // the header is attacker-controlled on any socket.
@@ -152,6 +197,19 @@ test("OAuth state packs the origin in and unpacks it back out", () => {
   const state = packOAuthState("http://192.0.2.10:3000", "abcDEF-_123456");
   assert.match(state, /^abcDEF-_123456\./);
   assert.equal(unpackOAuthState(state), "http://192.0.2.10:3000");
+  assert.equal(unpackOAuthReturnTo(state), null, "a plain sign-in has no LAN return address");
+});
+
+test("OAuth state carries a LAN return address for the tunnel leg", () => {
+  // A phone on the router cannot hold a Discord callback; the tunnel leg packs
+  // its origin so the callback can hand the finished session back.
+  const state = packOAuthState("https://quiet-river.ngrok-free.app", "abcDEF-_123456", "http://192.168.1.195:3000");
+  assert.equal(unpackOAuthState(state), "https://quiet-river.ngrok-free.app");
+  assert.equal(unpackOAuthReturnTo(state), "http://192.168.1.195:3000");
+  // The newline separator cannot be smuggled: a payload with three parts is
+  // rejected rather than silently using one of them.
+  const three = `abcDEF-_123456.${Buffer.from("http://a\nhttp://b\nhttp://c", "utf8").toString("base64url")}`;
+  assert.equal(unpackOAuthReturnTo(three), null);
 });
 
 test("unpackOAuthState rejects payloads that are not origins", () => {
@@ -300,6 +358,121 @@ test("a tunnel with no address is never re-minted by the probe", () => {
     nextProbeState({ url: null, verdict: "error", failures: 4 }),
     { failures: 0, remint: false }
   );
+});
+
+/**
+ * ERR_NGROK_727 (the free plan's 20,000-request monthly quota) is an account
+ * fact, not a dead URL. The old healer read the 403 as "the address stopped
+ * answering" and re-minted the agent forever; every new agent inherited the
+ * same exhausted account. These tests pin the classification and the refusal.
+ */
+test("an exhausted ngrok quota is recognised and never re-minted", async () => {
+  assert.equal(isNgrokQuotaResponse(403, "This ngrok account has reached its HTTP requests limit (ERR_NGROK_727)"), true);
+  assert.equal(isNgrokQuotaResponse(403, "HTTP Requests exceeded"), true);
+  assert.equal(isNgrokQuotaResponse(403, "forbidden by our own host gate"), false);
+  assert.equal(isNgrokQuotaResponse(502, "ERR_NGROK_727"), false);
+
+  const quotaPage = async () =>
+    new Response("This ngrok account has reached its HTTP requests limit for the month. (ERR_NGROK_727)", { status: 403 });
+  const verdict = await probeTunnelReachability(
+    { mode: "tunnel", url: tunnelUrl, status: "running" },
+    quotaPage
+  );
+  assert.equal(verdict.status, "error");
+  assert.equal(verdict.quotaExceeded, true);
+  assert.equal(verdict.error, TUNNEL_QUOTA_ERROR);
+  assert.deepEqual(
+    nextProbeState({ url: tunnelUrl, verdict: "error", failures: 4, quotaExceeded: true }),
+    { failures: 0, remint: false }
+  );
+});
+
+test("a wedged agent waits out the re-mint cooldown", () => {
+  const now = 1_000_000;
+  assert.deepEqual(
+    nextProbeState({ url: tunnelUrl, verdict: "error", failures: 1, lastRemintAt: now - 1_000, now }),
+    { failures: 0, remint: false },
+    "a restart a second ago cannot be worth another one"
+  );
+  assert.deepEqual(
+    nextProbeState({ url: tunnelUrl, verdict: "error", failures: 1, lastRemintAt: now - REMINT_COOLDOWN_MS - 1, now }),
+    { failures: 0, remint: true }
+  );
+});
+
+/** A fetch stub that records every URL, so "no public request" is measurable. */
+function recordingFetch(
+  answers: Record<string, { status: number; body: unknown }>
+): { fetchImpl: typeof fetch; asked: string[] } {
+  const asked: string[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    asked.push(url);
+    const prefix = Object.keys(answers).find(key => url.startsWith(key));
+    if (!prefix) return new Response("{}", { status: 404 });
+    const answer = answers[prefix];
+    return new Response(JSON.stringify(answer.body), {
+      status: answer.status,
+      headers: { "content-type": "application/json" }
+    });
+  }) as typeof fetch;
+  return { fetchImpl, asked };
+}
+
+const localOptions = {
+  agentApi: NGROK_AGENT_API_ORIGIN,
+  upstream: "http://127.0.0.1:3000",
+  expectedUrl: tunnelUrl
+};
+
+const healthyAgent = {
+  [`${NGROK_AGENT_API_ORIGIN}/api/status`]: { status: 200, body: { status: "online" } },
+  [`${NGROK_AGENT_API_ORIGIN}/api/tunnels`]: {
+    status: 200,
+    body: { tunnels: [{ public_url: tunnelUrl }] }
+  },
+  "http://127.0.0.1:3000/api/health": { status: 200, body: { status: "healthy" } }
+};
+
+test("liveness is proved on loopback and spends zero public requests", async () => {
+  const { fetchImpl, asked } = recordingFetch(healthyAgent);
+  const verdict = await probeTunnelLocally(localOptions, fetchImpl);
+  assert.equal(verdict.healthy, true, verdict.reason ?? "healthy");
+  assert.ok(verdict.urls.includes(tunnelUrl.toLowerCase()));
+  assert.equal(asked.some(url => url.startsWith(tunnelUrl)), false, "no request may leave through the tunnel");
+  assert.ok(PUBLIC_VERIFY_INTERVAL_MS >= 60 * 60 * 1000, "public verification stays at most hourly");
+});
+
+test("an offline agent, a changed URL and a dead upstream are all unhealthy", async () => {
+  for (const broken of [
+    { ...healthyAgent, [`${NGROK_AGENT_API_ORIGIN}/api/status`]: { status: 200, body: { status: "offline" } } },
+    {
+      ...healthyAgent,
+      [`${NGROK_AGENT_API_ORIGIN}/api/tunnels`]: {
+        status: 200,
+        body: { tunnels: [{ public_url: "https://another-1234.ngrok-free.dev" }] }
+      }
+    },
+    { ...healthyAgent, "http://127.0.0.1:3000/api/health": { status: 503, body: {} } }
+  ]) {
+    const { fetchImpl } = recordingFetch(broken);
+    assert.equal((await probeTunnelLocally(localOptions, fetchImpl)).healthy, false);
+  }
+});
+
+test("a reconnecting agent is alive, not a reason to kill it", async () => {
+  const { fetchImpl } = recordingFetch({
+    ...healthyAgent,
+    [`${NGROK_AGENT_API_ORIGIN}/api/status`]: { status: 200, body: { status: "reconnecting" } }
+  });
+  assert.equal((await probeTunnelLocally(localOptions, fetchImpl)).healthy, true);
+});
+
+test("a non-loopback agent API is refused instead of becoming an outbound probe", async () => {
+  const { fetchImpl, asked } = recordingFetch(healthyAgent);
+  const verdict = await probeTunnelLocally({ ...localOptions, agentApi: "https://attacker.example" }, fetchImpl);
+  assert.equal(verdict.healthy, false);
+  assert.equal(asked.length, 0);
 });
 
 /**

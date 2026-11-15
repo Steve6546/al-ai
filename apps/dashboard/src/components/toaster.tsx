@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -46,15 +47,36 @@ const TONE_STYLES: Record<ToastTone, { wrapper: string; Icon: typeof CheckCircle
 const AUTO_DISMISS_MS = 6000;
 
 export function Toaster({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
+  /**
+   * Portal only after mount.
+   *
+   * A toast is rendered from inside a screen, which sits inside a
+   * `framer-motion` wrapper. That wrapper sets a `transform` while it animates,
+   * and a transformed ancestor becomes the containing block for a `fixed`
+   * child — so `z-50` was being compared inside the screen's own stacking
+   * context, under the header (`z-30`) and clipped by `<main>`'s scroll box.
+   * That is the "toast behind the navbar" bug: not a missing z-index, a
+   * stacking context.
+   *
+   * Rendering into `document.body` at the top token removes both problems. The
+   * first render stays inline because `ReactDOMServer` does not support portals
+   * — the render smoke tests use it — and the effect moves the live stack out
+   * on the next tick, before any toast can be pushed (pushing is a user
+   * action).
+   */
+  const [portalReady, setPortalReady] = useState(false);
+  useEffect(() => setPortalReady(true), []);
   if (toasts.length === 0) return null;
 
-  return (
-    <div className="pointer-events-none fixed inset-x-0 top-4 z-50 mx-auto flex w-[min(34rem,calc(100%_-_2rem))] flex-col gap-2">
+  const stack = (
+    <div className="pointer-events-none fixed inset-x-0 top-4 z-[var(--z-toast)] mx-auto flex w-[min(34rem,calc(100%_-_2rem))] flex-col gap-2">
       {toasts.map(toast => (
         <ToastRow key={toast.id} toast={toast} onDismiss={onDismiss} />
       ))}
     </div>
   );
+
+  return portalReady && typeof document !== "undefined" ? createPortal(stack, document.body) : stack;
 }
 
 function ToastRow({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {

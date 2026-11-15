@@ -1,6 +1,8 @@
 # AL AI - the one command that brings the local stack up.
 #
 #   npm run dev                 start database + dashboard + bot, then supervise
+#   npm run dev -- -Lan         also answer devices on the same Wi-Fi/router
+#   npm run dev -- -Lan -OpenFirewall   and allow the port through Windows Firewall
 #   npm run dev -- -Tunnel      the same, with the dashboard's ngrok tunnel on
 #   npm run dev -- -Detach      start and return to the prompt (fire and forget)
 #   npm run dev -- -NoBot       dashboard only
@@ -45,6 +47,14 @@ param(
   # local work does not need a public URL, and the saved mode is honoured when
   # this flag is absent.
   [switch]$Tunnel,
+  # Bind wide and admit the machine's LAN addresses for this run. The BFF
+  # already listens on 0.0.0.0; this switch lifts its Host gate, which is
+  # loopback-only by default. It never saves the choice and never starts ngrok.
+  [switch]$Lan,
+  # Create the inbound Windows Firewall rule for the dashboard port if it is
+  # missing. Needs an elevated shell; without one the script prints the exact
+  # command instead of failing the whole stack.
+  [switch]$OpenFirewall,
   # Start and return instead of supervising. A detached stack is stopped later
   # with `npm run dev:stop`.
   [switch]$Detach,
@@ -94,7 +104,83 @@ $postgresPort = Get-PostgresPort -Values $dotenv
 if ($SavedMode) {
   Remove-Item Env:AL_AI_REMOTE_ACCESS -ErrorAction SilentlyContinue
 } else {
-  $env:AL_AI_REMOTE_ACCESS = if ($Tunnel) { "on" } else { "off" }
+  # `lan` is the router-only reach: no tunnel, no quota, no public exposure.
+  # `-Tunnel` subsumes it (tunnel mode also admits LAN hosts), so it wins.
+  $env:AL_AI_REMOTE_ACCESS = if ($Tunnel) { "on" } elseif ($Lan) { "lan" } else { "off" }
+}
+
+# The addresses a phone on the same router can actually open. This mirrors the
+# display filter in packages/core/src/remote-access.ts; the dashboard's own
+# /api/network remains the authority for what is printed in the UI. .NET's
+# interface table is used rather than Get-NetIPAddress so the launcher works on
+# a bare Windows install with no NetTCPIP module loaded.
+function Get-LanIPv4Addresses {
+  $found = @()
+  foreach ($interface in [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+    if ($interface.OperationalStatus -ne [System.Net.NetworkInformation.OperationalStatus]::Up) { continue }
+    if ($interface.NetworkInterfaceType -eq [System.Net.NetworkInformation.NetworkInterfaceType]::Loopback) { continue }
+    $label = [string]$interface.Name
+    if ($label -match 'wireguard|vpn|tap|virtual|vmware|virtualbox|hyper-?v|vethernet|wsl|docker|loopback|bluetooth') { continue }
+    foreach ($unicast in $interface.GetIPProperties().UnicastAddresses) {
+      if ($unicast.Address.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) { continue }
+      $address = [string]$unicast.Address.ToString()
+      if ($address -eq '127.0.0.1' -or $address.StartsWith('169.254.') -or $address.StartsWith('192.168.56.')) { continue }
+      $found += [pscustomobject]@{ Address = $address; Interface = $label }
+    }
+  }
+  return $found
+}
+
+$firewallRuleName = "AL AI Dashboard (LAN port $dashboardPort)"
+
+function Test-LanFirewallRule {
+  try { return @(Get-NetFirewallRule -DisplayName $firewallRuleName -ErrorAction SilentlyContinue).Count -gt 0 }
+  catch { return $false }
+}
+
+function Enable-LanFirewallRule {
+  if (Test-LanFirewallRule) { return }
+  try {
+    # `Any`, not `Private,Domain`: Windows classifies most home Wi-Fi networks
+    # as Public, and a Private-only rule is created successfully while still
+    # dropping every phone on the router. Measured on this machine: the active
+    # Wi-Fi profile is Public.
+    New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Protocol TCP `
+      -LocalPort $dashboardPort -Action Allow -Profile Any -ErrorAction Stop | Out-Null
+    Write-Host "firewall:              added inbound rule $firewallRuleName (profiles: Any)"
+  } catch {
+    # A missing elevation is not a reason to keep the database, the bot and the
+    # dashboard from starting. Print the exact one-liner instead.
+    Write-Host "firewall:              could not add the rule ($($_.Exception.Message)); run once as Administrator:"
+    Write-Host "                       New-NetFirewallRule -DisplayName '$firewallRuleName' -Direction Inbound -Protocol TCP -LocalPort $dashboardPort -Action Allow -Profile Any"
+  }
+}
+
+function Write-AccessUrls {
+  param([switch]$IsStatus)
+  Write-Host ("-" * 62)
+  Write-Host ("dashboard (localhost): http://localhost:$dashboardPort")
+  $lanAddresses = @(Get-LanIPv4Addresses)
+  if ($lanAddresses.Count -eq 0) {
+    Write-Host "dashboard (LAN):       no active IPv4 adapter found - connect to Wi-Fi/Ethernet first"
+  } else {
+    foreach ($entry in $lanAddresses) {
+      Write-Host ("dashboard (LAN):       http://$($entry.Address):$dashboardPort  [$($entry.Interface)]")
+    }
+  }
+  if ($IsStatus) {
+    Write-Host "LAN reach:             chosen at launch (-Lan / -Tunnel / -SavedMode); the live setting is on the «الوصول للشبكة» screen"
+  } elseif ($env:AL_AI_REMOTE_ACCESS -eq 'off') {
+    Write-Host "LAN access:            OFF for this run (use -Lan, -Tunnel, or -SavedMode)"
+  } else {
+    Write-Host "LAN access:            $($env:AL_AI_REMOTE_ACCESS)"
+  }
+  if (Test-LanFirewallRule) {
+    Write-Host "firewall:              inbound rule present ($firewallRuleName)"
+  } else {
+    Write-Host "firewall:              no inbound rule yet - if another device cannot connect, run once as Administrator:"
+    Write-Host "                       New-NetFirewallRule -DisplayName '$firewallRuleName' -Direction Inbound -Protocol TCP -LocalPort $dashboardPort -Action Allow -Profile Any"
+  }
 }
 
 function Ensure-RunDirectory {
@@ -246,6 +332,12 @@ function Invoke-Start {
     & (Join-Path $PSScriptRoot "postgres.ps1") -Action start | Out-Null
   }
 
+  # LAN reach is useless if Windows drops the packet before the BFF sees it.
+  # Try on every LAN/tunnel launch, not only behind an explicit switch; without
+  # elevation this prints the exact command and the stack still starts. The
+  # dashboard's own button performs the elevated retry.
+  if (($OpenFirewall -or $Lan -or $Tunnel) -and -not $NoDashboard) { Enable-LanFirewallRule }
+
   $dashboardPid = $null
   $botPid = $null
 
@@ -312,6 +404,7 @@ function Invoke-Start {
   }
 
   if ($Tunnel) { Write-Host "tunnel: requested (the dashboard mints the URL; it appears in $($dashboardLog.out))" }
+  Write-AccessUrls
 }
 
 function Invoke-Stop {
@@ -413,6 +506,7 @@ function Invoke-Status {
   } catch {
     Write-Host "health:    dashboard not answering yet"
   }
+  Write-AccessUrls -IsStatus
 }
 
 # Supervise the stack until Ctrl+C, or until every service has exited.

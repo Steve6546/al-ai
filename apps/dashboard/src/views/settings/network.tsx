@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { motion } from "framer-motion";
-import { Check, Copy, ExternalLink, Globe, Loader2, ShieldAlert } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { Check, Copy, ExternalLink, Globe, Loader2, ShieldAlert, ShieldCheck, Wifi, WifiOff } from "lucide-react";
 import { REMOTE_ACCESS_MODES, type RemoteAccessMode } from "@al-ai/core/browser";
 import { api } from "@/api";
 import { LoadError, LoadingRow } from "@/components/view-states";
@@ -13,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { useCopy } from "@/lib/use-copy";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import type { NetworkSnapshot } from "@/types";
+import type { NetworkFirewall, NetworkSnapshot } from "@/types";
 
 /**
  * The «الوصول للشبكة» screen — where the deployment's reach is chosen.
@@ -39,16 +40,20 @@ const tunnelStatusCopy: Record<
 };
 
 /**
- * How often the screen looks again while a tunnel is coming up.
+ * How often the screen looks again.
  *
- * Without this the screen froze on «جارٍ التشغيل…» until a manual reload: the
- * tunnel takes a few seconds to mint a URL, but the operator's one PUT already
- * answered and nothing was going to tell the browser to ask again. An hour-old
- * spinner is what that looked like. Polling stops the moment the status leaves
- * `starting`, so a live tunnel costs one request per interval and a finished
- * one costs none.
+ * `starting` needs a short interval: the PUT has already answered and nothing
+ * else will tell the browser that ngrok minted a URL. Once the tunnel is up the
+ * server does its own liveness checks on loopback, so a slow refresh is enough.
+ *
+ * The old single 2-second interval kept polling *forever* — 30 requests a
+ * minute for every open tab. On the free ngrok plan (20,000 requests a month)
+ * that alone spends the whole quota in about eleven hours, and every one of
+ * those requests travels through the public edge. Hidden tabs must not spend
+ * it at all.
  */
-const TUNNEL_POLL_MS = 2_000;
+const TUNNEL_STARTING_POLL_MS = 2_000;
+const TUNNEL_SETTLED_POLL_MS = 60_000;
 
 /**
  * A mode switch spawns or kills a process; a second click before the first one
@@ -76,6 +81,13 @@ export function NetworkView() {
   const [savingDomain, setSavingDomain] = useState(false);
   const { toasts, push, dismiss } = useToasts();
   const { copied, copy } = useCopy();
+  /**
+   * Windows Firewall is read separately from `/api/network`: it is a property
+   * of the host, not of the reach mode, and a check spawns a short PowerShell
+   * read that has no business delaying the mode payload.
+   */
+  const [firewall, setFirewall] = useState<NetworkFirewall | null>(null);
+  const [firewallBusy, setFirewallBusy] = useState(false);
 
   useEffect(() => {
     setDomainDraft(snapshot?.tunnelDomain ?? "");
@@ -94,6 +106,21 @@ export function NetworkView() {
     };
   }, [t]);
 
+  // The firewall verdict never changes the reach mode, so it is read once on
+  // entry and refreshed only after the operator asks to open the port. A
+  // failure here is not a screen failure: the LAN links stay usable and the
+  // status simply stays unknown.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .networkFirewall()
+      .then(result => !cancelled && setFirewall(result))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   /**
    * Keeps the screen honest while a tunnel is being created — and afterwards.
    *
@@ -102,22 +129,23 @@ export function NetworkView() {
    * — the moment the mode moves off it. Two cases need it:
    *
    * - `starting`: the URL has not appeared yet, and the spinner must not outlive it.
-   * - `running`: the server probes the tunnel's own address on each read, and a
-   *   live process with a dead edge (a VPN breaking the handshake to ngrok's
-   *   edge) is downgraded to an error asynchronously. Without
-   *   polling, that verdict would only appear on a manual reload, and the
-   *   screen would keep offering a link that cannot work.
+   * - `running`/`error`: the server checks liveness on loopback every 15s and
+   *   verifies the public edge at most once an hour, so a slow refresh is
+   *   enough to pick up a downgrade — or the day the ngrok quota resets.
    */
   useEffect(() => {
     if (snapshot?.mode !== "tunnel") return;
+    const interval = snapshot.tunnelStatus === "starting" ? TUNNEL_STARTING_POLL_MS : TUNNEL_SETTLED_POLL_MS;
     const poll = setInterval(() => {
+      // A background tab must not spend the account's monthly ngrok quota.
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       api
         .network()
         .then(result => setSnapshot(result))
         .catch(() => {
           /* A poll failing is not a tunnel failure; the next one retries. */
         });
-    }, TUNNEL_POLL_MS);
+    }, interval);
     return () => clearInterval(poll);
   }, [snapshot?.mode, snapshot?.tunnelStatus]);
 
@@ -173,25 +201,67 @@ export function NetworkView() {
     }
   };
 
-  // Each address is labelled by the interface it belongs to — a machine answers
-  // on several adapters at once (Wi-Fi, a virtual host-only NIC, a VPN), and
-  // naming every row «شبكة محلية» told the operator nothing about which was
-  // which. The address stays in the row so it stays identifiable at a glance.
-  // Only addresses that can actually be reached are worth advertising: the
-  // server binds IPv4, so an IPv6 link-local (fe80::…) row is dead, a VPN or
-  // virtual adapter is not a door onto this machine, and the VirtualBox
-  // host-only default (192.168.56.0/24) and APIPA (169.254.0.0/16) are not
-  // reachable from another device. Those rows are dropped rather than shown
-  // with a link that will not open.
-  const unusableAdapter = /wireguard|vpn|tap|virtual|vmware|virtualbox|hyper-?v|vethernet|wsl|docker|loopback|bluetooth/i;
-  const unusableHost = (host: string) =>
-    host.includes(":") || host.startsWith("169.254.") || host.startsWith("192.168.56.");
-  const lanUrls = snapshot.machineHosts
-    .filter(({ host, label }) => !unusableHost(host) && !unusableAdapter.test(label))
-    .map(({ host, label }) => ({
-      url: `http://${host}:${snapshot.port}`,
-      label: t("network.localLabel", { label })
-    }));
+  /**
+   * Ask Windows for the inbound rule. `elevate: true` raises the UAC prompt on
+   * the host; the elevated child writes the rule asynchronously, so the status
+   * is polled briefly instead of claiming success the moment UAC appears.
+   */
+  const openFirewall = async () => {
+    if (firewallBusy) return;
+    setFirewallBusy(true);
+    try {
+      let report = await api.ensureNetworkFirewall(true);
+      setFirewall(report);
+      for (let attempt = 0; attempt < 6 && report.status !== "allowed" && report.elevation?.started; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 1_500));
+        report = await api.networkFirewall();
+        setFirewall(report);
+      }
+      push(
+        report.status === "allowed"
+          ? {
+              title: t("network.firewallTitle"),
+              description: t("network.firewallAllowed", {
+                port: snapshot.port,
+                profiles: report.profiles.join(", ") || "Any"
+              }),
+              tone: "success"
+            }
+          : { title: t("network.firewallTitle"), description: t("network.firewallFailed"), tone: "error" }
+      );
+    } catch (cause) {
+      push({
+        title: t("network.firewallTitle"),
+        description: cause instanceof Error ? cause.message : t("network.firewallFailed"),
+        tone: "error"
+      });
+    } finally {
+      setFirewallBusy(false);
+    }
+  };
+
+  // The URLs come from the server, which built them from `server.address()`
+  // and the live interface table through the shared `reachableLanEntries`
+  // filter. Duplicating that filter here would let the screen advertise an
+  // address the host gate refuses — or hide one it accepts. `lanEnabled` is
+  // the gate's own verdict, so `off` is labelled instead of offering a link
+  // that would answer 403 on the other device.
+  const lanEntries = snapshot.lanUrls ?? [];
+  const lanUrls = lanEntries.map(({ url, label }) => ({
+    url,
+    label: t("network.localLabel", { label })
+  }));
+  /**
+   * The address a phone can scan: the server's `primaryLanHost` (already
+   * filtered to the physical private LAN adapter), not simply the first row.
+   * The payload is trimmed and must be an absolute http(s) URL — iOS/Android
+   * cameras only offer "Open in browser" for a real URL, and a stray newline
+   * turns the QR into copyable text.
+   */
+  const primaryLanUrl =
+    lanEntries.find(entry => entry.host === snapshot.primaryLanHost)?.url ?? lanUrls[0]?.url ?? null;
+  const qrUrl = (primaryLanUrl ?? `http://localhost:${snapshot.port}`).trim();
+  const qrPayload = /^https?:\/\/[^\s]+$/.test(qrUrl) ? qrUrl : null;
   const tunnelUrl = snapshot.tunnelUrl;
   const status = tunnelStatusCopy[snapshot.tunnelStatus];
 
@@ -336,6 +406,19 @@ export function NetworkView() {
             {snapshot.tunnelStatus === "error" && snapshot.tunnelError ? (
               <p className="text-xs text-destructive">{snapshot.tunnelError}</p>
             ) : null}
+            {snapshot.quotaExceeded ? (
+              <p className="text-xs text-warning">
+                ERR_NGROK_727 ·{" "}
+                <a
+                  className="underline"
+                  href="https://dashboard.ngrok.com/billing"
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  dashboard.ngrok.com/billing
+                </a>
+              </p>
+            ) : null}
 
             <form onSubmit={saveDomain} className="space-y-2 rounded-xl border border-border/80 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -376,23 +459,119 @@ export function NetworkView() {
             <p className="text-base font-bold">{t("network.localLinks")}</p>
             <p className="text-xs text-muted-foreground">{t("network.localLinksBody")}</p>
           </div>
+          {/* The badge is the host gate's verdict, not a guess from the mode
+              label: in `off` the links below are real addresses whose requests
+              would be refused, and saying so beats offering a dead link. */}
+          <Badge variant={snapshot.lanEnabled ? "secondary" : "outline"} className="shrink-0 gap-1.5">
+            {snapshot.lanEnabled ? <Wifi className="size-3" aria-hidden /> : <WifiOff className="size-3" aria-hidden />}
+            {snapshot.lanEnabled ? t("network.lanActive") : t("network.lanClosed")}
+          </Badge>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="space-y-3">
+          {/*
+            A VPN on the host (or on the phone) is the second reason a LAN URL
+            fails while the server is healthy: the route to 192.168.x.x is
+            captured by the tunnel. The adapter names come from the server's
+            live interface table, so this is a measured fact, not a guess.
+          */}
+          {(snapshot.vpnAdapters ?? []).length > 0 && (
+            <div className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
+              <p className="font-medium text-warning">{t("network.vpnTitle")}</p>
+              <p className="mt-0.5 text-muted-foreground">
+                {t("network.vpnBody", { adapters: (snapshot.vpnAdapters ?? []).join(", "), host: qrUrl })}
+              </p>
+            </div>
+          )}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            {/*
+              Drawn locally from the live URL — no external QR service ever sees
+              the address, and the CSP forbids one anyway. A phone on the same
+              Wi-Fi scans this instead of typing an IP by hand.
+            */}
+            <div className="shrink-0 self-start rounded-xl border border-white/10 bg-black p-2">
+              {qrPayload ? (
+                <QRCodeSVG
+                  // White modules on black: the screen is dark, and a phone
+                  // camera handles an inverted code at this size. `marginSize`
+                  // is the quiet zone the scanner needs — without it the code
+                  // touches the border and many cameras refuse it.
+                  value={qrPayload}
+                  size={112}
+                  level="M"
+                  marginSize={3}
+                  bgColor="#000000"
+                  fgColor="#FFFFFF"
+                  role="img"
+                  aria-label={qrPayload}
+                />
+              ) : null}
+            </div>
+            <div className="min-w-0 space-y-1">
+              <p className="text-xs font-medium">{t("network.qrTitle")}</p>
+              <p className="text-xs text-muted-foreground">{t("network.qrBody")}</p>
+              <code className="block break-all text-xs" dir="ltr">{qrUrl}</code>
+              <p className="text-xs text-muted-foreground">
+                {t("network.boundTo", { host: snapshot.boundHost ?? "—", port: snapshot.port })}
+              </p>
+            </div>
+          </div>
           {copyRow(t("network.thisDevice"), `http://localhost:${snapshot.port}`)}
           {/*
-            One row per network address, named by the address itself. Naming
-            every LAN row «الشبكة المحلية» made several adapters
-            indistinguishable — an operator with Wi-Fi and an Ethernet port saw
-            two identical labels and could only tell them apart by reading the
-            URL they came to copy. The address is the name now; the prefix says
-            which kind it is.
+            One row per network address, named by the adapter it came from.
+            Several identical «شبكة محلية» rows left an operator with Wi-Fi and
+            Ethernet unable to tell which URL belonged to which; the label is
+            the interface now, and the address is in the row.
           */}
           {lanUrls.map(({ url, label }) => (
             <div key={url}>{copyRow(label, url)}</div>
           ))}
-          <p className="text-xs text-muted-foreground">
-            {t("network.firewallHint", { port: snapshot.port })}
-          </p>
+          {!snapshot.lanEnabled && (
+            <p className="text-xs text-warning">{t("network.lanClosedHint")}</p>
+          )}
+          {/*
+            Live firewall verdict. "The switch says LAN but the phone cannot
+            connect" was almost always this row: no inbound rule, or a rule
+            scoped to Private while Windows classified the Wi-Fi as Public.
+          */}
+          {firewall ? (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-input bg-background/50 px-3 py-2">
+                <div className="flex min-w-0 items-center gap-2 text-xs">
+                  {firewall.status === "allowed" ? (
+                    <ShieldCheck className="size-4 shrink-0 text-success" aria-hidden />
+                  ) : (
+                    <ShieldAlert className="size-4 shrink-0 text-warning" aria-hidden />
+                  )}
+                  <span className="font-medium">{t("network.firewallTitle")}</span>
+                  <span className="text-muted-foreground">
+                    {firewall.status === "allowed"
+                      ? t("network.firewallAllowed", {
+                          port: snapshot.port,
+                          profiles: firewall.profiles.join(", ") || "Any"
+                        })
+                      : t("network.firewallBlocked", { port: snapshot.port })}
+                  </span>
+                </div>
+                {firewall.status !== "allowed" && (
+                  <Button size="sm" variant="outline" onClick={() => void openFirewall()} disabled={firewallBusy}>
+                    {firewallBusy ? (
+                      <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                    ) : (
+                      <ShieldAlert className="size-3.5" aria-hidden />
+                    )}
+                    {t("network.firewallOpen")}
+                  </Button>
+                )}
+              </div>
+              {firewall.status !== "allowed" && (
+                <p className="text-xs text-muted-foreground">{t("network.firewallUac")}</p>
+              )}
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {t("network.firewallHint", { port: snapshot.port })}
+            </p>
+          )}
         </CardContent>
       </Card>
 

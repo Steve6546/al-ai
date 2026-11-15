@@ -2,26 +2,41 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     ".": {
+      "entry": ["scripts/*.mjs", "scripts/*.mts"],
       "project": ["scripts/**/*.mjs", "scripts/**/*.mts"],
       "ignoreDependencies": ["pg"]
     },
     "apps/bot": {
-      "entry": ["test/fixtures/*.ts"],
+      "entry": [
+        "src/lib/discord.ts",
+        "scripts/**/*.ts",
+        "test/**/*.ts",
+        "test/fixtures/*.ts"
+      ],
       "project": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
     },
     "apps/dashboard": {
+      "entry": [
+        "src/App.tsx",
+        "src/index.css",
+        "test/**/*.ts",
+        "test/**/*.tsx"
+      ],
       "project": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.css", "server/**/*.ts", "test/**/*.ts", "test/**/*.tsx"],
       "ignore": ["src/components/ui/**"]
     },
     "packages/core": {
-      "project": ["src/**/*.ts", "test/**/*.ts"]
+      "entry": ["test/**/*.ts"],
+      "project": ["src/**/*.ts", "test/**/*.ts"],
+      "ignoreDependencies": ["tsx"]
     }
   },
   "ignoreDependencies": [
     "pgsql-ast-parser"
   ],
   "ignoreBinaries": [
-    "tasklist"
+    "tasklist",
+    "tsx"
   ],
   "ignoreExportsUsedInFile": true,
   "includeEntryExports": false

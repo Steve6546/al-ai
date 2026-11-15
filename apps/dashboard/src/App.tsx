@@ -36,6 +36,7 @@ const authMessages: Record<string, TranslationKey> = {
   denied: "auth.denied",
   "2fa_required": "auth.twoFactorRequired",
   state_mismatch: "auth.stateMismatch",
+  handoff_failed: "auth.handoffFailed",
   failed: "auth.failed"
 };
 
@@ -58,8 +59,19 @@ const signedOut: SessionInfo = { authenticated: false, user: null, secondFactor:
  * The bot's heartbeat goes stale at 45s and the dashboard's own throttle allows
  * 120 requests a minute, so 20s reports a bot that dropped within one poll
  * without spending a third of the budget on one operator's tab.
+ *
+ * Through a public ngrok URL the cost is different: ngrok's free plan budgets
+ * 20,000 HTTP requests a *month*, and a 20-second poll spends 4,320 of them
+ * per tab per day. On that origin the poll drops to one a minute and stops
+ * entirely while the tab is hidden. Loopback costs nothing, so it keeps 20s.
  */
 const HEALTH_POLL_MS = 20_000;
+const PUBLIC_HEALTH_POLL_MS = 60_000;
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+function healthPollInterval(): number {
+  if (typeof window === "undefined") return HEALTH_POLL_MS;
+  return LOOPBACK_HOSTS.has(window.location.hostname) ? HEALTH_POLL_MS : PUBLIC_HEALTH_POLL_MS;
+}
 
 export function App() {
   const route = useRoute();
@@ -184,11 +196,14 @@ export function App() {
     if (booting) return;
     let cancelled = false;
     const timer = setInterval(() => {
+      // An idle tab is not an operator watching the status strip. On a public
+      // tunnel this is also a quota guard: no request leaves through ngrok.
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       api
         .health()
         .then(next => !cancelled && setHealth(next))
         .catch(() => !cancelled && setHealth(null));
-    }, HEALTH_POLL_MS);
+    }, healthPollInterval());
     return () => {
       cancelled = true;
       clearInterval(timer);

@@ -19,11 +19,9 @@ import {
   type LogDestination,
   type NukeAction,
   type RemoteAccessMode,
-  type Tier,
   type TierRoles
 } from "@al-ai/core/browser";
 
-export type { Tier } from "@al-ai/core/browser";
 export { tierOrder } from "@al-ai/core/browser";
 
 /* ------------------------------------------------------------------ *
@@ -142,11 +140,18 @@ export type LeaderboardPage = {
  * Guild-scoped, and every field is the *member's* value rather than the
  * account's: `avatarUrl` is built from the guild-avatar hash and `bannerUrl`
  * from the guild-banner hash, so the preview draws the face members of THIS
- * server see. There is no `bio`: Discord validates a member bio on write and
- * never returns it on read, so the stored row is the only source for it.
+ * server see. There is no member `bio`: Discord validates it on write and never
+ * returns it on read, so the stored row is the only source for it.
+ *
+ * `accountBio` is a different, genuinely readable field — the application
+ * description from `GET /applications/@me`. It is a labelled fallback, never a
+ * claim that a per-guild bio was saved. Optional fields keep older server
+ * responses (and test fixtures) valid: a missing live read is "unknown", not
+ * a value.
  */
 export type GuildProfileSnapshot = {
-  username: string;
+  /** Null when neither the member nor the application read answered. */
+  username: string | null;
   /** The member's nickname in this guild, or null when they have none. */
   nickname: string | null;
   /** This guild's avatar and banner, or null when there is no override. */
@@ -160,6 +165,10 @@ export type GuildProfileSnapshot = {
    */
   accountAvatarUrl: string | null;
   accountBannerUrl: string | null;
+  /** `accent_color` from the forced `GET /users/@me` REST read. */
+  accentColor?: number | null;
+  /** Application description, used only when this guild has no saved bio. */
+  accountBio?: string | null;
 };
 
 /**
@@ -316,40 +325,49 @@ export type NetworkSnapshot = {
   tunnelStable: boolean;
   tunnelStatus: "off" | "starting" | "running" | "error";
   tunnelError: string | null;
+  /** The ngrok account exhausted its monthly HTTP quota (ERR_NGROK_727).
+   * Account-level truth: the agent is healthy, the public edge refuses every
+   * visitor. Re-minting the tunnel cannot fix it. */
+  quotaExceeded: boolean;
   /** The machine's own non-loopback addresses, each with the interface it belongs to. */
   machineHosts: { host: string; label: string }[];
+  /** Live VPN/tunnel adapters holding an IPv4 address — a hint that a client on
+   * a VPN may not route to `192.168.x.x` until local-LAN traffic is allowed. */
+  vpnAdapters: string[];
+  /** The physical private LAN address a phone should scan, or null when none. */
+  primaryLanHost: string | null;
+  /**
+   * The same addresses after the shared "can another device actually open
+   * this?" filter, with ready-to-copy URLs. Built server-side from the live
+   * interface table and the port the socket is really bound to.
+   */
+  lanUrls: { url: string; host: string; label: string }[];
+  /** The host gate's verdict: false means a LAN URL would answer 403. */
+  lanEnabled: boolean;
+  /** What the HTTP socket is actually bound to (`0.0.0.0` for LAN reach). */
+  boundHost: string | null;
+  /** The live port from `server.address()`, not the configured default. */
   port: number;
   /** Whether a sign-in has completed through the tunnel address, proving its
    * redirect URI is registered in Discord — see `markOriginVerified` server-side. */
   tunnelCallbackVerified: boolean;
 };
 
-/* ------------------------------------------------------------------ *
- * Display copy
- * ------------------------------------------------------------------ */
-
-export const tierDescriptions: Record<Tier, string> = {
-  owner: "تحكم كامل. تلقائي: مالك السيرفر وأي عضو يملك صلاحية Administrator في Discord.",
-  admin: "إعدادات اللوحة وكافة الأوامر الإشرافية.",
-  moderator: "العقوبات اليومية فقط: إسكات مؤقت، تحذير، طرد."
-};
-
-export const tierLabels: Record<Tier, string> = {
-  owner: "المالك",
-  admin: "مدير",
-  moderator: "مشرف"
-};
-
-export const remoteAccessLabels: Record<RemoteAccessMode, string> = {
-  off: "هذا الجهاز فقط",
-  lan: "الشبكة المحلية",
-  tunnel: "عبر الإنترنت"
-};
-
-export const remoteAccessDescriptions: Record<RemoteAccessMode, string> = {
-  off: "اللوحة من هذا الجهاز فقط (localhost).",
-  lan: "أي جهاز على نفس الشبكة يفتح اللوحة.",
-  tunnel: "أي جهاز عبر نفق ngrok مشفّر — بلا فتح منفذ."
+/**
+ * Windows Firewall state for the dashboard port.
+ *
+ * `missing`/`disabled` is the usual reason a phone on the same Wi-Fi gets
+ * `ERR_ADDRESS_UNREACHABLE` while the server is healthy. `needsAdmin` means the
+ * rule cannot be created from this process — the screen offers a UAC prompt.
+ */
+export type NetworkFirewall = {
+  status: "allowed" | "missing" | "disabled" | "unknown";
+  needsAdmin: boolean;
+  ruleName: string;
+  port: number;
+  profiles: string[];
+  detail: string;
+  elevation?: { started: boolean; reason: string | null };
 };
 
 /**

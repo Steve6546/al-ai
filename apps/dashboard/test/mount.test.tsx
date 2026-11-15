@@ -171,9 +171,23 @@ const payloads: [RegExp, unknown][] = [
     tunnelUrl: null,
     tunnelStatus: "off",
     tunnelError: null,
+    quotaExceeded: false,
     machineHosts: [{ host: "192.0.2.10", label: "Ethernet" }],
+    vpnAdapters: [],
+    primaryLanHost: "192.0.2.10",
+    lanUrls: [{ url: "http://192.0.2.10:3000", host: "192.0.2.10", label: "Ethernet" }],
+    lanEnabled: true,
+    boundHost: "0.0.0.0",
     port: 3000,
     tunnelCallbackVerified: false
+  }],
+  [/^\/api\/network\/firewall$/, {
+    status: "allowed",
+    needsAdmin: false,
+    ruleName: "AL AI Dashboard (TCP 3000)",
+    port: 3000,
+    profiles: ["Any"],
+    detail: "inbound TCP allowed"
   }],
   [/^\/api\/guilds\/[^/]+\/customization$/, customizationPayload],
   /**
@@ -455,8 +469,11 @@ async function mount<T = undefined>(
       });
     }
     // Read the markup *before* unmounting: unmounting clears the container, so
-    // measuring afterwards reports an empty tree for every screen.
-    const html = container.innerHTML;
+    // measuring afterwards reports an empty tree for every screen. The body is
+    // read rather than the container because toasts are portalled out of the
+    // screen's stacking context — a container-only read would miss the very
+    // message these tests assert on.
+    const html = dom.window.document.body.innerHTML;
     root.unmount();
     return { html, errors, result };
   } finally {
@@ -556,6 +573,22 @@ for (const view of views) {
     assert.doesNotMatch(html, LOADING_COPY, `${view} moved past every loading state, not just the first`);
   });
 }
+
+/**
+ * The QR is the one control a phone actually uses, and both halves of it have
+ * been wrong before: a white plate in a dark screen, and a payload built from
+ * the wrong adapter (a VPN or a VirtualBox host-only address) so the camera
+ * opened nothing. The colours and the quiet zone are in the markup, and the
+ * address must be the physical LAN one the server selected.
+ */
+test("the network screen draws a scannable inverted QR for the physical LAN address", async () => {
+  stubFetch();
+  const { html, errors } = await mount(`/dashboard/${GUILD_ID}/network`);
+  assert.deepEqual(fatal(errors), [], "the network screen produced no render error");
+  assert.match(html, /fill="#FFFFFF"/, "the modules are white");
+  assert.match(html, /fill="#000000"/, "the background is black");
+  assert.match(html, /aria-label="http:\/\/192\.0\.2\.10:3000"/, "the QR payload is the LAN URL the server chose");
+});
 
 /**
  * The protection screen's navigation and its honesty about what is wired.
@@ -1591,6 +1624,11 @@ test("the logs sidebar lists every section and swaps one card in for another", a
   // The general pane is the landing one — the master switch lives here, and no
   // section card is mounted until one is chosen.
   assert.match(general, /التسجيل المركزي/);
+  // «التسجيل المركزي» is no longer a unique fingerprint: the status strip's
+  // "central logging is off" notice repeats the phrase on every section page.
+  // The general card's master switch is unconditional and belongs to that card
+  // alone, so it is the marker the unmount assertion can safely rely on.
+  assert.match(general, /تفعيل السجلات/, "the general card carries its master switch");
   for (const label of logCategories.map(category => category.label)) {
     assert.match(general, new RegExp(label), `the sidebar lists «${label}»`);
   }
@@ -1615,7 +1653,7 @@ test("the logs sidebar lists every section and swaps one card in for another", a
   for (const event of roles.events) {
     assert.match(section, new RegExp(event.label), `the record «${event.label}» is drawn without an extra click`);
   }
-  assert.doesNotMatch(section, /التسجيل المركزي/, "the general card is unmounted, not stacked above it");
+  assert.doesNotMatch(section, /تفعيل السجلات/, "the general card is unmounted, not stacked above it");
 });
 
 test("«تعطيل الكل» mutes every event in a section at once", async () => {

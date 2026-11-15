@@ -2,8 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { encryptSecret, hashRecoveryCode, DISCORD_PERMISSION_BITS, SESSION_COOKIE_NAME } from "@al-ai/core";
+import { encryptSecret, hashRecoveryCode, DISCORD_PERMISSION_BITS, SESSION_COOKIE_NAME, SESSION_COOKIE_NAMES } from "@al-ai/core";
 import {
+  cookiePolicyFor,
+  derivedCookieName,
+  sessionCookieHeader
+} from "../server/session.js";
+import {
+  SECOND_FACTOR_COOKIE_NAMES,
+  secondFactorCookieName,
   SECOND_FACTOR_COOKIE_NAME,
   SECOND_FACTOR_MAX_ATTEMPTS,
   SECOND_FACTOR_PENDING_SECONDS,
@@ -150,7 +157,11 @@ test("the OAuth callback decides the second factor before it mints a session", (
     source.indexOf('app.post("/api/2fa/verify"'),
     source.indexOf('app.post("/api/2fa/cancel"')
   );
-  for (const marker of ["consumeTotpCounter", "consumeRecoveryCode", "issueSession(db, env", "sessionCookieHeader(id)"]) {
+  // The `request` argument is load-bearing: the session cookie's name and
+  // `Secure` flag follow the origin, so a LAN verification must not mint a
+  // `__Host-`/Secure cookie that the browser would discard. Pinning the call
+  // without it would let that regression back in silently.
+  for (const marker of ["consumeTotpCounter", "consumeRecoveryCode", "issueSession(db, env", "sessionCookieHeader(id, request)"]) {
     assert.ok(verify.includes(marker), `${marker} is part of a successful verification`);
   }
   assert.ok(
@@ -160,4 +171,98 @@ test("the OAuth callback decides the second factor before it mints a session", (
 
   const sessionRoute = source.slice(source.indexOf('app.get("/api/session"'), source.indexOf('app.get("/api/network"'));
   assert.ok(sessionRoute.includes("secondFactor"), "/api/session announces a pending admin login");
+});
+
+/**
+ * A cookie minted before the operator enrolled is a single-factor credential.
+ * Enabling 2FA must invalidate it, not grandfather it in — otherwise the whole
+ * second factor is optional for whoever is holding an older session.
+ */
+test("a session minted before enrolment cannot outlive the credential", () => {
+  const index = readFileSync(resolve(import.meta.dirname, "../server/index.ts"), "utf8");
+  const sessionModule = readFileSync(resolve(import.meta.dirname, "../server/session.ts"), "utf8");
+  const dbModule = readFileSync(resolve(import.meta.dirname, "../server/db.ts"), "utf8");
+  const schema = readFileSync(resolve(import.meta.dirname, "../../../infra/schema.sql"), "utf8");
+
+  assert.match(
+    schema,
+    /second_factor_satisfied BOOLEAN NOT NULL DEFAULT FALSE/,
+    "an upgrade marks every pre-existing session as unverified"
+  );
+  assert.match(dbModule, /EXISTS \(SELECT 1 FROM admin_two_factor/, "the session read learns whether a credential exists");
+  assert.match(sessionModule, /session\.secondFactorRequired && !session\.secondFactorSatisfied/, "an unverified session fails closed");
+  assert.ok(
+    sessionModule.indexOf("db.deleteSession(id)") < sessionModule.indexOf("db.touchSession(id)"),
+    "the stale session is destroyed before anything touches it"
+  );
+
+  const verify = index.slice(
+    index.indexOf('app.post("/api/2fa/verify"'),
+    index.indexOf('app.post("/api/2fa/cancel"')
+  );
+  assert.match(verify, /secondFactorSatisfied: true/, "only a code-consuming login mints a verified session");
+  assert.match(verify, /deleteOtherSessions\(pending\.discordUserId, id\)/, "first-time enrolment drops older sessions");
+
+  const confirm = index.slice(
+    index.indexOf('app.post("/api/me/2fa/confirm"'),
+    index.indexOf('app.post("/api/me/2fa/disable"')
+  );
+  assert.match(confirm, /markSessionSecondFactorSatisfied\(session\.id\)/, "the session that proved a code survives");
+  assert.match(confirm, /deleteOtherSessions\(session\.discordUserId, session\.id\)/, "the other single-factor sessions do not");
+
+  const callback = index.slice(
+    index.indexOf('app.get("/auth/discord/callback"'),
+    index.indexOf('app.post("/auth/logout"')
+  );
+  assert.match(
+    callback,
+    /\|\| \(await secondFactor\.isEnrolled\(identity\.id\)\)/,
+    "every admin is challenged even before enrolling, and an enrolled account stays challenged"
+  );
+});
+
+/* ------------------------------------------------------------------ *
+ * Session cookies must follow the origin, not just NODE_ENV.
+ *
+ * A production dashboard bound to 0.0.0.0 serves both http://localhost and
+ * http://192.168.1.195. A `Secure`/`__Host-` cookie is accepted on the first
+ * and silently discarded on the second, so the read and write paths both have
+ * to ask which origin this request came from.
+ * ------------------------------------------------------------------ */
+
+test("a LAN request resolves to a plain, non-Secure cookie even in production", () => {
+  const lan = { headers: { host: "192.168.1.195:3000" }, protocol: "http" };
+  assert.deepEqual(cookiePolicyFor(lan, true), { name: "al_ai_session", secure: false });
+  assert.equal(derivedCookieName("_state", lan, true), "al_ai_session_state");
+  assert.equal(derivedCookieName("_2fa", lan, true), "al_ai_session_2fa");
+});
+
+test("localhost and the HTTPS tunnel keep the hardened cookie in production", () => {
+  for (const context of [
+    { headers: { host: "localhost:3000" }, protocol: "http" },
+    { headers: { host: "127.0.0.1:3000" }, protocol: "http" },
+    { headers: { host: "example.ngrok-free.dev" }, protocol: "https" }
+  ]) {
+    assert.deepEqual(cookiePolicyFor(context, true), {
+      name: "__Host-al_ai_session",
+      secure: true
+    });
+    assert.equal(derivedCookieName("_state", context, true), "__Host-al_ai_session_state");
+  }
+});
+
+test("the state and pending cookies follow their session's name", () => {
+  const lan = { headers: { host: "10.0.0.7:3000" }, protocol: "http" };
+  const name = cookiePolicyFor(lan, true).name;
+  assert.equal(secondFactorCookieName(lan), `${name}_2fa`);
+  assert.ok(pendingCookieHeader("00000000-0000-4000-8000-000000000000", lan).startsWith(`${name}_2fa=`));
+  assert.ok(!sessionCookieHeader("00000000-0000-4000-8000-000000000000", lan).includes("Secure"));
+});
+
+test("both cookie names are recognised by the guards", () => {
+  // The CSRF and throttle guards see the request before any route resolves it,
+  // so they must accept either spelling rather than one deployment's choice.
+  assert.deepEqual([...SESSION_COOKIE_NAMES], ["__Host-al_ai_session", "al_ai_session"]);
+  assert.ok(SECOND_FACTOR_COOKIE_NAMES.includes("__Host-al_ai_session_2fa"));
+  assert.ok(SECOND_FACTOR_COOKIE_NAMES.includes("al_ai_session_2fa"));
 });

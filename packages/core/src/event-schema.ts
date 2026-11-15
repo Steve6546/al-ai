@@ -416,6 +416,69 @@ export function isEventEnabled(
   return isCategoryEnabled(eventFlags, category);
 }
 
+/* ------------------------------------------------------------------ *
+ * "Configured on" is not "active".
+ *
+ * A flag that was never set reads as ON (GOVERNANCE rule 6), so counting
+ * flags alone reports 111 live events on a server where central logging is
+ * switched off and nothing is routed anywhere. The router itself refuses to
+ * deliver in that state (`channel-registry.ts`), so the number an operator
+ * sees must answer the same question the router answers: is this event
+ * actually going to arrive somewhere?
+ *
+ * These three helpers are the one place that question is answered. The BFF
+ * computes the saved truth from the PostgreSQL row, and the settings screen
+ * recomputes the same truth from its draft — two callers, one definition, so
+ * a badge can never disagree with the server's own stat.
+ * ------------------------------------------------------------------ */
+export type LoggingActivity = {
+  /** The master switch (`guild_logging.enabled`). */
+  enabled: boolean;
+  /** Distinct channels bound to the routing table. Zero means no delivery. */
+  boundChannels: number;
+};
+
+/** How many distinct channels the routing table actually writes to. */
+export function countBoundChannels(
+  globalChannelId: string | null | undefined,
+  categoryChannels: Record<string, string> | undefined,
+  eventChannels: Record<string, string> | undefined
+): number {
+  return new Set([
+    ...(globalChannelId ? [globalChannelId] : []),
+    ...Object.values(categoryChannels ?? {}),
+    ...Object.values(eventChannels ?? {})
+  ]).size;
+}
+
+/** Every event an operator can configure — the denominator, not a hardcoded 111. */
+export function totalOperatorEvents(): number {
+  return logDestinations.reduce((sum, destination) => sum + eventsByCategory(destination).length, 0);
+}
+
+/** How many operator-visible events can actually be delivered right now. */
+export function countActiveEvents(
+  eventFlags: Record<string, boolean> | undefined,
+  activity: LoggingActivity
+): number {
+  if (!activity.enabled || activity.boundChannels <= 0) return 0;
+  return logDestinations.reduce(
+    (sum, destination) =>
+      sum + eventsByCategory(destination).filter(eventId => isEventEnabled(eventFlags, destination, eventId)).length,
+    0
+  );
+}
+
+/** The same count for one section, for the sidebar's `active/total` badge. */
+export function countActiveEventsInCategory(
+  eventFlags: Record<string, boolean> | undefined,
+  category: LogDestination,
+  activity: LoggingActivity
+): number {
+  if (!activity.enabled || activity.boundChannels <= 0) return 0;
+  return eventsByCategory(category).filter(eventId => isEventEnabled(eventFlags, category, eventId)).length;
+}
+
 /**
  * The member an event is *about*, as opposed to the one who caused it. Used to
  * decide whether an ignored role applies to either side.
