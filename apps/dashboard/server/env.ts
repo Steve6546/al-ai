@@ -52,6 +52,12 @@ export type BffEnv = {
    * denied — the deployment runs without a known owner and must not guess one.
    */
   ownerId: string | null;
+  /**
+   * The hostname a managed platform publishes this deployment at
+   * (`AL_AI_PLATFORM_HOST`). Absent for a self-hosted machine, where the Host
+   * allowlist stays loopback/LAN/tunnel only.
+   */
+  platformHost: string | null;
 };
 
 function read(key: string) {
@@ -91,6 +97,7 @@ export function loadEnv(): BffEnv {
     botToken: read("BOT_TOKEN"),
     keyRotationDays: read("KEY_ROTATION_DAYS") ? Number(read("KEY_ROTATION_DAYS")) : null,
     auditRetentionDays: read("AUDIT_RETENTION_DAYS") ? Number(read("AUDIT_RETENTION_DAYS")) : null,
-    ownerId: read("OWNER_ID")
+    ownerId: read("OWNER_ID"),
+    platformHost: read("AL_AI_PLATFORM_HOST")?.toLowerCase() ?? null
   };
 }

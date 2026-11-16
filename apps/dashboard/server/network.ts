@@ -214,11 +214,29 @@ export function tunnelHostForGate(liveUrl: string | null, domain: string | null)
  */
 export function isHostAllowed(
   host: string | undefined,
-  options: { port: number; mode: RemoteAccessMode; machineHosts: string[]; tunnelHost: string | null; remoteAddress?: string }
+  options: {
+    port: number;
+    mode: RemoteAccessMode;
+    machineHosts: string[];
+    tunnelHost: string | null;
+    /**
+     * The hostname a managed platform publishes this deployment at.
+     *
+     * Such a platform terminates TLS and forwards to the container port from
+     * its own network, so the TCP peer is never loopback and every request
+     * would be refused by the branches below. The hostname is compared exactly
+     * and only when the operator sets it, so a forged Host on a socket that is
+     * *not* the platform's still has to survive the exact match; and the
+     * container port is reachable only through that proxy.
+     */
+    platformHost?: string | null;
+    remoteAddress?: string;
+  }
 ): boolean {
   if (!host) return false;
   const { hostname, port } = splitHostPort(host);
   if (port !== null && port !== String(options.port)) return false;
+  if (options.platformHost && hostname === options.platformHost) return true;
   const peerIsLocal = isLoopbackPeer(options.remoteAddress);
   if (LOOPBACK_HOSTNAMES.has(hostname)) return peerIsLocal;
   if (options.mode === "off") return false;
@@ -750,10 +768,13 @@ export function createNetworkManager(input: {
   getSetting: (key: string) => Promise<string | null>;
   setSetting: (key: string, value: string) => Promise<void>;
   log: NetworkLog;
+  /** The managed platform's published hostname, when the deployment has one. */
+  platformHost?: string | null;
   /** Overridable so a test can watch the retry ladder without waiting minutes. */
   retryDelaysMs?: number[];
 }) {
   const retryDelaysMs = input.retryDelaysMs ?? TUNNEL_RETRY_DELAYS_MS;
+  const platformHost = input.platformHost ?? null;
   let mode: RemoteAccessMode = "off";
   let tunnelUrl: string | null = null;
   let tunnelStatus: TunnelStatus = "off";
@@ -803,7 +824,7 @@ export function createNetworkManager(input: {
     if (mode === "tunnel" && tunnelHost && host === tunnelHost) {
       return true;
     }
-    return isHostAllowed(host, { port: input.port, mode, machineHosts: machineHosts(), tunnelHost });
+    return isHostAllowed(host, { port: input.port, mode, machineHosts: machineHosts(), tunnelHost, platformHost });
   }
 
   /**
@@ -817,6 +838,7 @@ export function createNetworkManager(input: {
       mode,
       machineHosts: machineHosts(),
       tunnelHost: tunnelGateHost(),
+      platformHost,
       remoteAddress
     });
   }

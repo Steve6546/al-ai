@@ -268,6 +268,7 @@ const network = createNetworkManager({
   port: env.port,
   getSetting: key => db.getSetting(key),
   setSetting: (key, value) => db.setSetting(key, value),
+  platformHost: env.platformHost,
   log: app.log
 });
 await network.boot();

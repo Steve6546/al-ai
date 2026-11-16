@@ -22,6 +22,15 @@ coverage/
 # which is deliberately outside the repository.
 .al-ai/
 
+# Embedded PostgreSQL bootstrapped by `scripts/host/pg.mjs` for a one-slot host:
+# the downloaded binaries, the cluster, the generated password (mode 600) and the
+# readiness marker. Runtime state, never source — and the password must never
+# enter history.
+.al-ai-pg/
+
+# Install/build fingerprint and per-service logs written by `scripts/host/*.sh`.
+.al-ai-host/
+
 # Database dumps. They are a point-in-time copy of live rows â€” including the
 # encrypted OAuth tokens in `oauth_sessions` â€” and belong next to the data
 # directory, not in history where they can never be removed.

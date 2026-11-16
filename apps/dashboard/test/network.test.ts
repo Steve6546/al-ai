@@ -113,6 +113,25 @@ test("lan admits an RFC1918 Host only from an RFC1918 peer", () => {
   assert.equal(isHostAllowed("203.0.113.7:3000", { ...remote, mode: "lan" as const }), false);
 });
 
+test("a managed platform hostname is the one host a non-loopback peer may present", () => {
+  // The platform terminates TLS and forwards to the container port from its own
+  // network, so this request reaches the server from a public peer and every
+  // loopback/LAN branch refuses it.
+  const platformPeer = { ...base, mode: "off" as const, remoteAddress: "203.0.113.9" };
+  assert.equal(isHostAllowed("a1b2.apps.example.cloud", platformPeer), false);
+
+  const platform = { ...platformPeer, platformHost: "a1b2.apps.example.cloud" };
+  assert.equal(isHostAllowed("a1b2.apps.example.cloud", platform), true);
+  assert.equal(isHostAllowed("a1b2.apps.example.cloud:3000", platform), true);
+
+  // The match is exact: a neighbouring deployment, a loopback name on the same
+  // socket, and a foreign port all stay refused.
+  assert.equal(isHostAllowed("a1b3.apps.example.cloud", platform), false);
+  assert.equal(isHostAllowed("localhost:3000", platform), false);
+  assert.equal(isHostAllowed("a1b2.apps.example.cloud:9999", platform), false);
+  assert.equal(isHostAllowed(undefined, platform), false);
+});
+
 test("vpnAdaptersFrom reports live VPN NICs and ignores disconnected ones", () => {
   const interfaces = {
     HotspotShield_Wireguard: [{ address: "10.234.0.9", internal: false, family: "IPv4" } as NetworkInterfaceInfo],

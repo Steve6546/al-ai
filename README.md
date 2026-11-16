@@ -137,6 +137,7 @@ run through `scripts/test-runner.mjs` (≤2 workers, ≤768 MiB heap each) so a
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | processes, data-flow rules, module map, decomposition status |
 | [API.md](docs/API.md) | route groups, guards, error semantics, Discord API boundary |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | env reference, ports, single-instance guards, ngrok quota, troubleshooting |
+| [DEPLOY.md](docs/DEPLOY.md) | Bot-Hosting free plan: one slot, embedded PostgreSQL, dashboard + bot, renewal |
 | [GOVERNANCE.md](docs/GOVERNANCE.md) | 29 test-enforced rules — never renumber without updating the test |
 | [BOOK.md](docs/BOOK.md) | illustrated operator guide (Arabic) |
 | [docs index](docs/README.md) | full directory, including historical documents |

@@ -1,154 +1,162 @@
 # Deploying AL AI on Bot-Hosting.net
 
-Written 2026-11-13, after the connector was authenticated against the real account and
-the panel refused to create a second deployment. Everything below is measured or read
-from the panel API, not assumed.
+The panel's free tier is the only target this document treats as real: **one
+deployment, 256 MB RAM, 25 % of a CPU, 512 MB disk, renewed by hand every four
+days**. Everything below was measured against that container, not inferred from
+a plan table.
 
-## The blocker, in numbers
+The paid layout (three deployments, one of them `runtime: postgresql`) is kept
+at the end as the alternative. It is not the active path and nothing below
+depends on it.
 
-`account_get` on the connected key:
+## The free plan, as it actually behaves
 
-```json
-{"plan":{"tier":"free","name":"Free"},
- "quota":{"pool":{"ramMB":256,"cpuPct":25,"storageMB":512,"slots":1},
-          "used":{"ramMB":256,"cpuPct":25,"storageMB":512,"slots":1}}}
+| Property | Value | Consequence |
+| --- | --- | --- |
+| Slots | 1 | an app and a database cannot be two deployments |
+| RAM | 256 MB | three processes share one cgroup limit; there is no second budget |
+| CPU | 25 % of a core | a V8 heap with no ceiling will be OOM-killed before it is slow |
+| Disk | 512 MB | the source tree, `node_modules`, the build and PostgreSQL all fit in one budget |
+| Lifetime | 4 active days + 3-day grace | the deployment is **suspended** until an operator renews it in Billing |
+| Runtime | Node.js 24, npm 12, git, `gcc` | native modules and a compiled shim are possible |
+| Missing | `sudo`, `unshare`, `/etc/passwd` entry for uid 999 | no namespace tricks, and `initdb` needs a `getpwuid` answer |
+
+Suspension is not an error state: `deployments_shell` answers `suspended: This
+deployment is suspended.`, the panel shows *Renew free plan*, and the same
+deployment comes back untouched after renewal. If the grace window closes, the
+panel deletes the deployment and keeps a backup for one day.
+
+## Accepted layout: one deployment, three processes
+
+```
+bash scripts/host/boot.sh                     <- startup command
+├── scripts/host/setup.sh                     install + client build, once per commit
+├── PostgreSQL 18.6 (scripts/host/pg.mjs)     127.0.0.1:5432, data in .al-ai-pg/
+├── dashboard                                 0.0.0.0:$PORT, served behind the platform proxy
+└── bot                                       Discord gateway, no port
 ```
 
-`deployments_create` with `runtime: "postgresql"` answers:
+Why each piece exists:
 
-```
-SLOTS_EXHAUSTED: All slots in your plan are in use.
-```
+- **One slot** rules out `runtime: postgresql`, so the database lives inside the
+  deployment. `@embedded-postgres/linux-x64` ships the official PostgreSQL
+  build; `pg.mjs` does the four things that build needs in this container:
+  unpack once, recreate the `lib*.so.N` symlinks npm drops, compile a
+  `getpwuid`/`getgrgid` shim for uid 999, and `initdb` with 256 MB tuning
+  (`shared_buffers=16MB`, 1 MB WAL segments, `max_wal_senders=0`).
+- **`infra/schema.sql`** is applied on every boot and is idempotent, so a fresh
+  volume and an existing one take the same path — 29 tables, 50 indexes, one
+  function.
+- **`AL_AI_PLATFORM_HOST`** is what makes the dashboard answer at all. The
+  platform terminates TLS and forwards to the container port from its own
+  network, so the request's TCP peer is never loopback. The Host gate accepts
+  exactly the configured hostname and keeps refusing everything else; ports
+  are still checked.
+- **`boot.sh`** starts the database, waits for it, starts the dashboard, waits
+  for its port, then starts the bot, and ends the whole deployment (`wait -n`)
+  when any of the three dies. A half stack that serves a dashboard with no bot
+  is worse than a restart: the platform's restart is the only reliable recovery
+  for parts that share one database and one memory budget.
 
-The single free slot is already occupied by a deployment named `Al` (nodejs 24, offline),
-which holds a clone of this repository from an earlier attempt. Free tier = **1 slot,
-256 MB RAM, 512 MB disk, renew manually every 4 days, ads in the panel**. It cannot hold
-an app *and* its database, and a second slot cannot exist at any price below Starter.
-
-Disk is not the problem: a production install of all three workspaces (`npm ci --omit=dev
---ignore-scripts`) weighs **251 MB**, plus ~10 MB of source and the built `dist/`. RAM is:
-dashboard + bot + PostgreSQL client in 256 MB has no headroom for a welcome-image render.
-
-**Minimum that works: Starter+ (£2.59/month) — 2 GB RAM, 100 % CPU, 8 GB disk, 4 slots.**
-Starter (£1.69, 1 GB, 2 slots) only works if the dashboard and the bot share one
-deployment and PostgreSQL gets 256 MB of the pool.
-
-## Target layout (Starter+)
-
-| Deployment | Runtime | RAM | Role |
-| --- | --- | --- | --- |
-| `al-ai` | nodejs 24 | 512 MB | dashboard BFF + built SPA on `$SERVER_PORT` |
-| `al-ai-bot` | nodejs 24 | 768 MB | Discord gateway client + welcome-image canvas, no public port |
-| `al-ai-db` | postgresql | 512 MB | database, schema from `infra/schema.sql` |
-
-1.8 GB of the 2 GB pool is allocated; the remainder is headroom. The dashboard's own
-heap ceiling is 384 MB because the measured BFF stays under 100 MB RSS even during the
-load check — the bot gets 512 MB because Skia decodes and re-encodes animated images.
-
-Keeping the bot in its own deployment gives it its own logs, its own restart and its own
-memory ceiling — a crash loop in one does not take the other down, and the panel's
-`deployments_logs` then answers "why" per process instead of mixing two consoles.
+Per-process heap ceilings: `48` (PostgreSQL's supervisor), `96` (dashboard),
+`80` (bot). PostgreSQL's own main process measured **≈ 16 MB RSS** on this
+image; the dashboard stays under 100 MB during the load check. The three
+together must stay below 256 MB — `scripts/host/boot.sh` is the place where
+that budget is visible, and the first verification run after renewal records
+the number.
 
 ## Environment
 
-Set with `env_set` on each deployment (never a committed `.env`). `NODE_ENV=production`
-makes a missing operational setting a startup failure, which is what we want on a host.
+Set with `env_set` on the deployment (`secret: true` for the five credentials),
+never as a committed `.env`. `NODE_ENV=production` makes a missing operational
+setting a startup failure.
 
-| Key | `al-ai` | `al-ai-bot` | Notes |
+| Key | Value | Notes |
+| --- | --- | --- |
+| `NODE_ENV` | `production` | |
+| `PORT` | `25880` | the panel's published port |
+| `DATABASE_URL` | *leave unset* | `boot.sh` builds it from the embedded cluster |
+| `POSTGRES_PASSWORD` | optional | when unset the first boot mints one into `.al-ai-pg/password` |
+| `BOT_TOKEN` | secret | |
+| `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | secret | |
+| `DISCORD_REDIRECT_URI` | `https://<subdomain>.apps.bot-hosting.cloud/auth/discord/callback` | must match the developer portal exactly |
+| `SESSION_SECRET` | secret, 64 hex | |
+| `EVENT_HMAC_SECRET` | secret | both processes |
+| `ENCRYPTION_KEY` | secret | both processes; rotating it needs `scripts/rotate-encryption-key.mts` |
+| `KEY_ROTATION_DAYS` / `AUDIT_RETENTION_DAYS` | integers | required when `NODE_ENV=production` |
+| `DASHBOARD_URL` | the public HTTPS origin | |
+| `DASHBOARD_INTERNAL_URL` | `http://127.0.0.1:25880` | |
+| `AL_AI_PLATFORM_HOST` | `<subdomain>.apps.bot-hosting.cloud` | exact host, no scheme, no port |
+| `OWNER_ID` | the platform owner's Discord id | gates instance-wide surfaces |
+| `AL_AI_REMOTE_ACCESS` | unset | the platform replaces ngrok; the tunnel is off |
+| `BOT_LOCK_FILE` | `/tmp/al-ai-bot.lock` | one bot per container |
+| `NODE_OPTIONS` | unset | heap ceilings are set per process in `boot.sh` |
+
+If an operator ever has a real database, setting `DATABASE_URL` skips the
+embedded cluster entirely: `boot.sh` starts no PostgreSQL and downloads nothing.
+
+## First boot on a wiped volume
+
+```sh
+git clone https://github.com/Steve6546/al-ai /home/container   # the panel does this
+cd /home/container
+bash scripts/host/setup.sh      # npm ci, vite build, prune dev dependencies
+bash scripts/host/boot.sh       # database + dashboard + bot
+```
+
+The order matters only on a cold volume; `setup.sh` is fingerprinted by commit +
+`package-lock.json`, so a restart costs one `git rev-parse`. Set the startup
+command to `bash scripts/host/boot.sh` and let auto-pull bring new commits in.
+
+`setup.sh` prunes dev dependencies on purpose: the full tree is ~320 MB and the
+disk is 512 MB, shared with a ~200 MB PostgreSQL build. Everything needed after
+the client build (`tsx`, `fastify`, `pg`) is a runtime dependency.
+
+## Verifying a deployment
+
+1. `deployments_check` → `/api/health` over the public URL.
+2. `curl -s https://<subdomain>/api/health` from the panel shell, and
+   `deployments_logs` for `[db] ready`, `dashboard ready`, `[boot] starting the
+   Discord bot`.
+3. Memory: `cat /sys/fs/cgroup/memory.current` after ten minutes of gateway
+   traffic, compared with `memory.max` (268435456).
+4. Data survives a restart: create a row through the dashboard, `power stop`,
+   `power start`, read it again.
+5. OAuth: sign in from the public URL; the callback must return to the same
+   origin (`DISCORD_REDIRECT_URI`), not to `localhost`.
+6. Bot: one slash command round-trip, and `deployments_logs` for the gateway's
+   ready line.
+7. Auto-pull: push a no-op commit, restart, confirm `git log -1` matches.
+
+## Renewal (every four days)
+
+`https://bot-hosting.net/dash` → **Renew free plan** → complete the Cloudflare
+check → **Renew for 4 days**. The check is interactive and cannot be scripted;
+it needs a person. The account banner states the deletion deadline while the
+deployment is suspended. Renewing during grace restores the same deployment,
+volume and database — nothing is re-installed.
+
+## Paid alternative (not the active path)
+
+| Deployment | Runtime | RAM | Role |
 | --- | --- | --- | --- |
-| `NODE_ENV` | production | production | |
-| `DATABASE_URL` | ✔ | ✔ | `postgresql://…@<db-host>:<port>/<db>` from the DB deployment |
-| `BOT_TOKEN` | — | ✔ | |
-| `DISCORD_CLIENT_ID` / `_SECRET` | ✔ | ✔ | |
-| `DISCORD_REDIRECT_URI` | ✔ | ✔ | the public `https://<subdomain>/auth/discord/callback` |
-| `SESSION_SECRET` | ✔ | — | 64 hex chars |
-| `EVENT_HMAC_SECRET` | ✔ | ✔ | must match on both sides |
-| `ENCRYPTION_KEY` | ✔ | ✔ | must match on both sides |
-| `KEY_ROTATION_DAYS` / `AUDIT_RETENTION_DAYS` | ✔ | ✔ | required in production |
-| `DASHBOARD_URL` | ✔ | ✔ | public HTTPS origin |
-| `DASHBOARD_INTERNAL_URL` | ✔ | ✔ | `http://127.0.0.1:$SERVER_PORT` |
-| `PORT` | ✔ | — | default 3000; use `$SERVER_PORT` on the panel |
-| `OWNER_ID` | ✔ | ✔ | the platform owner's Discord id |
-| `INTEGRATION_ADAPTER_ENABLED` | false | false | loopback-only control surface, off in production |
-| `BOT_LOCK_FILE` | — | `/tmp/al-ai-bot.lock` | the container has one bot; the lock is still the identity |
-| `NGROK_*`, `AL_AI_REMOTE_ACCESS` | — | — | the panel replaces the tunnel; leave unset |
+| `al-ai` | nodejs 24 | 512 MB | dashboard BFF + built SPA |
+| `al-ai-bot` | nodejs 24 | 768 MB | gateway client + image rendering |
+| `al-ai-db` | postgresql | 512 MB | `infra/schema.sql` |
 
-## Start commands
+Starter+ (£2.59/month: 2 GB, 4 slots) fits that table with headroom; Starter
+(1 GB, 2 slots) fits only if the dashboard and bot share a deployment. With
+three slots, drop `scripts/host/` entirely and point `DATABASE_URL` at the
+database deployment, which is the configuration `DEPLOYMENT.md` describes for a
+self-hosted machine.
 
-The repository's scripts pass `--env-file=../../.env`; on the panel the environment is
-already in the process, so the flag is dropped and TypeScript is loaded in-process with
-`node --import tsx` — the same form the Dockerfiles use. `npx`/the `tsx` shim would add a
-wrapper process between the stop signal and the program, and cost a third process on a
-panel that bills RAM.
+## What this path does not promise
 
-`al-ai`:
-
-```sh
-npm ci --no-audit --no-fund \
-  && npm run build --workspace=@al-ai/dashboard \
-  && exec node --max-old-space-size=448 --import tsx apps/dashboard/server/index.ts
-```
-
-`al-ai-bot`:
-
-```sh
-npm ci --omit=dev --no-audit --no-fund \
-  && exec node --max-old-space-size=448 --import tsx apps/bot/src/index.ts
-```
-
-Both keep `NODE_OPTIONS=--max-old-space-size=…` below the deployment's RAM, so a leak
-restarts the process instead of the node (the Dockerfiles do the same at 2048/512).
-
-## Database
-
-1. Create the `postgresql` deployment, then read `deployments_get` → `connection`
-   (`host`, `port`, `uriTemplate`) and build `DATABASE_URL` from it.
-2. Apply the schema once, through `deployments_shell` on the database deployment:
-
-   ```sh
-   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/schema.sql
-   ```
-
-   `infra/schema.sql` is the same file `docker-compose` mounts into
-   `/docker-entrypoint-initdb.d`, so the panel and the local stack end up with one schema.
-3. `databases_rotatePassword` rotates it — update `DATABASE_URL` on both app deployments
-   in the same step, or they lose the database.
-
-## Domain and OAuth
-
-1. `deployments_enableDomains` on `al-ai` → `https://<subdomain>.apps.bot-hosting.cloud`.
-2. Put that origin in `DISCORD_REDIRECT_URI` and `DASHBOARD_URL`.
-3. In the Discord developer portal, add the same URL to **OAuth2 → Redirects**
-   (`/auth/discord/callback`). A mismatch is a silent login failure, not an error page.
-4. `deployments_check` fetches `/api/health` over the public URL after every deploy.
-
-## Order of operations (once the plan allows it)
-
-1. `deployments_create` ×3 (`nodejs` ×2, `postgresql`).
-2. `env_set` on each, from the table above.
-3. Schema, then `al-ai-bot`, then `al-ai`.
-4. `deployments_power` start → `deployments_logs` → `deployments_check`.
-5. `deployments_setAutoPull` on both app deployments so a push redeploys on restart.
-
-## What is blocked today
-
-The key is in place and authenticates; the connector is not the blocker. The account is
-**Free**, and its only slot is occupied by the existing `Al` deployment (nodejs 24,
-offline, already linked to `Steve6546/al-ai` `main` with auto-pull on, 142 MB of the
-512 MB disk in use). A database is a deployment of its own, so the layout above needs
-**three** slots:
-
-```
-deployments_create({ runtime: "postgresql" })
-→ SLOTS_EXHAUSTED: All slots in your plan are in use.
-```
-
-Nothing on the panel creates a slot: `deployments_resize` can shrink a deployment inside
-the current pool, but the pool itself is 1 slot / 256 MB RAM / 512 MB disk, and the MCP
-surface has no billing or plan-change tool. The upgrade must be made in the panel UI
-(Billing → Starter+), after which the three deployments can be created in one session.
-
-`Al` does not need to be deleted to make room: on Starter+ it can be reconfigured as the
-dashboard (same repository, same auto-pull) and the other two created beside it, so no
-existing file or backup is lost.
-
+- **256 MB is a ceiling, not a target.** Measured RSS after renewal decides
+  whether all three fit; if the cgroup OOM-kills the stack during image
+  rendering, the honest fix is fewer features on the free plan or a paid plan,
+  not a bigger swap the container does not have.
+- **Renewal is manual.** A suspended deployment serves nothing, and no code in
+  this repository can change that.
+- **`fsync=off`** is deliberate for this throwaway volume: host-crash durability
+  is traded for CPU and WAL size. A real database uses the defaults.

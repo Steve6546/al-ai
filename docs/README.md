@@ -9,6 +9,7 @@
 | [SECURITY-AUDIT.md](SECURITY-AUDIT.md) | you need the full security audit: scope inspected, findings, applied fixes (secrets/env/Git/auth/2FA), measured verification results, and open decisions |
 | [BOOK.md](BOOK.md) | the illustrated operator guide (Arabic), with screenshots from `docs/images/` |
 | [BOT-HOSTING-MCP.md](BOT-HOSTING-MCP.md) | managed hosting evaluation (accepted path) |
+| [DEPLOY.md](DEPLOY.md) | you deploy to Bot-Hosting's free plan: the one-slot layout (embedded PostgreSQL + dashboard + bot), environment, start command, verification and the four-day renewal |
 
 ## Historical / evaluation documents
 
@@ -16,7 +17,6 @@ These are point-in-time records, not active contracts:
 
 - [HANDOVER-VERIFICATION-2026-11-05.md](HANDOVER-VERIFICATION-2026-11-05.md) — dated handover and verification snapshot.
 - [FEATHERPANEL-MCP.md](FEATHERPANEL-MCP.md) — rejected hosting evaluation, superseded by BOT-HOSTING-MCP.md.
-- [DEPLOY.md](DEPLOY.md) — a blocked deployment attempt; the active deployment guide is DEPLOYMENT.md.
 
 Nothing in this directory is generated at build time. Operational rules that
 must survive across sessions also live in `.workbuddy-ai/memory/RULES-*.md`

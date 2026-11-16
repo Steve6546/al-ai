@@ -61,6 +61,7 @@ reach the program and one process — not two — is billed to the container.
 | `NGROK_DOMAIN` | optional | fixed dev domain so the OAuth callback survives restarts |
 | `NGROK_PATH` | optional | ngrok binary when it is not on `PATH` |
 | `AL_AI_REMOTE_ACCESS` | optional | one-process override `off`/`on` used by `dev.ps1` |
+| `AL_AI_PLATFORM_HOST` | managed hosting | exact public hostname a platform proxy forwards to this container (e.g. `a1b2.apps.example.cloud`); accept it from any peer, since the platform's own network is never loopback |
 | `INTEGRATION_ADAPTER_ENABLED`, `BOT_LOCK_FILE` | optional | local control surface and single-instance lock path |
 | `DEVELOPER_WEBHOOK_URL` | optional | `security.*` events destination |
 | `AL_AI_TOOLCHAIN`, `CHROME_PATH` | optional | out-of-tree toolchain / browser for verification scripts |
