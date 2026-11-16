@@ -272,6 +272,29 @@ async function waitForPort(timeoutMs = 60000) {
 }
 
 /**
+ * `initdb` creates `postgres`, `template0` and `template1`; it does not create
+ * the application's database. A first boot without it makes every connection
+ * fail with `database "al_ai" does not exist`, which reads like a credentials
+ * problem. Create it once, as the superuser that `initdb` just made.
+ */
+async function ensureDatabase(secret) {
+  const { default: pg } = await import("pg");
+  const url = new URL(databaseUrl(secret));
+  url.pathname = "/postgres";
+  const admin = new pg.Client({ connectionString: url.toString() });
+  await admin.connect();
+  try {
+    const { rowCount } = await admin.query("select 1 from pg_database where datname = $1", [DATABASE]);
+    if (!rowCount) {
+      await admin.query(`create database "${DATABASE}"`);
+      log(`created database ${DATABASE}`);
+    }
+  } finally {
+    await admin.end();
+  }
+}
+
+/**
  * Apply `infra/schema.sql`.
  *
  * Idempotent by construction (`CREATE TABLE IF NOT EXISTS`), so it runs on
@@ -353,9 +376,9 @@ async function main() {
     child.kill("SIGKILL");
     throw new Error(`PostgreSQL did not open 127.0.0.1:${PORT}`);
   }
+  await ensureDatabase(secret);
   await applySchema(secret);
-  writeFileSync(join(WORK, "ready"), `${new Date().toISOString()}\n`);
-  log("ready");
+  writeFileSync(join(WORK, "ready"), `${new Date().toISOString()}\n`);  log("ready");
 
   child.on("exit", code => {
     log(`PostgreSQL exited (${code})`);
