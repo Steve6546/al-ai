@@ -15,6 +15,8 @@
  *
  * 1. **Download once.** The 60 MB release is unpacked into `.al-ai-pg/` on the
  *    first boot and reused afterwards; the deployment's own volume keeps it.
+ *    The version is pinned exactly: this package publishes prereleases only, so
+ *    a range like `18` does not resolve at all.
  * 2. **Repair the loader.** npm does not preserve the version symlinks inside
  *    that package, so `libpq.so.5` and `libicuuc.so.60` are missing until they
  *    are recreated. Without them `initdb` dies with "cannot open shared object
@@ -114,7 +116,7 @@ function ensureBinaries() {
   mkdirSync(PKG, { recursive: true });
   const result = spawnSync(
     process.platform === "win32" ? "npm.cmd" : "npm",
-    ["install", "--prefix", PKG, "--no-save", "--no-audit", "--no-fund", "--loglevel=error", "@embedded-postgres/linux-x64@18"],
+    ["install", "--prefix", PKG, "--no-save", "--no-audit", "--no-fund", "--loglevel=error", "@embedded-postgres/linux-x64@18.6.0-beta.19"],
     { stdio: "inherit", env: { ...process.env, npm_config_fund: "false", npm_config_audit: "false" } }
   );
   if (result.status !== 0 || !haveBinaries()) {
