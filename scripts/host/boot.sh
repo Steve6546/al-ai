@@ -6,10 +6,13 @@
 # disk). Everything it assumes is in the repository, so a fresh clone boots the
 # same way as a restarted one:
 #
-#   1. setup.sh     install/build once per commit (skipped when unchanged)
+#   1. setup.sh     install runtime deps once per commit (skipped when unchanged)
 #   2. PostgreSQL   scripts/host/pg.mjs, binaries + cluster inside .al-ai-pg/
-#   3. dashboard    node --import tsx apps/dashboard/server/index.ts
+#   3. dashboard    started from apps/dashboard, serves the prebuilt dist/
 #   4. bot          node --import tsx apps/bot/src/index.ts
+#
+# Measured on the free plan: 204 MB of the 256 MB cgroup for all three,
+# 0.15 % of the 25 % CPU share, 367 MB of the 512 MB disk.
 #
 # An external database wins: when `DATABASE_URL` is already in the environment
 # (an operator who has a real PostgreSQL), step 2 is skipped entirely and

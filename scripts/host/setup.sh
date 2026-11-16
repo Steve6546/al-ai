@@ -1,16 +1,26 @@
 #!/usr/bin/env bash
-# Install and build the stack once per commit, on a host that has 512 MB of disk.
+# Prepare the runtime on a host with 256 MB of RAM and 512 MB of disk.
 #
-# `boot.sh` calls this on every start. The work is skipped entirely when the
-# commit and the lockfile are unchanged, so a restart costs one `git rev-parse`
-# and one `sha256sum`. When either moves, the sequence is:
+# `boot.sh` calls this on every start; the work is skipped when the commit and
+# the lockfile are unchanged, so a restart costs one `git rev-parse` and two
+# `sha256sum`. When they move:
 #
-#   full install -> client build -> prune dev dependencies
+#   install runtime dependencies -> verify the prebuilt client -> drop the cache
 #
-# The prune is not optional here: the tree with dev dependencies is ~320 MB and
-# a free plan ships 512 MB shared with a ~200 MB PostgreSQL build. The server
-# runs TypeScript through `tsx`, which is a *runtime* dependency of both apps,
-# so nothing needed after the build is a dev dependency.
+# Two constraints shaped this script, both measured on the real container:
+#
+#   1. The client bundle is built *here*? No. `vite build` needs ~320 MB of
+#      dev dependencies plus a Node heap, and the cgroup kills npm outright
+#      (SIGKILL, no message) long before the build starts. The bundle is built
+#      on a workstation and uploaded to `apps/dashboard/dist`; this script only
+#      refuses to continue when it is missing, because a dashboard that serves
+#      404 for every page while /api/health says "healthy" is worse than a
+#      failed boot.
+#   2. A root `npm ci` OOMs. Even `--omit=dev` resolves the whole lockfile in
+#      one ideal tree. Installing one workspace at a time keeps each pass under
+#      the limit: the dashboard is ~60 packages now that the client libraries
+#      live in devDependencies, the bot 48 (including the prebuilt canvas
+#      binaries, so no compiler and no optional-package omission).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -37,20 +47,28 @@ if [ "$want" = "$have" ] \
   exit 0
 fi
 
-echo "[setup] installing and building ($want)"
-# npm's own resolver needs more heap than the 256 MB cgroup leaves a Node
-# process, and the kernel answers with SIGKILL (just "Killed" in the log). Each
-# step gets a ceiling small enough to keep RSS inside the limit; `tsx` and the
-# servers get their own caps in boot.sh.
-NODE_OPTIONS="--max-old-space-size=144" npm ci --include=dev --ignore-scripts \
-  --no-audit --no-fund --no-progress --loglevel=error
-NODE_OPTIONS="--max-old-space-size=176" npm run build --workspace=@al-ai/dashboard
+# The bundle is not produced on this host (see the header). Fail loudly and
+# early: boot.sh would otherwise start a server whose every page 404s.
+if [ ! -f apps/dashboard/dist/index.html ]; then
+  echo "[setup] apps/dashboard/dist/index.html is missing." >&2
+  echo "[setup] Build the client locally (npm run build --workspace=@al-ai/dashboard)" >&2
+  echo "[setup] and upload apps/dashboard/dist to the volume; this host cannot." >&2
+  exit 1
+fi
 
-# Drop the build toolchain the server never loads. `--omit=dev` is what makes
-# the second pass remove vite/React/typescript instead of leaving them behind as
-# "extraneous" for the next boot to trip over.
-NODE_OPTIONS="--max-old-space-size=144" npm prune --omit=dev \
-  --no-audit --no-fund --no-progress --loglevel=error
+echo "[setup] installing runtime dependencies ($want)"
+export NODE_OPTIONS="--max-old-space-size=96"
+
+npm ci --omit=dev --omit=optional --workspace=@al-ai/dashboard \
+  --ignore-scripts --no-audit --no-fund --no-progress --loglevel=error
+# `install`, not a second `ci`: ci deletes node_modules before it links. This
+# pass adds the bot's tree next to the dashboard's without touching the lock.
+npm install --omit=dev --workspace=@al-ai/bot \
+  --ignore-scripts --no-audit --no-fund --no-progress --loglevel=error --no-save
+
+# The npm cache is 100 MB of tarballs this volume does not have room for, and
+# a container restart never reuses it.
+npm cache clean --force
 
 echo "$want" >"$STATE/setup-fingerprint"
 echo "[setup] ready"
