@@ -31,8 +31,8 @@ coverage/
 # Install/build fingerprint and per-service logs written by `scripts/host/*.sh`.
 .al-ai-host/
 
-# Database dumps. They are a point-in-time copy of live rows â€” including the
-# encrypted OAuth tokens in `oauth_sessions` â€” and belong next to the data
+# Database dumps. They are a point-in-time copy of live rows — including the
+# encrypted OAuth tokens in `oauth_sessions` — and belong next to the data
 # directory, not in history where they can never be removed.
 .workbuddy-ai/backups/
 

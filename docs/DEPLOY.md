@@ -91,6 +91,9 @@ setting a startup failure.
 | `AL_AI_REMOTE_ACCESS` | unset | the platform replaces ngrok; the tunnel is off |
 | `BOT_LOCK_FILE` | `/tmp/al-ai-bot.lock` | one bot per container |
 | `NODE_OPTIONS` | unset | heap ceilings are set per process in `boot.sh` |
+| `AL_AI_HEAP_BOT` / `AL_AI_HEAP_DASHBOARD` / `AL_AI_HEAP_PG` | `96` / `80` / `24` | V8 old-space ceilings in MB, sized for the 256 MB plan; raise them only on a larger plan |
+| `AL_AI_BACKUP_DIR` / `AL_AI_BACKUP_KEEP` | `.al-ai-host/backups` / `5` | where `db:export` writes, and how many snapshots survive |
+| `AL_AI_IMPORT_BATCH` | `500` | rows per INSERT during `db:import`; lower it if a restore is ever killed for memory |
 
 If an operator ever has a real database, setting `DATABASE_URL` skips the
 embedded cluster entirely: `boot.sh` starts no PostgreSQL and downloads nothing.

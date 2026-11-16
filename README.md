@@ -139,6 +139,17 @@ checkout).
 and `boot.sh` skips the embedded PostgreSQL entirely — no download, no ~170 MB
 of processes. Unset it and the embedded cluster starts automatically.
 
+### Memory ceilings
+
+`boot.sh` gives each of the three processes an explicit V8 old-space ceiling —
+`AL_AI_HEAP_BOT` (96 MB), `AL_AI_HEAP_DASHBOARD` (80 MB), `AL_AI_HEAP_PG`
+(24 MB). A ceiling is not a reservation: it makes V8 collect instead of letting
+the old generation grow until the cgroup OOM-kills the container, which is what
+turns "fine at boot" into "dead on day nine". Measured on the 256 MB plan: 130
+MiB shortly after boot, ~170 MiB after 14 hours of uptime. Raise the ceilings
+(they are environment variables, see `.env.example`) on a larger plan; do not
+raise them past the plan's RAM, or the ceiling stops protecting anything.
+
 ### Production runtime vs local tooling
 
 | Production (shipped / runs on host) | Local workstation only |
@@ -177,6 +188,13 @@ empty). Foreign keys are read from `pg_constraint` (the `information_schema`
 views are filtered by ownership and see nothing under the unprivileged app
 role) and inserted parent-first; sequences are reset.
 
+The import **streams** the snapshot instead of buffering it: one pass reads the
+`meta` line, a second inserts each chunk as it arrives, `AL_AI_IMPORT_BATCH`
+(default 500) rows per statement. Peak memory is one decompressed chunk, not the
+dump — a snapshot of 300 000 rows (64 MB decompressed) restores inside a 24 MB
+heap. That is the difference between a migration that works on this container
+and one that dies once the guild data grows.
+
 `--fresh` truncates the target first, **except** for append-only tables: the
 `audit_trail` `BEFORE TRUNCATE` guard is deliberate, so a restore adds history
 with `ON CONFLICT DO NOTHING` instead of rewriting it.
@@ -188,6 +206,16 @@ with `ON CONFLICT DO NOTHING` instead of rewriting it.
 - [ ] **OAuth2 → Redirects** → add **exactly** `https://<your-domain>/auth/discord/callback` (no trailing slash). A mismatch is the cause of `Invalid OAuth2 redirect_uri`.
 - [ ] **Bot → Privileged Gateway Intents** → `SERVER MEMBERS` + `MESSAGE CONTENT` **ON**, `PRESENCE` **OFF**
 - [ ] **OAuth2 → Scopes** → `bot` + `applications.commands` (dashboard login uses `identify` + `guilds`)
+- [ ] **Bot → Permissions** → the bot needs **Manage Roles** in a guild before it can create its own role; without it you get `DiscordAPIError[50013] Missing Permissions` at startup and the bot still runs, just without the role
+
+## Bot-Hosting panel checklist
+
+- [ ] **Auto-Pull on Restart: ON** — this is what makes a `git push` reach the host. Verify with `deployments_getGit` (`autoPull: true`) rather than trusting the panel label.
+- [ ] **Startup → Runtime** `nodejs` **24**, **Entry file** `index.js`, **Start command** `bash scripts/host/boot.sh`, **Port** `25880`
+- [ ] **Resources** 256 MB RAM / 25% CPU / 512 MB disk (the ceilings in `boot.sh` are sized for exactly this plan)
+- [ ] **Variables** — the required set is `BOT_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`, `SESSION_SECRET`, `EVENT_HMAC_SECRET`, `ENCRYPTION_KEY`, `OWNER_ID`. Leave `DATABASE_URL` **unset** to use the embedded PostgreSQL.
+- [ ] **Disk headroom** — `node_modules` ~84 MB, `.al-ai-pg` ~99 MB, `host-build` ~6 MB. None of them is safe to delete; `setup.sh` prunes the rest.
+- [ ] **Health after a restart** — `/` and `/api/health` return `200`, the log shows `AL AI connected as <name>`, and there is no `lock file "postmaster.pid" already exists` (that guard now self-heals, but its absence is the clean signal).
 
 ## Verify
 

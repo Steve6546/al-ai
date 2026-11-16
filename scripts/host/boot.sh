@@ -46,6 +46,22 @@ PG_HOME="${AL_AI_PG_HOME:-$ROOT/.al-ai-pg}"
 PORT="${PORT:-3000}"
 mkdir -p "$LOG_DIR"
 
+# --- V8 heap ceilings ------------------------------------------------------
+# A cap is not a reservation: it does not make a process use that much, it only
+# makes V8 collect instead of letting the old generation grow until the cgroup
+# OOM-kills the container. Sized from the measured steady state on the 256 MB
+# plan (bot 90.8 MiB RSS, dashboard 75.6, pg supervisor 58.1), with headroom so
+# a busy guild does not hit "JavaScript heap out of memory".
+#
+# The bot is the largest consumer (guild cache, image rendering) and gets the
+# largest ceiling; the dashboard is smaller. 96 + 80 + 24 = 200 MiB of ceiling
+# across three processes that never all peak at once, which keeps the cgroup
+# under ~175 MiB in practice while leaving the kernel room to breathe.
+# Override with AL_AI_HEAP_* when a bigger plan is available.
+HEAP_BOT="${AL_AI_HEAP_BOT:-96}"
+HEAP_DASHBOARD="${AL_AI_HEAP_DASHBOARD:-80}"
+HEAP_PG="${AL_AI_HEAP_PG:-24}"
+
 : "${NODE_ENV:=production}"
 export NODE_ENV
 
@@ -81,7 +97,7 @@ if [ -z "${DATABASE_URL:-}" ]; then
 
   rm -f "$PG_HOME/ready"
   log "starting PostgreSQL (embedded, $PGPORT)"
-  NODE_OPTIONS="--max-old-space-size=24" node scripts/host/pg.mjs \
+  NODE_OPTIONS="--max-old-space-size=$HEAP_PG" node scripts/host/pg.mjs \
     > >(tee -a "$LOG_DIR/postgres.log") 2>&1 &
   pids+=($!)
 
@@ -108,10 +124,10 @@ fi
 # (apps/dashboard/dist), so it is started from its workspace, not the root.
 log "starting the dashboard on port $PORT"
 if [ "$COMPILED" = "1" ]; then
-  ( cd apps/dashboard && NODE_OPTIONS="--max-old-space-size=96" node "$ROOT/host-build/server.mjs" ) \
+  ( cd apps/dashboard && NODE_OPTIONS="--max-old-space-size=$HEAP_DASHBOARD" node "$ROOT/host-build/server.mjs" ) \
     > >(tee -a "$LOG_DIR/dashboard.log") 2>&1 &
 else
-  ( cd apps/dashboard && NODE_OPTIONS="--max-old-space-size=96" node --import tsx server/index.ts ) \
+  ( cd apps/dashboard && NODE_OPTIONS="--max-old-space-size=$HEAP_DASHBOARD" node --import tsx server/index.ts ) \
     > >(tee -a "$LOG_DIR/dashboard.log") 2>&1 &
 fi
 pids+=($!)
@@ -136,10 +152,10 @@ log "dashboard ready"
 # --- bot -------------------------------------------------------------------
 log "starting the Discord bot"
 if [ "$COMPILED" = "1" ]; then
-  NODE_OPTIONS="--max-old-space-size=80" node "$ROOT/host-build/bot.mjs" \
+  NODE_OPTIONS="--max-old-space-size=$HEAP_BOT" node "$ROOT/host-build/bot.mjs" \
     > >(tee -a "$LOG_DIR/bot.log") 2>&1 &
 else
-  NODE_OPTIONS="--max-old-space-size=80" node --import tsx apps/bot/src/index.ts \
+  NODE_OPTIONS="--max-old-space-size=$HEAP_BOT" node --import tsx apps/bot/src/index.ts \
     > >(tee -a "$LOG_DIR/bot.log") 2>&1 &
 fi
 pids+=($!)
