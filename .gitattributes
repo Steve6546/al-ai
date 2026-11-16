@@ -1,0 +1,6 @@
+# The Linux host runs these directly. A CRLF shebang (`#!/usr/bin/env bash\r`)
+# makes bash look for `bash\r` and fails before the first line executes, so the
+# store and the checkout must both stay LF regardless of a Windows clone's
+# core.autocrlf setting.
+*.sh text eol=lf
+*.mjs text eol=lf
