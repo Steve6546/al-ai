@@ -159,7 +159,9 @@ Three independent guards fail closed:
 A stale lock is reclaimed on the next start, including when its pid has been
 recycled. `npm run dev` is the only launcher on Windows; `dev:bot` and
 `dev:dashboard` delegate to it. There is no `tsx watch`: it would be a second
-supervisor. To pick up a change, `npm run dev:restart`.
+supervisor. To pick up a change, `npm run dev:restart` — it deliberately keeps the
+ngrok agent up so a registered OAuth callback survives. `npm run dev:stop` ends
+the agent and the local database too, so nothing of the stack is left running.
 
 ## 5. The ngrok request budget
 

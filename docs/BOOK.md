@@ -252,7 +252,7 @@ npm run dev              # قاعدة البيانات (عند الحاجة) + �
 npm run dev -- -Tunnel   # مع نفق ngrok (نطاق ثابت أو عنوان مؤقّت)
 npm run dev -- -Detach   # تشغيل والعودة للسطر
 npm run dev:status       # ما الذي يعمل، على أي منفذ، وحكم الصحة
-npm run dev:stop         # إيقاف رشيق
+npm run dev:stop         # إيقاف كامل: الخدمتان + وكيل ngrok + قاعدة البيانات (55432)
 npm run db:start|stop|status|verify
 npm run backup           # نسخة consistent من القاعدة
 npm run deploy           # نشر الواجهة: بناء + بوابة الأسرار + تأكيد النسخة المخدومة

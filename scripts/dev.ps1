@@ -36,10 +36,10 @@
 #     its pool - with a forced kill only as the last resort. Nothing is orphaned
 #     because every child is named (by port owner, command line, and remembered
 #     pid) rather than assumed to have died with us;
-#   * the ngrok tunnel is owned by the dashboard, not by this script. It is
-#     deliberately left up across a restart so a registered OAuth callback
-#     survives; end it from the network screen's mode switch, or stop the whole
-#     stack with `npm run dev:stop`.
+#   * the ngrok tunnel is owned by the dashboard, not by this script. A direct
+#     `npm run dev:stop` ends it as well, so a stop leaves nothing of this stack
+#     running; `npm run dev:restart` passes -KeepTunnel and deliberately leaves
+#     it up, so a registered OAuth callback survives a restart.
 [CmdletBinding()]
 param(
   [ValidateSet("start", "stop", "restart", "status")]
@@ -405,6 +405,10 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
+  # `restart` passes this: the ngrok agent is left up so a registered OAuth
+  # callback survives. A direct `npm run dev:stop` leaves it unset and ends it.
+  param([switch]$KeepTunnel)
+
   $state = Read-State
   $targets = New-Object System.Collections.Generic.HashSet[int]
 
@@ -440,19 +444,44 @@ function Invoke-Stop {
   $lockOwner = Get-BotLockOwner -Path $botLockPath
   if ($lockOwner) { [void]$targets.Add($lockOwner) }
 
-  if ($targets.Count -eq 0) {
-    Write-Host "No AL AI services are running."
-    if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath -Force }
-    return
+  # ngrok is owned by the dashboard rather than by this script, so it is not in
+  # the target set above. A stop that left it running was the orphan: the
+  # reserved domain stayed claimed by a stack that was supposedly down, and the
+  # next `npm run dev` found a tunnel "already up" in front of a dead dashboard.
+  $tunnelPids = @()
+  if (-not $KeepTunnel) {
+    try {
+      $tunnelPids = @(Get-CimInstance Win32_Process -Filter "Name='ngrok.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and [regex]::IsMatch([string]$_.CommandLine, "http\s+$dashboardPort\b") } |
+        Select-Object -ExpandProperty ProcessId)
+    } catch {
+      $tunnelPids = @()
+    }
   }
 
-  foreach ($processId in $targets) {
-    if (Stop-ProcessGracefully -Id $processId -WaitSeconds 12) {
-      Write-Host "stopped pid $processId (graceful)"
-    } else {
-      Stop-ProcessTree -Id $processId
-      Write-Host "stopped pid $processId (forced)"
+  if ($targets.Count -eq 0 -and $tunnelPids.Count -eq 0) {
+    Write-Host "No AL AI services are running."
+  } else {
+    foreach ($processId in $targets) {
+      if (Stop-ProcessGracefully -Id $processId -WaitSeconds 12) {
+        Write-Host "stopped pid $processId (graceful)"
+      } else {
+        Stop-ProcessTree -Id $processId
+        Write-Host "stopped pid $processId (forced)"
+      }
     }
+    foreach ($tunnelPid in $tunnelPids) {
+      Stop-Process -Id $tunnelPid -Force -ErrorAction SilentlyContinue
+      Write-Host "stopped the ngrok agent (pid $tunnelPid)"
+    }
+  }
+
+  # The database is part of the stack as well. Leaving it up meant `dev:stop`
+  # left a ~55 MB server behind and `dev:status` still reported "database: up"
+  # for a stack the operator had stopped. -NoDb keeps the old behaviour for a
+  # cluster that something else is sharing.
+  if (-not $NoDb) {
+    & (Join-Path $PSScriptRoot "postgres.ps1") -Action stop | Out-Null
   }
 
   if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath -Force }
@@ -568,7 +597,9 @@ switch ($Action) {
   }
   "stop" { Invoke-Stop }
   "restart" {
-    Invoke-Stop
+    # The tunnel is the one thing a restart keeps: an OAuth callback registered
+    # against the public URL must not change out from under a half-finished login.
+    Invoke-Stop -KeepTunnel
     Invoke-Start
     if (-not $Detach) { Invoke-Supervise }
   }

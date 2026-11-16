@@ -42,8 +42,8 @@ npm run dev -- -Lan                    # + devices on the same Wi-Fi/router
 npm run dev -- -Lan -OpenFirewall      # + Windows Firewall inbound rule (run as Administrator)
 npm run dev -- -Tunnel                 # + the ngrok tunnel (public HTTPS)
 npm run dev:status                     # what is up, both URLs, and firewall state
-npm run dev:restart                    # pick up a backend change (no hot reload)
-npm run dev:stop
+npm run dev:restart                    # pick up a backend change (no hot reload); keeps the tunnel
+npm run dev:stop                       # stop all of it: services, ngrok agent, and the database
 ```
 
 The dashboard BFF binds `0.0.0.0`; its **Host gate** is what limits reach.
