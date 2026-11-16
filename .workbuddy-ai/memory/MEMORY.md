@@ -120,3 +120,19 @@
 لإخفاء شيء عن المستخدم؛ الحل الوحيد ألّا يُشغَّل الأصل. أي spawn جديد يلزمه
 `-NoProfile -NonInteractive`، والتحقّق بـ`Get-ScheduledTask | ? TaskName -match 'AL AI'`.
 نسخ XML للمهام المُعطَّلة في `~/.workbuddy-ai/task-backups/` (إعادة التفعيل ممكنة).
+
+## عقد البيئة والحدود (2026-11-17)
+- **`.env.example` هو القائمة الوحيدة** (3 أقسام: 9 أساسية · `DATABASE_URL` · متقدّمة). لا تكرّر
+  جدول متغيّرات في أي وثيقة — التكرار أنتج `DATABASE_URL` "مطلوباً" بعد أن صار فارغاً = مدمج.
+  `DATABASE_URL` فارغ ⇒ `boot.sh` يشغّل القاعدة ويصدّره؛ `npm run dev` المحلي لا يمرّ بـ`boot.sh`
+  فيحتاج السطر المعلّق مفتوحاً. **`KEY_ROTATION_DAYS` + `AUDIT_RETENTION_DAYS` إلزاميان في الإنتاج.**
+- ⚠️ **حارس `env-template.test.ts` كان أعمى عن `heap("X",…)` و`pinned("X",…)`** ⇒ أربعة متغيّرات
+  تُقرأ ولا تُوثَّق والفحص يمرّ. أُضيف النمط + تأكيد `read.has(...)`. **كل حارس يمرّ بلا نتيجة
+  يجب أن يُثبَت أنه يرى شيئاً.**
+- **لوحة Packages تعرض `devDependencies` من جذر `package.json`** (axe-core/knip/pgsql-ast-parser/
+  typescript) ولا شيء منها مثبّت (`setup.sh` = `npm ci --omit=dev` لحزمتين). تحريرها من اللوحة
+  يكسر `npm ci` التالي. **لا تُحرَّر.**
+- **السجلّات كانت بلا سقف** ⇒ `rotate_logs()` في `boot.sh`: 5 MiB + 400 سطر، **قصّ في المكان لا
+  إعادة تسمية** (`tee -a` يمسك `O_APPEND`؛ التسمية تجعله يكتب في النسخة المدوّرة للأبد).
+- **`PRESENCE INTENT` = OFF**: `discord.ts` يطلب `GuildMembers`+`MessageContent` فقط.
+- **نطاق الوثائق:** `DEPLOY.md` = النشر لكل المضيفين · `DEPLOYMENT.md` = التشغيل المحلي.

@@ -1,7 +1,12 @@
-# Deployment & Operations
+# Local development & operations
 
 AL AI runs unchanged on Windows (PowerShell), Linux, macOS, Docker Compose and
 a plain VPS. Nothing in the source depends on a sandbox URL or a machine path.
+
+This document covers **running it on a workstation**: ports, LAN reach, the
+single-instance guards, the ngrok request budget and troubleshooting. For
+deploying to a host see [DEPLOY.md](DEPLOY.md); for the portal and panel
+walkthroughs see the [README](../README.md).
 
 ## 1. Quick start
 
@@ -49,41 +54,36 @@ reach the program and one process — not two — is billed to the container.
 
 ## 2. Environment reference
 
-`.env` is gitignored; `.env.example` is the contract.
+`.env` is gitignored; **`.env.example` is the contract** — three sections, and
+the only place the variable list is written down. It is not repeated here,
+because a second copy is a second thing to drift: this document used to carry a
+table that listed `DATABASE_URL` as required, which stopped being true the day
+`boot.sh` started the embedded cluster itself.
 
-| Variable | Required | Meaning |
-|---|---|---|
-| `BOT_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | yes | Discord application credentials |
-| `DISCORD_REDIRECT_URI` | yes | exact OAuth callback; must be registered in the Developer Portal |
-| `DATABASE_URL` | yes | PostgreSQL connection string (Compose overrides it) |
-| `SESSION_SECRET`, `EVENT_HMAC_SECRET`, `ENCRYPTION_KEY` | yes | 32-byte hex, 32-byte hex, 64 hex chars respectively |
-| `KEY_ROTATION_DAYS`, `AUDIT_RETENTION_DAYS` | **yes in production** | operational settings; never guessed, never defaulted |
-| `OWNER_ID` | recommended | platform owner's Discord user id; gates owner-only screens |
-| `POSTGRES_PASSWORD`, `POSTGRES_HOST_PORT` | Compose | password and host port (default 5432) |
-| `DASHBOARD_URL` | recommended | public HTTPS origin used in bot replies |
-| `DASHBOARD_INTERNAL_URL` | optional | loopback origin for signed health snapshots (keeps telemetry off the tunnel) |
-| `PORT` | optional | BFF port, default 3000 |
-| `NODE_ENV` | optional | `production` turns undecided operational settings into a startup failure |
-| `NGROK_DOMAIN` | optional | fixed dev domain so the OAuth callback survives restarts |
-| `NGROK_PATH` | optional | ngrok binary when it is not on `PATH` |
-| `AL_AI_REMOTE_ACCESS` | optional | one-process override `off`/`on` used by `dev.ps1` |
-| `AL_AI_PLATFORM_HOST` | managed hosting | exact public hostname a platform proxy forwards to this container (e.g. `a1b2.apps.example.cloud`); accept it from any peer, since the platform's own network is never loopback |
-| `INTEGRATION_ADAPTER_ENABLED`, `BOT_LOCK_FILE` | optional | local control surface and single-instance lock path |
-| `DEVELOPER_WEBHOOK_URL` | optional | `security.*` events destination |
-| `AL_AI_TOOLCHAIN`, `CHROME_PATH` | optional | out-of-tree toolchain / browser for verification scripts |
-| `NODE_OPTIONS` | tooling | rewritten by `scripts/test-runner.mjs` to cap each test worker's heap |
-| `ENCRYPTION_KEY_OLD`, `ENCRYPTION_KEY_NEW` | maintenance | one key-rotation run only |
-| `AL_AI_DASHBOARD_HEAP_MB`, `AL_AI_BOT_HEAP_MB` | optional | heap ceilings for `npm start` (defaults 512 / 2048) |
-| `AL_AI_TEST_CONCURRENCY`, `AL_AI_TEST_HEAP_MB` | CI | pin the test memory ceiling |
+Read it in this order:
+
+1. **Section 1 — the 9 core keys.** Nothing boots without them.
+2. **Section 2 — `DATABASE_URL`.** Blank means "start the built-in PostgreSQL";
+   set means "use this external one and start nothing". `npm run dev` on a
+   workstation needs the commented line uncommented, because it does not go
+   through `boot.sh`.
+3. **Section 3 — everything else.** Every value has a working default; blank
+   means "use it". Two of them (`KEY_ROTATION_DAYS`, `AUDIT_RETENTION_DAYS`) are
+   additionally required when `NODE_ENV=production`.
+
+`apps/bot/test/env-template.test.ts` enforces the contract in the only direction
+that matters: every variable the code reads must appear in `.env.example`. It
+covers `process.env`, `process.env["…"]`, the dashboard's `read("…")` wrapper,
+the shared `readEnv(source, "…")` accessor, and the `heap("…")` / `pinned("…")`
+helpers in `scripts/`.
 
 Generate secrets with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
 
-**Discord Developer Portal:** enable `SERVER MEMBERS INTENT` and
-`MESSAGE CONTENT INTENT`; leave `PRESENCE INTENT` **off**. Scopes `bot` and
-`applications.commands`; dashboard login uses `identify` + `guilds`. Register
-both redirect URIs exactly (no trailing slash):
-`http://localhost:3000/auth/discord/callback` and
-`https://<your-ngrok-domain>/auth/discord/callback`.
+**Discord Developer Portal:** the full tab-by-tab walkthrough is in the
+[README](../README.md#discord-developer-portal--every-tab). The short version:
+`SERVER MEMBERS` + `MESSAGE CONTENT` intents on, `PRESENCE` off, scopes `bot` +
+`applications.commands` (login uses `identify` + `guilds`), and the redirect URI
+registered exactly — no trailing slash.
 
 ## 3. Ports
 

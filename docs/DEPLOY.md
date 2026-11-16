@@ -1,9 +1,25 @@
-# Deploying AL AI on Bot-Hosting.net
+# Deploying AL AI
 
-The panel's free tier is the only target this document treats as real: **one
-deployment, 256 MB RAM, 25 % of a CPU, 512 MB disk, renewed by hand every four
-days**. Everything below was measured against that container, not inferred from
-a plan table.
+One start command covers every host: **`bash scripts/host/boot.sh`** (or
+`node index.js`, which delegates to it). It starts the embedded PostgreSQL when
+`DATABASE_URL` is blank, waits for it, starts the dashboard, waits for its port,
+then starts the bot. If any of the three dies the whole deployment ends on
+purpose, because the platform restart is the only reliable recovery for parts
+that share one database and one memory budget.
+
+| Target | Start command | Database |
+| --- | --- | --- |
+| Bot-Hosting (Free/Starter) | `bash scripts/host/boot.sh` | embedded (blank `DATABASE_URL`) |
+| Any VPS / Pterodactyl | `node index.js` | embedded, or your own |
+| Docker | `infra/docker-compose.yml` | a real PostgreSQL service |
+| PaaS (Railway/Render) | `node index.js` | managed; set `DATABASE_URL` |
+| Local workstation | `npm run dev` | the local cluster on 55432 |
+
+The rest of this document treats **Bot-Hosting's free tier as the real target**:
+one deployment, 256 MB RAM, 25 % of a CPU, 512 MB disk, renewed by hand every
+four days. Everything below was measured against that container, not inferred
+from a plan table. For local development see [DEPLOYMENT.md](DEPLOYMENT.md); for
+the portal and panel walkthroughs see the [README](../README.md).
 
 The paid layout (three deployments, one of them `runtime: postgresql`) is kept
 at the end as the alternative. It is not the active path and nothing below
@@ -58,45 +74,62 @@ Why each piece exists:
   is worse than a restart: the platform's restart is the only reliable recovery
   for parts that share one database and one memory budget.
 
-Per-process heap ceilings: `48` (PostgreSQL's supervisor), `96` (dashboard),
-`80` (bot). PostgreSQL's own main process measured **≈ 16 MB RSS** on this
-image; the dashboard stays under 100 MB during the load check. The three
-together must stay below 256 MB — `scripts/host/boot.sh` is the place where
-that budget is visible, and the first verification run after renewal records
-the number.
+Per-process heap ceilings, as `boot.sh` actually sets them: `24` (PostgreSQL's
+supervisor), `80` (dashboard), `96` (bot). The bot is the largest consumer
+(guild cache, image rendering), so it gets the largest ceiling. PostgreSQL's own
+main process measured **≈ 16 MB RSS** on this image; the dashboard stays under
+100 MB during the load check. 96 + 80 + 24 = 200 MB of ceiling across three
+processes that never all peak at once, which keeps the cgroup under ~175 MiB in
+practice. Measured on this plan: **130 MiB** shortly after boot, **144–170 MiB**
+after hours of gateway traffic. Override with `AL_AI_HEAP_*` on a larger plan;
+never raise them past the plan's RAM, or the ceiling stops protecting anything.
 
 ## Environment
 
 Set with `env_set` on the deployment (`secret: true` for the five credentials),
-never as a committed `.env`. `NODE_ENV=production` makes a missing operational
-setting a startup failure.
+never as a committed `.env`. **The variable list is `.env.example`** — three
+sections, one contract, enforced by `env-template.test.ts`. This section lists
+only what is *specific to this host*; anything not mentioned takes the default
+documented in the template.
 
-| Key | Value | Notes |
+| Key | Value here | Why |
 | --- | --- | --- |
-| `NODE_ENV` | `production` | |
+| `NODE_ENV` | `production` | makes a missing operational setting a startup failure |
 | `PORT` | `25880` | the panel's published port |
-| `DATABASE_URL` | *leave unset* | `boot.sh` builds it from the embedded cluster |
-| `POSTGRES_PASSWORD` | optional | when unset the first boot mints one into `.al-ai-pg/password` |
-| `BOT_TOKEN` | secret | |
-| `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | secret | |
-| `DISCORD_REDIRECT_URI` | `https://<subdomain>.apps.bot-hosting.cloud/auth/discord/callback` | must match the developer portal exactly |
-| `SESSION_SECRET` | secret, 64 hex | |
-| `EVENT_HMAC_SECRET` | secret | both processes |
-| `ENCRYPTION_KEY` | secret | both processes; rotating it needs `scripts/rotate-encryption-key.mts` |
-| `KEY_ROTATION_DAYS` / `AUDIT_RETENTION_DAYS` | integers | required when `NODE_ENV=production` |
-| `DASHBOARD_URL` | the public HTTPS origin | |
-| `DASHBOARD_INTERNAL_URL` | `http://127.0.0.1:25880` | |
+| `DATABASE_URL` | *blank* | `boot.sh` starts the embedded cluster and exports it |
+| `DASHBOARD_URL` | `https://<subdomain>.apps.bot-hosting.cloud` | the public HTTPS origin |
+| `DASHBOARD_INTERNAL_URL` | `http://127.0.0.1:25880` | keeps health telemetry off the public proxy |
 | `AL_AI_PLATFORM_HOST` | `<subdomain>.apps.bot-hosting.cloud` | exact host, no scheme, no port |
-| `OWNER_ID` | the platform owner's Discord id | gates instance-wide surfaces |
-| `AL_AI_REMOTE_ACCESS` | unset | the platform replaces ngrok; the tunnel is off |
+| `DISCORD_REDIRECT_URI` | `https://<subdomain>/auth/discord/callback` | must match the portal exactly |
+| `KEY_ROTATION_DAYS` / `AUDIT_RETENTION_DAYS` | `90` / `90` | required in production; keep them equal to the panel |
+| `AL_AI_REMOTE_ACCESS` | *unset* | the platform replaces ngrok; no tunnel on this host |
 | `BOT_LOCK_FILE` | `/tmp/al-ai-bot.lock` | one bot per container |
-| `NODE_OPTIONS` | unset | heap ceilings are set per process in `boot.sh` |
-| `AL_AI_HEAP_BOT` / `AL_AI_HEAP_DASHBOARD` / `AL_AI_HEAP_PG` | `96` / `80` / `24` | V8 old-space ceilings in MB, sized for the 256 MB plan; raise them only on a larger plan |
-| `AL_AI_BACKUP_DIR` / `AL_AI_BACKUP_KEEP` | `.al-ai-host/backups` / `5` | where `db:export` writes, and how many snapshots survive |
-| `AL_AI_IMPORT_BATCH` | `500` | rows per INSERT during `db:import`; lower it if a restore is ever killed for memory |
+| `POSTGRES_PASSWORD` | optional | unset means the first boot mints one into `.al-ai-pg/password` |
+
+Everything else — the nine core keys, the three secrets, `OWNER_ID`, the heap
+ceilings, the backup retention and the log caps — is Section 1 or Section 3 of
+`.env.example` and is identical on every host.
 
 If an operator ever has a real database, setting `DATABASE_URL` skips the
 embedded cluster entirely: `boot.sh` starts no PostgreSQL and downloads nothing.
+
+## Disk growth
+
+The 512 MB disk is shared with `node_modules` (~84 MB), the PostgreSQL build
+(~99 MB) and `host-build` (~6 MB). Three writers could grow without limit; all
+three are capped:
+
+| Writer | Bound |
+| --- | --- |
+| Snapshots in `.al-ai-host/backups/` | 5 files (~3 KB each); older ones **and their `.sha256` sidecars** are deleted after each export |
+| `.al-ai-host/logs/{bot,dashboard,postgres}.log` | 5 MiB per file, truncated in place, last 400 lines kept as `.log.1` |
+| npm cache | `setup.sh` runs `npm cache clean --force` after every install |
+
+Truncation rather than rotation-by-rename is deliberate: each service writes
+through `tee -a`, which holds an `O_APPEND` descriptor on the live file, so a
+rename would leave the writer filling the rotated copy while the new file stayed
+empty. Worst case on disk is therefore ~18 MB of logs plus 15 KB of snapshots,
+not a number that grows with uptime.
 
 ## First boot on a wiped volume
 

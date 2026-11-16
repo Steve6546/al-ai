@@ -43,7 +43,16 @@ const patterns = [
   /process\.env\.([A-Z_][A-Z0-9_]*)/g,
   /process\.env\[\s*["']([A-Z_][A-Z0-9_]*)["']\s*\]/g,
   /\bread\(\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)/g,
-  /\breadEnv\(\s*[^,()]*,\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)/g
+  /\breadEnv\(\s*[^,()]*,\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)/g,
+  /**
+   * The `scripts/` helpers that take a variable *name* as their first argument:
+   * `heap("AL_AI_BOT_HEAP_MB", 2048)` in `start.mjs`, `pinned("AL_AI_TEST_HEAP_MB",
+   * …)` in `test-runner.mjs`. Both read `process.env[name]` internally, so the
+   * four variables they own were invisible to every pattern above and sat
+   * undocumented while the check reported a clean bill of health — the same
+   * failure mode the `readEnv` pattern was added for.
+   */
+  /\b(?:heap|pinned)\(\s*["']([A-Z_][A-Z0-9_]*)["']/g
 ];
 
 /**
@@ -101,6 +110,7 @@ test("the scan finds the environment reads it is meant to find", () => {
   // check can quietly pass on an empty scan.
   assert.ok(read.has("BOT_TOKEN"), "expected to see the bot read BOT_TOKEN through readEnv()");
   assert.ok(read.has("PORT"), "expected to see the dashboard read PORT through read()");
+  assert.ok(read.has("AL_AI_TEST_HEAP_MB"), "expected to see test-runner.mjs read AL_AI_TEST_HEAP_MB through pinned()");
 });
 
 test("every environment variable the code reads is documented in .env.example", () => {

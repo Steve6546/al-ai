@@ -78,23 +78,26 @@ what is being served.
 
 ## Environment variables
 
-`.env` is gitignored; `.env.example` is the contract. Full table and
-production requirements: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+`.env` is gitignored; **`.env.example` is the only list**, organised in three
+sections. Do not copy a table out of a document — if a variable is not in
+`.env.example`, it is not part of the contract (`apps/bot/test/env-template.test.ts`
+fails the build for any variable the code reads but the template omits).
 
-| Required | Purpose |
-|---|---|
-| `BOT_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | Discord credentials |
-| `DISCORD_REDIRECT_URI` | exact OAuth callback, registered in the Developer Portal |
-| `DATABASE_URL` | PostgreSQL connection string |
-| `SESSION_SECRET`, `EVENT_HMAC_SECRET`, `ENCRYPTION_KEY` | 32-byte hex, 32-byte hex, 64 hex |
-| `KEY_ROTATION_DAYS`, `AUDIT_RETENTION_DAYS` | mandatory when `NODE_ENV=production`; never guessed |
+| Section | Count | What it is |
+|---|---|---|
+| 1 — Core required | 9 | `BOT_TOKEN` · `DISCORD_CLIENT_ID` · `DISCORD_CLIENT_SECRET` · `DISCORD_REDIRECT_URI` · `DASHBOARD_URL` · `SESSION_SECRET` · `EVENT_HMAC_SECRET` · `ENCRYPTION_KEY` · `OWNER_ID` |
+| 2 — Database mode | 1 | `DATABASE_URL` — blank starts the built-in PostgreSQL, set uses an external one |
+| 3 — Advanced | rest | tuning with working defaults: heap ceilings, backup retention, log caps, reach, retention days |
 
-Generate secrets with
-`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+Generate each secret separately with
+`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`:
+`SESSION_SECRET` ≥ 32 chars, `ENCRYPTION_KEY` exactly 64 hex chars.
 
-Portal: enable `SERVER MEMBERS INTENT` + `MESSAGE CONTENT INTENT`, leave
-`PRESENCE INTENT` **off**; scopes `bot` + `applications.commands` (dashboard
-login uses `identify` + `guilds`); register both redirect URIs exactly.
+Two values are **additionally required when `NODE_ENV=production`** —
+`KEY_ROTATION_DAYS` and `AUDIT_RETENTION_DAYS`. The application never guesses a
+retention policy, so production refuses to boot without them. The current
+deployment uses `90` for both; keep the panel and the template equal so there is
+one number, not two.
 
 **Ports:** 3000 BFF (`0.0.0.0`) · 3400 integration adapter (loopback only) ·
 55432 local PostgreSQL (5432 in Compose) · 4040 ngrok agent inspection API
@@ -199,23 +202,111 @@ and one that dies once the guild data grows.
 `audit_trail` `BEFORE TRUNCATE` guard is deliberate, so a restore adds history
 with `ON CONFLICT DO NOTHING` instead of rewriting it.
 
-## Discord Developer Portal checklist
+## Discord Developer Portal — every tab
 
-- [ ] **Bot → Token** → `BOT_TOKEN`
-- [ ] **OAuth2 → Client ID / Client Secret** → `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`
-- [ ] **OAuth2 → Redirects** → add **exactly** `https://<your-domain>/auth/discord/callback` (no trailing slash). A mismatch is the cause of `Invalid OAuth2 redirect_uri`.
-- [ ] **Bot → Privileged Gateway Intents** → `SERVER MEMBERS` + `MESSAGE CONTENT` **ON**, `PRESENCE` **OFF**
-- [ ] **OAuth2 → Scopes** → `bot` + `applications.commands` (dashboard login uses `identify` + `guilds`)
-- [ ] **Bot → Permissions** → the bot needs **Manage Roles** in a guild before it can create its own role; without it you get `DiscordAPIError[50013] Missing Permissions` at startup and the bot still runs, just without the role
+Open <https://discord.com/developers/applications> → your application. The tabs
+below are in the order the portal shows them; do them once, top to bottom.
 
-## Bot-Hosting panel checklist
+### 1. General Information
 
-- [ ] **Auto-Pull on Restart: ON** — this is what makes a `git push` reach the host. Verify with `deployments_getGit` (`autoPull: true`) rather than trusting the panel label.
-- [ ] **Startup → Runtime** `nodejs` **24**, **Entry file** `index.js`, **Start command** `bash scripts/host/boot.sh`, **Port** `25880`
-- [ ] **Resources** 256 MB RAM / 25% CPU / 512 MB disk (the ceilings in `boot.sh` are sized for exactly this plan)
-- [ ] **Variables** — the required set is `BOT_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`, `SESSION_SECRET`, `EVENT_HMAC_SECRET`, `ENCRYPTION_KEY`, `OWNER_ID`. Leave `DATABASE_URL` **unset** to use the embedded PostgreSQL.
-- [ ] **Disk headroom** — `node_modules` ~84 MB, `.al-ai-pg` ~99 MB, `host-build` ~6 MB. None of them is safe to delete; `setup.sh` prunes the rest.
-- [ ] **Health after a restart** — `/` and `/api/health` return `200`, the log shows `AL AI connected as <name>`, and there is no `lock file "postmaster.pid" already exists` (that guard now self-heals, but its absence is the clean signal).
+- **Application ID** is the same value as `DISCORD_CLIENT_ID`. Copy it from here
+  (or from OAuth2 → Client ID; they are identical).
+- Set **Name** and **Icon** — these are what members see when they authorise the
+  app, not what the bot shows in a guild (that is the bot's own avatar).
+
+### 2. Installation
+
+- Enable **User Install** *and* **Guild Install**.
+- **Guild Install → Scopes:** `bot` + `applications.commands`.
+- **Guild Install → Permissions:** `Manage Roles`, `Manage Channels`,
+  `Moderate Members`, `Send Messages`, `View Audit Log`, `Embed Links`,
+  `Read Message History`.
+- **Install Link:** `Discord Provided Link`. Copy it; that is the URL you open to
+  add the bot to a server (there is no need to hand-build an invite URL).
+- `Manage Roles` is the one that matters most: without it the bot cannot create
+  its own role and logs `DiscordAPIError[50013] Missing Permissions` at startup.
+  The bot still runs — it just never gets the role.
+
+### 3. OAuth2
+
+- **Redirects:** exactly **one** entry, matching `DISCORD_REDIRECT_URI` byte for
+  byte — same scheme, same host, **no trailing slash**, no duplicate rows.
+  - local: `http://localhost:3000/auth/discord/callback`
+  - hosted: `https://<your-domain>/auth/discord/callback`
+  - Any difference is the entire cause of `Invalid OAuth2 redirect_uri`. The
+    portal also rejects `http://` for anything except `localhost`/`127.0.0.1`.
+- **Client ID** → `DISCORD_CLIENT_ID`. **Client Secret** → `DISCORD_CLIENT_SECRET`
+  (use *Reset Secret* if it is not visible; the old one stops working).
+- **Scopes used by the dashboard login:** `identify` + `guilds`. These are
+  requested by the app at sign-in and do not need to be added to the install
+  link above.
+
+### 4. Bot
+
+- **Token** → *Reset Token* → copy once → `BOT_TOKEN`. It is shown a single time.
+- **Privileged Gateway Intents:**
+  - `SERVER MEMBERS INTENT` — **ON** (role and member resolution)
+  - `MESSAGE CONTENT INTENT` — **ON** (commands and moderation read message text)
+  - `PRESENCE INTENT` — **leave OFF**. The code never subscribes to it
+    (`apps/bot/src/lib/discord.ts` requests `GuildMembers` and `MessageContent`
+    only). Turning it on changes nothing functionally, adds a stream of presence
+    events to a 256 MB container, and drags the app into Discord's verification
+    requirement past 100 guilds.
+- **Public Bot** — on. **Requires OAuth2 Code Grant** — off.
+
+### 5. Server role hierarchy (in the guild, not the portal)
+
+- Drag the bot's role **above** every role it has to manage — including the
+  managed/integration roles it creates for itself.
+- A bot can only act on roles strictly **below** its own highest role. This is
+  the other half of `50013`: correct permissions with a low position still fail.
+- Keep `Manage Roles` granted on the bot's role itself, not only on the invite.
+
+## Bot-Hosting panel — every surface
+
+- [ ] **Startup** → Runtime `nodejs` **24**, Entry file `index.js`, Start command
+      `bash scripts/host/boot.sh`, Port `25880`. (`index.js` delegates to
+      `boot.sh`, so either entry works; the panel's real command is `boot.sh`.)
+- [ ] **GitHub Sync → Auto-Pull on Restart: ON** — this is what makes a `git push`
+      reach the host. Verify with `deployments_getGit` (`autoPull: true`) rather
+      than trusting the panel label.
+- [ ] **Resources** — 256 MB RAM / 25 % CPU / 512 MB disk. The heap ceilings in
+      `boot.sh` are sized for exactly this plan; a different plan means changing
+      `AL_AI_HEAP_*`, not the code.
+- [ ] **Variables** — paste the **9** keys from `.env.example` Section 1, leave
+      `DATABASE_URL` **blank** (Section 2) so `boot.sh` starts the embedded
+      PostgreSQL, and add `KEY_ROTATION_DAYS=90` + `AUDIT_RETENTION_DAYS=90`
+      because `NODE_ENV=production` refuses to boot without them.
+- [ ] **Do not edit the Packages tab.** It renders the **root `package.json`
+      `devDependencies`** (`axe-core`, `knip`, `pgsql-ast-parser`, `typescript`)
+      because that is the file the panel reads. None of them is installed:
+      `setup.sh` runs `npm ci --omit=dev` for two workspaces only. Adding or
+      removing a package there does not change the container — it only puts
+      `package.json` and `package-lock.json` out of sync and breaks the next
+      `npm ci`. Dependencies change in `package.json` + lockfile, in a commit.
+- [ ] **SFTP / Files** — the volume is the repository root; `node_modules`,
+      `.al-ai-pg` and `.al-ai-host` are generated. Never edit them by hand.
+- [ ] **Disk headroom** — `node_modules` ~84 MB, `.al-ai-pg` ~99 MB,
+      `host-build` ~6 MB, logs capped at 5 MiB per file + 400 lines of history.
+      None of the first three is safe to delete; `setup.sh` prunes the rest.
+- [ ] **Health after a restart** — `/` and `/api/health` return `200`, the log
+      shows `AL AI connected as <name>`, and there is no
+      `lock file "postmaster.pid" already exists` (the guard self-heals, but its
+      absence is the clean signal).
+- [ ] **Renewal** — the free plan is suspended every 4 days and needs a person to
+      renew in Billing; nothing in the repository can automate that.
+
+### Disk growth is bounded
+
+| Writer | Bound | Where |
+|---|---|---|
+| Database snapshots | 5 files, ~3 KB each, older ones and their `.sha256` deleted | `AL_AI_BACKUP_KEEP` in `db-export.mjs` |
+| Service logs | 5 MiB per file, last 400 lines kept as `.log.1` | `AL_AI_LOG_MAX_BYTES` / `AL_AI_LOG_KEEP_LINES` in `boot.sh` |
+| npm cache | cleaned by `setup.sh` after every install | `npm cache clean --force` |
+
+Logs are truncated **in place**, never renamed: every service writes through
+`tee -a`, which holds an `O_APPEND` descriptor, so a rename would leave it
+writing into the rotated copy forever while the new file stayed empty.
 
 ## Verify
 
@@ -235,12 +326,16 @@ run through `scripts/test-runner.mjs` (≤2 workers, ≤768 MiB heap each) so a
 
 ## Documentation
 
-| Guide | Covers |
+One source of truth per subject — if two documents disagree, the more specific
+one below wins, and `.env.example` always wins on environment variables.
+
+| Guide | Scope |
 |---|---|
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | processes, data-flow rules, module map, decomposition status |
+| **this file** | setup, the two portal guides, architecture map, backup/migration |
+| [DEPLOY.md](docs/DEPLOY.md) | deploying: host matrix, start commands, Bot-Hosting free plan, renewal, verification |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | running it **locally**: ports, LAN reach, single-instance guards, ngrok budget, troubleshooting |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | processes, data-flow rules, module map |
 | [API.md](docs/API.md) | route groups, guards, error semantics, Discord API boundary |
-| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | env reference, ports, single-instance guards, ngrok quota, troubleshooting |
-| [DEPLOY.md](docs/DEPLOY.md) | Bot-Hosting free plan: one slot, embedded PostgreSQL, dashboard + bot, renewal |
 | [GOVERNANCE.md](docs/GOVERNANCE.md) | 29 test-enforced rules — never renumber without updating the test |
 | [BOOK.md](docs/BOOK.md) | illustrated operator guide (Arabic) |
 | [docs index](docs/README.md) | full directory, including historical documents |

@@ -67,12 +67,39 @@ export NODE_ENV
 
 log() { echo "[boot] $*"; }
 
+# --- bounded logs ----------------------------------------------------------
+# Every service is launched through `tee -a`, so a log file grows until the
+# disk is gone: a crash loop can write hundreds of MB in minutes, and the
+# platform quota does not warn before it fills. `.al-ai-host/backups/` was
+# already bounded (5 snapshots, sidecars removed with them); the logs were not.
+#
+# Truncate, never rename. `tee -a` holds an O_APPEND descriptor on the live
+# file, so a rename would leave it writing into the rotated copy forever while
+# the new file stayed empty — the classic rotation bug. Truncating in place
+# keeps the descriptor valid and the next write lands at offset 0.
+LOG_MAX_BYTES="${AL_AI_LOG_MAX_BYTES:-5242880}"   # 5 MiB per file
+LOG_KEEP_LINES="${AL_AI_LOG_KEEP_LINES:-400}"
+
+rotate_logs() {
+  for file in "$LOG_DIR"/*.log; do
+    [ -f "$file" ] || continue
+    size=$(wc -c < "$file" 2>/dev/null || echo 0)
+    [ "$size" -gt "$LOG_MAX_BYTES" ] 2>/dev/null || continue
+    tail -n "$LOG_KEEP_LINES" "$file" > "$file.1" 2>/dev/null || true
+    : > "$file" 2>/dev/null || true
+    log "rotated $(basename "$file") (was $((size / 1024)) KiB, kept $LOG_KEEP_LINES lines)"
+  done
+}
+
+# A previous run may have died with a full log; cap before starting, not after.
+rotate_logs
+
 bash scripts/host/setup.sh
 
 pids=()
 cleanup() {
   trap - INT TERM
-  [ -n "${BACKUP_LOOP_PID:-}" ] && kill "$BACKUP_LOOP_PID" 2>/dev/null || true
+  [ -n "${MAINT_LOOP_PID:-}" ] && kill "$MAINT_LOOP_PID" 2>/dev/null || true
   # Last-chance portable snapshot before PostgreSQL stops. The embedded cluster
   # runs with fsync=off, so the volume alone is not crash-safe; this is what
   # guarantees a restorable copy of the rows. Bounded (60 s) so a slow export
@@ -160,11 +187,22 @@ else
 fi
 pids+=($!)
 
-# A portable snapshot every 12 hours, so a crash between the platform's hourly
-# backups never costs more than half a day of rows. The sleep runs in bash, so
-# this costs no Node RSS while it waits.
-( while sleep 43200; do node "$ROOT/scripts/db-export.mjs" --quiet >/dev/null 2>&1 || true; done ) &
-BACKUP_LOOP_PID=$!
+# One maintenance loop does both jobs, so the deployment runs one extra bash
+# child rather than two. A minute tick keeps a runaway log from ever reaching
+# the cap for long; every 720 ticks (12 h) it takes a portable snapshot, so a
+# crash between the platform's own backups never costs more than half a day of
+# rows. The sleep runs in bash, so this costs no Node RSS while it waits.
+(
+  ticks=0
+  while sleep 60; do
+    ticks=$((ticks + 1))
+    rotate_logs
+    if [ $((ticks % 720)) -eq 0 ]; then
+      node "$ROOT/scripts/db-export.mjs" --quiet >/dev/null 2>&1 || true
+    fi
+  done
+) &
+MAINT_LOOP_PID=$!
 
 # One process dying ends the deployment on purpose: the platform restarts the
 # whole slot, which is the only reliable recovery for a stack whose parts share
