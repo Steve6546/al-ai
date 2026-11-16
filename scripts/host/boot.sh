@@ -82,8 +82,10 @@ else
 fi
 
 # --- dashboard -------------------------------------------------------------
+# The server serves the client from `dist/` relative to its working directory
+# (apps/dashboard/dist), so it is started from its workspace, not the root.
 log "starting the dashboard on port $PORT"
-NODE_OPTIONS="--max-old-space-size=96" node --import tsx apps/dashboard/server/index.ts \
+( cd apps/dashboard && NODE_OPTIONS="--max-old-space-size=96" node --import tsx server/index.ts ) \
   > >(tee -a "$LOG_DIR/dashboard.log") 2>&1 &
 pids+=($!)
 
