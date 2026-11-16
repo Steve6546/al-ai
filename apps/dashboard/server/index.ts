@@ -255,7 +255,28 @@ const app = Fastify({
     }
   },
   bodyLimit: REQUEST_BODY_LIMIT,
-  trustProxy: trustProxyOnlyLoopback
+  trustProxy: trustProxyOnlyLoopback,
+  // The bot posts a signed health snapshot every 30 s per guild; Fastify's
+  // automatic request logging turned each POST into two log lines, which is
+  // what filled dashboard.log. Automatic logging is off here and re-added
+  // below for every path except that one, so the console keeps full visibility
+  // into real traffic while the probes stay silent (they still return 200).
+  disableRequestLogging: true
+});
+
+const HEALTH_PROBE_PATH = "/internal/layer/health";
+app.addHook("onRequest", (request, _reply, done) => {
+  if (request.url !== HEALTH_PROBE_PATH) request.log.info({ req: request }, "incoming request");
+  done();
+});
+app.addHook("onResponse", (request, reply, done) => {
+  if (request.url !== HEALTH_PROBE_PATH) {
+    request.log.info(
+      { reqId: request.id, res: { statusCode: reply.statusCode }, responseTime: reply.elapsedTime },
+      "request completed"
+    );
+  }
+  done();
 });
 
 /**

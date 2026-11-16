@@ -27,6 +27,19 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+# The two services ship precompiled (host-build/*.mjs, built by `npm run
+# build:host`). Running plain JS removes tsx and its esbuild child from both
+# processes — ~31 MB of RSS on a 256 MB cgroup. AL_AI_ROOT keeps the three
+# `import.meta.url` path sites correct once the code is flattened into a
+# bundle. A fresh checkout with no bundles falls back to tsx so this script
+# still works for a developer.
+export AL_AI_ROOT="$ROOT"
+if [ -f "$ROOT/host-build/server.mjs" ] && [ -f "$ROOT/host-build/bot.mjs" ]; then
+  COMPILED=1
+else
+  COMPILED=0
+fi
+
 STATE="${AL_AI_HOST_STATE:-$ROOT/.al-ai-host}"
 LOG_DIR="${AL_AI_LOG_DIR:-$STATE/logs}"
 PG_HOME="${AL_AI_PG_HOME:-$ROOT/.al-ai-pg}"
@@ -43,6 +56,12 @@ bash scripts/host/setup.sh
 pids=()
 cleanup() {
   trap - INT TERM
+  [ -n "${BACKUP_LOOP_PID:-}" ] && kill "$BACKUP_LOOP_PID" 2>/dev/null || true
+  # Last-chance portable snapshot before PostgreSQL stops. The embedded cluster
+  # runs with fsync=off, so the volume alone is not crash-safe; this is what
+  # guarantees a restorable copy of the rows. Bounded (60 s) so a slow export
+  # can never hold the platform's stop signal hostage.
+  timeout 60 node "$ROOT/scripts/db-export.mjs" --quiet >/dev/null 2>&1 || true
   for pid in "${pids[@]:-}"; do
     kill "$pid" 2>/dev/null || true
   done
@@ -62,7 +81,7 @@ if [ -z "${DATABASE_URL:-}" ]; then
 
   rm -f "$PG_HOME/ready"
   log "starting PostgreSQL (embedded, $PGPORT)"
-  NODE_OPTIONS="--max-old-space-size=48" node scripts/host/pg.mjs \
+  NODE_OPTIONS="--max-old-space-size=24" node scripts/host/pg.mjs \
     > >(tee -a "$LOG_DIR/postgres.log") 2>&1 &
   pids+=($!)
 
@@ -88,8 +107,13 @@ fi
 # The server serves the client from `dist/` relative to its working directory
 # (apps/dashboard/dist), so it is started from its workspace, not the root.
 log "starting the dashboard on port $PORT"
-( cd apps/dashboard && NODE_OPTIONS="--max-old-space-size=96" node --import tsx server/index.ts ) \
-  > >(tee -a "$LOG_DIR/dashboard.log") 2>&1 &
+if [ "$COMPILED" = "1" ]; then
+  ( cd apps/dashboard && NODE_OPTIONS="--max-old-space-size=96" node "$ROOT/host-build/server.mjs" ) \
+    > >(tee -a "$LOG_DIR/dashboard.log") 2>&1 &
+else
+  ( cd apps/dashboard && NODE_OPTIONS="--max-old-space-size=96" node --import tsx server/index.ts ) \
+    > >(tee -a "$LOG_DIR/dashboard.log") 2>&1 &
+fi
 pids+=($!)
 
 for _ in $(seq 1 120); do
@@ -111,9 +135,20 @@ log "dashboard ready"
 
 # --- bot -------------------------------------------------------------------
 log "starting the Discord bot"
-NODE_OPTIONS="--max-old-space-size=80" node --import tsx apps/bot/src/index.ts \
-  > >(tee -a "$LOG_DIR/bot.log") 2>&1 &
+if [ "$COMPILED" = "1" ]; then
+  NODE_OPTIONS="--max-old-space-size=80" node "$ROOT/host-build/bot.mjs" \
+    > >(tee -a "$LOG_DIR/bot.log") 2>&1 &
+else
+  NODE_OPTIONS="--max-old-space-size=80" node --import tsx apps/bot/src/index.ts \
+    > >(tee -a "$LOG_DIR/bot.log") 2>&1 &
+fi
 pids+=($!)
+
+# A portable snapshot every 12 hours, so a crash between the platform's hourly
+# backups never costs more than half a day of rows. The sleep runs in bash, so
+# this costs no Node RSS while it waits.
+( while sleep 43200; do node "$ROOT/scripts/db-export.mjs" --quiet >/dev/null 2>&1 || true; done ) &
+BACKUP_LOOP_PID=$!
 
 # One process dying ends the deployment on purpose: the platform restarts the
 # whole slot, which is the only reliable recovery for a stack whose parts share

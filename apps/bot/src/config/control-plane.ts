@@ -9,7 +9,12 @@ import { allDestinations, eventsByCategory, type LogDestination } from "@al-ai/c
  * `_todo` so a production deploy fails loudly instead of inventing a default.
  */
 
-const CONFIG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "config");
+// A production bundle collapses this file's location, so `import.meta.url` no
+// longer points at apps/bot/src/config. The launcher sets AL_AI_ROOT to the
+// repo root; without it (tsx dev, tests) the original relative path holds.
+const CONFIG_DIR = process.env.AL_AI_ROOT
+  ? join(process.env.AL_AI_ROOT, "apps", "bot", "config")
+  : join(dirname(fileURLToPath(import.meta.url)), "..", "..", "config");
 
 /**
  * The file layout this build understands. Declared in code as well as in the

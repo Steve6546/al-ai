@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -20,7 +21,11 @@ import { promisify } from "node:util";
 const run = promisify(execFile);
 
 /** `status` is read-only; `ensure` needs an elevated shell. */
-const SCRIPT = fileURLToPath(new URL("../../../scripts/firewall.ps1", import.meta.url));
+// AL_AI_ROOT keeps this correct under a bundle; the URL form is the dev/test
+// path (firewall automation is Windows-only and a no-op elsewhere).
+const SCRIPT = process.env.AL_AI_ROOT
+  ? join(process.env.AL_AI_ROOT, "scripts", "firewall.ps1")
+  : fileURLToPath(new URL("../../../scripts/firewall.ps1", import.meta.url));
 
 export type FirewallState = "allowed" | "missing" | "disabled" | "unknown";
 

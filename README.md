@@ -114,6 +114,64 @@ because a `Secure`/`__Host-` cookie would be silently discarded by the browser.
 `SameSite=Lax`, `HttpOnly`, `Path=/`, the same-origin write guard and the exact
 Host allow-list are unchanged on every origin.
 
+## Production build & universal hosting
+
+The container runs **plain JavaScript**, not TypeScript. `npm run build:host`
+bundles the bot and the dashboard server into `host-build/{bot,server}.mjs`
+(committed), so no `tsx`/`esbuild` process is alive at runtime — that was ~31 MB
+of the 256 MB budget. Rebuild and commit `host-build/` whenever you change
+`apps/` or `packages/` source; `Auto-Pull on Restart` then delivers runnable JS
+to a host that cannot build it.
+
+One start command works everywhere: `bash scripts/host/boot.sh` — or `node
+index.js`, which delegates to it. It runs PostgreSQL, the dashboard and the bot,
+and falls back to `tsx` automatically when no bundle is present (a fresh dev
+checkout).
+
+| Target | How it runs |
+|---|---|
+| Bot-Hosting (Free/Starter) | start command `bash scripts/host/boot.sh`; embedded PostgreSQL when `DATABASE_URL` is unset |
+| Any VPS / Pterodactyl | `node index.js` or `bash scripts/host/boot.sh`; embedded DB, or set `DATABASE_URL` |
+| Docker | `infra/docker-compose.yml` (a real PostgreSQL service) |
+| PaaS (Railway/Render) | `node index.js`; set `DATABASE_URL` to the managed database |
+
+**External database mode:** set `DATABASE_URL` (Supabase, Neon, Railway, a VPS…)
+and `boot.sh` skips the embedded PostgreSQL entirely — no download, no ~170 MB
+of processes. Unset it and the embedded cluster starts automatically.
+
+### Production runtime vs local tooling
+
+| Production (shipped / runs on host) | Local workstation only |
+|---|---|
+| `apps/bot`, `apps/dashboard/server`, `packages/core` | `scripts/*.ps1` (dev, watchdog, postgres) |
+| `apps/dashboard/dist` (prebuilt client) + `host-build/` | `scripts/{verify,check-*,ui-check,oauth-check,load-check}*` |
+| `scripts/host/{boot,setup,pg}.sh/mjs`, `scripts/db-*.mjs`, `index.js` | `docs/`, `evidence/`, `.agents/`, `.workbuddy-ai/`, `.zcode/` |
+| `infra/schema.sql`, runtime `node_modules` | test files, `*.ps1`, Vite/Tailwind/HeroUI dev deps |
+
+## Backup & migration
+
+The embedded cluster runs with `fsync=off` (fits the 256 MB cgroup) and ships no
+`pg_dump`, so backups are a pure-`pg` logical dump:
+
+```bash
+npm run db:export                              # -> .al-ai-host/backups/db-<ts>.json.gz (sha256, keep 5)
+DATABASE_URL=postgres://… npm run db:export    # snapshot any database
+DATABASE_URL=postgres://… npm run db:import .al-ai-host/backups/db-<ts>.json.gz --fresh
+```
+
+`db:export` runs automatically on graceful shutdown and every 12 hours on the
+host. `db:import` restores into the embedded DB or migrates every row into an
+external PostgreSQL in one transaction (schema applied when the target is
+empty). Foreign keys are inserted parent-first; sequences are reset.
+
+## Discord Developer Portal checklist
+
+- [ ] **Bot → Token** → `BOT_TOKEN`
+- [ ] **OAuth2 → Client ID / Client Secret** → `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`
+- [ ] **OAuth2 → Redirects** → add **exactly** `https://<your-domain>/auth/discord/callback` (no trailing slash). A mismatch is the cause of `Invalid OAuth2 redirect_uri`.
+- [ ] **Bot → Privileged Gateway Intents** → `SERVER MEMBERS` + `MESSAGE CONTENT` **ON**, `PRESENCE` **OFF**
+- [ ] **OAuth2 → Scopes** → `bot` + `applications.commands` (dashboard login uses `identify` + `guilds`)
+
 ## Verify
 
 ```bash

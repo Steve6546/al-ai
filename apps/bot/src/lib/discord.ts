@@ -12,6 +12,7 @@ import {
   Events,
   GatewayIntentBits,
   GuildScheduledEventStatus,
+  Options,
   PermissionsBitField,
   REST,
   Routes,
@@ -146,7 +147,30 @@ export function createDiscordClient() {
     // the server is pinged by a message the operator never meant as a ping.
     // The one ping the bot actually means - the member a level-up is about -
     // is asked for explicitly, with `allowedMentionsFor(userId)`.
-    allowedMentions: { parse: [] }
+    allowedMentions: { parse: [] },
+    // Bounded caches. The bot is long-running on a 256 MB cgroup: discord.js
+    // caches every message, reaction and presence it sees by default, so an
+    // active server grows the heap until it is killed. These caps keep the
+    // hot path (members, guilds, channels) intact and evict only what is
+    // re-fetchable over REST when needed.
+    makeCache: Options.cacheWithLimits({
+      ...Options.DefaultMakeCacheSettings,
+      MessageManager: 100,
+      ReactionManager: 0,
+      GuildStickerManager: 0,
+      GuildScheduledEventManager: 0,
+      PresenceManager: 100
+    }),
+    // Sweep the two caches that still grow with traffic. A message older than
+    // 30 minutes is never read back by this bot (logs are written to Postgres
+    // on arrival), and a user not seen for two hours is cheap to re-resolve.
+    sweepers: {
+      ...Options.DefaultSweeperSettings,
+      // Messages are the one cache that grows with traffic; a message older
+      // than 30 minutes is never read back by this bot (logs are written to
+      // Postgres on arrival). Users are bounded by the cache limits above.
+      messages: { interval: 300, lifetime: 1_800 }
+    }
   });
 }
 

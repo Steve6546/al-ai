@@ -26,7 +26,9 @@ export type SessionRecord = {
 export function createPool(databaseUrl: string) {
   const pool = new Pool({
     connectionString: databaseUrl,
-    max: 10,
+    // Sized to the embedded server's max_connections=8 together with the bot's
+    // pool (4): 3 + 4 leaves one slot for the bootstrapper/admin connection.
+    max: 3,
     idleTimeoutMillis: 30_000,
     // A hung query used to pin a slot forever — ten wedged queries exhausted
     // the pool and every request then queued on checkout. The statement cap

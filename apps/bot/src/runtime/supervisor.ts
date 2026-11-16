@@ -17,7 +17,11 @@ import type { BotDatabase } from "../storage/database.js";
  * The repository root, resolved from this file rather than from the working
  * directory. Everything below is anchored here.
  */
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+// AL_AI_ROOT overrides this when the code runs as a bundle, where
+// `import.meta.url` points at the bundle rather than at src/runtime.
+const REPO_ROOT = process.env.AL_AI_ROOT
+  ? join(process.env.AL_AI_ROOT)
+  : join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 
 export const DEFAULT_LOCK_PATH = join(REPO_ROOT, ".al-ai-bot.lock");
 

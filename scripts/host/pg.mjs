@@ -199,7 +199,7 @@ int getgrgid_r(gid_t gid, struct group *grp, char *buf, size_t len, struct group
  */
 const TUNING = `# AL AI free-plan tuning (scripts/host/pg.mjs)
 shared_buffers = 16MB
-max_connections = 20
+max_connections = 8
 work_mem = 2MB
 maintenance_work_mem = 16MB
 effective_cache_size = 64MB

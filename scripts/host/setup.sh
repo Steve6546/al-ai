@@ -70,5 +70,15 @@ npm install --omit=dev --workspace=@al-ai/bot \
 # a container restart never reuses it.
 npm cache clean --force
 
+# Dead native binaries. The host is glibc (Debian 13); npm still installs the
+# musl Skia build (30 MB) and it is never loaded. When the precompiled bundle
+# is present the host never runs tsx, so its esbuild platform package is dead
+# weight too — it is kept only when there is no bundle, because the tsx
+# fallback in boot.sh needs it.
+rm -rf node_modules/@napi-rs/canvas-linux-x64-musl
+if [ -f host-build/bot.mjs ] && [ -f host-build/server.mjs ]; then
+  rm -rf node_modules/@esbuild
+fi
+
 echo "$want" >"$STATE/setup-fingerprint"
 echo "[setup] ready"

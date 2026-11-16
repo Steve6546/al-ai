@@ -124,7 +124,8 @@ export type BotDatabase = ReturnType<typeof createBotDatabase>;
 export function createBotDatabase(databaseUrl: string) {
   const pool = new Pool({
     connectionString: databaseUrl,
-    max: 5,
+    // Dashboard pool is 3; 4 + 3 = 7 of the embedded server's 8 slots.
+    max: 4,
     idleTimeoutMillis: 30_000,
     // Same caps as the dashboard's pool: a hung query must not pin a slot
     // forever, and a forgotten BEGIN must not hold its connection idle.

@@ -13,8 +13,24 @@
  * family list is the dashboard's offer, and an unavailable family silently
  * falls back, exactly as a browser would.
  */
-import { createCanvas, GifEncoder, ImageData, loadImage, type SKRSContext2D, type Canvas } from "@napi-rs/canvas";
+import type { SKRSContext2D, Canvas } from "@napi-rs/canvas";
 import { decodeGifFrames, looksLikeAnimatedGif, type DecodedGif } from "./gif-frames.js";
+
+/**
+ * The canvas engine is loaded on first use, never at import time.
+ *
+ * `@napi-rs/canvas` mmaps a ~34 MB Skia binary into the process the moment it
+ * is imported. On a 256 MB cgroup that cost used to be paid at boot even when
+ * no welcome card was ever rendered — this module is imported by `index.ts`
+ * for the image command, so a static import pulled the binary in permanently.
+ * A dynamic import moves that cost to the first image render and keeps it
+ * cached afterwards (one promise, never re-fetched).
+ */
+type CanvasModule = typeof import("@napi-rs/canvas");
+let canvasModule: Promise<CanvasModule> | null = null;
+function loadCanvas(): Promise<CanvasModule> {
+  return (canvasModule ??= import("@napi-rs/canvas"));
+}
 import {
   MAX_IMAGE_BYTES,
   renderWelcomeMessage,
@@ -273,7 +289,7 @@ export async function executeDrawOp(
       // GIF all came back `0,0,0,0` through that path, in both drawImage
       // overloads. `loadImage` decodes all three. The old path made every avatar
       // and every picture background on this card invisible.
-      image = await loadImage(op.source);
+      image = await (await loadCanvas()).loadImage(op.source);
       images.set(op.source, image);
     }
     if (op.kind === "image") {
@@ -355,7 +371,8 @@ export async function executeDrawOp(
 const MAX_ANIMATED_FRAMES = 12;
 
 /** One decoded GIF frame as PNG bytes, so the existing draw ops can consume it. */
-function frameToPng(gif: DecodedGif, rgba: Uint8Array): Buffer {
+async function frameToPng(gif: DecodedGif, rgba: Uint8Array): Promise<Buffer> {
+  const { createCanvas, ImageData } = await loadCanvas();
   const canvas = createCanvas(gif.width, gif.height);
   const ctx = canvas.getContext("2d");
   ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.length), gif.width, gif.height), 0, 0);
@@ -382,6 +399,9 @@ export async function renderWelcomeImage(
   const ops = await planWelcomeImageDraw(config, facts);
   if (ops.length === 0) return null;
 
+  // Loaded here, once, only when there is actually something to draw.
+  const { createCanvas, GifEncoder } = await loadCanvas();
+
   const animated = facts.avatarBuffer && looksLikeAnimatedGif(facts.avatarBuffer)
     ? decodeGifFrames(facts.avatarBuffer, MAX_ANIMATED_FRAMES)
     : null;
@@ -389,7 +409,7 @@ export async function renderWelcomeImage(
   if (animated && animated.frames.length > 1) {
     const encoder = new GifEncoder(config.width, config.height, { repeat: 0 });
     for (const frame of animated.frames) {
-      const source = frameToPng(animated, frame.rgba);
+      const source = await frameToPng(animated, frame.rgba);
       const frameCanvas = createCanvas(config.width, config.height);
       const frameCtx = frameCanvas.getContext("2d");
       for (const op of ops) {
