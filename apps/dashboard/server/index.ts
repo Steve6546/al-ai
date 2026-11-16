@@ -332,6 +332,23 @@ throttleSweep.unref();
  * rather than a helmet dependency: five lines the whole surface depends on,
  * with the image exception stated where it can be read.
  */
+/**
+ * A managed platform terminates TLS and forwards cleartext to the container
+ * from its own network, so `trustProxy` (loopback-only) never sees its
+ * `x-forwarded-proto` and `request.protocol` reads `http`. That one wrong
+ * string decides three things: the OAuth origin (Discord refuses an http
+ * callback), the `__Host-` cookie shape, and HSTS. The hostname the platform
+ * publishes is https by construction, and it is the exact value the Host gate
+ * already pins, so present it as the request's protocol here instead of
+ * teaching every call site about the platform.
+ */
+app.addHook("onRequest", async request => {
+  if (!env.platformHost || request.protocol === "https") return;
+  const host = request.headers.host?.split(":")[0]?.toLowerCase();
+  if (host !== env.platformHost) return;
+  Object.defineProperty(request, "protocol", { value: "https", configurable: true });
+});
+
 app.addHook("onRequest", async (request, reply) => {
   reply.header("X-Content-Type-Options", "nosniff");
   reply.header("X-Frame-Options", "DENY");
