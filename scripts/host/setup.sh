@@ -38,13 +38,19 @@ if [ "$want" = "$have" ] \
 fi
 
 echo "[setup] installing and building ($want)"
-npm ci --include=dev --no-audit --no-fund --loglevel=error
-npm run build --workspace=@al-ai/dashboard
+# npm's own resolver needs more heap than the 256 MB cgroup leaves a Node
+# process, and the kernel answers with SIGKILL (just "Killed" in the log). Each
+# step gets a ceiling small enough to keep RSS inside the limit; `tsx` and the
+# servers get their own caps in boot.sh.
+NODE_OPTIONS="--max-old-space-size=144" npm ci --include=dev --ignore-scripts \
+  --no-audit --no-fund --no-progress --loglevel=error
+NODE_OPTIONS="--max-old-space-size=176" npm run build --workspace=@al-ai/dashboard
 
 # Drop the build toolchain the server never loads. `--omit=dev` is what makes
 # the second pass remove vite/React/typescript instead of leaving them behind as
 # "extraneous" for the next boot to trip over.
-npm prune --omit=dev --no-audit --no-fund --loglevel=error
+NODE_OPTIONS="--max-old-space-size=144" npm prune --omit=dev \
+  --no-audit --no-fund --no-progress --loglevel=error
 
 echo "$want" >"$STATE/setup-fingerprint"
 echo "[setup] ready"
