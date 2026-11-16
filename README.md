@@ -154,15 +154,32 @@ The embedded cluster runs with `fsync=off` (fits the 256 MB cgroup) and ships no
 `pg_dump`, so backups are a pure-`pg` logical dump:
 
 ```bash
-npm run db:export                              # -> .al-ai-host/backups/db-<ts>.json.gz (sha256, keep 5)
+npm run db:export                              # -> .al-ai-host/backups/db-<ts>.json.gz + .sha256 (keep 5)
 DATABASE_URL=postgres://… npm run db:export    # snapshot any database
 DATABASE_URL=postgres://… npm run db:import .al-ai-host/backups/db-<ts>.json.gz --fresh
 ```
 
+Every snapshot gets a `db-<ts>.json.gz.sha256` sidecar in `sha256sum` format, so
+integrity is verifiable offline with the standard tool:
+
+```bash
+cd .al-ai-host/backups && sha256sum -c db-<ts>.json.gz.sha256
+```
+
+`db:import` verifies that sidecar **before it connects** and refuses a mismatch,
+so a truncated or wrong snapshot can never overwrite live data. A snapshot
+without a sidecar still imports, with a warning.
+
 `db:export` runs automatically on graceful shutdown and every 12 hours on the
 host. `db:import` restores into the embedded DB or migrates every row into an
 external PostgreSQL in one transaction (schema applied when the target is
-empty). Foreign keys are inserted parent-first; sequences are reset.
+empty). Foreign keys are read from `pg_constraint` (the `information_schema`
+views are filtered by ownership and see nothing under the unprivileged app
+role) and inserted parent-first; sequences are reset.
+
+`--fresh` truncates the target first, **except** for append-only tables: the
+`audit_trail` `BEFORE TRUNCATE` guard is deliberate, so a restore adds history
+with `ON CONFLICT DO NOTHING` instead of rewriting it.
 
 ## Discord Developer Portal checklist
 

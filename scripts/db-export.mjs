@@ -22,10 +22,19 @@
  *
  * Env: AL_AI_BACKUP_DIR (default .al-ai-host/backups), AL_AI_BACKUP_KEEP (5).
  */
-import { createWriteStream, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from "node:fs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
@@ -80,12 +89,19 @@ async function main() {
       `SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'`
     );
     const names = tables.map(r => r.table_name).sort();
+    // Read the foreign keys from the catalogs, not from information_schema:
+    // `constraint_column_usage` only lists objects the current role **owns**,
+    // and the application role owns no table in this deployment. It therefore
+    // returned zero rows, `topoSort` fell back to alphabetical order, and every
+    // restore died on the first child table (`guild_command_flags` sorts before
+    // `guilds`). `pg_constraint` is readable by any role.
     const { rows: fks } = await client.query(`
-      SELECT tc.table_name AS child, ccu.table_name AS parent
-      FROM information_schema.table_constraints tc
-      JOIN information_schema.constraint_column_usage ccu
-        ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
-      WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'`);
+      SELECT child.relname AS child, parent.relname AS parent
+      FROM pg_constraint con
+      JOIN pg_class child ON child.oid = con.conrelid
+      JOIN pg_class parent ON parent.oid = con.confrelid
+      JOIN pg_namespace n ON n.oid = child.relnamespace
+      WHERE con.contype = 'f' AND n.nspname = 'public'`);
     const order = topoSort(names, fks);
 
     mkdirSync(OUT_DIR, { recursive: true });
@@ -132,10 +148,18 @@ async function main() {
     await done;
     const sha = hash.digest("hex");
     const size = statSync(file).size;
+    // The digest is written next to the snapshot, not only to the console: a
+    // hash you merely printed cannot later prove that this file is the one you
+    // took. The sidecar uses the `sha256sum` format, so
+    // `sha256sum -c db-….json.gz.sha256` verifies it with no extra tooling.
+    writeFileSync(`${file}.sha256`, `${sha}  ${basename(file)}\n`);
 
-    // Keep only the newest KEEP snapshots.
+    // Keep only the newest KEEP snapshots, and their sidecars with them.
     const dumps = readdirSync(OUT_DIR).filter(n => /^db-.*\.json\.gz$/.test(n)).sort().reverse();
-    for (const stale of dumps.slice(KEEP)) unlinkSync(join(OUT_DIR, stale));
+    for (const stale of dumps.slice(KEEP)) {
+      unlinkSync(join(OUT_DIR, stale));
+      rmSync(`${join(OUT_DIR, stale)}.sha256`, { force: true });
+    }
 
     if (!QUIET) {
       console.log(
