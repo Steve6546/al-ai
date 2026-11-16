@@ -3,8 +3,8 @@
  * The portable stack launcher behind `npm start`.
  *
  * `npm run dev` is still the supervised launcher on Windows: it owns the
- * database, the single-instance lock, graceful Ctrl+C, and the watchdog's pid
- * bookkeeping. It is PowerShell, though, so it cannot be the entry point on
+ * database, the single-instance lock, graceful Ctrl+C, and the pid bookkeeping
+ * for both services. It is PowerShell, though, so it cannot be the entry point on
  * Linux, macOS or a VPS. This file is the small, dependency-free alternative:
  * it starts the same two Node services directly, with no shell, no PowerShell
  * and no `--env-file=../../.env` path that only exists in this workspace

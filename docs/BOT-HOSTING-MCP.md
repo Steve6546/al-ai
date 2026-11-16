@@ -118,8 +118,8 @@ Roughly 1.5–2 GB disk for `node_modules` plus the database.
 
 - `start` scripts use `--env-file=../../.env`; on the panel the environment comes from
   `env_set`, so the start command drops that flag instead of shipping a `.env` file.
-- `scripts/dev.ps1`, `scripts/postgres.ps1`, the watchdog and ngrok are Windows-local
-  tooling; they stay behind on the local machine and are not uploaded.
+- `scripts/dev.ps1`, `scripts/postgres.ps1` and ngrok are Windows-local tooling;
+  they stay behind on the local machine and are not uploaded.
 - Discord OAuth redirect + the dashboard's public URL move to the panel subdomain.
 - `remote_access_mode`/instance settings get re-seeded from the new public URL.
 

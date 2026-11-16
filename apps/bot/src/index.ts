@@ -2663,9 +2663,9 @@ if (adapter) {
   // owner. It used to be swallowed — the error was logged and the bot went on to
   // `client.login()`, which is the worst possible outcome. Two bots then shared
   // one token (duplicated log lines, doubled commands, doubled anti-nuke
-  // counting) while only one held port 3400, so `dev.ps1` and the watchdog both
-  // read the deployment as "bot down" and kept launching replacements that the
-  // lock refused. The operator saw a server running more than one copy.
+  // counting) while only one held port 3400, so `dev.ps1` read the deployment as
+  // "bot down" and kept launching a replacement that the lock refused. The
+  // operator saw a server running more than one copy.
   //
   // A control surface that cannot bind is not a degraded bot, it is a bot that
   // does not own this deployment. Refusing to log in is the only honest answer.

@@ -100,3 +100,23 @@
   `test/update-banner.test.tsx` (6 حالات، مُتحقَّق بالطفر).
 - **نشر أوامر السلاش خطوة منفصلة:** `npm run deploy-commands --workspace=@al-ai/bot` (`-- --guild <id>` فوري).
 
+
+## دروس الاستضافة الحيّة (2026-11-16)
+- **`ps` مجموع RSS لا يقيس الرام هنا:** كل backend لـPostgreSQL يحمل `shared_buffers=16MB` في
+  RSS ⇒ 4 اتصالات خاملة تبدو 66 MiB. المرجع الوحيد `deployments_resources` (cgroup).
+  الرام بعد الإصلاح: **130 MiB** فور الإقلاع، **169.5** بعد 14 س (نموّ heap، ليس تسريباً).
+- **`deployments_getGit` / `deployments_setAutoPull` موجودتان** — لا تفترض أن حالة Auto-Pull مجهولة.
+- **`information_schema.constraint_column_usage` مصفّاة بالملكية** ⇒ دور التطبيق (لا يملك جدولاً)
+  يرى **صفر** مفاتيح خارجية. استخدم `pg_constraint` لأي استعلام بنيوي.
+- **`disableRequestLogging` مهمَل في Fastify 5** ويُتجاهل، و`onRequest/onResponse` تُكرّر `reqId`.
+  الصواب: `{ logLevel: "silent" }` على المسار.
+- **`db:import` عقدها:** sidecar `.sha256` بصيغة `sha256sum`، تحقّق **قبل** الاتصال، و`--fresh`
+  يتخطّى الجداول ذات مشغّل `BEFORE TRUNCATE` (append-only). دليلها جولة استعادة كاملة.
+
+## ⛔ لا مهام مُجدولة محلية ولا حلقات خلفية (2026-11-16)
+الإنتاج على Bot-Hosting؛ الجهاز أداة تطوير فقط. **لا شيء في المستودع يُسجِّل مهمة أو حلقة.**
+`scripts/watchdog.ps1` حُذف — كان السكربت **الوحيد** الذي يُشغّل `powershell.exe` ابناً.
+`-WindowStyle Hidden` **لا يمنع** وميض النافذة (الكونسل يُنشأ ثم يُخفى) ⇒ لا تعتمد عليه
+لإخفاء شيء عن المستخدم؛ الحل الوحيد ألّا يُشغَّل الأصل. أي spawn جديد يلزمه
+`-NoProfile -NonInteractive`، والتحقّق بـ`Get-ScheduledTask | ? TaskName -match 'AL AI'`.
+نسخ XML للمهام المُعطَّلة في `~/.workbuddy-ai/task-backups/` (إعادة التفعيل ممكنة).

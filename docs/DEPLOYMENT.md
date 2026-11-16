@@ -12,8 +12,14 @@ npm ci
 
 **Windows (supervised, recommended):** `npm run dev` starts PostgreSQL (only
 if its port is closed), the dashboard, the bot, and — with `-- -Tunnel` — the
-ngrok agent. It owns pid files and graceful Ctrl+C. `scripts/dev.ps1` and the
-`AL AI Watchdog` scheduled task are Windows-only; they are optional.
+ngrok agent. It owns pid files and graceful Ctrl+C. `scripts/dev.ps1` is
+Windows-only and optional.
+
+Nothing in this repository registers a scheduled task, a logon entry or a
+background probe loop. The local stack runs only while you are watching it;
+unattended keep-alive is the host's job (`scripts/host/boot.sh`), not your
+workstation's. A workstation-side watchdog would resurrect a stack nobody asked
+for — and on Windows each background re-launch flashes a console window.
 
 **Linux / macOS / VPS (portable):**
 

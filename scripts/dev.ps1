@@ -10,9 +10,10 @@
 #   npm run dev:status          what is up, on which ports, and is it healthy
 #   npm run dev:restart         stop, then start
 #
-# Unattended keep-alive lives in scripts/watchdog.ps1 (logon task + probe loop);
-# it starts this script with -SavedMode -Detach and idles while a deliberate
-# stop's pause file exists.
+# This is the only launcher, and it is strictly on-demand: nothing here registers
+# a scheduled task, a logon entry or a probe loop. Production runs on the host,
+# so a local keep-alive would only resurrect a stack nobody asked for - and on
+# Windows every background re-launch is a console window the operator sees.
 #
 # What it guarantees that a row of hand-typed commands did not:
 #   * the database is started on demand (scripts/postgres.ps1) and its port is
@@ -59,8 +60,8 @@ param(
   # with `npm run dev:stop`.
   [switch]$Detach,
   # Leave AL_AI_REMOTE_ACCESS unset so the dashboard boots with the operator's
-  # saved reach mode. For unattended bring-up (scripts/watchdog.ps1): a flag
-  # default of `off` would lock the operator out of a tunnel they saved on.
+  # saved reach mode. Without it the flag default `off` would override a tunnel
+  # the operator saved on and lock them out of their own dashboard.
   [switch]$SavedMode,
   [switch]$NoDb,
   [switch]$NoDashboard,
@@ -311,10 +312,6 @@ function Get-LiveServicePids {
 }
 
 function Invoke-Start {
-  # A start cancels a deliberate stop: the watchdog resumes watching. The pause
-  # file is written by Invoke-Stop and survives reboots until someone starts.
-  $pausePath = Join-Path $runDir "watchdog.pause"
-  if (Test-Path -LiteralPath $pausePath) { Remove-Item -LiteralPath $pausePath -Force }
   # Stamped before anything launches, and written immediately: the dashboard
   # starts its tunnel during boot, so a start time recorded at the *end* of this
   # function would be later than the tunnel's birth and the tunnel would look
@@ -408,10 +405,6 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
-  # Record the decision so scripts/watchdog.ps1 does not resurrect a stack the
-  # operator stopped on purpose. A fall leaves no such file; a start removes it.
-  Ensure-RunDirectory
-  Set-Content -LiteralPath (Join-Path $runDir "watchdog.pause") -Value (Get-Date).ToString("o") -Encoding utf8
   $state = Read-State
   $targets = New-Object System.Collections.Generic.HashSet[int]
 

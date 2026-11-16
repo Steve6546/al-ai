@@ -143,7 +143,7 @@ of processes. Unset it and the embedded cluster starts automatically.
 
 | Production (shipped / runs on host) | Local workstation only |
 |---|---|
-| `apps/bot`, `apps/dashboard/server`, `packages/core` | `scripts/*.ps1` (dev, watchdog, postgres) |
+| `apps/bot`, `apps/dashboard/server`, `packages/core` | `scripts/*.ps1` (dev, postgres) |
 | `apps/dashboard/dist` (prebuilt client) + `host-build/` | `scripts/{verify,check-*,ui-check,oauth-check,load-check}*` |
 | `scripts/host/{boot,setup,pg}.sh/mjs`, `scripts/db-*.mjs`, `index.js` | `docs/`, `evidence/`, `.agents/`, `.workbuddy-ai/`, `.zcode/` |
 | `infra/schema.sql`, runtime `node_modules` | test files, `*.ps1`, Vite/Tailwind/HeroUI dev deps |
