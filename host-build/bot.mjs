@@ -84428,6 +84428,14 @@ async function ensureBotRole(client2, guildId) {
   if (needsAssign) await me.roles.add(role, "AL AI assigns its own role on join.");
   return { roleId: role.id, created };
 }
+function describeRoleFailure(error) {
+  const code = error?.code;
+  if (code === 50013) {
+    return "Discord refused with 50013 (Missing Permissions): AL AI lacks \xABManage Roles\xBB. Grant it in Server Settings \u2192 Roles \u2192 AL AI, or re-invite the bot with Administrator.";
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return typeof code === "number" ? `Discord answered ${code}: ${message}` : message;
+}
 async function applyBotPresence(client2, presence2) {
   if (!client2.isReady() || !client2.user) return false;
   client2.user.setPresence({
@@ -88718,7 +88726,7 @@ var dispatch = createDispatcher({
       (result) => console.log(
         result.created ? `AL AI created its role in ${name} (${result.roleId}).` : `AL AI role already present in ${name} (${result.roleId}).`
       )
-    ).catch((error) => console.error(`AL AI could not create its role in ${name}`, error));
+    ).catch((error) => console.warn(`AL AI could not create its role in ${name} \u2014 ${describeRoleFailure(error)}`));
   }
 });
 var securityConfigs = new ConfigCache((guildId) => database.loadSecurity(guildId));
@@ -90130,7 +90138,7 @@ client.once(import_discord.Events.ClientReady, async () => {
     const channels = await listLoggableChannels(client, guild.id).catch(() => []);
     if (channels.length) console.log(`AL AI can log to ${channels.length} channels in ${guild.name}.`);
     await ensureBotRole(client, guild.id).catch(
-      (error) => console.error(`AL AI could not ensure its role in ${guild.name}`, error)
+      (error) => console.warn(`AL AI could not ensure its role in ${guild.name} \u2014 ${describeRoleFailure(error)}`)
     );
     await guild.members.fetch().then((members) => intentUsage.observe(members.keys())).catch(() => void 0);
   }

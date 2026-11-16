@@ -409,8 +409,10 @@ export type BotRoleResult = { roleId: string; created: boolean };
  * nothing to position moderation roles against. This creates a visible, hoisted
  * role that carries Administrator, then assigns it to the bot member.
  *
- * Returns what actually happened instead of throwing, so a missing MANAGE_ROLES
- * degrades to a logged warning rather than blocking the whole join flow.
+ * Throws whatever Discord answered when the role cannot be created or
+ * assigned. The ordinary cause is a guild that invited AL AI without
+ * MANAGE_ROLES, which Discord refuses with 50013; both call sites catch it and
+ * report a warning, so a missing permission never blocks the join flow.
  */
 export async function ensureBotRole(client: Client, guildId: string): Promise<BotRoleResult> {
   const guild = await client.guilds.fetch(guildId);
@@ -435,6 +437,28 @@ export async function ensureBotRole(client: Client, guildId: string): Promise<Bo
   if (needsAssign) await me.roles.add(role, "AL AI assigns its own role on join.");
 
   return { roleId: role.id, created };
+}
+
+/**
+ * A one-line, actionable report for a failed role setup.
+ *
+ * `ensureBotRole` throws whatever Discord answered, and the common case — a
+ * guild that invited AL AI without MANAGE_ROLES — is `DiscordAPIError[50013]`.
+ * Printing that error object dumps a discord.js stack that names nothing the
+ * operator can act on, and it does so again on every boot. 50013 is therefore
+ * translated into the one thing they *can* do; anything else keeps Discord's
+ * own message and code, which is what makes an unfamiliar failure searchable.
+ */
+export function describeRoleFailure(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === 50013) {
+    return (
+      "Discord refused with 50013 (Missing Permissions): AL AI lacks «Manage Roles». " +
+      "Grant it in Server Settings → Roles → AL AI, or re-invite the bot with Administrator."
+    );
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return typeof code === "number" ? `Discord answered ${code}: ${message}` : message;
 }
 
 /**

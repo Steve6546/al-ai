@@ -83,15 +83,71 @@ function envNamesIn(source: string): string[] {
   return patterns.flatMap(pattern => [...withoutComments(source).matchAll(pattern)].map(match => match[1]));
 }
 
+/**
+ * The shell half of the contract.
+ *
+ * `boot.sh`, `setup.sh` and `run-linux-stack.sh` read the environment directly —
+ * `${AL_AI_HEAP_BOT:-96}` and friends — and no TypeScript pattern can see that.
+ * Five variables lived in exactly that blind spot (`AL_AI_LOG_DIR`,
+ * `AL_AI_HOST_STATE`, `AL_AI_RELAY_LISTEN_PORTS`, `AL_AI_RELAY_LISTEN_PORT`,
+ * `AL_AI_TUNNEL_HOST`): real, supported overrides that a fresh clone could not
+ * discover, while the check reported a clean bill of health.
+ *
+ * A shell script both *reads* and *assigns* names, so the reference alone proves
+ * nothing — `ROOT`, `STATE` and `LOG_DIR` are locals. The rule is therefore
+ * "referenced but never assigned in the same file", which is exactly what
+ * "supplied by the environment" means. Shell built-ins and POSIX variables are
+ * excluded because nothing can or should document them.
+ */
+const SHELL_REFERENCE = /\$\{?([A-Z_][A-Z0-9_]*)/g;
+const SHELL_ASSIGNMENT = /(?:^|[\s;(])(?:export\s+)?([A-Z_][A-Z0-9_]*)=/gm;
+const SHELL_SCOPE = /\b(?:local|declare|typeset)\s+(?:-\w+\s+)?([A-Z_][A-Z0-9_]*)/g;
+const SHELL_LOOP = /\bfor\s+([A-Z_][A-Z0-9_]*)\s+in\b/g;
+const SHELL_READ = /\bread\s+(?:-\w+\s+)*([A-Z_][A-Z0-9_]*)/g;
+
+/** Variables the shell or the OS provides; never ours to document. */
+const SHELL_BUILTINS = new Set([
+  "BASH_SOURCE", "BASH_VERSION", "BASH_REMATCH", "DIRSTACK", "EUID", "FUNCNAME",
+  "GROUPS", "HOME", "HOSTNAME", "IFS", "LANG", "LC_ALL", "LINENO", "OLDPWD",
+  "OSTYPE", "PATH", "PIPESTATUS", "PPID", "PWD", "RANDOM", "SECONDS", "SHELL",
+  "SHLVL", "TERM", "TMPDIR", "UID", "USER"
+]);
+
+function shellNamesIn(source: string): string[] {
+  const body = withoutComments(source);
+  const provided = new Set<string>();
+  for (const pattern of [SHELL_ASSIGNMENT, SHELL_SCOPE, SHELL_LOOP, SHELL_READ]) {
+    for (const match of body.matchAll(pattern)) provided.add(match[1]);
+  }
+  const referenced = [...body.matchAll(SHELL_REFERENCE)].map(match => match[1]);
+  return referenced.filter(name => !provided.has(name) && !SHELL_BUILTINS.has(name));
+}
+
 const scanRoots = ["apps/bot/src", "apps/bot/test", "apps/dashboard/server", "apps/dashboard/test", "packages/core/src", "scripts"];
 const read = new Map<string, string[]>();
 
+function record(name: string, path: string) {
+  const where = relative(repoRoot, path).replace(/\\/g, "/");
+  read.set(name, [...(read.get(name) ?? []), where]);
+}
+
 for (const root of scanRoots) {
   for (const path of sourceFiles(join(repoRoot, root))) {
-    for (const name of envNamesIn(readFileSync(path, "utf8"))) {
-      const where = relative(repoRoot, path).replace(/\\/g, "/");
-      read.set(name, [...(read.get(name) ?? []), where]);
-    }
+    for (const name of envNamesIn(readFileSync(path, "utf8"))) record(name, path);
+  }
+}
+
+function shellFiles(dir: string): string[] {
+  return readdirSync(dir).flatMap(entry => {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) return shellFiles(full);
+    return full.endsWith(".sh") ? [full] : [];
+  });
+}
+
+for (const root of ["scripts", "infra"]) {
+  for (const path of shellFiles(join(repoRoot, root))) {
+    for (const name of shellNamesIn(readFileSync(path, "utf8"))) record(name, path);
   }
 }
 

@@ -92,6 +92,7 @@ import {
   SESSION_COOKIE_NAMES
 } from "@al-ai/core";
 import { loadEnv } from "./env.js";
+import { checkRedirectRegistration } from "./oauth-preflight.js";
 import { elevateFirewall, ensureFirewall, firewallStatus } from "./firewall.js";
 import { isPlatformOwner } from "./authorization.js";
 import { createDatabase, createPool } from "./db.js";
@@ -4194,6 +4195,18 @@ try {
   await db.close().catch(() => undefined);
   process.exit(1);
 }
+
+/*
+ * Is the callback this deployment will send one Discord actually knows?
+ *
+ * Runs once, after the port is open, and never blocks or fails the boot: the
+ * answer is a warning, because a deployment that cannot sign anyone in is still
+ * a deployment the operator needs to reach in order to fix it. This is the only
+ * place the mismatch is visible before a browser hits Discord's error page.
+ */
+void checkRedirectRegistration({ botToken: env.botToken, redirectUri: env.redirectUri }).then(warning => {
+  if (warning) app.log.warn({ redirectUri: env.redirectUri }, warning);
+});
 
 /**
  * Graceful shutdown.

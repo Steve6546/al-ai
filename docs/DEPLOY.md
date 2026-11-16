@@ -113,6 +113,26 @@ ceilings, the backup retention and the log caps — is Section 1 or Section 3 of
 If an operator ever has a real database, setting `DATABASE_URL` skips the
 embedded cluster entirely: `boot.sh` starts no PostgreSQL and downloads nothing.
 
+### The Packages tab is not a dependency list
+
+The panel's **Packages** tab reads `/package.json` and lists what it finds. On
+this repository that is the workspace *root*, so it shows five **build-time**
+`devDependencies` — `axe-core`, `esbuild`, `knip`, `pgsql-ast-parser`,
+`typescript`. None of them is installed in the container: `setup.sh` runs
+`npm ci --omit=dev` for the two workspaces and the root installs nothing at all.
+
+Two consequences worth knowing before touching it:
+
+- An entry there does **not** mean the package is present, and a package the
+  bot or dashboard actually uses is **not** listed — the runtime dependencies
+  live in `apps/*/package.json`, which the tab does not read.
+- **Do not add or remove packages from that tab.** It edits the manifest (and
+  may leave the lockfile behind), and the next `setup.sh` then fails on
+  `npm ci` — which surfaces as a container that restarts with no dependencies
+  and a dashboard answering 502. Change dependencies in the workspace manifest,
+  commit `package.json` and `package-lock.json` together, and let
+  `npm run check:lock` catch a disagreement before it reaches the host.
+
 ## Disk growth
 
 The 512 MB disk is shared with `node_modules` (~84 MB), the PostgreSQL build
@@ -158,8 +178,17 @@ the client build (`tsx`, `fastify`, `pg`) is a runtime dependency.
    traffic, compared with `memory.max` (268435456).
 4. Data survives a restart: create a row through the dashboard, `power stop`,
    `power start`, read it again.
-5. OAuth: sign in from the public URL; the callback must return to the same
-   origin (`DISCORD_REDIRECT_URI`), not to `localhost`.
+5. OAuth — two steps, and the first is the one that actually breaks:
+   - `node scripts/oauth-preflight.mjs` must print `REGISTERED` for
+     `DISCORD_REDIRECT_URI` and exit 0. Discord matches the callback
+     byte-for-byte, and **the API reads that list but cannot write it**: a
+     `PATCH /applications/@me` carrying `redirect_uris` returns 200 and changes
+     nothing, so the Developer Portal is the only place to add a missing entry.
+     The dashboard checks this once at boot and logs a warning naming the exact
+     URI when its own callback is not registered — that warning means sign-in
+     is already broken, not that it is about to be.
+   - then sign in from the public URL; the callback must return to the same
+     origin (`DISCORD_REDIRECT_URI`), not to `localhost`.
 6. Bot: one slash command round-trip, and `deployments_logs` for the gateway's
    ready line.
 7. Auto-pull: push a no-op commit, restart, confirm `git log -1` matches.

@@ -51208,6 +51208,36 @@ function loadEnv() {
   };
 }
 
+// apps/dashboard/server/oauth-preflight.ts
+var DISCORD_API = "https://discord.com/api/v10";
+var USER_AGENT = "DiscordBot (https://github.com/Steve6546/al-ai, 0.1.0)";
+function redirectRegistrationWarning(registered, redirectUri) {
+  if (!registered) return null;
+  if (registered.includes(redirectUri)) return null;
+  const listed = registered.length ? registered.join(", ") : "(none)";
+  return `Discord has not registered this deployment's OAuth callback: ${redirectUri}. Sign-in fails with \xABInvalid OAuth2 redirect_uri\xBB until it is added in the Developer Portal \u2192 OAuth2 \u2192 Redirects (the API reads the list but cannot write it). Currently registered: ${listed}.`;
+}
+async function checkRedirectRegistration(input) {
+  if (!input.botToken) return null;
+  const doFetch = input.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? 5e3);
+  try {
+    const response = await doFetch(`${DISCORD_API}/applications/@me`, {
+      headers: { Authorization: `Bot ${input.botToken}`, "User-Agent": USER_AGENT },
+      signal: controller.signal
+    });
+    if (!response.ok) return null;
+    const application = await response.json();
+    const registered = Array.isArray(application.redirect_uris) ? application.redirect_uris.filter((value) => typeof value === "string") : null;
+    return redirectRegistrationWarning(registered, input.redirectUri);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // apps/dashboard/server/firewall.ts
 import { execFile, spawn } from "node:child_process";
 import { join } from "node:path";
@@ -57233,6 +57263,9 @@ try {
   await db.close().catch(() => void 0);
   process.exit(1);
 }
+void checkRedirectRegistration({ botToken: env.botToken, redirectUri: env.redirectUri }).then((warning) => {
+  if (warning) app.log.warn({ redirectUri: env.redirectUri }, warning);
+});
 async function shutdown(signal) {
   app.log.info({ signal }, "AL AI dashboard is shutting down");
   try {

@@ -9,6 +9,7 @@ import {
   buildInviteLeaderboardMessage,
   createDiscordClient,
   createPersonalInvite,
+  describeRoleFailure,
   dmGuildOwner,
   ensureBotRole,
   Events,
@@ -323,7 +324,7 @@ const dispatch = createDispatcher({
             : `AL AI role already present in ${name} (${result.roleId}).`
         )
       )
-      .catch(error => console.error(`AL AI could not create its role in ${name}`, error));
+      .catch(error => console.warn(`AL AI could not create its role in ${name} — ${describeRoleFailure(error)}`));
   }
 });
 
@@ -2494,7 +2495,7 @@ client.once(Events.ClientReady, async () => {
     // Guilds the bot was already in when it started still need their role, so the
     // same guarantee holds after a restart as after a fresh invite.
     await ensureBotRole(client, guild.id).catch(error =>
-      console.error(`AL AI could not ensure its role in ${guild.name}`, error)
+      console.warn(`AL AI could not ensure its role in ${guild.name} — ${describeRoleFailure(error)}`)
     );
 
     // GOVERNANCE rule 14: the privileged-intent budget is seeded from the real
