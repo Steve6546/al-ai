@@ -255,28 +255,7 @@ const app = Fastify({
     }
   },
   bodyLimit: REQUEST_BODY_LIMIT,
-  trustProxy: trustProxyOnlyLoopback,
-  // The bot posts a signed health snapshot every 30 s per guild; Fastify's
-  // automatic request logging turned each POST into two log lines, which is
-  // what filled dashboard.log. Automatic logging is off here and re-added
-  // below for every path except that one, so the console keeps full visibility
-  // into real traffic while the probes stay silent (they still return 200).
-  disableRequestLogging: true
-});
-
-const HEALTH_PROBE_PATH = "/internal/layer/health";
-app.addHook("onRequest", (request, _reply, done) => {
-  if (request.url !== HEALTH_PROBE_PATH) request.log.info({ req: request }, "incoming request");
-  done();
-});
-app.addHook("onResponse", (request, reply, done) => {
-  if (request.url !== HEALTH_PROBE_PATH) {
-    request.log.info(
-      { reqId: request.id, res: { statusCode: reply.statusCode }, responseTime: reply.elapsedTime },
-      "request completed"
-    );
-  }
-  done();
+  trustProxy: trustProxyOnlyLoopback
 });
 
 /**
@@ -855,7 +834,10 @@ app.get("/api/health", async (request): Promise<HealthSnapshot | Omit<HealthSnap
 });
 
 /** Called by the bot's supervisor. Signed, nonce-protected, never public. */
-app.post("/internal/layer/health", async (request, reply) => {
+// `logLevel: "silent"` suppresses the automatic request/response log lines for
+// the bot's signed health snapshot (two per guild every 30 s) without touching
+// logging for real traffic. The route still returns 200.
+app.post("/internal/layer/health", { logLevel: "silent" }, async (request, reply) => {
   if (!(await verifyLayerCall(request, reply))) return;
   const body = request.body as
     | { guildId?: string; state?: string; botPresent?: boolean; gatewayEvents?: number; uniqueUsers?: number }

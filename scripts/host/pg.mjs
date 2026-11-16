@@ -329,6 +329,41 @@ async function applySchema(secret) {
   throw lastError ?? new Error("schema could not be applied");
 }
 
+/**
+ * Remove a `postmaster.pid` left behind by a killed instance.
+ *
+ * A platform restart can SIGKILL the supervisor before PostgreSQL gets its
+ * `-m fast` stop, leaving the lock file behind. On the next boot the new
+ * postmaster then refuses to start ("lock file already exists") and the
+ * deployment crash-loops. After a container restart PIDs are recycled, so a
+ * live PID is not proof of a live cluster: the /proc cmdline must also name
+ * this data directory.
+ */
+function clearStalePostmasterPid() {
+  const pidFile = join(DATA, "postmaster.pid");
+  if (!existsSync(pidFile)) return;
+  const [pidLine, dirLine] = readFileSync(pidFile, "utf8").split("\n");
+  const pid = Number(pidLine);
+  if (dirLine && resolve(dirLine.trim()) !== resolve(DATA)) return; // a different cluster
+  let alive = false;
+  try {
+    process.kill(pid, 0);
+    alive = true;
+  } catch {
+    alive = false;
+  }
+  if (alive) {
+    try {
+      const cmd = readFileSync(`/proc/${pid}/cmdline`, "utf8");
+      if (cmd.includes("postgres") && cmd.includes(DATA)) return; // genuinely running
+    } catch {
+      return; // no /proc: cannot prove it stale, leave it alone
+    }
+  }
+  log(`removing stale postmaster.pid (pid ${pid})`);
+  rmSync(pidFile, { force: true });
+}
+
 async function main() {
   const secret = password();
   if (process.argv.includes("--print-url")) {
@@ -341,6 +376,7 @@ async function main() {
   ensurePasswdShim();
   if (!existsSync(PASSWORD_FILE) && !process.env.POSTGRES_PASSWORD) password();
   ensureCluster(secret);
+  clearStalePostmasterPid();
 
   log(`starting PostgreSQL on 127.0.0.1:${PORT}`);
   const child = spawn(join(BIN, "postgres"), [

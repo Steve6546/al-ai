@@ -54892,27 +54892,7 @@ var app = (0, import_fastify.default)({
     }
   },
   bodyLimit: REQUEST_BODY_LIMIT,
-  trustProxy: trustProxyOnlyLoopback,
-  // The bot posts a signed health snapshot every 30 s per guild; Fastify's
-  // automatic request logging turned each POST into two log lines, which is
-  // what filled dashboard.log. Automatic logging is off here and re-added
-  // below for every path except that one, so the console keeps full visibility
-  // into real traffic while the probes stay silent (they still return 200).
-  disableRequestLogging: true
-});
-var HEALTH_PROBE_PATH = "/internal/layer/health";
-app.addHook("onRequest", (request2, _reply, done) => {
-  if (request2.url !== HEALTH_PROBE_PATH) request2.log.info({ req: request2 }, "incoming request");
-  done();
-});
-app.addHook("onResponse", (request2, reply, done) => {
-  if (request2.url !== HEALTH_PROBE_PATH) {
-    request2.log.info(
-      { reqId: request2.id, res: { statusCode: reply.statusCode }, responseTime: reply.elapsedTime },
-      "request completed"
-    );
-  }
-  done();
+  trustProxy: trustProxyOnlyLoopback
 });
 var network = createNetworkManager({
   port: env.port,
@@ -55191,7 +55171,7 @@ app.get("/api/health", async (request2) => {
     verification: describeVerification({ guildCount, uniqueUsers })
   };
 });
-app.post("/internal/layer/health", async (request2, reply) => {
+app.post("/internal/layer/health", { logLevel: "silent" }, async (request2, reply) => {
   if (!await verifyLayerCall(request2, reply)) return;
   const body = request2.body;
   if (!body?.guildId) return reply.code(400).send({ error: "GUILD_ID_REQUIRED" });
