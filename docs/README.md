@@ -9,7 +9,7 @@
 | [SECURITY-AUDIT.md](SECURITY-AUDIT.md) | you need the full security audit: scope inspected, findings, applied fixes (secrets/env/Git/auth/2FA), measured verification results, and open decisions |
 | [BOOK.md](BOOK.md) | the illustrated operator guide (Arabic), with screenshots from `docs/images/` |
 | [BOT-HOSTING-MCP.md](BOT-HOSTING-MCP.md) | managed hosting evaluation (accepted path) |
-| [DEPLOY.md](DEPLOY.md) | you **deploy**: the host matrix, one start command, Bot-Hosting's free plan (one slot, embedded PostgreSQL), disk bounds, renewal, verification |
+| [DEPLOY.md](DEPLOY.md) | you **deploy**: the host matrix, one start command, Bot-Hosting's free plan (one slot, embedded PostgreSQL), disk bounds, renewal, verification, the Docker path with its PostgreSQL volume upgrade, and the development/production Discord application split |
 
 `.env.example` is the only list of environment variables — no document repeats
 it. `README.md` is the front door: setup, both portal guides, architecture map,

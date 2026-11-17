@@ -13,7 +13,7 @@
 | **المشغّل** |discord.js واحد، اتصال Gateway واحد، قفل نسخة واحدة، بودايم واحد موحّد |
 | **اللوحة** | Fastify BFF + واجهة React RTL؛ **لا يصل أي سرّ إلى المتصفّح** |
 | **العقد** | `packages/core`: مخطّط الأحداث، الصلاحيات، التشفير، سياسة الجلسة، تطبيع المظهر |
-| **البيانات** | PostgreSQL 17 على `55432`، 24 جدولاً، سجل تدقيق **إضافة فقط** مشفّر AES-256-GCM |
+| **البيانات** | PostgreSQL 17 على `55432`، 29 جدولاً، سجل تدقيق **إضافة فقط** مشفّر AES-256-GCM |
 
 الفصل: المتصفّح يتحدّث مع الـBFF فقط (كوكي `HttpOnly`)، والـBFF وحده هو من يتحدّث مع ديسكورد
 ويكتب في القاعدة. لا يلمس البوتُ اللوحة، ولا تمسّ اللوحةُ البوت.
@@ -53,7 +53,7 @@ apps/dashboard  ← اللوحة: الواجهة + الـBFF (منفصلان ف�
 packages/core   ← العقود المشتركة: مخطّط الأحداث، الصلاحيات، التشفير، الجلسة
 infra           ← ملفات Docker، docker-compose، ومخطّط قاعدة البيانات
 scripts         ← أدوات التشغيل والتحقق (PowerShell + Node)
-docs            ← هذا الكتاب + [GOVERNANCE.md](GOVERNANCE.md) (٢٧ قاعدة)
+docs            ← هذا الكتاب + [GOVERNANCE.md](GOVERNANCE.md) (٢٩ قاعدة)
 ```
 
 **قاعدة الفصل:** `core` لا يستورد إلا `node:crypto`؛ الواجهة لا تصل إلى البوت ولا إلى الخادم؛
@@ -231,11 +231,11 @@ docs            ← هذا الكتاب + [GOVERNANCE.md](GOVERNANCE.md) (٢٧ �
 
 ## 7. قاعدة البيانات
 
-24 جدولاً، مخطّط **إضافي فقط** (كل `CREATE TABLE IF NOT EXISTS` و`ADD COLUMN IF NOT EXISTS`)، وكتابة
+29 جدولاً، مخطّط **إضافي فقط** (كل `CREATE TABLE IF NOT EXISTS` و`ADD COLUMN IF NOT EXISTS`)، وكتابة
 واحدة: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` في `infra/schema.sql`.
 
 الفحص المعتمد **قاعدة جديدة من الصفر** + **ترقية قاعدة قائمة**:
-- قاعدة جديدة ⇒ نفس البنية تماماً (٢٤ جدولاً، كل الأعمدة).
+- قاعدة جديدة ⇒ نفس البنية تماماً (٢٩ جدولاً، كل الأعمدة).
 - قاعدة قديمة + بيانات ⇒ الترقية تضيف العمود وتحفظ الصفوف ولا تخترع قيمًا.
 - التطبيق مراراً ⇒ لا تغيير (idempotent).
 
@@ -305,7 +305,7 @@ npm run deploy -- --port 3001 # خادم على منفذ غير الافتراض
 | `npm run db:verify` | اتصال مصدَّق + استعلام حقيقي | <1s |
 
 **ما لا تكشفه الاختبارات** هو في `.workbuddy-ai/memory/` (قواعد التشغيل)، وفي
-`docs/GOVERNANCE.md` (٢٧ قاعدة مُفروضة باختبار).
+`docs/GOVERNANCE.md` (٢٩ قاعدة مُفروضة باختبار).
 
 ---
 
@@ -343,4 +343,4 @@ npm run deploy -- --port 3001 # خادم على منفذ غير الافتراض
 | `scripts/*.mjs` | `verify-db` · `ui-check` · `oauth-check` · `load-check` · **`deploy`** |
 | `scripts/run-linux-stack.sh` | مُشغّل Linux (dockerd → postgres → لوحة → جسر → بوت) |
 | `scripts/linux/port-forward.mjs` | جسر loopback: منفذ أو قائمة منافذ بعملية واحدة |
-| `docs/GOVERNANCE.md` | ٢٧ قاعدة |
+| `docs/GOVERNANCE.md` | ٢٩ قاعدة |

@@ -50,7 +50,7 @@ appearance normalisation, command registry, anti-nuke limits.
 | `apps/dashboard/src/views` | one screen per feature | `settings/*`, `account-settings.tsx`, `security.tsx` |
 | `apps/dashboard/src/components` | shell + UI primitives | `app-shell.tsx`, `status-picker.tsx`, `components/ui/*` |
 | `apps/dashboard/src/api/client.ts` | all browser HTTP | single entry point, no token ever |
-| `apps/dashboard/server/index.ts` | Fastify route registration | 64 routes; guards and services are separate modules |
+| `apps/dashboard/server/index.ts` | Fastify route registration | 67 routes; guards and services are separate modules |
 | `apps/dashboard/server` | security / data / integration | `authorization.ts`, `guild-access.ts`, `db.ts`, `appearance.ts`, `discord.ts`, `network.ts`, `env.ts`, `cache.ts` |
 | `apps/bot/src/lib/discord.ts` | Gateway client, embeds, slash builders, event binding | deliberately the only `discord.js` importer |
 | `apps/bot/src` | pipeline, anti-nuke, levels, welcome, commands, storage | `events/`, `logging/`, `punishments/`, `security/`, `storage/` |
@@ -68,13 +68,13 @@ The remaining large modules are **not** split yet, on purpose:
 
 | File | LOC | Why a mechanical split is not yet safe |
 |---|---|---|
-| `apps/dashboard/server/index.ts` | 4,200 | mutable top-level `app`/`pool`/`db`/`network`; three tests read the file as raw text |
-| `apps/bot/src/lib/discord.ts` | 2,940 | governance pins `discord.js` to this exact path and `sendLogEmbed`/`applyBotPresence`/`setNickname` to it |
-| `apps/bot/src/index.ts` | 2,761 | mutable cooldown/cache state; two tests scan the file textually |
+| `apps/dashboard/server/index.ts` | 4,322 | mutable top-level `app`/`pool`/`db`/`network`; three tests read the file as raw text |
+| `apps/bot/src/lib/discord.ts` | 2,988 | governance pins `discord.js` to this exact path and `sendLogEmbed`/`applyBotPresence`/`setNickname` to it |
+| `apps/bot/src/index.ts` | 2,762 | mutable cooldown/cache state; two tests scan the file textually |
 | `apps/dashboard/src/views/settings/levels.tsx` | 1,720 | hook-bearing parts; render/mount tests catch hook-order regressions |
-| `apps/dashboard/server/db.ts` | 1,513 | one cohesive repository layer |
-| `apps/bot/src/storage/database.ts` | 1,322 | one cohesive repository layer |
-| `apps/dashboard/server/network.ts` | 1,403 | one cohesive state machine |
+| `apps/dashboard/server/db.ts` | 1,515 | one cohesive repository layer |
+| `apps/bot/src/storage/database.ts` | 1,323 | one cohesive repository layer |
+| `apps/dashboard/server/network.ts` | 1,425 | one cohesive state machine |
 
 Split these incrementally, one module at a time, with a green `npm run verify`
 after each. A big-bang split would break path-pinned textual tests, the
@@ -96,3 +96,77 @@ once, leaving no bisectable diff.
   See `docs/DEPLOYMENT.md` and `.workbuddy-ai/memory/RULES-NGROK.md`.
 - **Memory ceiling:** all tests go through `scripts/test-runner.mjs` (two
   workers, ≤768 MiB heap each). See `docs/DEPLOYMENT.md`.
+
+## Adding a service, a workspace or a host
+
+The repository is wired by three enforced gates. Anything added has to satisfy
+them rather than bypass them:
+
+| Gate | What it enforces | Source |
+| --- | --- | --- |
+| `npm run check:lock` | every manifest appears in `package-lock.json`; the root declares no runtime dependencies | `scripts/check-lockfile-sync.mjs` |
+| `env-template.test.ts` | every variable the code reads is documented in `.env.example` (the only list) | `apps/bot/test/` |
+| `governance.test.ts` | layering, rule numbers, the single `discord.js` importer | `apps/bot/test/` |
+
+**A new workspace** (`packages/*` or `apps/*`):
+
+1. `package.json` with `name`, `private: true`, `type: module`, and the three
+   scripts the root fans out to: `build`, `lint`/`typecheck`, and `test` — the
+   last is `node ../../scripts/test-runner.mjs test/*.test.ts`, never
+   `node --test` directly: the runner caps workers and heap, and a raw run is
+   what OOM-kills this machine.
+2. `tsconfig.json` mirroring `packages/core/tsconfig.json`. TypeScript 7 dropped
+   `baseUrl`, so cross-package imports go through `paths` and the package's own
+   `exports` map.
+3. One `npm install` at the root — a nested lockfile is the two-live-copies bug
+   — then `npm run check:lock`.
+4. If it is a long-running service, add it to `TARGETS` in
+   `scripts/build-host.mjs` and to `scripts/host/boot.sh`, with a named heap
+   ceiling and `tee -a` into `.al-ai-host/logs/`. Native or optional modules go
+   in that script's `EXTERNAL` list so the bundle stays one file.
+
+**A new service or background job:** one start line in `boot.sh` (heap ceiling,
+log file), one health endpoint, and a listen order that fails loudly before the
+first request. Nothing is scheduled locally: the host's own supervisor restarts
+processes, and a Windows task or hidden loop is a second supervisor that fights
+it.
+
+**A new host:** add a row to the matrix in `DEPLOY.md`, then satisfy three
+things — a persistent volume mounted at the repository root (the embedded
+PostgreSQL lives in `.al-ai-pg/`, the import fingerprint in `.al-ai-host/`),
+outbound HTTPS for `npm ci` and the Discord API, and the ability to run
+`bash scripts/host/boot.sh`. Register that host's `/auth/discord/callback` in
+whichever application the deployment uses, then run
+`node --env-file=.env scripts/oauth-preflight.mjs --origin https://<host>` and
+require exit 0 before calling the deployment live.
+
+## Presence: one writer, three wake-up paths
+
+The bot's status and activity live on the gateway, so the dashboard can only
+*store* them. `apps/dashboard/server/db.ts` writes the single `bot_identity` row
+and then runs `NOTIFY al_ai_presence`; the bot holds one `LISTEN` connection
+(`watchPresence`) and applies the row the moment the notification arrives, so a
+status click reaches Discord in milliseconds instead of waiting for a tick.
+
+Two other paths exist, and each covers a case the notification cannot:
+
+| Path | Trigger | Why it exists |
+|---|---|---|
+| `NOTIFY` | dashboard save | the fast path; no polling at all |
+| one-shot timer | `statusExpiresAt` reached | a timed status must revert on its own instant, not up to a tick late |
+| 60 s fallback tick | always | a dropped LISTEN connection or a row written by another tool still lands |
+
+A duration is stored as the operator's choice (`statusDuration`) plus the
+instant it lapses (`statusExpiresAt`, derived server-side from the duration —
+never from a client clock). The reader applies `effectiveBotStatus`, so an
+elapsed window reads as `online` without rewriting the stored row: reopening the
+screen still shows what was picked.
+
+Durations shipped: 15 m · 30 m · 1 h · 8 h · 24 h · 3 d · forever, for the three
+statuses Discord times (`idle`, `dnd`, `invisible`). The database CHECK lists the
+same ids — a set the schema does not know about fails at write time with
+`23514`, which is exactly how the missing `30m` was caught.
+
+An empty activity text means **no activity** (`activities: []`), not a default:
+the field's own hint promises it, and `applyBotPresence` already sent an empty
+list for it.

@@ -8568,7 +8568,7 @@ var require_transport = __commonJS({
   "node_modules/pino/lib/transport.js"(exports, module) {
     "use strict";
     var { createRequire } = __require("module");
-    var { existsSync } = __require("node:fs");
+    var { existsSync: existsSync2 } = __require("node:fs");
     var getCallers = require_caller();
     var { join: join4, isAbsolute, sep } = __require("node:path");
     var { fileURLToPath: fileURLToPath2 } = __require("node:url");
@@ -8642,7 +8642,7 @@ var require_transport = __commonJS({
           return false;
         }
       }
-      return isAbsolute(path) && !existsSync(path);
+      return isAbsolute(path) && !existsSync2(path);
     }
     function stripQuotes(value) {
       const first = value[0];
@@ -49611,6 +49611,7 @@ function isTimedBotStatus(value) {
 }
 var botStatusDurations = [
   { id: "15m", minutes: 15, label: "\u0644\u0645\u062F\u0629 15 \u062F\u0642\u064A\u0642\u0629" },
+  { id: "30m", minutes: 30, label: "\u0644\u0645\u062F\u0629 30 \u062F\u0642\u064A\u0642\u0629" },
   { id: "1h", minutes: 60, label: "\u0644\u0645\u062F\u0629 \u0633\u0627\u0639\u0629" },
   { id: "8h", minutes: 480, label: "\u0644\u0645\u062F\u0629 8 \u0633\u0627\u0639\u0627\u062A" },
   { id: "24h", minutes: 1440, label: "\u0644\u0645\u062F\u0629 24 \u0633\u0627\u0639\u0629" },
@@ -49628,7 +49629,6 @@ function durationToMs(duration) {
 var activityTypes = ["playing", "listening", "watching", "competing"];
 var DEFAULT_ACTIVITY_TYPE = "playing";
 var MAX_ACTIVITY_TEXT_LENGTH = 128;
-var DEFAULT_ACTIVITY_TEXT = "\u0633\u064A\u0631\u0641\u0631\u0627\u062A \u062F\u064A\u0633\u0643\u0648\u0631\u062F";
 var MAX_BIO_LENGTH = 300;
 var MAX_IMAGE_UPLOAD_BYTES = 2e6;
 var MAX_IMAGE_DATA_URL_LENGTH = Math.ceil(MAX_IMAGE_UPLOAD_BYTES / 3 * 4) + 64;
@@ -52190,6 +52190,7 @@ function createDatabase(pool2) {
                updated_at = now()`,
         [settings.status, settings.activityType, settings.activityText, settings.statusDuration, settings.statusExpiresAt]
       );
+      await pool2.query("NOTIFY al_ai_presence").catch(() => void 0);
     },
     async getLogging(guildId) {
       const { rows } = await pool2.query(
@@ -53723,10 +53724,14 @@ function checkWelcomeChannels(settings, ids, options) {
 
 // apps/dashboard/server/network.ts
 import { execFile as execFile2, spawn as spawn2 } from "node:child_process";
-import { closeSync, openSync, readFileSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, statSync } from "node:fs";
 import { join as join2 } from "node:path";
 import { networkInterfaces } from "node:os";
 import { promisify as promisify2 } from "node:util";
+function isHostedRuntime(signals) {
+  if (signals.platformHost) return true;
+  return Boolean(signals.dockerMarker || signals.containerMarker);
+}
 function lanHostsFrom(interfaces) {
   const hosts = [];
   for (const entries2 of Object.values(interfaces)) {
@@ -54013,6 +54018,11 @@ async function waitForGone(pid, timeoutMs = 5e3) {
 function createNetworkManager(input) {
   const retryDelaysMs = input.retryDelaysMs ?? TUNNEL_RETRY_DELAYS_MS;
   const platformHost = input.platformHost ?? null;
+  const hosted = isHostedRuntime({
+    platformHost,
+    dockerMarker: existsSync("/.dockerenv"),
+    containerMarker: existsSync("/run/.containerenv")
+  });
   let mode = "off";
   let tunnelUrl = null;
   let tunnelStatus = "off";
@@ -54023,7 +54033,7 @@ function createNetworkManager(input) {
   let verifiedOrigin = null;
   let startAttempts = 0;
   let retryTimer = null;
-  const machineHosts = () => lanHostsFrom(networkInterfaces());
+  const machineHosts = () => hosted ? [] : lanHostsFrom(networkInterfaces());
   const ngrokPath = resolveNgrokPath();
   const tunnelGateHost = () => tunnelHostForGate(tunnelUrl, domain);
   function isOriginAllowed(origin) {
@@ -54322,7 +54332,7 @@ function createNetworkManager(input) {
     });
   }
   function ensureReachFirewall() {
-    if (mode === "off") return;
+    if (hosted || mode === "off") return;
     void ensureFirewall(input.port).then((report) => {
       if (report.status !== "allowed") {
         input.log.warn(
@@ -54334,8 +54344,10 @@ function createNetworkManager(input) {
   }
   function snapshot() {
     const stable = Boolean(domain && tunnelUrl && new URL(tunnelUrl).hostname === domain);
-    const interfaces = networkInterfaces();
+    const interfaces = hosted ? {} : networkInterfaces();
     return {
+      hosted,
+      publicUrl: hosted && platformHost ? `https://${platformHost}` : null,
       mode,
       tunnelProvider: "ngrok",
       tunnelUrl,
@@ -54399,7 +54411,7 @@ function createNetworkManager(input) {
   function tunnelOrigin() {
     return mode === "tunnel" && tunnelUrl ? tunnelUrl : null;
   }
-  return { boot, applyReach, snapshot, probe: probeTunnel, markOriginVerified, isHostAllowed: isHostAllowedNow, isOriginAllowed, tunnelOrigin, stop };
+  return { boot, applyReach, snapshot, probe: probeTunnel, markOriginVerified, isHostAllowed: isHostAllowedNow, isOriginAllowed, tunnelOrigin, stop, isHosted: () => hosted };
 }
 
 // apps/dashboard/server/appearance.ts
@@ -55358,6 +55370,9 @@ function networkSnapshot() {
   const bound = address && typeof address !== "string" ? address : null;
   const port = bound?.port ?? env.port;
   const base = network.snapshot();
+  if (base.hosted) {
+    return { ...base, port, boundHost: bound?.address ?? null, lanEnabled: false, lanUrls: [] };
+  }
   return {
     ...base,
     port,
@@ -55370,6 +55385,10 @@ function networkSnapshot() {
     }))
   };
 }
+var HOSTED_NETWORK_REFUSAL = {
+  error: "HOSTED_NETWORK",
+  message: "\u0647\u0630\u0627 \u0627\u0644\u0646\u0634\u0631 \u0645\u0633\u062A\u0636\u0627\u0641: \u0627\u0644\u0631\u0627\u0628\u0637 \u0627\u0644\u0639\u0627\u0645 \u0648\u0627\u0644\u0648\u0635\u0648\u0644 \u062A\u062F\u064A\u0631\u0647\u0645\u0627 \u0627\u0644\u0645\u0646\u0635\u0651\u0629\u060C \u0648\u0644\u0627 \u064A\u0648\u062C\u062F \u0646\u0641\u0642 \u0645\u062D\u0644\u064A \u0623\u0648 \u062C\u062F\u0627\u0631 \u062D\u0645\u0627\u064A\u0629 \u0647\u0646\u0627."
+};
 app.get("/api/network", async (request2, reply) => {
   if (!await requirePlatformOwner(request2, reply)) return;
   network.probe();
@@ -55391,6 +55410,7 @@ app.put("/api/network", async (request2, reply) => {
     });
   }
   const current = network.snapshot();
+  if (current.hosted) return reply.code(409).send(HOSTED_NETWORK_REFUSAL);
   const next = normaliseRemoteAccessMode(body?.mode);
   const modeChanging = next !== current.mode;
   const domainChanging = hasDomain && nextDomain !== current.tunnelDomain;
@@ -55424,11 +55444,13 @@ function dashboardPort() {
 }
 app.get("/api/network/firewall", async (request2, reply) => {
   if (!await requirePlatformOwner(request2, reply)) return;
+  if (network.isHosted()) return reply.code(409).send(HOSTED_NETWORK_REFUSAL);
   return firewallStatus(dashboardPort());
 });
 app.post("/api/network/firewall", async (request2, reply) => {
   const session = await requirePlatformOwner(request2, reply);
   if (!session) return;
+  if (network.isHosted()) return reply.code(409).send(HOSTED_NETWORK_REFUSAL);
   const body = request2.body;
   const port = dashboardPort();
   if (body?.elevate === true) {
@@ -56670,7 +56692,7 @@ app.put("/api/bot/presence", async (request2, reply) => {
       message: `\u0646\u0635 \u0627\u0644\u0646\u0634\u0627\u0637 \u064A\u062C\u0628 \u0623\u0644\u0627 \u064A\u062A\u062C\u0627\u0648\u0632 ${MAX_ACTIVITY_TEXT_LENGTH} \u062D\u0631\u0641\u0627\u064B.`
     });
   }
-  const activityText = rawActivity.length > 0 ? rawActivity : DEFAULT_ACTIVITY_TEXT;
+  const activityText = rawActivity;
   const previous = await db.getBotPresence();
   const next = normaliseBotPresence({
     // Fields absent from the body keep their stored value, so a PUT that

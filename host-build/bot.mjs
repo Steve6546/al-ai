@@ -82515,6 +82515,7 @@ function isTimedBotStatus(value) {
 }
 var botStatusDurations = [
   { id: "15m", minutes: 15, label: "\u0644\u0645\u062F\u0629 15 \u062F\u0642\u064A\u0642\u0629" },
+  { id: "30m", minutes: 30, label: "\u0644\u0645\u062F\u0629 30 \u062F\u0642\u064A\u0642\u0629" },
   { id: "1h", minutes: 60, label: "\u0644\u0645\u062F\u0629 \u0633\u0627\u0639\u0629" },
   { id: "8h", minutes: 480, label: "\u0644\u0645\u062F\u0629 8 \u0633\u0627\u0639\u0627\u062A" },
   { id: "24h", minutes: 1440, label: "\u0644\u0645\u062F\u0629 24 \u0633\u0627\u0639\u0629" },
@@ -85630,6 +85631,42 @@ function createBotDatabase(databaseUrl2) {
      * banner, bio, role appearance — is on `guild_customization` and written by
      * the dashboard over REST.
      */
+    /**
+     * Wake the presence sync the instant the dashboard saves a new row.
+     *
+     * The bot is the only process that can call `setPresence`, and it lives in
+     * the same container as the BFF, so the shortest honest path between them is
+     * PostgreSQL's own notification channel: the dashboard runs `NOTIFY
+     * al_ai_presence` after its upsert, and this holds one connection on the
+     * bot's own pool as a listener. That is an event, not a poll, and it costs
+     * one of the pool's four slots while it runs.
+     *
+     * The returned function stops the listener. A dropped connection is not
+     * fatal: the caller keeps its fallback tick, so a status still lands a
+     * minute later rather than never. The notification payload is deliberately
+     * ignored — the row is re-read through `normaliseBotPresence`, so a
+     * notification can never make the bot apply something the database does not
+     * actually hold.
+     */
+    async watchPresence(onChange) {
+      const listener = await pool.connect();
+      try {
+        await listener.query("LISTEN al_ai_presence");
+      } catch (error) {
+        listener.release();
+        throw error;
+      }
+      const handler = () => onChange();
+      listener.on("notification", handler);
+      let stopped = false;
+      return async () => {
+        if (stopped) return;
+        stopped = true;
+        listener.removeListener("notification", handler);
+        await listener.query("UNLISTEN al_ai_presence").catch(() => void 0);
+        listener.release();
+      };
+    },
     async loadBotIdentity() {
       const { rows } = await pool.query(`SELECT status, activity_type, activity_text, status_duration, status_expires_at FROM bot_identity WHERE id = true`);
       const row = rows[0];
@@ -87859,8 +87896,9 @@ function createPresenceSync(deps) {
     /** Applies whatever changed. Safe to call repeatedly. */
     async run() {
       let desired;
+      let identity;
       try {
-        const identity = normaliseBotPresence(await deps.loadIdentity());
+        identity = normaliseBotPresence(await deps.loadIdentity());
         desired = {
           // The *effective* status, not the stored one. A timed `dnd` whose
           // window has closed must read as `online` — that is the whole point of
@@ -87872,15 +87910,17 @@ function createPresenceSync(deps) {
         };
       } catch (error) {
         deps.onError?.(error);
-        return;
+        return null;
       }
+      deps.onApplied?.(identity);
       const key = keyOf(desired);
-      if (applied === key) return;
+      if (applied === key) return identity;
       const ok = await deps.applyPresence(desired).catch((error) => {
         deps.onError?.(error);
         return false;
       });
       if (ok) applied = key;
+      return identity;
     },
     /** Exposed for tests and for the shutdown path. */
     applied() {
@@ -90254,12 +90294,33 @@ if (adapter) {
 } else {
   console.log('AL AI integration adapter is off (INTEGRATION_ADAPTER_ENABLED is not "true"); the instance lock alone guards this instance.');
 }
+var presenceExpiryTimer = null;
+var presenceExpiryTarget = null;
+function schedulePresenceExpiry(identity) {
+  const expires = identity.statusExpiresAt ? Date.parse(identity.statusExpiresAt) : Number.NaN;
+  if (!Number.isFinite(expires) || expires <= Date.now()) return;
+  if (presenceExpiryTarget === expires && presenceExpiryTimer) return;
+  if (presenceExpiryTimer) clearTimeout(presenceExpiryTimer);
+  presenceExpiryTarget = expires;
+  const delay = Math.min(expires - Date.now() + 500, 2147483e3);
+  presenceExpiryTimer = setTimeout(() => {
+    presenceExpiryTimer = null;
+    presenceExpiryTarget = null;
+    void presence.run();
+  }, delay);
+  presenceExpiryTimer.unref?.();
+}
 var presence = createPresenceSync({
   loadIdentity: () => database.loadBotIdentity(),
   applyPresence: (value) => applyBotPresence(client, value),
+  onApplied: schedulePresenceExpiry,
   onError: (error) => console.error("AL AI could not apply the presence", error)
 });
-var presenceTimer = setInterval(() => void presence.run(), 15e3);
+var stopPresenceWatch = await database.watchPresence(() => void presence.run()).catch((error) => {
+  console.warn("AL AI presence listener unavailable; the fallback tick still applies the status", error);
+  return null;
+});
+var presenceTimer = setInterval(() => void presence.run(), 6e4);
 presenceTimer.unref?.();
 var shuttingDown = false;
 async function shutdown(signal) {
@@ -90271,6 +90332,8 @@ async function shutdown(signal) {
   clearInterval(securityProbe);
   clearInterval(presenceTimer);
   clearInterval(downSweep);
+  if (presenceExpiryTimer) clearTimeout(presenceExpiryTimer);
+  await stopPresenceWatch?.().catch(() => void 0);
   await adapter?.close().catch(() => void 0);
   const flushed = await pipeline.flush(5e3);
   if (!flushed) console.warn("AL AI shutdown with undelivered log jobs.");

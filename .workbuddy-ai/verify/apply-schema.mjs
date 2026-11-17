@@ -17,17 +17,33 @@ import { readFileSync } from "node:fs";
 
 const dryRun = process.argv.includes("--dry-run");
 
-const env = Object.fromEntries(
-  readFileSync(".env", "utf8")
-    .split(/\r?\n/)
-    .filter(line => line && !line.startsWith("#") && line.includes("="))
-    .map(line => {
-      const at = line.indexOf("=");
-      return [line.slice(0, at).trim(), line.slice(at + 1).trim()];
-    })
-);
+const env = (() => {
+  try {
+    return Object.fromEntries(
+      readFileSync(".env", "utf8")
+        .split(/\r?\n/)
+        .filter(line => line && !line.startsWith("#") && line.includes("="))
+        .map(line => {
+          const at = line.indexOf("=");
+          return [line.slice(0, at).trim(), line.slice(at + 1).trim()];
+        })
+    );
+  } catch {
+    // A hosted deployment has no `.env` file at all: its variables arrive in the
+    // process environment (boot.sh exports DATABASE_URL itself). Read the file
+    // when it exists and fall through to the environment otherwise, so the same
+    // command applies the schema on a workstation and on the host.
+    return {};
+  }
+})();
 
-const db = new Client({ connectionString: env.DATABASE_URL });
+const databaseUrl = process.env.DATABASE_URL || env.DATABASE_URL;
+if (!databaseUrl) {
+  console.error("no DATABASE_URL: set it in the environment or in .env");
+  process.exit(2);
+}
+
+const db = new Client({ connectionString: databaseUrl });
 await db.connect();
 
 const before = await db.query(

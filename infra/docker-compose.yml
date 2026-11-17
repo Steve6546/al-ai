@@ -1,6 +1,13 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # PostgreSQL 17 is the version the schema is applied to from scratch
+    # (`.workbuddy-ai/verify/fresh-schema-check.mjs`) and the one the local
+    # cluster runs, so a Compose stack exercises the same server the tests do.
+    # The hosted deployment embeds PostgreSQL 18 through `scripts/host/pg.mjs`;
+    # 16 was a third, never-tested version and is gone. Stay on 17 or 18: 18's
+    # official image moved PGDATA to `/var/lib/postgresql/18/docker`, so the
+    # volume below would have to move with it.
+    image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: al_ai

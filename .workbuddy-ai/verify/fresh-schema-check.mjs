@@ -6,6 +6,14 @@
  * one already has the columns the new statements are supposed to add.
  *
  *   node .workbuddy-ai/verify/fresh-schema-check.mjs
+ *
+ * `DATABASE_URL`'s role must be allowed to CREATE DATABASE. The usual .env
+ * role (`al_ai_app`) is not, and the server answers 42501 instead of saying
+ * so; set `FRESH_DB_URL` to a connection for a role that can, without editing
+ * `.env`:
+ *
+ *   FRESH_DB_URL='postgresql://al_ai:<password>@localhost:55432/postgres' \
+ *     node .workbuddy-ai/verify/fresh-schema-check.mjs
  */
 
 import { Client } from "pg";
@@ -22,8 +30,12 @@ const env = Object.fromEntries(
 );
 
 const PROBE = "al_ai_probe";
+// The probe database is created and dropped, so the role has to be allowed to
+// CREATE DATABASE; the app role deliberately is not. FRESH_DB_URL is the
+// override that keeps `.env` untouched.
+const adminUrl = process.env.FRESH_DB_URL || env.DATABASE_URL;
 
-const admin = new Client({ connectionString: env.DATABASE_URL });
+const admin = new Client({ connectionString: adminUrl });
 await admin.connect();
 const live = (await admin.query("select current_database() as name")).rows[0].name;
 
@@ -31,9 +43,20 @@ const live = (await admin.query("select current_database() as name")).rows[0].na
 if (PROBE === live) throw new Error("the probe name collides with the live database");
 
 await admin.query(`DROP DATABASE IF EXISTS ${PROBE}`);
-await admin.query(`CREATE DATABASE ${PROBE}`);
+try {
+  await admin.query(`CREATE DATABASE ${PROBE}`);
+} catch (error) {
+  await admin.end();
+  if (error?.code === "42501") {
+    throw new Error(
+      "this role cannot CREATE DATABASE (42501): re-run with FRESH_DB_URL pointing at a role that can " +
+        "(the local cluster's `al_ai` superuser works), e.g. FRESH_DB_URL=postgresql://al_ai:<password>@localhost:55432/postgres"
+    );
+  }
+  throw error;
+}
 
-const url = new URL(env.DATABASE_URL);
+const url = new URL(adminUrl);
 url.pathname = `/${PROBE}`;
 const probe = new Client({ connectionString: url.toString() });
 await probe.connect();

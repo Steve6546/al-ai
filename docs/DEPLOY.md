@@ -201,6 +201,105 @@ it needs a person. The account banner states the deletion deadline while the
 deployment is suspended. Renewing during grace restores the same deployment,
 volume and database — nothing is re-installed.
 
+## Docker: what compose runs, and moving a PostgreSQL 16 volume to 17
+
+`infra/docker-compose.yml` is the alternative target in the matrix above: three
+services (postgres, dashboard, bot), one volume, `npm ci` inside each image. It
+is not the measured path — nothing in this document was benchmarked on Docker —
+so treat it as a convenience deployment, not as a proven one.
+
+- **`postgres:17-alpine`.** 17 is the major version `infra/schema.sql` is applied
+to from scratch on every verification run (`.workbuddy-ai/verify/fresh-schema-check.mjs`);
+the hosted deployment embeds 18 through `scripts/host/pg.mjs`.
+- **Do not switch this file to the 18 image without moving the volume.** From 18
+  on, the official image sets `PGDATA=/var/lib/postgresql/18/docker` and
+  `VOLUME /var/lib/postgresql`; the mount below would land where the server does
+  not look, and the container would initialise an empty cluster inside the image
+  layer instead of failing. 16 and 17 both use `/var/lib/postgresql/data` and the
+  same `PGDATA`, which is why this file moves between them without touching the
+  volume line.
+
+### Moving an existing 16 volume to 17 (no data loss)
+
+A data directory belongs to the major version that created it. Measured: a
+cluster initialised by 16 and started with 17 refuses to start —
+`FATAL: database files are incompatible with server … initialized by PostgreSQL
+version 16` — and leaves every file untouched. That is fail-closed, not
+corruption, but the stack stays down until it is upgraded.
+
+```bash
+# The volume is named after the Compose project (the checkout's directory name):
+# `<project>_postgres-data`. `docker volume ls` prints the real spelling.
+
+# 1. Dump with the OLD server. The 17 image refuses the 16 directory, and
+#    `docker compose down` keeps the volume, so dump from a one-off container.
+docker run --rm -v <project>_postgres-data:/var/lib/postgresql/data postgres:16-alpine \
+  pg_dumpall -U al_ai > al-ai-pg16.sql
+
+# 2. Restore into a NEW, empty volume.
+docker volume create <project>_postgres-data-17
+docker run --rm -i -v <project>_postgres-data-17:/var/lib/postgresql/data postgres:17-alpine \
+  psql -U al_ai -d postgres -f - < al-ai-pg16.sql
+
+# 3. Point the volume line at the new volume, then bring the stack up.
+```
+
+`pg_upgrade` inside a `postgres:17` container is the alternative when the
+database is too large to dump; it needs both binaries and a stopped server.
+
+The application-level path was the one measured here, and it restores into an
+empty database with the schema applied by the importer itself:
+
+```bash
+AL_AI_BACKUP_DIR=/tmp/al-ai node --env-file=.env scripts/db-export.mjs
+DATABASE_URL=postgresql://…/al_ai_fresh node scripts/db-import.mjs /tmp/al-ai/db-*.json.gz
+# restored 518 rows across 29 tables; all 29 tables matched the source
+# row-for-row, 19 foreign keys and 276 columns on both sides, and the
+# `audit_trail` contents hashed equal. Re-running the import without --fresh
+# left the counts unchanged (518/29).
+```
+
+## Two Discord applications: development and production
+
+The project runs against **two different Discord applications** on purpose:
+
+| | Development (workstation) | Production (host) |
+| --- | --- | --- |
+| Application | `1544750141112582187` (`ddas`) | `1570227988602036365` |
+| Token | the developer's `.env` | the deployment's environment variables |
+| Callback origin | `http://localhost:3000/auth/discord/callback` | `https://ngln5duqvk.apps.bot-hosting.cloud/auth/discord/callback` |
+| Second registered URI | the reserved ngrok domain | none needed |
+
+Why two: a bot token belongs to exactly one application, so one application
+cannot serve a local gateway client and a hosted one without sharing a token and
+a rate-limit budget — and rotating a leaked development token would sign the
+deployment out. Roles and guild membership are per-application too, so a
+development bot in a live guild is a second member with its own permissions.
+
+Rules that keep the two apart:
+
+- **`DISCORD_CLIENT_ID` must equal the application the bot token belongs to.** A
+  mismatch is not cosmetic: the sign-in leg sends the client id from the
+  environment and Discord answers an unknown-application or
+  `Invalid OAuth2 redirect_uri` page.
+- **Each environment registers its own callbacks**; the lists are not shared.
+  Portal → OAuth2 → Redirects is the only editor: `PATCH /applications/@me`
+  with `redirect_uris` returns 200 and ignores the body.
+- **Verify each side separately, with the same script:**
+  ```bash
+  npm run check:oauth:preflight                                      # local .env
+  node --env-file=.env scripts/oauth-preflight.mjs --origin https://<host>
+  ```
+  Exit 0 = every origin is registered · 1 = at least one is missing · 2 = the
+  check could not ask (no token, no network). The dashboard repeats this check
+  once at boot and logs a warning naming the missing URI; it never blocks boot.
+- **Measured on 2026-11-17:** the production application returns two registered
+  URIs — the live host above and one leftover `…all-hands.dev` sandbox origin
+  from the platform that built earlier bundles. The leftover grants nothing
+  today, but it is an origin that can complete a sign-in, so remove it in the
+  portal. The development application returns `localhost:3000` and the reserved
+  ngrok domain, which matches its `.env`.
+
 ## Paid alternative (not the active path)
 
 | Deployment | Runtime | RAM | Role |
@@ -225,3 +324,20 @@ self-hosted machine.
   this repository can change that.
 - **`fsync=off`** is deliberate for this throwaway volume: host-crash durability
   is traded for CPU and WAL size. A real database uses the defaults.
+
+## Hosted runtime vs local runtime
+
+One flag separates the two, decided at boot in `server/network.ts`:
+`AL_AI_PLATFORM_HOST` set, or a container marker (`/.dockerenv`,
+`/run/.containerenv`). `NODE_ENV` is deliberately not a signal — a self-hosted
+VPS in production is a machine whose LAN links still work.
+
+| | Local workstation | Hosted (Bot-Hosting, Docker) |
+| --- | --- | --- |
+| Network screen | reach switch, LAN URLs, Wi-Fi QR, VPN hint, firewall card | one card: the public URL, and a note that the local tools are off |
+| Interface table | read for LAN/gate/QR | **not read at all** — internal addresses cannot reach a response |
+| `POST /api/network` · `/api/network/firewall` | act | `409 HOSTED_NETWORK`, no ngrok child spawned |
+| Presence | same code path | same code path (`NOTIFY` → `LISTEN` → `setPresence`) |
+
+The hosted screen is not a filtered copy of the local one: the server returns
+empty interface arrays, so there is nothing to filter.
