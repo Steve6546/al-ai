@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Prepare the runtime on a host with 256 MB of RAM and 512 MB of disk.
 #
-# `boot.sh` calls this on every start; the work is skipped when the commit and
-# the lockfile are unchanged, so a restart costs one `git rev-parse` and two
-# `sha256sum`. When they move:
+# `boot.sh` calls this on every start; the work is skipped when the dependency
+# graph is unchanged, so a restart or a code-only deploy costs one `git
+# rev-parse` and two `sha256sum`. When the lockfile moves:
 #
 #   install runtime dependencies -> verify the prebuilt client -> drop the cache
 #
@@ -29,9 +29,20 @@ cd "$ROOT"
 STATE="${AL_AI_HOST_STATE:-$ROOT/.al-ai-host}"
 mkdir -p "$STATE"
 
+# The install is a function of the dependency graph, never of the commit.
+#
+# This used to hash `git rev-parse HEAD` too, so *any* deploy — a docs page, a
+# README typo, a comment — re-ran both `npm ci` passes. Measured on this plan
+# that is 100–180 s during which nothing listens on $PORT, which the platform's
+# proxy answers with `502 App is unreachable` for the whole window. The install
+# was not skipped because it was needed; it was re-run because a file changed in
+# a directory npm never reads.
+#
+# `package-lock.json` already pins every workspace dependency, and npm rewrites
+# it whenever a workspace `package.json` changes, so this pair is the whole
+# input. The commit is still recorded, but as a label — not as a trigger.
 fingerprint() {
   {
-    git rev-parse HEAD 2>/dev/null || echo "no-git"
     sha256sum package-lock.json | cut -d' ' -f1
     sha256sum package.json | cut -d' ' -f1
   } | tr '\n' '-'
@@ -40,10 +51,19 @@ fingerprint() {
 want="$(fingerprint)"
 have="$(cat "$STATE/setup-fingerprint" 2>/dev/null || true)"
 
-if [ "$want" = "$have" ] \
-  && [ -x node_modules/.bin/tsx ] \
-  && [ -f apps/dashboard/dist/index.html ]; then
-  echo "[setup] up to date ($want)"
+# The fingerprint says what was installed; these say it is still there. A
+# restart after a partial install, a wiped node_modules or a missing bundle must
+# re-run the work even when the lockfile has not moved.
+installed() {
+  [ -x node_modules/.bin/tsx ] \
+    && [ -d node_modules/pg ] \
+    && [ -d node_modules/@al-ai/core ] \
+    && [ -f apps/dashboard/dist/index.html ]
+}
+
+if [ "$want" = "$have" ] && installed; then
+  git rev-parse HEAD >"$STATE/setup-commit" 2>/dev/null || true
+  echo "[setup] up to date (deps unchanged, $(git rev-parse --short HEAD 2>/dev/null || echo no-git))"
   exit 0
 fi
 
@@ -81,4 +101,5 @@ if [ -f host-build/bot.mjs ] && [ -f host-build/server.mjs ]; then
 fi
 
 echo "$want" >"$STATE/setup-fingerprint"
+git rev-parse HEAD >"$STATE/setup-commit" 2>/dev/null || true
 echo "[setup] ready"
