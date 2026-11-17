@@ -149,13 +149,27 @@ if [ -z "${DATABASE_URL:-}" ]; then
   # back to the owner URL with a warning when the role cannot log in. The
   # fallback is deliberate: a role problem must not stop the deployment, and the
   # warning is what makes it visible instead of silent.
-  DATABASE_URL="$(node scripts/host/pg.mjs --print-app-url)"
+  #
+  # The answer is validated before it becomes a connection string. pg.mjs keeps
+  # stdout to one line, but a future log line on stdout would be captured here
+  # and pg's parser would turn it into `host: "base"` instead of failing — an
+  # outage that names nothing real. Last line, known scheme, or no change.
+  APP_URL="$(node scripts/host/pg.mjs --print-app-url 2>/dev/null | tail -n 1)"
+  case "$APP_URL" in
+    postgres://*|postgresql://*)
+      DATABASE_URL="$APP_URL"
+      if [ "$DATABASE_URL" = "$ADMIN_DATABASE_URL" ]; then
+        log "WARNING: the services are connecting as the database owner"
+      else
+        log "the services connect as the least-privilege application role"
+      fi
+      ;;
+    *)
+      DATABASE_URL="$ADMIN_DATABASE_URL"
+      log "WARNING: the application role URL was unusable; the services connect as the database owner"
+      ;;
+  esac
   export DATABASE_URL
-  if [ "$DATABASE_URL" = "$ADMIN_DATABASE_URL" ]; then
-    log "WARNING: the services are connecting as the database owner"
-  else
-    log "the services connect as the least-privilege application role"
-  fi
   log "PostgreSQL ready"
 else
   log "using the DATABASE_URL from the environment; no local database is started"

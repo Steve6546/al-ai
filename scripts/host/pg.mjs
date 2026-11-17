@@ -344,11 +344,16 @@ async function ensureAppRole(secret) {
     const exists = await admin.query("select 1 from pg_roles where rolname = $1", [APP_USER]);
     const statement = exists.rowCount
       ? (await admin.query(
-          "select format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', $1, $2) as sql",
+          // `::text` is required: `format()` has no fixed argument types, so
+          // PostgreSQL cannot infer them from the placeholders and refuses the
+          // statement with "could not determine data type of parameter $1".
+          // Without it the role was created by the schema pass instead — with
+          // LOGIN and no password — and every application login then failed.
+          "select format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', $1::text, $2::text) as sql",
           [APP_USER, appSecret]
         )).rows[0].sql
       : (await admin.query(
-          "select format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', $1, $2) as sql",
+          "select format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', $1::text, $2::text) as sql",
           [APP_USER, appSecret]
         )).rows[0].sql;
     await admin.query(statement);
@@ -459,6 +464,12 @@ async function main() {
   // URL only when that role can actually log in; otherwise the owner URL is
   // printed (and a warning logged) so a role problem is a downgrade, not an
   // outage.
+  //
+  // Stdout carries **only** the URL. boot.sh captures it verbatim into
+  // DATABASE_URL, and pg's connection-string parser does not reject a string
+  // that starts with a log line: it tokenises it and reports `host: "base"`
+  // (`database` split down the middle), which is an outage that names nothing
+  // real. Diagnostics go to stderr.
   if (process.argv.includes("--print-app-url")) {
     const ownerUrl = databaseUrl(secret);
     const { default: pg } = await import("pg");
@@ -477,7 +488,7 @@ async function main() {
       }
       if (usable) console.log(appDatabaseUrl(appSecret));
     } catch (error) {
-      log(`application role is not usable yet (${error.message})`);
+      console.error(`[db] application role is not usable yet (${error.message})`);
     }
     if (!usable) {
       console.error(`[db] warning: ${APP_USER} cannot log in; printing the owner URL instead`);
