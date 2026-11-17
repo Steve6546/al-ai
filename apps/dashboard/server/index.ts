@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
+import fastifyCompress from "@fastify/compress";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import {
@@ -256,6 +257,31 @@ const app = Fastify({
   },
   bodyLimit: REQUEST_BODY_LIMIT,
   trustProxy: trustProxyOnlyLoopback
+});
+
+/**
+ * Compression, because the entry bundle is not small and the platform proxy
+ * does not compress for us.
+ *
+ * Measured against the live deployment from outside the container:
+ * `/assets/index-*.js` arrived as 747 KB with **no** `content-encoding` and took
+ * 4.2 s, while the same file is 182 KB gzipped. Nothing in the stack compressed
+ * it: @fastify/static only sends `preCompressed` variants when they exist on
+ * disk, the build does not write them, and the platform's edge passes the body
+ * through as-is. On a phone that is the difference between a dashboard that
+ * opens and one that looks broken.
+ *
+ * Brotli is offered before gzip (`encodings`), which the browser negotiates
+ * down from; both are computed on the fly rather than shipped as sidecar files,
+ * so there is nothing extra to upload or keep in sync with the build hash.
+ * `threshold` leaves small JSON responses alone — compressing a 129-byte health
+ * payload costs more than it saves. SSE and already-compressed bodies are
+ * skipped by the plugin itself.
+ */
+await app.register(fastifyCompress, {
+  global: true,
+  encodings: ["br", "gzip", "deflate"],
+  threshold: 1024
 });
 
 /**

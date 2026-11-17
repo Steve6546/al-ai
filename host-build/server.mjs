@@ -103,7 +103,7 @@ var require_queue = __commonJS({
       var queueTail = null;
       var _running = 0;
       var errorHandler = null;
-      var self = {
+      var self2 = {
         push,
         drain: noop,
         saturated: noop,
@@ -117,7 +117,7 @@ var require_queue = __commonJS({
             throw new Error("fastqueue concurrency must be equal to or greater than 1");
           }
           _concurrency = value;
-          if (self.paused) return;
+          if (self2.paused) return;
           for (; queueHead && _running < _concurrency; ) {
             _running++;
             release();
@@ -135,12 +135,12 @@ var require_queue = __commonJS({
         error,
         abort
       };
-      return self;
+      return self2;
       function running() {
         return _running;
       }
       function pause() {
-        self.paused = true;
+        self2.paused = true;
       }
       function length() {
         var current = queueHead;
@@ -161,8 +161,8 @@ var require_queue = __commonJS({
         return tasks;
       }
       function resume() {
-        if (!self.paused) return;
-        self.paused = false;
+        if (!self2.paused) return;
+        self2.paused = false;
         if (queueHead === null) {
           _running++;
           release();
@@ -174,7 +174,7 @@ var require_queue = __commonJS({
         }
       }
       function idle() {
-        return _running === 0 && self.length() === 0;
+        return _running === 0 && self2.length() === 0;
       }
       function push(value, done) {
         var current = cache.get();
@@ -183,14 +183,14 @@ var require_queue = __commonJS({
         current.value = value;
         current.callback = done || noop;
         current.errorHandler = errorHandler;
-        if (_running >= _concurrency || self.paused) {
+        if (_running >= _concurrency || self2.paused) {
           if (queueTail) {
             queueTail.next = current;
             queueTail = current;
           } else {
             queueHead = current;
             queueTail = current;
-            self.saturated();
+            self2.saturated();
           }
         } else {
           _running++;
@@ -204,14 +204,14 @@ var require_queue = __commonJS({
         current.value = value;
         current.callback = done || noop;
         current.errorHandler = errorHandler;
-        if (_running >= _concurrency || self.paused) {
+        if (_running >= _concurrency || self2.paused) {
           if (queueHead) {
             current.next = queueHead;
             queueHead = current;
           } else {
             queueHead = current;
             queueTail = current;
-            self.saturated();
+            self2.saturated();
           }
         } else {
           _running++;
@@ -224,7 +224,7 @@ var require_queue = __commonJS({
         }
         var next = queueHead;
         if (next && _running <= _concurrency) {
-          if (!self.paused) {
+          if (!self2.paused) {
             if (queueTail === queueHead) {
               queueTail = null;
             }
@@ -232,25 +232,25 @@ var require_queue = __commonJS({
             next.next = null;
             worker.call(context, next.value, next.worked);
             if (queueTail === null) {
-              self.empty();
+              self2.empty();
             }
           } else {
             _running--;
           }
         } else if (--_running === 0) {
-          self.drain();
+          self2.drain();
         }
       }
       function kill() {
         queueHead = null;
         queueTail = null;
-        self.drain = noop;
+        self2.drain = noop;
       }
       function killAndDrain() {
         queueHead = null;
         queueTail = null;
-        self.drain();
-        self.drain = noop;
+        self2.drain();
+        self2.drain = noop;
       }
       function abort() {
         var current = queueHead;
@@ -273,7 +273,7 @@ var require_queue = __commonJS({
           cache.release(current);
           current = next;
         }
-        self.drain = noop;
+        self2.drain = noop;
       }
       function error(handler) {
         errorHandler = handler;
@@ -288,18 +288,18 @@ var require_queue = __commonJS({
       this.release = noop;
       this.context = null;
       this.errorHandler = null;
-      var self = this;
+      var self2 = this;
       this.worked = function worked(err, result) {
-        var callback = self.callback;
-        var errorHandler = self.errorHandler;
-        var val = self.value;
-        self.value = null;
-        self.callback = noop;
-        if (self.errorHandler) {
+        var callback = self2.callback;
+        var errorHandler = self2.errorHandler;
+        var val = self2.value;
+        self2.value = null;
+        self2.callback = noop;
+        if (self2.errorHandler) {
           errorHandler(err, val);
         }
-        callback.call(self.context, err, result);
-        self.release(self);
+        callback.call(self2.context, err, result);
+        self2.release(self2);
       };
     }
     function queueAsPromised(context, worker, _concurrency) {
@@ -15241,12 +15241,12 @@ var require_util = __commonJS({
     }
     exports.alwaysValidSchema = alwaysValidSchema;
     function checkUnknownRules(it, schema = it.schema) {
-      const { opts, self } = it;
+      const { opts, self: self2 } = it;
       if (!opts.strictSchema)
         return;
       if (typeof schema === "boolean")
         return;
-      const rules = self.RULES.keywords;
+      const rules = self2.RULES.keywords;
       for (const key in schema) {
         if (!rules[key])
           checkStrictMode(it, `unknown keyword: "${key}"`);
@@ -15632,8 +15632,8 @@ var require_applicability = __commonJS({
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.shouldUseRule = exports.shouldUseGroup = exports.schemaHasRulesForType = void 0;
-    function schemaHasRulesForType({ schema, self }, type) {
-      const group = self.RULES.types[type];
+    function schemaHasRulesForType({ schema, self: self2 }, type) {
+      const group = self2.RULES.types[type];
       return group && group !== true && shouldUseGroup(schema, group);
     }
     exports.schemaHasRulesForType = schemaHasRulesForType;
@@ -16098,7 +16098,7 @@ var require_keyword = __commonJS({
       return !schemaType.length || schemaType.some((st) => st === "array" ? Array.isArray(schema) : st === "object" ? schema && typeof schema == "object" && !Array.isArray(schema) : typeof schema == st || allowUndefined && typeof schema == "undefined");
     }
     exports.validSchemaType = validSchemaType;
-    function validateKeywordUsage({ schema, opts, self, errSchemaPath }, def, keyword) {
+    function validateKeywordUsage({ schema, opts, self: self2, errSchemaPath }, def, keyword) {
       if (Array.isArray(def.keyword) ? !def.keyword.includes(keyword) : def.keyword !== keyword) {
         throw new Error("ajv implementation error");
       }
@@ -16109,9 +16109,9 @@ var require_keyword = __commonJS({
       if (def.validateSchema) {
         const valid = def.validateSchema(schema[keyword]);
         if (!valid) {
-          const msg = `keyword "${keyword}" value is invalid at path "${errSchemaPath}": ` + self.errorsText(def.validateSchema.errors);
+          const msg = `keyword "${keyword}" value is invalid at path "${errSchemaPath}": ` + self2.errorsText(def.validateSchema.errors);
           if (opts.validateSchema === "log")
-            self.logger.error(msg);
+            self2.logger.error(msg);
           else
             throw new Error(msg);
         }
@@ -16578,11 +16578,11 @@ var require_validate = __commonJS({
       }
       (0, boolSchema_1.boolOrEmptySchema)(it, valid);
     }
-    function schemaCxtHasRules({ schema, self }) {
+    function schemaCxtHasRules({ schema, self: self2 }) {
       if (typeof schema == "boolean")
         return !schema;
       for (const key in schema)
-        if (self.RULES.all[key])
+        if (self2.RULES.all[key])
           return true;
       return false;
     }
@@ -16611,9 +16611,9 @@ var require_validate = __commonJS({
       schemaKeywords(it, types2, !checkedTypes, errsCount);
     }
     function checkRefsAndKeywords(it) {
-      const { schema, errSchemaPath, opts, self } = it;
-      if (schema.$ref && opts.ignoreKeywordsWithRef && (0, util_1.schemaHasRulesButRef)(schema, self.RULES)) {
-        self.logger.warn(`$ref: keywords ignored in schema at path "${errSchemaPath}"`);
+      const { schema, errSchemaPath, opts, self: self2 } = it;
+      if (schema.$ref && opts.ignoreKeywordsWithRef && (0, util_1.schemaHasRulesButRef)(schema, self2.RULES)) {
+        self2.logger.warn(`$ref: keywords ignored in schema at path "${errSchemaPath}"`);
       }
     }
     function checkNoDefault(it) {
@@ -16659,8 +16659,8 @@ var require_validate = __commonJS({
         gen.assign((0, codegen_1._)`${evaluated}.items`, items);
     }
     function schemaKeywords(it, types2, typeErrors, errsCount) {
-      const { gen, schema, data, allErrors, opts, self } = it;
-      const { RULES } = self;
+      const { gen, schema, data, allErrors, opts, self: self2 } = it;
+      const { RULES } = self2;
       if (schema.$ref && (opts.ignoreKeywordsWithRef || !(0, util_1.schemaHasRulesButRef)(schema, RULES))) {
         gen.block(() => keywordCode(it, "$ref", RULES.all.$ref.definition));
         return;
@@ -19096,11 +19096,11 @@ var require_ref = __commonJS({
       schemaType: "string",
       code(cxt) {
         const { gen, schema: $ref, it } = cxt;
-        const { baseId, schemaEnv: env2, validateName, opts, self } = it;
+        const { baseId, schemaEnv: env2, validateName, opts, self: self2 } = it;
         const { root } = env2;
         if (($ref === "#" || $ref === "#/") && baseId === root.baseId)
           return callRootRef();
-        const schOrEnv = compile_1.resolveRef.call(self, root, baseId, $ref);
+        const schOrEnv = compile_1.resolveRef.call(self2, root, baseId, $ref);
         if (schOrEnv === void 0)
           throw new ref_error_1.default(it.opts.uriResolver, baseId, $ref);
         if (schOrEnv instanceof compile_1.SchemaEnv)
@@ -20628,7 +20628,7 @@ var require_format = __commonJS({
       error,
       code(cxt, ruleType) {
         const { gen, data, $data, schema, schemaCode, it } = cxt;
-        const { opts, errSchemaPath, schemaEnv, self } = it;
+        const { opts, errSchemaPath, schemaEnv, self: self2 } = it;
         if (!opts.validateFormats)
           return;
         if ($data)
@@ -20637,7 +20637,7 @@ var require_format = __commonJS({
           validateFormat();
         function validate$DataFormat() {
           const fmts = gen.scopeValue("formats", {
-            ref: self.formats,
+            ref: self2.formats,
             code: opts.code.formats
           });
           const fDef = gen.const("fDef", (0, codegen_1._)`${fmts}[${schemaCode}]`);
@@ -20657,7 +20657,7 @@ var require_format = __commonJS({
           }
         }
         function validateFormat() {
-          const formatDef = self.formats[schema];
+          const formatDef = self2.formats[schema];
           if (!formatDef) {
             unknownFormat();
             return;
@@ -20669,7 +20669,7 @@ var require_format = __commonJS({
             cxt.pass(validCondition());
           function unknownFormat() {
             if (opts.strictSchema === false) {
-              self.logger.warn(unknownMsg());
+              self2.logger.warn(unknownMsg());
               return;
             }
             throw new Error(unknownMsg());
@@ -22143,24 +22143,24 @@ var require_serialize = __commonJS({
     function serializeString({ gen, data }) {
       gen.add(names_1.default.json, (0, codegen_1._)`${(0, util_1.useFunc)(gen, quote_1.default)}(${data})`);
     }
-    function serializeNumber({ gen, data, self }) {
+    function serializeNumber({ gen, data, self: self2 }) {
       const condition = (0, codegen_1._)`${data} === Infinity || ${data} === -Infinity || ${data} !== ${data}`;
-      if (self.opts.specialNumbers === void 0 || self.opts.specialNumbers === "fast") {
+      if (self2.opts.specialNumbers === void 0 || self2.opts.specialNumbers === "fast") {
         gen.add(names_1.default.json, (0, codegen_1._)`"" + ${data}`);
       } else {
         gen.if(condition, () => gen.add(names_1.default.json, (0, codegen_1._)`null`), () => gen.add(names_1.default.json, (0, codegen_1._)`"" + ${data}`));
       }
     }
     function serializeRef(cxt) {
-      const { gen, self, data, definitions, schema, schemaEnv } = cxt;
+      const { gen, self: self2, data, definitions, schema, schemaEnv } = cxt;
       const { ref } = schema;
       const refSchema = definitions[ref];
       if (!refSchema)
-        throw new ref_error_1.default(self.opts.uriResolver, "", ref, `No definition ${ref}`);
+        throw new ref_error_1.default(self2.opts.uriResolver, "", ref, `No definition ${ref}`);
       if (!(0, ref_1.hasRef)(refSchema))
         return serializeCode({ ...cxt, schema: refSchema });
       const { root } = schemaEnv;
-      const sch = compileSerializer.call(self, new __1.SchemaEnv({ schema: refSchema, root }), definitions);
+      const sch = compileSerializer.call(self2, new __1.SchemaEnv({ schema: refSchema, root }), definitions);
       gen.add(names_1.default.json, (0, codegen_1._)`${getSerialize(gen, sch)}(${data})`);
     }
     function getSerialize(gen, sch) {
@@ -22583,7 +22583,7 @@ var require_parse = __commonJS({
       parseCode({ ...cxt, schema, data: (0, codegen_1._)`${cxt.data}[${key}]` });
     }
     function parseType(cxt) {
-      const { gen, schema, data, self } = cxt;
+      const { gen, schema, data, self: self2 } = cxt;
       switch (schema.type) {
         case "boolean":
           parseBoolean(cxt);
@@ -22594,7 +22594,7 @@ var require_parse = __commonJS({
         case "timestamp": {
           parseString(cxt);
           const vts = (0, util_1.useFunc)(gen, timestamp_1.default);
-          const { allowDate, parseDate } = self.opts;
+          const { allowDate, parseDate } = self2.opts;
           const notValid = allowDate ? (0, codegen_1._)`!${vts}(${data}, true)` : (0, codegen_1._)`!${vts}(${data})`;
           const fail = parseDate ? (0, codegen_1.or)(notValid, (0, codegen_1._)`(${data} = new Date(${data}), false)`, (0, codegen_1._)`isNaN(${data}.valueOf())`) : notValid;
           gen.if(fail, () => parsingError(cxt, (0, codegen_1.str)`invalid timestamp`));
@@ -22606,7 +22606,7 @@ var require_parse = __commonJS({
           break;
         default: {
           const t = schema.type;
-          if (!self.opts.int32range && (t === "int32" || t === "uint32")) {
+          if (!self2.opts.int32range && (t === "int32" || t === "uint32")) {
             parseNumber(cxt, 16);
             if (t === "uint32") {
               gen.if((0, codegen_1._)`${data} < 0`, () => parsingError(cxt, (0, codegen_1.str)`integer out of range`));
@@ -22650,15 +22650,15 @@ var require_parse = __commonJS({
       };
     }
     function parseRef(cxt) {
-      const { gen, self, definitions, schema, schemaEnv } = cxt;
+      const { gen, self: self2, definitions, schema, schemaEnv } = cxt;
       const { ref } = schema;
       const refSchema = definitions[ref];
       if (!refSchema)
-        throw new ref_error_1.default(self.opts.uriResolver, "", ref, `No definition ${ref}`);
+        throw new ref_error_1.default(self2.opts.uriResolver, "", ref, `No definition ${ref}`);
       if (!(0, ref_1.hasRef)(refSchema))
         return parseCode({ ...cxt, schema: refSchema });
       const { root } = schemaEnv;
-      const sch = compileParser.call(self, new __1.SchemaEnv({ schema: refSchema, root }), definitions);
+      const sch = compileParser.call(self2, new __1.SchemaEnv({ schema: refSchema, root }), definitions);
       partialParse(cxt, getParser(gen, sch), true);
     }
     function getParser(gen, sch) {
@@ -24554,17 +24554,17 @@ var require_limit = __commonJS({
       error,
       code(cxt) {
         const { gen, data, schemaCode, keyword, it } = cxt;
-        const { opts, self } = it;
+        const { opts, self: self2 } = it;
         if (!opts.validateFormats)
           return;
-        const fCxt = new ajv_1.KeywordCxt(it, self.RULES.all.format.definition, "format");
+        const fCxt = new ajv_1.KeywordCxt(it, self2.RULES.all.format.definition, "format");
         if (fCxt.$data)
           validate$DataFormat();
         else
           validateFormat();
         function validate$DataFormat() {
           const fmts = gen.scopeValue("formats", {
-            ref: self.formats,
+            ref: self2.formats,
             code: opts.code.formats
           });
           const fmt = gen.const("fmt", (0, codegen_1._)`${fmts}[${fCxt.schemaCode}]`);
@@ -24572,7 +24572,7 @@ var require_limit = __commonJS({
         }
         function validateFormat() {
           const format2 = fCxt.schema;
-          const fmtDef = self.formats[format2];
+          const fmtDef = self2.formats[format2];
           if (!fmtDef || fmtDef === true)
             return;
           if (typeof fmtDef != "object" || fmtDef instanceof RegExp || typeof fmtDef.compare != "function") {
@@ -44546,6 +44546,24334 @@ var require_static = __commonJS({
   }
 });
 
+// node_modules/@fastify/compress/node_modules/fastify-plugin/lib/getPluginName.js
+var require_getPluginName2 = __commonJS({
+  "node_modules/@fastify/compress/node_modules/fastify-plugin/lib/getPluginName.js"(exports, module) {
+    "use strict";
+    var fpStackTracePattern = /at\s(?:.*\.)?plugin\s.*\n\s*(.*)/;
+    var fileNamePattern = /(\w*(\.\w*)*)\..*/;
+    module.exports = function getPluginName(fn) {
+      if (fn.name.length > 0) return fn.name;
+      const stackTraceLimit = Error.stackTraceLimit;
+      Error.stackTraceLimit = 10;
+      try {
+        throw new Error("anonymous function");
+      } catch (e) {
+        Error.stackTraceLimit = stackTraceLimit;
+        return extractPluginName(e.stack);
+      }
+    };
+    function extractPluginName(stack) {
+      const m = stack.match(fpStackTracePattern);
+      return m ? m[1].split(/[/\\]/).slice(-1)[0].match(fileNamePattern)[1] : "anonymous";
+    }
+    module.exports.extractPluginName = extractPluginName;
+  }
+});
+
+// node_modules/@fastify/compress/node_modules/fastify-plugin/lib/toCamelCase.js
+var require_toCamelCase2 = __commonJS({
+  "node_modules/@fastify/compress/node_modules/fastify-plugin/lib/toCamelCase.js"(exports, module) {
+    "use strict";
+    module.exports = function toCamelCase(name) {
+      if (name[0] === "@") {
+        name = name.slice(1).replace("/", "-");
+      }
+      return name.replace(/-(.)/g, function(match, g1) {
+        return g1.toUpperCase();
+      });
+    };
+  }
+});
+
+// node_modules/@fastify/compress/node_modules/fastify-plugin/plugin.js
+var require_plugin2 = __commonJS({
+  "node_modules/@fastify/compress/node_modules/fastify-plugin/plugin.js"(exports, module) {
+    "use strict";
+    var getPluginName = require_getPluginName2();
+    var toCamelCase = require_toCamelCase2();
+    var count = 0;
+    function plugin(fn, options = {}) {
+      let autoName = false;
+      if (fn.default !== void 0) {
+        fn = fn.default;
+      }
+      if (typeof fn !== "function") {
+        throw new TypeError(
+          `fastify-plugin expects a function, instead got a '${typeof fn}'`
+        );
+      }
+      if (typeof options === "string") {
+        options = {
+          fastify: options
+        };
+      }
+      if (typeof options !== "object" || Array.isArray(options) || options === null) {
+        throw new TypeError("The options object should be an object");
+      }
+      if (options.fastify !== void 0 && typeof options.fastify !== "string") {
+        throw new TypeError(`fastify-plugin expects a version string, instead got '${typeof options.fastify}'`);
+      }
+      if (!options.name) {
+        autoName = true;
+        options.name = getPluginName(fn) + "-auto-" + count++;
+      }
+      fn[/* @__PURE__ */ Symbol.for("skip-override")] = options.encapsulate !== true;
+      fn[/* @__PURE__ */ Symbol.for("fastify.display-name")] = options.name;
+      fn[/* @__PURE__ */ Symbol.for("plugin-meta")] = options;
+      if (!fn.default) {
+        fn.default = fn;
+      }
+      const camelCase = toCamelCase(options.name);
+      if (!autoName && !fn[camelCase]) {
+        fn[camelCase] = fn;
+      }
+      return fn;
+    }
+    module.exports = plugin;
+    module.exports.default = plugin;
+    module.exports.fastifyPlugin = plugin;
+  }
+});
+
+// node_modules/wrappy/wrappy.js
+var require_wrappy = __commonJS({
+  "node_modules/wrappy/wrappy.js"(exports, module) {
+    module.exports = wrappy;
+    function wrappy(fn, cb) {
+      if (fn && cb) return wrappy(fn)(cb);
+      if (typeof fn !== "function")
+        throw new TypeError("need wrapper function");
+      Object.keys(fn).forEach(function(k) {
+        wrapper[k] = fn[k];
+      });
+      return wrapper;
+      function wrapper() {
+        var args = new Array(arguments.length);
+        for (var i = 0; i < args.length; i++) {
+          args[i] = arguments[i];
+        }
+        var ret = fn.apply(this, args);
+        var cb2 = args[args.length - 1];
+        if (typeof ret === "function" && ret !== cb2) {
+          Object.keys(cb2).forEach(function(k) {
+            ret[k] = cb2[k];
+          });
+        }
+        return ret;
+      }
+    }
+  }
+});
+
+// node_modules/once/once.js
+var require_once = __commonJS({
+  "node_modules/once/once.js"(exports, module) {
+    var wrappy = require_wrappy();
+    module.exports = wrappy(once);
+    module.exports.strict = wrappy(onceStrict);
+    once.proto = once(function() {
+      Object.defineProperty(Function.prototype, "once", {
+        value: function() {
+          return once(this);
+        },
+        configurable: true
+      });
+      Object.defineProperty(Function.prototype, "onceStrict", {
+        value: function() {
+          return onceStrict(this);
+        },
+        configurable: true
+      });
+    });
+    function once(fn) {
+      var f = function() {
+        if (f.called) return f.value;
+        f.called = true;
+        return f.value = fn.apply(this, arguments);
+      };
+      f.called = false;
+      return f;
+    }
+    function onceStrict(fn) {
+      var f = function() {
+        if (f.called)
+          throw new Error(f.onceError);
+        f.called = true;
+        return f.value = fn.apply(this, arguments);
+      };
+      var name = fn.name || "Function wrapped with `once`";
+      f.onceError = name + " shouldn't be called more than once";
+      f.called = false;
+      return f;
+    }
+  }
+});
+
+// node_modules/end-of-stream/index.js
+var require_end_of_stream = __commonJS({
+  "node_modules/end-of-stream/index.js"(exports, module) {
+    var once = require_once();
+    var noop = function() {
+    };
+    var qnt = global.Bare ? queueMicrotask : process.nextTick.bind(process);
+    var isRequest = function(stream) {
+      return stream.setHeader && typeof stream.abort === "function";
+    };
+    var isChildProcess = function(stream) {
+      return stream.stdio && Array.isArray(stream.stdio) && stream.stdio.length === 3;
+    };
+    var eos = function(stream, opts, callback) {
+      if (typeof opts === "function") return eos(stream, null, opts);
+      if (!opts) opts = {};
+      callback = once(callback || noop);
+      var ws = stream._writableState;
+      var rs = stream._readableState;
+      var readable = opts.readable || opts.readable !== false && stream.readable;
+      var writable = opts.writable || opts.writable !== false && stream.writable;
+      var cancelled = false;
+      var onlegacyfinish = function() {
+        if (!stream.writable) onfinish();
+      };
+      var onfinish = function() {
+        writable = false;
+        if (!readable) callback.call(stream);
+      };
+      var onend = function() {
+        readable = false;
+        if (!writable) callback.call(stream);
+      };
+      var onexit = function(exitCode) {
+        callback.call(stream, exitCode ? new Error("exited with error code: " + exitCode) : null);
+      };
+      var onerror = function(err) {
+        callback.call(stream, err);
+      };
+      var onclose = function() {
+        qnt(onclosenexttick);
+      };
+      var onclosenexttick = function() {
+        if (cancelled) return;
+        if (readable && !(rs && (rs.ended && !rs.destroyed))) return callback.call(stream, new Error("premature close"));
+        if (writable && !(ws && (ws.ended && !ws.destroyed))) return callback.call(stream, new Error("premature close"));
+      };
+      var onrequest = function() {
+        stream.req.on("finish", onfinish);
+      };
+      if (isRequest(stream)) {
+        stream.on("complete", onfinish);
+        stream.on("abort", onclose);
+        if (stream.req) onrequest();
+        else stream.on("request", onrequest);
+      } else if (writable && !ws) {
+        stream.on("end", onlegacyfinish);
+        stream.on("close", onlegacyfinish);
+      }
+      if (isChildProcess(stream)) stream.on("exit", onexit);
+      stream.on("end", onend);
+      stream.on("finish", onfinish);
+      if (opts.error !== false) stream.on("error", onerror);
+      stream.on("close", onclose);
+      return function() {
+        cancelled = true;
+        stream.removeListener("complete", onfinish);
+        stream.removeListener("abort", onclose);
+        stream.removeListener("request", onrequest);
+        if (stream.req) stream.req.removeListener("finish", onfinish);
+        stream.removeListener("end", onlegacyfinish);
+        stream.removeListener("close", onlegacyfinish);
+        stream.removeListener("finish", onfinish);
+        stream.removeListener("exit", onexit);
+        stream.removeListener("end", onend);
+        stream.removeListener("error", onerror);
+        stream.removeListener("close", onclose);
+      };
+    };
+    module.exports = eos;
+  }
+});
+
+// node_modules/pump/index.js
+var require_pump = __commonJS({
+  "node_modules/pump/index.js"(exports, module) {
+    var once = require_once();
+    var eos = require_end_of_stream();
+    var fs;
+    try {
+      fs = __require("fs");
+    } catch (e) {
+    }
+    var noop = function() {
+    };
+    var ancient = typeof process === "undefined" ? false : /^v?\.0/.test(process.version);
+    var isFn = function(fn) {
+      return typeof fn === "function";
+    };
+    var isFS = function(stream) {
+      if (!ancient) return false;
+      if (!fs) return false;
+      return (stream instanceof (fs.ReadStream || noop) || stream instanceof (fs.WriteStream || noop)) && isFn(stream.close);
+    };
+    var isRequest = function(stream) {
+      return stream.setHeader && isFn(stream.abort);
+    };
+    var destroyer = function(stream, reading, writing, callback) {
+      callback = once(callback);
+      var closed = false;
+      stream.on("close", function() {
+        closed = true;
+      });
+      eos(stream, { readable: reading, writable: writing }, function(err) {
+        if (err) return callback(err);
+        closed = true;
+        callback();
+      });
+      var destroyed = false;
+      return function(err) {
+        if (closed) return;
+        if (destroyed) return;
+        destroyed = true;
+        if (isFS(stream)) return stream.close(noop);
+        if (isRequest(stream)) return stream.abort();
+        if (isFn(stream.destroy)) return stream.destroy();
+        callback(err || new Error("stream was destroyed"));
+      };
+    };
+    var call = function(fn) {
+      fn();
+    };
+    var pipe = function(from, to) {
+      return from.pipe(to);
+    };
+    var pump = function() {
+      var streams = Array.prototype.slice.call(arguments);
+      var callback = isFn(streams[streams.length - 1] || noop) && streams.pop() || noop;
+      if (Array.isArray(streams[0])) streams = streams[0];
+      if (streams.length < 2) throw new Error("pump requires two streams per minimum");
+      var error;
+      var destroys = streams.map(function(stream, i) {
+        var reading = i < streams.length - 1;
+        var writing = i > 0;
+        return destroyer(stream, reading, writing, function(err) {
+          if (!error) error = err;
+          if (err) destroys.forEach(call);
+          if (reading) return;
+          destroys.forEach(call);
+          callback(error);
+        });
+      });
+      return streams.reduce(pipe);
+    };
+    module.exports = pump;
+  }
+});
+
+// node_modules/mime-db/db.json
+var require_db = __commonJS({
+  "node_modules/mime-db/db.json"(exports, module) {
+    module.exports = {
+      "application/1d-interleaved-parityfec": {
+        source: "iana"
+      },
+      "application/3gpdash-qoe-report+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/3gpp-ims+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/3gpphal+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/3gpphalforms+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/a2l": {
+        source: "iana"
+      },
+      "application/ace+cbor": {
+        source: "iana"
+      },
+      "application/ace+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/ace-groupcomm+cbor": {
+        source: "iana"
+      },
+      "application/ace-trl+cbor": {
+        source: "iana"
+      },
+      "application/activemessage": {
+        source: "iana"
+      },
+      "application/activity+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/aif+cbor": {
+        source: "iana"
+      },
+      "application/aif+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-cdni+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-cdnifilter+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-costmap+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-costmapfilter+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-directory+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-endpointcost+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-endpointcostparams+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-endpointprop+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-endpointpropparams+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-error+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-networkmap+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-networkmapfilter+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-propmap+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-propmapparams+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-tips+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-tipsparams+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-updatestreamcontrol+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/alto-updatestreamparams+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/aml": {
+        source: "iana"
+      },
+      "application/andrew-inset": {
+        source: "iana",
+        extensions: ["ez"]
+      },
+      "application/appinstaller": {
+        compressible: false,
+        extensions: ["appinstaller"]
+      },
+      "application/applefile": {
+        source: "iana"
+      },
+      "application/applixware": {
+        source: "apache",
+        extensions: ["aw"]
+      },
+      "application/appx": {
+        compressible: false,
+        extensions: ["appx"]
+      },
+      "application/appxbundle": {
+        compressible: false,
+        extensions: ["appxbundle"]
+      },
+      "application/at+jwt": {
+        source: "iana"
+      },
+      "application/atf": {
+        source: "iana"
+      },
+      "application/atfx": {
+        source: "iana"
+      },
+      "application/atom+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["atom"]
+      },
+      "application/atomcat+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["atomcat"]
+      },
+      "application/atomdeleted+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["atomdeleted"]
+      },
+      "application/atomicmail": {
+        source: "iana"
+      },
+      "application/atomsvc+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["atomsvc"]
+      },
+      "application/atsc-dwd+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["dwd"]
+      },
+      "application/atsc-dynamic-event-message": {
+        source: "iana"
+      },
+      "application/atsc-held+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["held"]
+      },
+      "application/atsc-rdt+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/atsc-rsat+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["rsat"]
+      },
+      "application/atxml": {
+        source: "iana"
+      },
+      "application/auth-policy+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/automationml-aml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["aml"]
+      },
+      "application/automationml-amlx+zip": {
+        source: "iana",
+        compressible: false,
+        extensions: ["amlx"]
+      },
+      "application/bacnet-xdd+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/batch-smtp": {
+        source: "iana"
+      },
+      "application/bdoc": {
+        compressible: false,
+        extensions: ["bdoc"]
+      },
+      "application/beep+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/bufr": {
+        source: "iana"
+      },
+      "application/c2pa": {
+        source: "iana"
+      },
+      "application/calendar+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/calendar+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xcs"]
+      },
+      "application/call-completion": {
+        source: "iana"
+      },
+      "application/cals-1840": {
+        source: "iana"
+      },
+      "application/captive+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/cbor": {
+        source: "iana"
+      },
+      "application/cbor-seq": {
+        source: "iana"
+      },
+      "application/cccex": {
+        source: "iana"
+      },
+      "application/ccmp+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/ccxml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["ccxml"]
+      },
+      "application/cda+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/cdfx+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["cdfx"]
+      },
+      "application/cdmi-capability": {
+        source: "iana",
+        extensions: ["cdmia"]
+      },
+      "application/cdmi-container": {
+        source: "iana",
+        extensions: ["cdmic"]
+      },
+      "application/cdmi-domain": {
+        source: "iana",
+        extensions: ["cdmid"]
+      },
+      "application/cdmi-object": {
+        source: "iana",
+        extensions: ["cdmio"]
+      },
+      "application/cdmi-queue": {
+        source: "iana",
+        extensions: ["cdmiq"]
+      },
+      "application/cdni": {
+        source: "iana"
+      },
+      "application/ce+cbor": {
+        source: "iana"
+      },
+      "application/cea": {
+        source: "iana"
+      },
+      "application/cea-2018+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/cellml+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/cfw": {
+        source: "iana"
+      },
+      "application/cid-edhoc+cbor-seq": {
+        source: "iana"
+      },
+      "application/city+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/city+json-seq": {
+        source: "iana"
+      },
+      "application/clr": {
+        source: "iana"
+      },
+      "application/clue+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/clue_info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/cms": {
+        source: "iana"
+      },
+      "application/cnrp+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/coap-eap": {
+        source: "iana"
+      },
+      "application/coap-group+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/coap-payload": {
+        source: "iana"
+      },
+      "application/commonground": {
+        source: "iana"
+      },
+      "application/concise-problem-details+cbor": {
+        source: "iana"
+      },
+      "application/conference-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/cose": {
+        source: "iana"
+      },
+      "application/cose-key": {
+        source: "iana"
+      },
+      "application/cose-key-set": {
+        source: "iana"
+      },
+      "application/cose-x509": {
+        source: "iana"
+      },
+      "application/cpl+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["cpl"]
+      },
+      "application/csrattrs": {
+        source: "iana"
+      },
+      "application/csta+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/cstadata+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/csvm+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/cu-seeme": {
+        source: "apache",
+        extensions: ["cu"]
+      },
+      "application/cwl": {
+        source: "iana",
+        extensions: ["cwl"]
+      },
+      "application/cwl+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/cwl+yaml": {
+        source: "iana"
+      },
+      "application/cwt": {
+        source: "iana"
+      },
+      "application/cybercash": {
+        source: "iana"
+      },
+      "application/dart": {
+        compressible: true
+      },
+      "application/dash+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["mpd"]
+      },
+      "application/dash-patch+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["mpp"]
+      },
+      "application/dashdelta": {
+        source: "iana"
+      },
+      "application/davmount+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["davmount"]
+      },
+      "application/dca-rft": {
+        source: "iana"
+      },
+      "application/dcd": {
+        source: "iana"
+      },
+      "application/dec-dx": {
+        source: "iana"
+      },
+      "application/dialog-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/dicom": {
+        source: "iana",
+        extensions: ["dcm"]
+      },
+      "application/dicom+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/dicom+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/dii": {
+        source: "iana"
+      },
+      "application/dit": {
+        source: "iana"
+      },
+      "application/dns": {
+        source: "iana"
+      },
+      "application/dns+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/dns-message": {
+        source: "iana"
+      },
+      "application/docbook+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["dbk"]
+      },
+      "application/dots+cbor": {
+        source: "iana"
+      },
+      "application/dpop+jwt": {
+        source: "iana"
+      },
+      "application/dskpp+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/dssc+der": {
+        source: "iana",
+        extensions: ["dssc"]
+      },
+      "application/dssc+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xdssc"]
+      },
+      "application/dvcs": {
+        source: "iana"
+      },
+      "application/eat+cwt": {
+        source: "iana"
+      },
+      "application/eat+jwt": {
+        source: "iana"
+      },
+      "application/eat-bun+cbor": {
+        source: "iana"
+      },
+      "application/eat-bun+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/eat-ucs+cbor": {
+        source: "iana"
+      },
+      "application/eat-ucs+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/ecmascript": {
+        source: "apache",
+        compressible: true,
+        extensions: ["ecma"]
+      },
+      "application/edhoc+cbor-seq": {
+        source: "iana"
+      },
+      "application/edi-consent": {
+        source: "iana"
+      },
+      "application/edi-x12": {
+        source: "iana",
+        compressible: false
+      },
+      "application/edifact": {
+        source: "iana",
+        compressible: false
+      },
+      "application/efi": {
+        source: "iana"
+      },
+      "application/elm+json": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/elm+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/emergencycalldata.cap+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/emergencycalldata.comment+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/emergencycalldata.control+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/emergencycalldata.deviceinfo+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/emergencycalldata.ecall.msd": {
+        source: "iana"
+      },
+      "application/emergencycalldata.legacyesn+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/emergencycalldata.providerinfo+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/emergencycalldata.serviceinfo+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/emergencycalldata.subscriberinfo+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/emergencycalldata.veds+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/emma+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["emma"]
+      },
+      "application/emotionml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["emotionml"]
+      },
+      "application/encaprtp": {
+        source: "iana"
+      },
+      "application/entity-statement+jwt": {
+        source: "iana"
+      },
+      "application/epp+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/epub+zip": {
+        source: "iana",
+        compressible: false,
+        extensions: ["epub"]
+      },
+      "application/eshop": {
+        source: "iana"
+      },
+      "application/exi": {
+        source: "iana",
+        extensions: ["exi"]
+      },
+      "application/expect-ct-report+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/express": {
+        source: "iana",
+        extensions: ["exp"]
+      },
+      "application/fastinfoset": {
+        source: "iana"
+      },
+      "application/fastsoap": {
+        source: "iana"
+      },
+      "application/fdf": {
+        source: "iana",
+        extensions: ["fdf"]
+      },
+      "application/fdt+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["fdt"]
+      },
+      "application/fhir+json": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/fhir+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/fido.trusted-apps+json": {
+        compressible: true
+      },
+      "application/fits": {
+        source: "iana"
+      },
+      "application/flexfec": {
+        source: "iana"
+      },
+      "application/font-sfnt": {
+        source: "iana"
+      },
+      "application/font-tdpfr": {
+        source: "iana",
+        extensions: ["pfr"]
+      },
+      "application/font-woff": {
+        source: "iana",
+        compressible: false
+      },
+      "application/framework-attributes+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/geo+json": {
+        source: "iana",
+        compressible: true,
+        extensions: ["geojson"]
+      },
+      "application/geo+json-seq": {
+        source: "iana"
+      },
+      "application/geopackage+sqlite3": {
+        source: "iana"
+      },
+      "application/geopose+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/geoxacml+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/geoxacml+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/gltf-buffer": {
+        source: "iana"
+      },
+      "application/gml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["gml"]
+      },
+      "application/gnap-binding-jws": {
+        source: "iana"
+      },
+      "application/gnap-binding-jwsd": {
+        source: "iana"
+      },
+      "application/gnap-binding-rotation-jws": {
+        source: "iana"
+      },
+      "application/gnap-binding-rotation-jwsd": {
+        source: "iana"
+      },
+      "application/gpx+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["gpx"]
+      },
+      "application/grib": {
+        source: "iana"
+      },
+      "application/gxf": {
+        source: "apache",
+        extensions: ["gxf"]
+      },
+      "application/gzip": {
+        source: "iana",
+        compressible: false,
+        extensions: ["gz"]
+      },
+      "application/h224": {
+        source: "iana"
+      },
+      "application/held+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/hjson": {
+        extensions: ["hjson"]
+      },
+      "application/hl7v2+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/http": {
+        source: "iana"
+      },
+      "application/hyperstudio": {
+        source: "iana",
+        extensions: ["stk"]
+      },
+      "application/ibe-key-request+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/ibe-pkg-reply+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/ibe-pp-data": {
+        source: "iana"
+      },
+      "application/iges": {
+        source: "iana"
+      },
+      "application/im-iscomposing+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/index": {
+        source: "iana"
+      },
+      "application/index.cmd": {
+        source: "iana"
+      },
+      "application/index.obj": {
+        source: "iana"
+      },
+      "application/index.response": {
+        source: "iana"
+      },
+      "application/index.vnd": {
+        source: "iana"
+      },
+      "application/inkml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["ink", "inkml"]
+      },
+      "application/iotp": {
+        source: "iana"
+      },
+      "application/ipfix": {
+        source: "iana",
+        extensions: ["ipfix"]
+      },
+      "application/ipp": {
+        source: "iana"
+      },
+      "application/isup": {
+        source: "iana"
+      },
+      "application/its+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["its"]
+      },
+      "application/java-archive": {
+        source: "iana",
+        compressible: false,
+        extensions: ["jar", "war", "ear"]
+      },
+      "application/java-serialized-object": {
+        source: "apache",
+        compressible: false,
+        extensions: ["ser"]
+      },
+      "application/java-vm": {
+        source: "apache",
+        compressible: false,
+        extensions: ["class"]
+      },
+      "application/javascript": {
+        source: "apache",
+        charset: "UTF-8",
+        compressible: true,
+        extensions: ["js"]
+      },
+      "application/jf2feed+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/jose": {
+        source: "iana"
+      },
+      "application/jose+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/jrd+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/jscalendar+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/jscontact+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/json": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true,
+        extensions: ["json", "map"]
+      },
+      "application/json-patch+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/json-seq": {
+        source: "iana"
+      },
+      "application/json5": {
+        extensions: ["json5"]
+      },
+      "application/jsonml+json": {
+        source: "apache",
+        compressible: true,
+        extensions: ["jsonml"]
+      },
+      "application/jsonpath": {
+        source: "iana"
+      },
+      "application/jwk+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/jwk-set+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/jwk-set+jwt": {
+        source: "iana"
+      },
+      "application/jwt": {
+        source: "iana"
+      },
+      "application/kpml-request+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/kpml-response+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/ld+json": {
+        source: "iana",
+        compressible: true,
+        extensions: ["jsonld"]
+      },
+      "application/lgr+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["lgr"]
+      },
+      "application/link-format": {
+        source: "iana"
+      },
+      "application/linkset": {
+        source: "iana"
+      },
+      "application/linkset+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/load-control+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/logout+jwt": {
+        source: "iana"
+      },
+      "application/lost+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["lostxml"]
+      },
+      "application/lostsync+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/lpf+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/lxf": {
+        source: "iana"
+      },
+      "application/mac-binhex40": {
+        source: "iana",
+        extensions: ["hqx"]
+      },
+      "application/mac-compactpro": {
+        source: "apache",
+        extensions: ["cpt"]
+      },
+      "application/macwriteii": {
+        source: "iana"
+      },
+      "application/mads+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["mads"]
+      },
+      "application/manifest+json": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true,
+        extensions: ["webmanifest"]
+      },
+      "application/marc": {
+        source: "iana",
+        extensions: ["mrc"]
+      },
+      "application/marcxml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["mrcx"]
+      },
+      "application/mathematica": {
+        source: "iana",
+        extensions: ["ma", "nb", "mb"]
+      },
+      "application/mathml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["mathml"]
+      },
+      "application/mathml-content+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mathml-presentation+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mbms-associated-procedure-description+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mbms-deregister+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mbms-envelope+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mbms-msk+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mbms-msk-response+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mbms-protection-description+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mbms-reception-report+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mbms-register+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mbms-register-response+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mbms-schedule+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mbms-user-service-description+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mbox": {
+        source: "iana",
+        extensions: ["mbox"]
+      },
+      "application/media-policy-dataset+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["mpf"]
+      },
+      "application/media_control+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mediaservercontrol+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["mscml"]
+      },
+      "application/merge-patch+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/metalink+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["metalink"]
+      },
+      "application/metalink4+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["meta4"]
+      },
+      "application/mets+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["mets"]
+      },
+      "application/mf4": {
+        source: "iana"
+      },
+      "application/mikey": {
+        source: "iana"
+      },
+      "application/mipc": {
+        source: "iana"
+      },
+      "application/missing-blocks+cbor-seq": {
+        source: "iana"
+      },
+      "application/mmt-aei+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["maei"]
+      },
+      "application/mmt-usd+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["musd"]
+      },
+      "application/mods+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["mods"]
+      },
+      "application/moss-keys": {
+        source: "iana"
+      },
+      "application/moss-signature": {
+        source: "iana"
+      },
+      "application/mosskey-data": {
+        source: "iana"
+      },
+      "application/mosskey-request": {
+        source: "iana"
+      },
+      "application/mp21": {
+        source: "iana",
+        extensions: ["m21", "mp21"]
+      },
+      "application/mp4": {
+        source: "iana",
+        extensions: ["mp4", "mpg4", "mp4s", "m4p"]
+      },
+      "application/mpeg4-generic": {
+        source: "iana"
+      },
+      "application/mpeg4-iod": {
+        source: "iana"
+      },
+      "application/mpeg4-iod-xmt": {
+        source: "iana"
+      },
+      "application/mrb-consumer+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/mrb-publish+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/msc-ivr+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/msc-mixer+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/msix": {
+        compressible: false,
+        extensions: ["msix"]
+      },
+      "application/msixbundle": {
+        compressible: false,
+        extensions: ["msixbundle"]
+      },
+      "application/msword": {
+        source: "iana",
+        compressible: false,
+        extensions: ["doc", "dot"]
+      },
+      "application/mud+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/multipart-core": {
+        source: "iana"
+      },
+      "application/mxf": {
+        source: "iana",
+        extensions: ["mxf"]
+      },
+      "application/n-quads": {
+        source: "iana",
+        extensions: ["nq"]
+      },
+      "application/n-triples": {
+        source: "iana",
+        extensions: ["nt"]
+      },
+      "application/nasdata": {
+        source: "iana"
+      },
+      "application/news-checkgroups": {
+        source: "iana",
+        charset: "US-ASCII"
+      },
+      "application/news-groupinfo": {
+        source: "iana",
+        charset: "US-ASCII"
+      },
+      "application/news-transmission": {
+        source: "iana"
+      },
+      "application/nlsml+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/node": {
+        source: "iana",
+        extensions: ["cjs"]
+      },
+      "application/nss": {
+        source: "iana"
+      },
+      "application/oauth-authz-req+jwt": {
+        source: "iana"
+      },
+      "application/oblivious-dns-message": {
+        source: "iana"
+      },
+      "application/ocsp-request": {
+        source: "iana"
+      },
+      "application/ocsp-response": {
+        source: "iana"
+      },
+      "application/octet-stream": {
+        source: "iana",
+        compressible: true,
+        extensions: ["bin", "dms", "lrf", "mar", "so", "dist", "distz", "pkg", "bpk", "dump", "elc", "deploy", "exe", "dll", "deb", "dmg", "iso", "img", "msi", "msp", "msm", "buffer"]
+      },
+      "application/oda": {
+        source: "iana",
+        extensions: ["oda"]
+      },
+      "application/odm+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/odx": {
+        source: "iana"
+      },
+      "application/oebps-package+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["opf"]
+      },
+      "application/ogg": {
+        source: "iana",
+        compressible: false,
+        extensions: ["ogx"]
+      },
+      "application/ohttp-keys": {
+        source: "iana"
+      },
+      "application/omdoc+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["omdoc"]
+      },
+      "application/onenote": {
+        source: "apache",
+        extensions: ["onetoc", "onetoc2", "onetmp", "onepkg", "one", "onea"]
+      },
+      "application/opc-nodeset+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/oscore": {
+        source: "iana"
+      },
+      "application/oxps": {
+        source: "iana",
+        extensions: ["oxps"]
+      },
+      "application/p21": {
+        source: "iana"
+      },
+      "application/p21+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/p2p-overlay+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["relo"]
+      },
+      "application/parityfec": {
+        source: "iana"
+      },
+      "application/passport": {
+        source: "iana"
+      },
+      "application/patch-ops-error+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xer"]
+      },
+      "application/pdf": {
+        source: "iana",
+        compressible: false,
+        extensions: ["pdf"]
+      },
+      "application/pdx": {
+        source: "iana"
+      },
+      "application/pem-certificate-chain": {
+        source: "iana"
+      },
+      "application/pgp-encrypted": {
+        source: "iana",
+        compressible: false,
+        extensions: ["pgp"]
+      },
+      "application/pgp-keys": {
+        source: "iana",
+        extensions: ["asc"]
+      },
+      "application/pgp-signature": {
+        source: "iana",
+        extensions: ["sig", "asc"]
+      },
+      "application/pics-rules": {
+        source: "apache",
+        extensions: ["prf"]
+      },
+      "application/pidf+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/pidf-diff+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/pkcs10": {
+        source: "iana",
+        extensions: ["p10"]
+      },
+      "application/pkcs12": {
+        source: "iana"
+      },
+      "application/pkcs7-mime": {
+        source: "iana",
+        extensions: ["p7m", "p7c"]
+      },
+      "application/pkcs7-signature": {
+        source: "iana",
+        extensions: ["p7s"]
+      },
+      "application/pkcs8": {
+        source: "iana",
+        extensions: ["p8"]
+      },
+      "application/pkcs8-encrypted": {
+        source: "iana"
+      },
+      "application/pkix-attr-cert": {
+        source: "iana",
+        extensions: ["ac"]
+      },
+      "application/pkix-cert": {
+        source: "iana",
+        extensions: ["cer"]
+      },
+      "application/pkix-crl": {
+        source: "iana",
+        extensions: ["crl"]
+      },
+      "application/pkix-pkipath": {
+        source: "iana",
+        extensions: ["pkipath"]
+      },
+      "application/pkixcmp": {
+        source: "iana",
+        extensions: ["pki"]
+      },
+      "application/pls+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["pls"]
+      },
+      "application/poc-settings+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/postscript": {
+        source: "iana",
+        compressible: true,
+        extensions: ["ai", "eps", "ps"]
+      },
+      "application/ppsp-tracker+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/private-token-issuer-directory": {
+        source: "iana"
+      },
+      "application/private-token-request": {
+        source: "iana"
+      },
+      "application/private-token-response": {
+        source: "iana"
+      },
+      "application/problem+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/problem+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/provenance+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["provx"]
+      },
+      "application/provided-claims+jwt": {
+        source: "iana"
+      },
+      "application/prs.alvestrand.titrax-sheet": {
+        source: "iana"
+      },
+      "application/prs.cww": {
+        source: "iana",
+        extensions: ["cww"]
+      },
+      "application/prs.cyn": {
+        source: "iana",
+        charset: "7-BIT"
+      },
+      "application/prs.hpub+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/prs.implied-document+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/prs.implied-executable": {
+        source: "iana"
+      },
+      "application/prs.implied-object+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/prs.implied-object+json-seq": {
+        source: "iana"
+      },
+      "application/prs.implied-object+yaml": {
+        source: "iana"
+      },
+      "application/prs.implied-structure": {
+        source: "iana"
+      },
+      "application/prs.mayfile": {
+        source: "iana"
+      },
+      "application/prs.nprend": {
+        source: "iana"
+      },
+      "application/prs.plucker": {
+        source: "iana"
+      },
+      "application/prs.rdf-xml-crypt": {
+        source: "iana"
+      },
+      "application/prs.vcfbzip2": {
+        source: "iana"
+      },
+      "application/prs.xsf+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xsf"]
+      },
+      "application/pskc+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["pskcxml"]
+      },
+      "application/pvd+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/qsig": {
+        source: "iana"
+      },
+      "application/raml+yaml": {
+        compressible: true,
+        extensions: ["raml"]
+      },
+      "application/raptorfec": {
+        source: "iana"
+      },
+      "application/rdap+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/rdf+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["rdf", "owl"]
+      },
+      "application/reginfo+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["rif"]
+      },
+      "application/relax-ng-compact-syntax": {
+        source: "iana",
+        extensions: ["rnc"]
+      },
+      "application/remote-printing": {
+        source: "apache"
+      },
+      "application/reputon+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/resolve-response+jwt": {
+        source: "iana"
+      },
+      "application/resource-lists+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["rl"]
+      },
+      "application/resource-lists-diff+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["rld"]
+      },
+      "application/rfc+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/riscos": {
+        source: "iana"
+      },
+      "application/rlmi+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/rls-services+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["rs"]
+      },
+      "application/route-apd+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["rapd"]
+      },
+      "application/route-s-tsid+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["sls"]
+      },
+      "application/route-usd+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["rusd"]
+      },
+      "application/rpki-checklist": {
+        source: "iana"
+      },
+      "application/rpki-ghostbusters": {
+        source: "iana",
+        extensions: ["gbr"]
+      },
+      "application/rpki-manifest": {
+        source: "iana",
+        extensions: ["mft"]
+      },
+      "application/rpki-publication": {
+        source: "iana"
+      },
+      "application/rpki-roa": {
+        source: "iana",
+        extensions: ["roa"]
+      },
+      "application/rpki-signed-tal": {
+        source: "iana"
+      },
+      "application/rpki-updown": {
+        source: "iana"
+      },
+      "application/rsd+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["rsd"]
+      },
+      "application/rss+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["rss"]
+      },
+      "application/rtf": {
+        source: "iana",
+        compressible: true,
+        extensions: ["rtf"]
+      },
+      "application/rtploopback": {
+        source: "iana"
+      },
+      "application/rtx": {
+        source: "iana"
+      },
+      "application/samlassertion+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/samlmetadata+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/sarif+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/sarif-external-properties+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/sbe": {
+        source: "iana"
+      },
+      "application/sbml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["sbml"]
+      },
+      "application/scaip+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/scim+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/scvp-cv-request": {
+        source: "iana",
+        extensions: ["scq"]
+      },
+      "application/scvp-cv-response": {
+        source: "iana",
+        extensions: ["scs"]
+      },
+      "application/scvp-vp-request": {
+        source: "iana",
+        extensions: ["spq"]
+      },
+      "application/scvp-vp-response": {
+        source: "iana",
+        extensions: ["spp"]
+      },
+      "application/sdp": {
+        source: "iana",
+        extensions: ["sdp"]
+      },
+      "application/secevent+jwt": {
+        source: "iana"
+      },
+      "application/senml+cbor": {
+        source: "iana"
+      },
+      "application/senml+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/senml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["senmlx"]
+      },
+      "application/senml-etch+cbor": {
+        source: "iana"
+      },
+      "application/senml-etch+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/senml-exi": {
+        source: "iana"
+      },
+      "application/sensml+cbor": {
+        source: "iana"
+      },
+      "application/sensml+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/sensml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["sensmlx"]
+      },
+      "application/sensml-exi": {
+        source: "iana"
+      },
+      "application/sep+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/sep-exi": {
+        source: "iana"
+      },
+      "application/session-info": {
+        source: "iana"
+      },
+      "application/set-payment": {
+        source: "iana"
+      },
+      "application/set-payment-initiation": {
+        source: "iana",
+        extensions: ["setpay"]
+      },
+      "application/set-registration": {
+        source: "iana"
+      },
+      "application/set-registration-initiation": {
+        source: "iana",
+        extensions: ["setreg"]
+      },
+      "application/sgml": {
+        source: "iana"
+      },
+      "application/sgml-open-catalog": {
+        source: "iana"
+      },
+      "application/shf+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["shf"]
+      },
+      "application/sieve": {
+        source: "iana",
+        extensions: ["siv", "sieve"]
+      },
+      "application/simple-filter+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/simple-message-summary": {
+        source: "iana"
+      },
+      "application/simplesymbolcontainer": {
+        source: "iana"
+      },
+      "application/sipc": {
+        source: "iana"
+      },
+      "application/slate": {
+        source: "iana"
+      },
+      "application/smil": {
+        source: "apache"
+      },
+      "application/smil+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["smi", "smil"]
+      },
+      "application/smpte336m": {
+        source: "iana"
+      },
+      "application/soap+fastinfoset": {
+        source: "iana"
+      },
+      "application/soap+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/sparql-query": {
+        source: "iana",
+        extensions: ["rq"]
+      },
+      "application/sparql-results+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["srx"]
+      },
+      "application/spdx+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/spirits-event+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/sql": {
+        source: "iana",
+        extensions: ["sql"]
+      },
+      "application/srgs": {
+        source: "iana",
+        extensions: ["gram"]
+      },
+      "application/srgs+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["grxml"]
+      },
+      "application/sru+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["sru"]
+      },
+      "application/ssdl+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["ssdl"]
+      },
+      "application/sslkeylogfile": {
+        source: "iana"
+      },
+      "application/ssml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["ssml"]
+      },
+      "application/st2110-41": {
+        source: "iana"
+      },
+      "application/stix+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/stratum": {
+        source: "iana"
+      },
+      "application/swid+cbor": {
+        source: "iana"
+      },
+      "application/swid+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["swidtag"]
+      },
+      "application/tamp-apex-update": {
+        source: "iana"
+      },
+      "application/tamp-apex-update-confirm": {
+        source: "iana"
+      },
+      "application/tamp-community-update": {
+        source: "iana"
+      },
+      "application/tamp-community-update-confirm": {
+        source: "iana"
+      },
+      "application/tamp-error": {
+        source: "iana"
+      },
+      "application/tamp-sequence-adjust": {
+        source: "iana"
+      },
+      "application/tamp-sequence-adjust-confirm": {
+        source: "iana"
+      },
+      "application/tamp-status-query": {
+        source: "iana"
+      },
+      "application/tamp-status-response": {
+        source: "iana"
+      },
+      "application/tamp-update": {
+        source: "iana"
+      },
+      "application/tamp-update-confirm": {
+        source: "iana"
+      },
+      "application/tar": {
+        compressible: true
+      },
+      "application/taxii+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/td+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/tei+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["tei", "teicorpus"]
+      },
+      "application/tetra_isi": {
+        source: "iana"
+      },
+      "application/thraud+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["tfi"]
+      },
+      "application/timestamp-query": {
+        source: "iana"
+      },
+      "application/timestamp-reply": {
+        source: "iana"
+      },
+      "application/timestamped-data": {
+        source: "iana",
+        extensions: ["tsd"]
+      },
+      "application/tlsrpt+gzip": {
+        source: "iana"
+      },
+      "application/tlsrpt+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/tm+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/tnauthlist": {
+        source: "iana"
+      },
+      "application/toc+cbor": {
+        source: "iana"
+      },
+      "application/token-introspection+jwt": {
+        source: "iana"
+      },
+      "application/toml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["toml"]
+      },
+      "application/trickle-ice-sdpfrag": {
+        source: "iana"
+      },
+      "application/trig": {
+        source: "iana",
+        extensions: ["trig"]
+      },
+      "application/trust-chain+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/trust-mark+jwt": {
+        source: "iana"
+      },
+      "application/trust-mark-delegation+jwt": {
+        source: "iana"
+      },
+      "application/ttml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["ttml"]
+      },
+      "application/tve-trigger": {
+        source: "iana"
+      },
+      "application/tzif": {
+        source: "iana"
+      },
+      "application/tzif-leap": {
+        source: "iana"
+      },
+      "application/ubjson": {
+        compressible: false,
+        extensions: ["ubj"]
+      },
+      "application/uccs+cbor": {
+        source: "iana"
+      },
+      "application/ujcs+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/ulpfec": {
+        source: "iana"
+      },
+      "application/urc-grpsheet+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/urc-ressheet+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["rsheet"]
+      },
+      "application/urc-targetdesc+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["td"]
+      },
+      "application/urc-uisocketdesc+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vc": {
+        source: "iana"
+      },
+      "application/vc+cose": {
+        source: "iana"
+      },
+      "application/vc+jwt": {
+        source: "iana"
+      },
+      "application/vcard+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vcard+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vemmi": {
+        source: "iana"
+      },
+      "application/vividence.scriptfile": {
+        source: "apache"
+      },
+      "application/vnd.1000minds.decision-model+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["1km"]
+      },
+      "application/vnd.1ob": {
+        source: "iana"
+      },
+      "application/vnd.3gpp-prose+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp-prose-pc3a+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp-prose-pc3ach+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp-prose-pc3ch+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp-prose-pc8+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp-v2x-local-service-information": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.5gnas": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.5gsa2x": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.5gsa2x-local-service-information": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.5gsv2x": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.5gsv2x-local-service-information": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.access-transfer-events+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.bsf+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.crs+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.current-location-discovery+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.gmop+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.gtpc": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.interworking-data": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.lpp": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.mc-signalling-ear": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.mcdata-affiliation-command+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcdata-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcdata-msgstore-ctrl-request+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcdata-payload": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.mcdata-regroup+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcdata-service-config+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcdata-signalling": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.mcdata-ue-config+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcdata-user-profile+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcptt-affiliation-command+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcptt-floor-request+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcptt-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcptt-location-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcptt-mbms-usage-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcptt-regroup+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcptt-service-config+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcptt-signed+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcptt-ue-config+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcptt-ue-init-config+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcptt-user-profile+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcvideo-affiliation-command+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcvideo-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcvideo-location-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcvideo-mbms-usage-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcvideo-regroup+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcvideo-service-config+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcvideo-transmission-request+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcvideo-ue-config+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mcvideo-user-profile+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.mid-call+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.ngap": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.pfcp": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.pic-bw-large": {
+        source: "iana",
+        extensions: ["plb"]
+      },
+      "application/vnd.3gpp.pic-bw-small": {
+        source: "iana",
+        extensions: ["psb"]
+      },
+      "application/vnd.3gpp.pic-bw-var": {
+        source: "iana",
+        extensions: ["pvb"]
+      },
+      "application/vnd.3gpp.pinapp-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.s1ap": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.seal-group-doc+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.seal-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.seal-location-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.seal-mbms-usage-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.seal-network-qos-management-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.seal-ue-config-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.seal-unicast-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.seal-user-profile-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.sms": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.sms+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.srvcc-ext+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.srvcc-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.state-and-event-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.ussd+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp.v2x": {
+        source: "iana"
+      },
+      "application/vnd.3gpp.vae-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp2.bcmcsinfo+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.3gpp2.sms": {
+        source: "iana"
+      },
+      "application/vnd.3gpp2.tcap": {
+        source: "iana",
+        extensions: ["tcap"]
+      },
+      "application/vnd.3lightssoftware.imagescal": {
+        source: "iana"
+      },
+      "application/vnd.3m.post-it-notes": {
+        source: "iana",
+        extensions: ["pwn"]
+      },
+      "application/vnd.accpac.simply.aso": {
+        source: "iana",
+        extensions: ["aso"]
+      },
+      "application/vnd.accpac.simply.imp": {
+        source: "iana",
+        extensions: ["imp"]
+      },
+      "application/vnd.acm.addressxfer+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.acm.chatbot+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.acucobol": {
+        source: "iana",
+        extensions: ["acu"]
+      },
+      "application/vnd.acucorp": {
+        source: "iana",
+        extensions: ["atc", "acutc"]
+      },
+      "application/vnd.adobe.air-application-installer-package+zip": {
+        source: "apache",
+        compressible: false,
+        extensions: ["air"]
+      },
+      "application/vnd.adobe.flash.movie": {
+        source: "iana"
+      },
+      "application/vnd.adobe.formscentral.fcdt": {
+        source: "iana",
+        extensions: ["fcdt"]
+      },
+      "application/vnd.adobe.fxp": {
+        source: "iana",
+        extensions: ["fxp", "fxpl"]
+      },
+      "application/vnd.adobe.partial-upload": {
+        source: "iana"
+      },
+      "application/vnd.adobe.xdp+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xdp"]
+      },
+      "application/vnd.adobe.xfdf": {
+        source: "apache",
+        extensions: ["xfdf"]
+      },
+      "application/vnd.aether.imp": {
+        source: "iana"
+      },
+      "application/vnd.afpc.afplinedata": {
+        source: "iana"
+      },
+      "application/vnd.afpc.afplinedata-pagedef": {
+        source: "iana"
+      },
+      "application/vnd.afpc.cmoca-cmresource": {
+        source: "iana"
+      },
+      "application/vnd.afpc.foca-charset": {
+        source: "iana"
+      },
+      "application/vnd.afpc.foca-codedfont": {
+        source: "iana"
+      },
+      "application/vnd.afpc.foca-codepage": {
+        source: "iana"
+      },
+      "application/vnd.afpc.modca": {
+        source: "iana"
+      },
+      "application/vnd.afpc.modca-cmtable": {
+        source: "iana"
+      },
+      "application/vnd.afpc.modca-formdef": {
+        source: "iana"
+      },
+      "application/vnd.afpc.modca-mediummap": {
+        source: "iana"
+      },
+      "application/vnd.afpc.modca-objectcontainer": {
+        source: "iana"
+      },
+      "application/vnd.afpc.modca-overlay": {
+        source: "iana"
+      },
+      "application/vnd.afpc.modca-pagesegment": {
+        source: "iana"
+      },
+      "application/vnd.age": {
+        source: "iana",
+        extensions: ["age"]
+      },
+      "application/vnd.ah-barcode": {
+        source: "apache"
+      },
+      "application/vnd.ahead.space": {
+        source: "iana",
+        extensions: ["ahead"]
+      },
+      "application/vnd.airzip.filesecure.azf": {
+        source: "iana",
+        extensions: ["azf"]
+      },
+      "application/vnd.airzip.filesecure.azs": {
+        source: "iana",
+        extensions: ["azs"]
+      },
+      "application/vnd.amadeus+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.amazon.ebook": {
+        source: "apache",
+        extensions: ["azw"]
+      },
+      "application/vnd.amazon.mobi8-ebook": {
+        source: "iana"
+      },
+      "application/vnd.americandynamics.acc": {
+        source: "iana",
+        extensions: ["acc"]
+      },
+      "application/vnd.amiga.ami": {
+        source: "iana",
+        extensions: ["ami"]
+      },
+      "application/vnd.amundsen.maze+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.android.ota": {
+        source: "iana"
+      },
+      "application/vnd.android.package-archive": {
+        source: "apache",
+        compressible: false,
+        extensions: ["apk"]
+      },
+      "application/vnd.anki": {
+        source: "iana"
+      },
+      "application/vnd.anser-web-certificate-issue-initiation": {
+        source: "iana",
+        extensions: ["cii"]
+      },
+      "application/vnd.anser-web-funds-transfer-initiation": {
+        source: "apache",
+        extensions: ["fti"]
+      },
+      "application/vnd.antix.game-component": {
+        source: "iana",
+        extensions: ["atx"]
+      },
+      "application/vnd.apache.arrow.file": {
+        source: "iana"
+      },
+      "application/vnd.apache.arrow.stream": {
+        source: "iana"
+      },
+      "application/vnd.apache.parquet": {
+        source: "iana"
+      },
+      "application/vnd.apache.thrift.binary": {
+        source: "iana"
+      },
+      "application/vnd.apache.thrift.compact": {
+        source: "iana"
+      },
+      "application/vnd.apache.thrift.json": {
+        source: "iana"
+      },
+      "application/vnd.apexlang": {
+        source: "iana"
+      },
+      "application/vnd.api+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.aplextor.warrp+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.apothekende.reservation+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.apple.installer+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["mpkg"]
+      },
+      "application/vnd.apple.keynote": {
+        source: "iana",
+        extensions: ["key"]
+      },
+      "application/vnd.apple.mpegurl": {
+        source: "iana",
+        extensions: ["m3u8"]
+      },
+      "application/vnd.apple.numbers": {
+        source: "iana",
+        extensions: ["numbers"]
+      },
+      "application/vnd.apple.pages": {
+        source: "iana",
+        extensions: ["pages"]
+      },
+      "application/vnd.apple.pkpass": {
+        compressible: false,
+        extensions: ["pkpass"]
+      },
+      "application/vnd.arastra.swi": {
+        source: "apache"
+      },
+      "application/vnd.aristanetworks.swi": {
+        source: "iana",
+        extensions: ["swi"]
+      },
+      "application/vnd.artisan+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.artsquare": {
+        source: "iana"
+      },
+      "application/vnd.astraea-software.iota": {
+        source: "iana",
+        extensions: ["iota"]
+      },
+      "application/vnd.audiograph": {
+        source: "iana",
+        extensions: ["aep"]
+      },
+      "application/vnd.autodesk.fbx": {
+        extensions: ["fbx"]
+      },
+      "application/vnd.autopackage": {
+        source: "iana"
+      },
+      "application/vnd.avalon+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.avistar+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.balsamiq.bmml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["bmml"]
+      },
+      "application/vnd.balsamiq.bmpr": {
+        source: "iana"
+      },
+      "application/vnd.banana-accounting": {
+        source: "iana"
+      },
+      "application/vnd.bbf.usp.error": {
+        source: "iana"
+      },
+      "application/vnd.bbf.usp.msg": {
+        source: "iana"
+      },
+      "application/vnd.bbf.usp.msg+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.bekitzur-stech+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.belightsoft.lhzd+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.belightsoft.lhzl+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.bint.med-content": {
+        source: "iana"
+      },
+      "application/vnd.biopax.rdf+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.blink-idb-value-wrapper": {
+        source: "iana"
+      },
+      "application/vnd.blueice.multipass": {
+        source: "iana",
+        extensions: ["mpm"]
+      },
+      "application/vnd.bluetooth.ep.oob": {
+        source: "iana"
+      },
+      "application/vnd.bluetooth.le.oob": {
+        source: "iana"
+      },
+      "application/vnd.bmi": {
+        source: "iana",
+        extensions: ["bmi"]
+      },
+      "application/vnd.bpf": {
+        source: "iana"
+      },
+      "application/vnd.bpf3": {
+        source: "iana"
+      },
+      "application/vnd.businessobjects": {
+        source: "iana",
+        extensions: ["rep"]
+      },
+      "application/vnd.byu.uapi+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.bzip3": {
+        source: "iana"
+      },
+      "application/vnd.c3voc.schedule+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.cab-jscript": {
+        source: "iana"
+      },
+      "application/vnd.canon-cpdl": {
+        source: "iana"
+      },
+      "application/vnd.canon-lips": {
+        source: "iana"
+      },
+      "application/vnd.capasystems-pg+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.cendio.thinlinc.clientconf": {
+        source: "iana"
+      },
+      "application/vnd.century-systems.tcp_stream": {
+        source: "iana"
+      },
+      "application/vnd.chemdraw+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["cdxml"]
+      },
+      "application/vnd.chess-pgn": {
+        source: "iana"
+      },
+      "application/vnd.chipnuts.karaoke-mmd": {
+        source: "iana",
+        extensions: ["mmd"]
+      },
+      "application/vnd.ciedi": {
+        source: "iana"
+      },
+      "application/vnd.cinderella": {
+        source: "iana",
+        extensions: ["cdy"]
+      },
+      "application/vnd.cirpack.isdn-ext": {
+        source: "iana"
+      },
+      "application/vnd.citationstyles.style+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["csl"]
+      },
+      "application/vnd.claymore": {
+        source: "iana",
+        extensions: ["cla"]
+      },
+      "application/vnd.cloanto.rp9": {
+        source: "iana",
+        extensions: ["rp9"]
+      },
+      "application/vnd.clonk.c4group": {
+        source: "iana",
+        extensions: ["c4g", "c4d", "c4f", "c4p", "c4u"]
+      },
+      "application/vnd.cluetrust.cartomobile-config": {
+        source: "iana",
+        extensions: ["c11amc"]
+      },
+      "application/vnd.cluetrust.cartomobile-config-pkg": {
+        source: "iana",
+        extensions: ["c11amz"]
+      },
+      "application/vnd.cncf.helm.chart.content.v1.tar+gzip": {
+        source: "iana"
+      },
+      "application/vnd.cncf.helm.chart.provenance.v1.prov": {
+        source: "iana"
+      },
+      "application/vnd.cncf.helm.config.v1+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.coffeescript": {
+        source: "iana"
+      },
+      "application/vnd.collabio.xodocuments.document": {
+        source: "iana"
+      },
+      "application/vnd.collabio.xodocuments.document-template": {
+        source: "iana"
+      },
+      "application/vnd.collabio.xodocuments.presentation": {
+        source: "iana"
+      },
+      "application/vnd.collabio.xodocuments.presentation-template": {
+        source: "iana"
+      },
+      "application/vnd.collabio.xodocuments.spreadsheet": {
+        source: "iana"
+      },
+      "application/vnd.collabio.xodocuments.spreadsheet-template": {
+        source: "iana"
+      },
+      "application/vnd.collection+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.collection.doc+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.collection.next+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.comicbook+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.comicbook-rar": {
+        source: "iana"
+      },
+      "application/vnd.commerce-battelle": {
+        source: "iana"
+      },
+      "application/vnd.commonspace": {
+        source: "iana",
+        extensions: ["csp"]
+      },
+      "application/vnd.contact.cmsg": {
+        source: "iana",
+        extensions: ["cdbcmsg"]
+      },
+      "application/vnd.coreos.ignition+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.cosmocaller": {
+        source: "iana",
+        extensions: ["cmc"]
+      },
+      "application/vnd.crick.clicker": {
+        source: "iana",
+        extensions: ["clkx"]
+      },
+      "application/vnd.crick.clicker.keyboard": {
+        source: "iana",
+        extensions: ["clkk"]
+      },
+      "application/vnd.crick.clicker.palette": {
+        source: "iana",
+        extensions: ["clkp"]
+      },
+      "application/vnd.crick.clicker.template": {
+        source: "iana",
+        extensions: ["clkt"]
+      },
+      "application/vnd.crick.clicker.wordbank": {
+        source: "iana",
+        extensions: ["clkw"]
+      },
+      "application/vnd.criticaltools.wbs+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["wbs"]
+      },
+      "application/vnd.cryptii.pipe+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.crypto-shade-file": {
+        source: "iana"
+      },
+      "application/vnd.cryptomator.encrypted": {
+        source: "iana"
+      },
+      "application/vnd.cryptomator.vault": {
+        source: "iana"
+      },
+      "application/vnd.ctc-posml": {
+        source: "iana",
+        extensions: ["pml"]
+      },
+      "application/vnd.ctct.ws+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.cups-pdf": {
+        source: "iana"
+      },
+      "application/vnd.cups-postscript": {
+        source: "iana"
+      },
+      "application/vnd.cups-ppd": {
+        source: "iana",
+        extensions: ["ppd"]
+      },
+      "application/vnd.cups-raster": {
+        source: "iana"
+      },
+      "application/vnd.cups-raw": {
+        source: "iana"
+      },
+      "application/vnd.curl": {
+        source: "iana"
+      },
+      "application/vnd.curl.car": {
+        source: "apache",
+        extensions: ["car"]
+      },
+      "application/vnd.curl.pcurl": {
+        source: "apache",
+        extensions: ["pcurl"]
+      },
+      "application/vnd.cyan.dean.root+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.cybank": {
+        source: "iana"
+      },
+      "application/vnd.cyclonedx+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.cyclonedx+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.d2l.coursepackage1p0+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.d3m-dataset": {
+        source: "iana"
+      },
+      "application/vnd.d3m-problem": {
+        source: "iana"
+      },
+      "application/vnd.dart": {
+        source: "iana",
+        compressible: true,
+        extensions: ["dart"]
+      },
+      "application/vnd.data-vision.rdz": {
+        source: "iana",
+        extensions: ["rdz"]
+      },
+      "application/vnd.datalog": {
+        source: "iana"
+      },
+      "application/vnd.datapackage+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.dataresource+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.dbf": {
+        source: "iana",
+        extensions: ["dbf"]
+      },
+      "application/vnd.dcmp+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["dcmp"]
+      },
+      "application/vnd.debian.binary-package": {
+        source: "iana"
+      },
+      "application/vnd.dece.data": {
+        source: "iana",
+        extensions: ["uvf", "uvvf", "uvd", "uvvd"]
+      },
+      "application/vnd.dece.ttml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["uvt", "uvvt"]
+      },
+      "application/vnd.dece.unspecified": {
+        source: "iana",
+        extensions: ["uvx", "uvvx"]
+      },
+      "application/vnd.dece.zip": {
+        source: "iana",
+        extensions: ["uvz", "uvvz"]
+      },
+      "application/vnd.denovo.fcselayout-link": {
+        source: "iana",
+        extensions: ["fe_launch"]
+      },
+      "application/vnd.desmume.movie": {
+        source: "iana"
+      },
+      "application/vnd.dir-bi.plate-dl-nosuffix": {
+        source: "iana"
+      },
+      "application/vnd.dm.delegation+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.dna": {
+        source: "iana",
+        extensions: ["dna"]
+      },
+      "application/vnd.document+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.dolby.mlp": {
+        source: "apache",
+        extensions: ["mlp"]
+      },
+      "application/vnd.dolby.mobile.1": {
+        source: "iana"
+      },
+      "application/vnd.dolby.mobile.2": {
+        source: "iana"
+      },
+      "application/vnd.doremir.scorecloud-binary-document": {
+        source: "iana"
+      },
+      "application/vnd.dpgraph": {
+        source: "iana",
+        extensions: ["dpg"]
+      },
+      "application/vnd.dreamfactory": {
+        source: "iana",
+        extensions: ["dfac"]
+      },
+      "application/vnd.drive+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.ds-keypoint": {
+        source: "apache",
+        extensions: ["kpxx"]
+      },
+      "application/vnd.dtg.local": {
+        source: "iana"
+      },
+      "application/vnd.dtg.local.flash": {
+        source: "iana"
+      },
+      "application/vnd.dtg.local.html": {
+        source: "iana"
+      },
+      "application/vnd.dvb.ait": {
+        source: "iana",
+        extensions: ["ait"]
+      },
+      "application/vnd.dvb.dvbisl+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.dvb.dvbj": {
+        source: "iana"
+      },
+      "application/vnd.dvb.esgcontainer": {
+        source: "iana"
+      },
+      "application/vnd.dvb.ipdcdftnotifaccess": {
+        source: "iana"
+      },
+      "application/vnd.dvb.ipdcesgaccess": {
+        source: "iana"
+      },
+      "application/vnd.dvb.ipdcesgaccess2": {
+        source: "iana"
+      },
+      "application/vnd.dvb.ipdcesgpdd": {
+        source: "iana"
+      },
+      "application/vnd.dvb.ipdcroaming": {
+        source: "iana"
+      },
+      "application/vnd.dvb.iptv.alfec-base": {
+        source: "iana"
+      },
+      "application/vnd.dvb.iptv.alfec-enhancement": {
+        source: "iana"
+      },
+      "application/vnd.dvb.notif-aggregate-root+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.dvb.notif-container+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.dvb.notif-generic+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.dvb.notif-ia-msglist+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.dvb.notif-ia-registration-request+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.dvb.notif-ia-registration-response+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.dvb.notif-init+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.dvb.pfr": {
+        source: "iana"
+      },
+      "application/vnd.dvb.service": {
+        source: "iana",
+        extensions: ["svc"]
+      },
+      "application/vnd.dxr": {
+        source: "iana"
+      },
+      "application/vnd.dynageo": {
+        source: "iana",
+        extensions: ["geo"]
+      },
+      "application/vnd.dzr": {
+        source: "iana"
+      },
+      "application/vnd.easykaraoke.cdgdownload": {
+        source: "iana"
+      },
+      "application/vnd.ecdis-update": {
+        source: "iana"
+      },
+      "application/vnd.ecip.rlp": {
+        source: "iana"
+      },
+      "application/vnd.eclipse.ditto+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.ecowin.chart": {
+        source: "iana",
+        extensions: ["mag"]
+      },
+      "application/vnd.ecowin.filerequest": {
+        source: "iana"
+      },
+      "application/vnd.ecowin.fileupdate": {
+        source: "iana"
+      },
+      "application/vnd.ecowin.series": {
+        source: "iana"
+      },
+      "application/vnd.ecowin.seriesrequest": {
+        source: "iana"
+      },
+      "application/vnd.ecowin.seriesupdate": {
+        source: "iana"
+      },
+      "application/vnd.efi.img": {
+        source: "iana"
+      },
+      "application/vnd.efi.iso": {
+        source: "iana"
+      },
+      "application/vnd.eln+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.emclient.accessrequest+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.enliven": {
+        source: "iana",
+        extensions: ["nml"]
+      },
+      "application/vnd.enphase.envoy": {
+        source: "iana"
+      },
+      "application/vnd.eprints.data+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.epson.esf": {
+        source: "iana",
+        extensions: ["esf"]
+      },
+      "application/vnd.epson.msf": {
+        source: "iana",
+        extensions: ["msf"]
+      },
+      "application/vnd.epson.quickanime": {
+        source: "iana",
+        extensions: ["qam"]
+      },
+      "application/vnd.epson.salt": {
+        source: "iana",
+        extensions: ["slt"]
+      },
+      "application/vnd.epson.ssf": {
+        source: "iana",
+        extensions: ["ssf"]
+      },
+      "application/vnd.ericsson.quickcall": {
+        source: "iana"
+      },
+      "application/vnd.erofs": {
+        source: "iana"
+      },
+      "application/vnd.espass-espass+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.eszigno3+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["es3", "et3"]
+      },
+      "application/vnd.etsi.aoc+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.asic-e+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.etsi.asic-s+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.etsi.cug+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.iptvcommand+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.iptvdiscovery+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.iptvprofile+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.iptvsad-bc+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.iptvsad-cod+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.iptvsad-npvr+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.iptvservice+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.iptvsync+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.iptvueprofile+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.mcid+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.mheg5": {
+        source: "iana"
+      },
+      "application/vnd.etsi.overload-control-policy-dataset+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.pstn+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.sci+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.simservs+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.timestamp-token": {
+        source: "iana"
+      },
+      "application/vnd.etsi.tsl+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.etsi.tsl.der": {
+        source: "iana"
+      },
+      "application/vnd.eu.kasparian.car+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.eudora.data": {
+        source: "iana"
+      },
+      "application/vnd.evolv.ecig.profile": {
+        source: "iana"
+      },
+      "application/vnd.evolv.ecig.settings": {
+        source: "iana"
+      },
+      "application/vnd.evolv.ecig.theme": {
+        source: "iana"
+      },
+      "application/vnd.exstream-empower+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.exstream-package": {
+        source: "iana"
+      },
+      "application/vnd.ezpix-album": {
+        source: "iana",
+        extensions: ["ez2"]
+      },
+      "application/vnd.ezpix-package": {
+        source: "iana",
+        extensions: ["ez3"]
+      },
+      "application/vnd.f-secure.mobile": {
+        source: "iana"
+      },
+      "application/vnd.familysearch.gedcom+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.fastcopy-disk-image": {
+        source: "iana"
+      },
+      "application/vnd.fdf": {
+        source: "apache",
+        extensions: ["fdf"]
+      },
+      "application/vnd.fdsn.mseed": {
+        source: "iana",
+        extensions: ["mseed"]
+      },
+      "application/vnd.fdsn.seed": {
+        source: "iana",
+        extensions: ["seed", "dataless"]
+      },
+      "application/vnd.fdsn.stationxml+xml": {
+        source: "iana",
+        charset: "XML-BASED",
+        compressible: true
+      },
+      "application/vnd.ffsns": {
+        source: "iana"
+      },
+      "application/vnd.ficlab.flb+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.filmit.zfc": {
+        source: "iana"
+      },
+      "application/vnd.fints": {
+        source: "iana"
+      },
+      "application/vnd.firemonkeys.cloudcell": {
+        source: "iana"
+      },
+      "application/vnd.flographit": {
+        source: "iana",
+        extensions: ["gph"]
+      },
+      "application/vnd.fluxtime.clip": {
+        source: "iana",
+        extensions: ["ftc"]
+      },
+      "application/vnd.font-fontforge-sfd": {
+        source: "iana"
+      },
+      "application/vnd.framemaker": {
+        source: "iana",
+        extensions: ["fm", "frame", "maker", "book"]
+      },
+      "application/vnd.freelog.comic": {
+        source: "iana"
+      },
+      "application/vnd.frogans.fnc": {
+        source: "apache",
+        extensions: ["fnc"]
+      },
+      "application/vnd.frogans.ltf": {
+        source: "apache",
+        extensions: ["ltf"]
+      },
+      "application/vnd.fsc.weblaunch": {
+        source: "iana",
+        extensions: ["fsc"]
+      },
+      "application/vnd.fujifilm.fb.docuworks": {
+        source: "iana"
+      },
+      "application/vnd.fujifilm.fb.docuworks.binder": {
+        source: "iana"
+      },
+      "application/vnd.fujifilm.fb.docuworks.container": {
+        source: "iana"
+      },
+      "application/vnd.fujifilm.fb.jfi+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.fujitsu.oasys": {
+        source: "iana",
+        extensions: ["oas"]
+      },
+      "application/vnd.fujitsu.oasys2": {
+        source: "iana",
+        extensions: ["oa2"]
+      },
+      "application/vnd.fujitsu.oasys3": {
+        source: "iana",
+        extensions: ["oa3"]
+      },
+      "application/vnd.fujitsu.oasysgp": {
+        source: "iana",
+        extensions: ["fg5"]
+      },
+      "application/vnd.fujitsu.oasysprs": {
+        source: "iana",
+        extensions: ["bh2"]
+      },
+      "application/vnd.fujixerox.art-ex": {
+        source: "iana"
+      },
+      "application/vnd.fujixerox.art4": {
+        source: "iana"
+      },
+      "application/vnd.fujixerox.ddd": {
+        source: "iana",
+        extensions: ["ddd"]
+      },
+      "application/vnd.fujixerox.docuworks": {
+        source: "iana",
+        extensions: ["xdw"]
+      },
+      "application/vnd.fujixerox.docuworks.binder": {
+        source: "iana",
+        extensions: ["xbd"]
+      },
+      "application/vnd.fujixerox.docuworks.container": {
+        source: "iana"
+      },
+      "application/vnd.fujixerox.hbpl": {
+        source: "iana"
+      },
+      "application/vnd.fut-misnet": {
+        source: "iana"
+      },
+      "application/vnd.futoin+cbor": {
+        source: "iana"
+      },
+      "application/vnd.futoin+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.fuzzysheet": {
+        source: "iana",
+        extensions: ["fzs"]
+      },
+      "application/vnd.ga4gh.passport+jwt": {
+        source: "iana"
+      },
+      "application/vnd.genomatix.tuxedo": {
+        source: "iana",
+        extensions: ["txd"]
+      },
+      "application/vnd.genozip": {
+        source: "iana"
+      },
+      "application/vnd.gentics.grd+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.gentoo.catmetadata+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.gentoo.ebuild": {
+        source: "iana"
+      },
+      "application/vnd.gentoo.eclass": {
+        source: "iana"
+      },
+      "application/vnd.gentoo.gpkg": {
+        source: "iana"
+      },
+      "application/vnd.gentoo.manifest": {
+        source: "iana"
+      },
+      "application/vnd.gentoo.pkgmetadata+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.gentoo.xpak": {
+        source: "iana"
+      },
+      "application/vnd.geo+json": {
+        source: "apache",
+        compressible: true
+      },
+      "application/vnd.geocube+xml": {
+        source: "apache",
+        compressible: true
+      },
+      "application/vnd.geogebra.file": {
+        source: "iana",
+        extensions: ["ggb"]
+      },
+      "application/vnd.geogebra.pinboard": {
+        source: "iana"
+      },
+      "application/vnd.geogebra.slides": {
+        source: "iana",
+        extensions: ["ggs"]
+      },
+      "application/vnd.geogebra.tool": {
+        source: "iana",
+        extensions: ["ggt"]
+      },
+      "application/vnd.geometry-explorer": {
+        source: "iana",
+        extensions: ["gex", "gre"]
+      },
+      "application/vnd.geonext": {
+        source: "iana",
+        extensions: ["gxt"]
+      },
+      "application/vnd.geoplan": {
+        source: "iana",
+        extensions: ["g2w"]
+      },
+      "application/vnd.geospace": {
+        source: "iana",
+        extensions: ["g3w"]
+      },
+      "application/vnd.gerber": {
+        source: "iana"
+      },
+      "application/vnd.globalplatform.card-content-mgt": {
+        source: "iana"
+      },
+      "application/vnd.globalplatform.card-content-mgt-response": {
+        source: "iana"
+      },
+      "application/vnd.gmx": {
+        source: "iana",
+        extensions: ["gmx"]
+      },
+      "application/vnd.gnu.taler.exchange+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.gnu.taler.merchant+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.google-apps.audio": {},
+      "application/vnd.google-apps.document": {
+        compressible: false,
+        extensions: ["gdoc"]
+      },
+      "application/vnd.google-apps.drawing": {
+        compressible: false,
+        extensions: ["gdraw"]
+      },
+      "application/vnd.google-apps.drive-sdk": {
+        compressible: false
+      },
+      "application/vnd.google-apps.file": {},
+      "application/vnd.google-apps.folder": {
+        compressible: false
+      },
+      "application/vnd.google-apps.form": {
+        compressible: false,
+        extensions: ["gform"]
+      },
+      "application/vnd.google-apps.fusiontable": {},
+      "application/vnd.google-apps.jam": {
+        compressible: false,
+        extensions: ["gjam"]
+      },
+      "application/vnd.google-apps.mail-layout": {},
+      "application/vnd.google-apps.map": {
+        compressible: false,
+        extensions: ["gmap"]
+      },
+      "application/vnd.google-apps.photo": {},
+      "application/vnd.google-apps.presentation": {
+        compressible: false,
+        extensions: ["gslides"]
+      },
+      "application/vnd.google-apps.script": {
+        compressible: false,
+        extensions: ["gscript"]
+      },
+      "application/vnd.google-apps.shortcut": {},
+      "application/vnd.google-apps.site": {
+        compressible: false,
+        extensions: ["gsite"]
+      },
+      "application/vnd.google-apps.spreadsheet": {
+        compressible: false,
+        extensions: ["gsheet"]
+      },
+      "application/vnd.google-apps.unknown": {},
+      "application/vnd.google-apps.video": {},
+      "application/vnd.google-earth.kml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["kml"]
+      },
+      "application/vnd.google-earth.kmz": {
+        source: "iana",
+        compressible: false,
+        extensions: ["kmz"]
+      },
+      "application/vnd.gov.sk.e-form+xml": {
+        source: "apache",
+        compressible: true
+      },
+      "application/vnd.gov.sk.e-form+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.gov.sk.xmldatacontainer+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xdcf"]
+      },
+      "application/vnd.gpxsee.map+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.grafeq": {
+        source: "iana",
+        extensions: ["gqf", "gqs"]
+      },
+      "application/vnd.gridmp": {
+        source: "iana"
+      },
+      "application/vnd.groove-account": {
+        source: "iana",
+        extensions: ["gac"]
+      },
+      "application/vnd.groove-help": {
+        source: "iana",
+        extensions: ["ghf"]
+      },
+      "application/vnd.groove-identity-message": {
+        source: "iana",
+        extensions: ["gim"]
+      },
+      "application/vnd.groove-injector": {
+        source: "iana",
+        extensions: ["grv"]
+      },
+      "application/vnd.groove-tool-message": {
+        source: "iana",
+        extensions: ["gtm"]
+      },
+      "application/vnd.groove-tool-template": {
+        source: "iana",
+        extensions: ["tpl"]
+      },
+      "application/vnd.groove-vcard": {
+        source: "iana",
+        extensions: ["vcg"]
+      },
+      "application/vnd.hal+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.hal+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["hal"]
+      },
+      "application/vnd.handheld-entertainment+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["zmm"]
+      },
+      "application/vnd.hbci": {
+        source: "iana",
+        extensions: ["hbci"]
+      },
+      "application/vnd.hc+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.hcl-bireports": {
+        source: "iana"
+      },
+      "application/vnd.hdt": {
+        source: "iana"
+      },
+      "application/vnd.heroku+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.hhe.lesson-player": {
+        source: "iana",
+        extensions: ["les"]
+      },
+      "application/vnd.hp-hpgl": {
+        source: "iana",
+        extensions: ["hpgl"]
+      },
+      "application/vnd.hp-hpid": {
+        source: "iana",
+        extensions: ["hpid"]
+      },
+      "application/vnd.hp-hps": {
+        source: "iana",
+        extensions: ["hps"]
+      },
+      "application/vnd.hp-jlyt": {
+        source: "iana",
+        extensions: ["jlt"]
+      },
+      "application/vnd.hp-pcl": {
+        source: "iana",
+        extensions: ["pcl"]
+      },
+      "application/vnd.hp-pclxl": {
+        source: "iana",
+        extensions: ["pclxl"]
+      },
+      "application/vnd.hsl": {
+        source: "iana"
+      },
+      "application/vnd.httphone": {
+        source: "iana"
+      },
+      "application/vnd.hydrostatix.sof-data": {
+        source: "iana",
+        extensions: ["sfd-hdstx"]
+      },
+      "application/vnd.hyper+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.hyper-item+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.hyperdrive+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.hzn-3d-crossword": {
+        source: "iana"
+      },
+      "application/vnd.ibm.afplinedata": {
+        source: "apache"
+      },
+      "application/vnd.ibm.electronic-media": {
+        source: "iana"
+      },
+      "application/vnd.ibm.minipay": {
+        source: "iana",
+        extensions: ["mpy"]
+      },
+      "application/vnd.ibm.modcap": {
+        source: "apache",
+        extensions: ["afp", "listafp", "list3820"]
+      },
+      "application/vnd.ibm.rights-management": {
+        source: "iana",
+        extensions: ["irm"]
+      },
+      "application/vnd.ibm.secure-container": {
+        source: "iana",
+        extensions: ["sc"]
+      },
+      "application/vnd.iccprofile": {
+        source: "iana",
+        extensions: ["icc", "icm"]
+      },
+      "application/vnd.ieee.1905": {
+        source: "iana"
+      },
+      "application/vnd.igloader": {
+        source: "iana",
+        extensions: ["igl"]
+      },
+      "application/vnd.imagemeter.folder+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.imagemeter.image+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.immervision-ivp": {
+        source: "iana",
+        extensions: ["ivp"]
+      },
+      "application/vnd.immervision-ivu": {
+        source: "iana",
+        extensions: ["ivu"]
+      },
+      "application/vnd.ims.imsccv1p1": {
+        source: "iana"
+      },
+      "application/vnd.ims.imsccv1p2": {
+        source: "iana"
+      },
+      "application/vnd.ims.imsccv1p3": {
+        source: "iana"
+      },
+      "application/vnd.ims.lis.v2.result+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.ims.lti.v2.toolconsumerprofile+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.ims.lti.v2.toolproxy+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.ims.lti.v2.toolproxy.id+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.ims.lti.v2.toolsettings+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.ims.lti.v2.toolsettings.simple+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.informedcontrol.rms+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.informix-visionary": {
+        source: "apache"
+      },
+      "application/vnd.infotech.project": {
+        source: "iana"
+      },
+      "application/vnd.infotech.project+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.innopath.wamp.notification": {
+        source: "iana"
+      },
+      "application/vnd.insors.igm": {
+        source: "iana",
+        extensions: ["igm"]
+      },
+      "application/vnd.intercon.formnet": {
+        source: "iana",
+        extensions: ["xpw", "xpx"]
+      },
+      "application/vnd.intergeo": {
+        source: "iana",
+        extensions: ["i2g"]
+      },
+      "application/vnd.intertrust.digibox": {
+        source: "iana"
+      },
+      "application/vnd.intertrust.nncp": {
+        source: "iana"
+      },
+      "application/vnd.intu.qbo": {
+        source: "iana",
+        extensions: ["qbo"]
+      },
+      "application/vnd.intu.qfx": {
+        source: "iana",
+        extensions: ["qfx"]
+      },
+      "application/vnd.ipfs.ipns-record": {
+        source: "iana"
+      },
+      "application/vnd.ipld.car": {
+        source: "iana"
+      },
+      "application/vnd.ipld.dag-cbor": {
+        source: "iana"
+      },
+      "application/vnd.ipld.dag-json": {
+        source: "iana"
+      },
+      "application/vnd.ipld.raw": {
+        source: "iana"
+      },
+      "application/vnd.iptc.g2.catalogitem+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.iptc.g2.conceptitem+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.iptc.g2.knowledgeitem+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.iptc.g2.newsitem+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.iptc.g2.newsmessage+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.iptc.g2.packageitem+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.iptc.g2.planningitem+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.ipunplugged.rcprofile": {
+        source: "iana",
+        extensions: ["rcprofile"]
+      },
+      "application/vnd.irepository.package+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["irp"]
+      },
+      "application/vnd.is-xpr": {
+        source: "iana",
+        extensions: ["xpr"]
+      },
+      "application/vnd.isac.fcs": {
+        source: "iana",
+        extensions: ["fcs"]
+      },
+      "application/vnd.iso11783-10+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.jam": {
+        source: "iana",
+        extensions: ["jam"]
+      },
+      "application/vnd.japannet-directory-service": {
+        source: "iana"
+      },
+      "application/vnd.japannet-jpnstore-wakeup": {
+        source: "iana"
+      },
+      "application/vnd.japannet-payment-wakeup": {
+        source: "iana"
+      },
+      "application/vnd.japannet-registration": {
+        source: "iana"
+      },
+      "application/vnd.japannet-registration-wakeup": {
+        source: "iana"
+      },
+      "application/vnd.japannet-setstore-wakeup": {
+        source: "iana"
+      },
+      "application/vnd.japannet-verification": {
+        source: "iana"
+      },
+      "application/vnd.japannet-verification-wakeup": {
+        source: "iana"
+      },
+      "application/vnd.jcp.javame.midlet-rms": {
+        source: "iana",
+        extensions: ["rms"]
+      },
+      "application/vnd.jisp": {
+        source: "iana",
+        extensions: ["jisp"]
+      },
+      "application/vnd.joost.joda-archive": {
+        source: "iana",
+        extensions: ["joda"]
+      },
+      "application/vnd.jsk.isdn-ngn": {
+        source: "iana"
+      },
+      "application/vnd.kahootz": {
+        source: "iana",
+        extensions: ["ktz", "ktr"]
+      },
+      "application/vnd.kde.karbon": {
+        source: "iana",
+        extensions: ["karbon"]
+      },
+      "application/vnd.kde.kchart": {
+        source: "iana",
+        extensions: ["chrt"]
+      },
+      "application/vnd.kde.kformula": {
+        source: "iana",
+        extensions: ["kfo"]
+      },
+      "application/vnd.kde.kivio": {
+        source: "iana",
+        extensions: ["flw"]
+      },
+      "application/vnd.kde.kontour": {
+        source: "iana",
+        extensions: ["kon"]
+      },
+      "application/vnd.kde.kpresenter": {
+        source: "iana",
+        extensions: ["kpr", "kpt"]
+      },
+      "application/vnd.kde.kspread": {
+        source: "iana",
+        extensions: ["ksp"]
+      },
+      "application/vnd.kde.kword": {
+        source: "iana",
+        extensions: ["kwd", "kwt"]
+      },
+      "application/vnd.kdl": {
+        source: "iana"
+      },
+      "application/vnd.kenameaapp": {
+        source: "iana",
+        extensions: ["htke"]
+      },
+      "application/vnd.keyman.kmp+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.keyman.kmx": {
+        source: "iana"
+      },
+      "application/vnd.kidspiration": {
+        source: "iana",
+        extensions: ["kia"]
+      },
+      "application/vnd.kinar": {
+        source: "iana",
+        extensions: ["kne", "knp"]
+      },
+      "application/vnd.koan": {
+        source: "iana",
+        extensions: ["skp", "skd", "skt", "skm"]
+      },
+      "application/vnd.kodak-descriptor": {
+        source: "iana",
+        extensions: ["sse"]
+      },
+      "application/vnd.las": {
+        source: "iana"
+      },
+      "application/vnd.las.las+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.las.las+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["lasxml"]
+      },
+      "application/vnd.laszip": {
+        source: "iana"
+      },
+      "application/vnd.ldev.productlicensing": {
+        source: "iana"
+      },
+      "application/vnd.leap+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.liberty-request+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.llamagraphics.life-balance.desktop": {
+        source: "iana",
+        extensions: ["lbd"]
+      },
+      "application/vnd.llamagraphics.life-balance.exchange+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["lbe"]
+      },
+      "application/vnd.logipipe.circuit+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.loom": {
+        source: "iana"
+      },
+      "application/vnd.lotus-1-2-3": {
+        source: "iana",
+        extensions: ["123"]
+      },
+      "application/vnd.lotus-approach": {
+        source: "iana",
+        extensions: ["apr"]
+      },
+      "application/vnd.lotus-freelance": {
+        source: "iana",
+        extensions: ["pre"]
+      },
+      "application/vnd.lotus-notes": {
+        source: "iana",
+        extensions: ["nsf"]
+      },
+      "application/vnd.lotus-organizer": {
+        source: "iana",
+        extensions: ["org"]
+      },
+      "application/vnd.lotus-screencam": {
+        source: "iana",
+        extensions: ["scm"]
+      },
+      "application/vnd.lotus-wordpro": {
+        source: "iana",
+        extensions: ["lwp"]
+      },
+      "application/vnd.macports.portpkg": {
+        source: "iana",
+        extensions: ["portpkg"]
+      },
+      "application/vnd.mapbox-vector-tile": {
+        source: "iana",
+        extensions: ["mvt"]
+      },
+      "application/vnd.marlin.drm.actiontoken+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.marlin.drm.conftoken+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.marlin.drm.license+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.marlin.drm.mdcf": {
+        source: "iana"
+      },
+      "application/vnd.mason+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.maxar.archive.3tz+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.maxmind.maxmind-db": {
+        source: "iana"
+      },
+      "application/vnd.mcd": {
+        source: "iana",
+        extensions: ["mcd"]
+      },
+      "application/vnd.mdl": {
+        source: "iana"
+      },
+      "application/vnd.mdl-mbsdf": {
+        source: "iana"
+      },
+      "application/vnd.medcalcdata": {
+        source: "iana",
+        extensions: ["mc1"]
+      },
+      "application/vnd.mediastation.cdkey": {
+        source: "iana",
+        extensions: ["cdkey"]
+      },
+      "application/vnd.medicalholodeck.recordxr": {
+        source: "iana"
+      },
+      "application/vnd.meridian-slingshot": {
+        source: "iana"
+      },
+      "application/vnd.mermaid": {
+        source: "iana"
+      },
+      "application/vnd.mfer": {
+        source: "iana",
+        extensions: ["mwf"]
+      },
+      "application/vnd.mfmp": {
+        source: "iana",
+        extensions: ["mfm"]
+      },
+      "application/vnd.micro+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.micrografx.flo": {
+        source: "iana",
+        extensions: ["flo"]
+      },
+      "application/vnd.micrografx.igx": {
+        source: "iana",
+        extensions: ["igx"]
+      },
+      "application/vnd.microsoft.portable-executable": {
+        source: "iana"
+      },
+      "application/vnd.microsoft.windows.thumbnail-cache": {
+        source: "iana"
+      },
+      "application/vnd.miele+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.mif": {
+        source: "iana",
+        extensions: ["mif"]
+      },
+      "application/vnd.minisoft-hp3000-save": {
+        source: "iana"
+      },
+      "application/vnd.mitsubishi.misty-guard.trustweb": {
+        source: "iana"
+      },
+      "application/vnd.mobius.daf": {
+        source: "iana",
+        extensions: ["daf"]
+      },
+      "application/vnd.mobius.dis": {
+        source: "iana",
+        extensions: ["dis"]
+      },
+      "application/vnd.mobius.mbk": {
+        source: "iana",
+        extensions: ["mbk"]
+      },
+      "application/vnd.mobius.mqy": {
+        source: "iana",
+        extensions: ["mqy"]
+      },
+      "application/vnd.mobius.msl": {
+        source: "iana",
+        extensions: ["msl"]
+      },
+      "application/vnd.mobius.plc": {
+        source: "iana",
+        extensions: ["plc"]
+      },
+      "application/vnd.mobius.txf": {
+        source: "iana",
+        extensions: ["txf"]
+      },
+      "application/vnd.modl": {
+        source: "iana"
+      },
+      "application/vnd.mophun.application": {
+        source: "iana",
+        extensions: ["mpn"]
+      },
+      "application/vnd.mophun.certificate": {
+        source: "iana",
+        extensions: ["mpc"]
+      },
+      "application/vnd.motorola.flexsuite": {
+        source: "iana"
+      },
+      "application/vnd.motorola.flexsuite.adsi": {
+        source: "iana"
+      },
+      "application/vnd.motorola.flexsuite.fis": {
+        source: "iana"
+      },
+      "application/vnd.motorola.flexsuite.gotap": {
+        source: "iana"
+      },
+      "application/vnd.motorola.flexsuite.kmr": {
+        source: "iana"
+      },
+      "application/vnd.motorola.flexsuite.ttc": {
+        source: "iana"
+      },
+      "application/vnd.motorola.flexsuite.wem": {
+        source: "iana"
+      },
+      "application/vnd.motorola.iprm": {
+        source: "iana"
+      },
+      "application/vnd.mozilla.xul+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xul"]
+      },
+      "application/vnd.ms-3mfdocument": {
+        source: "iana"
+      },
+      "application/vnd.ms-artgalry": {
+        source: "iana",
+        extensions: ["cil"]
+      },
+      "application/vnd.ms-asf": {
+        source: "iana"
+      },
+      "application/vnd.ms-cab-compressed": {
+        source: "iana",
+        extensions: ["cab"]
+      },
+      "application/vnd.ms-color.iccprofile": {
+        source: "apache"
+      },
+      "application/vnd.ms-excel": {
+        source: "iana",
+        compressible: false,
+        extensions: ["xls", "xlm", "xla", "xlc", "xlt", "xlw"]
+      },
+      "application/vnd.ms-excel.addin.macroenabled.12": {
+        source: "iana",
+        extensions: ["xlam"]
+      },
+      "application/vnd.ms-excel.sheet.binary.macroenabled.12": {
+        source: "iana",
+        extensions: ["xlsb"]
+      },
+      "application/vnd.ms-excel.sheet.macroenabled.12": {
+        source: "iana",
+        extensions: ["xlsm"]
+      },
+      "application/vnd.ms-excel.template.macroenabled.12": {
+        source: "iana",
+        extensions: ["xltm"]
+      },
+      "application/vnd.ms-fontobject": {
+        source: "iana",
+        compressible: true,
+        extensions: ["eot"]
+      },
+      "application/vnd.ms-htmlhelp": {
+        source: "iana",
+        extensions: ["chm"]
+      },
+      "application/vnd.ms-ims": {
+        source: "iana",
+        extensions: ["ims"]
+      },
+      "application/vnd.ms-lrm": {
+        source: "iana",
+        extensions: ["lrm"]
+      },
+      "application/vnd.ms-office.activex+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.ms-officetheme": {
+        source: "iana",
+        extensions: ["thmx"]
+      },
+      "application/vnd.ms-opentype": {
+        source: "apache",
+        compressible: true
+      },
+      "application/vnd.ms-outlook": {
+        compressible: false,
+        extensions: ["msg"]
+      },
+      "application/vnd.ms-package.obfuscated-opentype": {
+        source: "apache"
+      },
+      "application/vnd.ms-pki.seccat": {
+        source: "apache",
+        extensions: ["cat"]
+      },
+      "application/vnd.ms-pki.stl": {
+        source: "apache",
+        extensions: ["stl"]
+      },
+      "application/vnd.ms-playready.initiator+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.ms-powerpoint": {
+        source: "iana",
+        compressible: false,
+        extensions: ["ppt", "pps", "pot"]
+      },
+      "application/vnd.ms-powerpoint.addin.macroenabled.12": {
+        source: "iana",
+        extensions: ["ppam"]
+      },
+      "application/vnd.ms-powerpoint.presentation.macroenabled.12": {
+        source: "iana",
+        extensions: ["pptm"]
+      },
+      "application/vnd.ms-powerpoint.slide.macroenabled.12": {
+        source: "iana",
+        extensions: ["sldm"]
+      },
+      "application/vnd.ms-powerpoint.slideshow.macroenabled.12": {
+        source: "iana",
+        extensions: ["ppsm"]
+      },
+      "application/vnd.ms-powerpoint.template.macroenabled.12": {
+        source: "iana",
+        extensions: ["potm"]
+      },
+      "application/vnd.ms-printdevicecapabilities+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.ms-printing.printticket+xml": {
+        source: "apache",
+        compressible: true
+      },
+      "application/vnd.ms-printschematicket+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.ms-project": {
+        source: "iana",
+        extensions: ["mpp", "mpt"]
+      },
+      "application/vnd.ms-tnef": {
+        source: "iana"
+      },
+      "application/vnd.ms-visio.viewer": {
+        extensions: ["vdx"]
+      },
+      "application/vnd.ms-windows.devicepairing": {
+        source: "iana"
+      },
+      "application/vnd.ms-windows.nwprinting.oob": {
+        source: "iana"
+      },
+      "application/vnd.ms-windows.printerpairing": {
+        source: "iana"
+      },
+      "application/vnd.ms-windows.wsd.oob": {
+        source: "iana"
+      },
+      "application/vnd.ms-wmdrm.lic-chlg-req": {
+        source: "iana"
+      },
+      "application/vnd.ms-wmdrm.lic-resp": {
+        source: "iana"
+      },
+      "application/vnd.ms-wmdrm.meter-chlg-req": {
+        source: "iana"
+      },
+      "application/vnd.ms-wmdrm.meter-resp": {
+        source: "iana"
+      },
+      "application/vnd.ms-word.document.macroenabled.12": {
+        source: "iana",
+        extensions: ["docm"]
+      },
+      "application/vnd.ms-word.template.macroenabled.12": {
+        source: "iana",
+        extensions: ["dotm"]
+      },
+      "application/vnd.ms-works": {
+        source: "iana",
+        extensions: ["wps", "wks", "wcm", "wdb"]
+      },
+      "application/vnd.ms-wpl": {
+        source: "iana",
+        extensions: ["wpl"]
+      },
+      "application/vnd.ms-xpsdocument": {
+        source: "iana",
+        compressible: false,
+        extensions: ["xps"]
+      },
+      "application/vnd.msa-disk-image": {
+        source: "iana"
+      },
+      "application/vnd.mseq": {
+        source: "iana",
+        extensions: ["mseq"]
+      },
+      "application/vnd.msgpack": {
+        source: "iana"
+      },
+      "application/vnd.msign": {
+        source: "iana"
+      },
+      "application/vnd.multiad.creator": {
+        source: "iana"
+      },
+      "application/vnd.multiad.creator.cif": {
+        source: "iana"
+      },
+      "application/vnd.music-niff": {
+        source: "iana"
+      },
+      "application/vnd.musician": {
+        source: "iana",
+        extensions: ["mus"]
+      },
+      "application/vnd.muvee.style": {
+        source: "iana",
+        extensions: ["msty"]
+      },
+      "application/vnd.mynfc": {
+        source: "iana",
+        extensions: ["taglet"]
+      },
+      "application/vnd.nacamar.ybrid+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.nato.bindingdataobject+cbor": {
+        source: "iana"
+      },
+      "application/vnd.nato.bindingdataobject+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.nato.bindingdataobject+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["bdo"]
+      },
+      "application/vnd.nato.openxmlformats-package.iepd+zip": {
+        source: "iana",
+        compressible: false
+      },
+      "application/vnd.ncd.control": {
+        source: "iana"
+      },
+      "application/vnd.ncd.reference": {
+        source: "iana"
+      },
+      "application/vnd.nearst.inv+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.nebumind.line": {
+        source: "iana"
+      },
+      "application/vnd.nervana": {
+        source: "iana"
+      },
+      "application/vnd.netfpx": {
+        source: "iana"
+      },
+      "application/vnd.neurolanguage.nlu": {
+        source: "iana",
+        extensions: ["nlu"]
+      },
+      "application/vnd.nimn": {
+        source: "iana"
+      },
+      "application/vnd.nintendo.nitro.rom": {
+        source: "iana"
+      },
+      "application/vnd.nintendo.snes.rom": {
+        source: "iana"
+      },
+      "application/vnd.nitf": {
+        source: "iana",
+        extensions: ["ntf", "nitf"]
+      },
+      "application/vnd.noblenet-directory": {
+        source: "iana",
+        extensions: ["nnd"]
+      },
+      "application/vnd.noblenet-sealer": {
+        source: "iana",
+        extensions: ["nns"]
+      },
+      "application/vnd.noblenet-web": {
+        source: "iana",
+        extensions: ["nnw"]
+      },
+      "application/vnd.nokia.catalogs": {
+        source: "iana"
+      },
+      "application/vnd.nokia.conml+wbxml": {
+        source: "iana"
+      },
+      "application/vnd.nokia.conml+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.nokia.iptv.config+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.nokia.isds-radio-presets": {
+        source: "iana"
+      },
+      "application/vnd.nokia.landmark+wbxml": {
+        source: "iana"
+      },
+      "application/vnd.nokia.landmark+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.nokia.landmarkcollection+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.nokia.n-gage.ac+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["ac"]
+      },
+      "application/vnd.nokia.n-gage.data": {
+        source: "iana",
+        extensions: ["ngdat"]
+      },
+      "application/vnd.nokia.n-gage.symbian.install": {
+        source: "apache",
+        extensions: ["n-gage"]
+      },
+      "application/vnd.nokia.ncd": {
+        source: "iana"
+      },
+      "application/vnd.nokia.pcd+wbxml": {
+        source: "iana"
+      },
+      "application/vnd.nokia.pcd+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.nokia.radio-preset": {
+        source: "iana",
+        extensions: ["rpst"]
+      },
+      "application/vnd.nokia.radio-presets": {
+        source: "iana",
+        extensions: ["rpss"]
+      },
+      "application/vnd.novadigm.edm": {
+        source: "iana",
+        extensions: ["edm"]
+      },
+      "application/vnd.novadigm.edx": {
+        source: "iana",
+        extensions: ["edx"]
+      },
+      "application/vnd.novadigm.ext": {
+        source: "iana",
+        extensions: ["ext"]
+      },
+      "application/vnd.ntt-local.content-share": {
+        source: "iana"
+      },
+      "application/vnd.ntt-local.file-transfer": {
+        source: "iana"
+      },
+      "application/vnd.ntt-local.ogw_remote-access": {
+        source: "iana"
+      },
+      "application/vnd.ntt-local.sip-ta_remote": {
+        source: "iana"
+      },
+      "application/vnd.ntt-local.sip-ta_tcp_stream": {
+        source: "iana"
+      },
+      "application/vnd.oai.workflows": {
+        source: "iana"
+      },
+      "application/vnd.oai.workflows+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oai.workflows+yaml": {
+        source: "iana"
+      },
+      "application/vnd.oasis.opendocument.base": {
+        source: "iana"
+      },
+      "application/vnd.oasis.opendocument.chart": {
+        source: "iana",
+        extensions: ["odc"]
+      },
+      "application/vnd.oasis.opendocument.chart-template": {
+        source: "iana",
+        extensions: ["otc"]
+      },
+      "application/vnd.oasis.opendocument.database": {
+        source: "apache",
+        extensions: ["odb"]
+      },
+      "application/vnd.oasis.opendocument.formula": {
+        source: "iana",
+        extensions: ["odf"]
+      },
+      "application/vnd.oasis.opendocument.formula-template": {
+        source: "iana",
+        extensions: ["odft"]
+      },
+      "application/vnd.oasis.opendocument.graphics": {
+        source: "iana",
+        compressible: false,
+        extensions: ["odg"]
+      },
+      "application/vnd.oasis.opendocument.graphics-template": {
+        source: "iana",
+        extensions: ["otg"]
+      },
+      "application/vnd.oasis.opendocument.image": {
+        source: "iana",
+        extensions: ["odi"]
+      },
+      "application/vnd.oasis.opendocument.image-template": {
+        source: "iana",
+        extensions: ["oti"]
+      },
+      "application/vnd.oasis.opendocument.presentation": {
+        source: "iana",
+        compressible: false,
+        extensions: ["odp"]
+      },
+      "application/vnd.oasis.opendocument.presentation-template": {
+        source: "iana",
+        extensions: ["otp"]
+      },
+      "application/vnd.oasis.opendocument.spreadsheet": {
+        source: "iana",
+        compressible: false,
+        extensions: ["ods"]
+      },
+      "application/vnd.oasis.opendocument.spreadsheet-template": {
+        source: "iana",
+        extensions: ["ots"]
+      },
+      "application/vnd.oasis.opendocument.text": {
+        source: "iana",
+        compressible: false,
+        extensions: ["odt"]
+      },
+      "application/vnd.oasis.opendocument.text-master": {
+        source: "iana",
+        extensions: ["odm"]
+      },
+      "application/vnd.oasis.opendocument.text-master-template": {
+        source: "iana"
+      },
+      "application/vnd.oasis.opendocument.text-template": {
+        source: "iana",
+        extensions: ["ott"]
+      },
+      "application/vnd.oasis.opendocument.text-web": {
+        source: "iana",
+        extensions: ["oth"]
+      },
+      "application/vnd.obn": {
+        source: "iana"
+      },
+      "application/vnd.ocf+cbor": {
+        source: "iana"
+      },
+      "application/vnd.oci.image.manifest.v1+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oftn.l10n+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oipf.contentaccessdownload+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oipf.contentaccessstreaming+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oipf.cspg-hexbinary": {
+        source: "iana"
+      },
+      "application/vnd.oipf.dae.svg+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oipf.dae.xhtml+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oipf.mippvcontrolmessage+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oipf.pae.gem": {
+        source: "iana"
+      },
+      "application/vnd.oipf.spdiscovery+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oipf.spdlist+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oipf.ueprofile+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oipf.userprofile+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.olpc-sugar": {
+        source: "iana",
+        extensions: ["xo"]
+      },
+      "application/vnd.oma-scws-config": {
+        source: "iana"
+      },
+      "application/vnd.oma-scws-http-request": {
+        source: "iana"
+      },
+      "application/vnd.oma-scws-http-response": {
+        source: "iana"
+      },
+      "application/vnd.oma.bcast.associated-procedure-parameter+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.bcast.drm-trigger+xml": {
+        source: "apache",
+        compressible: true
+      },
+      "application/vnd.oma.bcast.imd+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.bcast.ltkm": {
+        source: "iana"
+      },
+      "application/vnd.oma.bcast.notification+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.bcast.provisioningtrigger": {
+        source: "iana"
+      },
+      "application/vnd.oma.bcast.sgboot": {
+        source: "iana"
+      },
+      "application/vnd.oma.bcast.sgdd+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.bcast.sgdu": {
+        source: "iana"
+      },
+      "application/vnd.oma.bcast.simple-symbol-container": {
+        source: "iana"
+      },
+      "application/vnd.oma.bcast.smartcard-trigger+xml": {
+        source: "apache",
+        compressible: true
+      },
+      "application/vnd.oma.bcast.sprov+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.bcast.stkm": {
+        source: "iana"
+      },
+      "application/vnd.oma.cab-address-book+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.cab-feature-handler+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.cab-pcc+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.cab-subs-invite+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.cab-user-prefs+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.dcd": {
+        source: "iana"
+      },
+      "application/vnd.oma.dcdc": {
+        source: "iana"
+      },
+      "application/vnd.oma.dd2+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["dd2"]
+      },
+      "application/vnd.oma.drm.risd+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.group-usage-list+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.lwm2m+cbor": {
+        source: "iana"
+      },
+      "application/vnd.oma.lwm2m+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.lwm2m+tlv": {
+        source: "iana"
+      },
+      "application/vnd.oma.pal+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.poc.detailed-progress-report+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.poc.final-report+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.poc.groups+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.poc.invocation-descriptor+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.poc.optimized-progress-report+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.push": {
+        source: "iana"
+      },
+      "application/vnd.oma.scidm.messages+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oma.xcap-directory+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.omads-email+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/vnd.omads-file+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/vnd.omads-folder+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/vnd.omaloc-supl-init": {
+        source: "iana"
+      },
+      "application/vnd.onepager": {
+        source: "iana"
+      },
+      "application/vnd.onepagertamp": {
+        source: "iana"
+      },
+      "application/vnd.onepagertamx": {
+        source: "iana"
+      },
+      "application/vnd.onepagertat": {
+        source: "iana"
+      },
+      "application/vnd.onepagertatp": {
+        source: "iana"
+      },
+      "application/vnd.onepagertatx": {
+        source: "iana"
+      },
+      "application/vnd.onvif.metadata": {
+        source: "iana"
+      },
+      "application/vnd.openblox.game+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["obgx"]
+      },
+      "application/vnd.openblox.game-binary": {
+        source: "iana"
+      },
+      "application/vnd.openeye.oeb": {
+        source: "iana"
+      },
+      "application/vnd.openofficeorg.extension": {
+        source: "apache",
+        extensions: ["oxt"]
+      },
+      "application/vnd.openstreetmap.data+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["osm"]
+      },
+      "application/vnd.opentimestamps.ots": {
+        source: "iana"
+      },
+      "application/vnd.openvpi.dspx+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.custom-properties+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.customxmlproperties+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.drawing+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.drawingml.chart+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.drawingml.chartshapes+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.drawingml.diagramcolors+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.drawingml.diagramdata+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.drawingml.diagramlayout+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.drawingml.diagramstyle+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.extended-properties+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.commentauthors+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.comments+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.handoutmaster+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.notesmaster+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.notesslide+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation": {
+        source: "iana",
+        compressible: false,
+        extensions: ["pptx"]
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.presprops+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.slide": {
+        source: "iana",
+        extensions: ["sldx"]
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.slide+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.slidelayout+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.slidemaster+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.slideshow": {
+        source: "iana",
+        extensions: ["ppsx"]
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.slideshow.main+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.slideupdateinfo+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.tablestyles+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.tags+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.template": {
+        source: "iana",
+        extensions: ["potx"]
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.template.main+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.presentationml.viewprops+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.calcchain+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.connections+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.dialogsheet+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.externallink+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotcachedefinition+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotcacherecords+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.pivottable+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.querytable+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.revisionheaders+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.revisionlog+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedstrings+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+        source: "iana",
+        compressible: false,
+        extensions: ["xlsx"]
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheetmetadata+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.tablesinglecells+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.template": {
+        source: "iana",
+        extensions: ["xltx"]
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.usernames+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.volatiledependencies+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.theme+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.themeoverride+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.vmldrawing": {
+        source: "iana"
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+        source: "iana",
+        compressible: false,
+        extensions: ["docx"]
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document.glossary+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.fonttable+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.template": {
+        source: "iana",
+        extensions: ["dotx"]
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.websettings+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-package.core-properties+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-package.digital-signature-xmlsignature+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.openxmlformats-package.relationships+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oracle.resource+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.orange.indata": {
+        source: "iana"
+      },
+      "application/vnd.osa.netdeploy": {
+        source: "iana"
+      },
+      "application/vnd.osgeo.mapguide.package": {
+        source: "iana",
+        extensions: ["mgp"]
+      },
+      "application/vnd.osgi.bundle": {
+        source: "iana"
+      },
+      "application/vnd.osgi.dp": {
+        source: "iana",
+        extensions: ["dp"]
+      },
+      "application/vnd.osgi.subsystem": {
+        source: "iana",
+        extensions: ["esa"]
+      },
+      "application/vnd.otps.ct-kip+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.oxli.countgraph": {
+        source: "iana"
+      },
+      "application/vnd.pagerduty+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.palm": {
+        source: "iana",
+        extensions: ["pdb", "pqa", "oprc"]
+      },
+      "application/vnd.panoply": {
+        source: "iana"
+      },
+      "application/vnd.paos.xml": {
+        source: "iana"
+      },
+      "application/vnd.patentdive": {
+        source: "iana"
+      },
+      "application/vnd.patientecommsdoc": {
+        source: "iana"
+      },
+      "application/vnd.pawaafile": {
+        source: "iana",
+        extensions: ["paw"]
+      },
+      "application/vnd.pcos": {
+        source: "iana"
+      },
+      "application/vnd.pg.format": {
+        source: "iana",
+        extensions: ["str"]
+      },
+      "application/vnd.pg.osasli": {
+        source: "iana",
+        extensions: ["ei6"]
+      },
+      "application/vnd.piaccess.application-licence": {
+        source: "iana"
+      },
+      "application/vnd.picsel": {
+        source: "iana",
+        extensions: ["efif"]
+      },
+      "application/vnd.pmi.widget": {
+        source: "iana",
+        extensions: ["wg"]
+      },
+      "application/vnd.poc.group-advertisement+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.pocketlearn": {
+        source: "iana",
+        extensions: ["plf"]
+      },
+      "application/vnd.powerbuilder6": {
+        source: "iana",
+        extensions: ["pbd"]
+      },
+      "application/vnd.powerbuilder6-s": {
+        source: "iana"
+      },
+      "application/vnd.powerbuilder7": {
+        source: "iana"
+      },
+      "application/vnd.powerbuilder7-s": {
+        source: "iana"
+      },
+      "application/vnd.powerbuilder75": {
+        source: "iana"
+      },
+      "application/vnd.powerbuilder75-s": {
+        source: "iana"
+      },
+      "application/vnd.preminet": {
+        source: "iana"
+      },
+      "application/vnd.previewsystems.box": {
+        source: "iana",
+        extensions: ["box"]
+      },
+      "application/vnd.procrate.brushset": {
+        extensions: ["brushset"]
+      },
+      "application/vnd.procreate.brush": {
+        extensions: ["brush"]
+      },
+      "application/vnd.procreate.dream": {
+        extensions: ["drm"]
+      },
+      "application/vnd.proteus.magazine": {
+        source: "iana",
+        extensions: ["mgz"]
+      },
+      "application/vnd.psfs": {
+        source: "iana"
+      },
+      "application/vnd.pt.mundusmundi": {
+        source: "iana"
+      },
+      "application/vnd.publishare-delta-tree": {
+        source: "iana",
+        extensions: ["qps"]
+      },
+      "application/vnd.pvi.ptid1": {
+        source: "iana",
+        extensions: ["ptid"]
+      },
+      "application/vnd.pwg-multiplexed": {
+        source: "iana"
+      },
+      "application/vnd.pwg-xhtml-print+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xhtm"]
+      },
+      "application/vnd.qualcomm.brew-app-res": {
+        source: "iana"
+      },
+      "application/vnd.quarantainenet": {
+        source: "iana"
+      },
+      "application/vnd.quark.quarkxpress": {
+        source: "iana",
+        extensions: ["qxd", "qxt", "qwd", "qwt", "qxl", "qxb"]
+      },
+      "application/vnd.quobject-quoxdocument": {
+        source: "iana"
+      },
+      "application/vnd.radisys.moml+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml-audit+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml-audit-conf+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml-audit-conn+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml-audit-dialog+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml-audit-stream+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml-conf+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml-dialog+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml-dialog-base+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml-dialog-fax-detect+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml-dialog-fax-sendrecv+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml-dialog-group+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml-dialog-speech+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.radisys.msml-dialog-transform+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.rainstor.data": {
+        source: "iana"
+      },
+      "application/vnd.rapid": {
+        source: "iana"
+      },
+      "application/vnd.rar": {
+        source: "iana",
+        extensions: ["rar"]
+      },
+      "application/vnd.realvnc.bed": {
+        source: "iana",
+        extensions: ["bed"]
+      },
+      "application/vnd.recordare.musicxml": {
+        source: "iana",
+        extensions: ["mxl"]
+      },
+      "application/vnd.recordare.musicxml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["musicxml"]
+      },
+      "application/vnd.relpipe": {
+        source: "iana"
+      },
+      "application/vnd.renlearn.rlprint": {
+        source: "iana"
+      },
+      "application/vnd.resilient.logic": {
+        source: "iana"
+      },
+      "application/vnd.restful+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.rig.cryptonote": {
+        source: "iana",
+        extensions: ["cryptonote"]
+      },
+      "application/vnd.rim.cod": {
+        source: "apache",
+        extensions: ["cod"]
+      },
+      "application/vnd.rn-realmedia": {
+        source: "apache",
+        extensions: ["rm"]
+      },
+      "application/vnd.rn-realmedia-vbr": {
+        source: "apache",
+        extensions: ["rmvb"]
+      },
+      "application/vnd.route66.link66+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["link66"]
+      },
+      "application/vnd.rs-274x": {
+        source: "iana"
+      },
+      "application/vnd.ruckus.download": {
+        source: "iana"
+      },
+      "application/vnd.s3sms": {
+        source: "iana"
+      },
+      "application/vnd.sailingtracker.track": {
+        source: "iana",
+        extensions: ["st"]
+      },
+      "application/vnd.sar": {
+        source: "iana"
+      },
+      "application/vnd.sbm.cid": {
+        source: "iana"
+      },
+      "application/vnd.sbm.mid2": {
+        source: "iana"
+      },
+      "application/vnd.scribus": {
+        source: "iana"
+      },
+      "application/vnd.sealed.3df": {
+        source: "iana"
+      },
+      "application/vnd.sealed.csf": {
+        source: "iana"
+      },
+      "application/vnd.sealed.doc": {
+        source: "iana"
+      },
+      "application/vnd.sealed.eml": {
+        source: "iana"
+      },
+      "application/vnd.sealed.mht": {
+        source: "iana"
+      },
+      "application/vnd.sealed.net": {
+        source: "iana"
+      },
+      "application/vnd.sealed.ppt": {
+        source: "iana"
+      },
+      "application/vnd.sealed.tiff": {
+        source: "iana"
+      },
+      "application/vnd.sealed.xls": {
+        source: "iana"
+      },
+      "application/vnd.sealedmedia.softseal.html": {
+        source: "iana"
+      },
+      "application/vnd.sealedmedia.softseal.pdf": {
+        source: "iana"
+      },
+      "application/vnd.seemail": {
+        source: "iana",
+        extensions: ["see"]
+      },
+      "application/vnd.seis+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.sema": {
+        source: "iana",
+        extensions: ["sema"]
+      },
+      "application/vnd.semd": {
+        source: "iana",
+        extensions: ["semd"]
+      },
+      "application/vnd.semf": {
+        source: "iana",
+        extensions: ["semf"]
+      },
+      "application/vnd.shade-save-file": {
+        source: "iana"
+      },
+      "application/vnd.shana.informed.formdata": {
+        source: "iana",
+        extensions: ["ifm"]
+      },
+      "application/vnd.shana.informed.formtemplate": {
+        source: "iana",
+        extensions: ["itp"]
+      },
+      "application/vnd.shana.informed.interchange": {
+        source: "iana",
+        extensions: ["iif"]
+      },
+      "application/vnd.shana.informed.package": {
+        source: "iana",
+        extensions: ["ipk"]
+      },
+      "application/vnd.shootproof+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.shopkick+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.shp": {
+        source: "iana"
+      },
+      "application/vnd.shx": {
+        source: "iana"
+      },
+      "application/vnd.sigrok.session": {
+        source: "iana"
+      },
+      "application/vnd.simtech-mindmapper": {
+        source: "iana",
+        extensions: ["twd", "twds"]
+      },
+      "application/vnd.siren+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.sketchometry": {
+        source: "iana"
+      },
+      "application/vnd.smaf": {
+        source: "iana",
+        extensions: ["mmf"]
+      },
+      "application/vnd.smart.notebook": {
+        source: "iana"
+      },
+      "application/vnd.smart.teacher": {
+        source: "iana",
+        extensions: ["teacher"]
+      },
+      "application/vnd.smintio.portals.archive": {
+        source: "iana"
+      },
+      "application/vnd.snesdev-page-table": {
+        source: "iana"
+      },
+      "application/vnd.software602.filler.form+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["fo"]
+      },
+      "application/vnd.software602.filler.form-xml-zip": {
+        source: "iana"
+      },
+      "application/vnd.solent.sdkm+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["sdkm", "sdkd"]
+      },
+      "application/vnd.spotfire.dxp": {
+        source: "iana",
+        extensions: ["dxp"]
+      },
+      "application/vnd.spotfire.sfs": {
+        source: "iana",
+        extensions: ["sfs"]
+      },
+      "application/vnd.sqlite3": {
+        source: "iana"
+      },
+      "application/vnd.sss-cod": {
+        source: "iana"
+      },
+      "application/vnd.sss-dtf": {
+        source: "iana"
+      },
+      "application/vnd.sss-ntf": {
+        source: "iana"
+      },
+      "application/vnd.stardivision.calc": {
+        source: "apache",
+        extensions: ["sdc"]
+      },
+      "application/vnd.stardivision.draw": {
+        source: "apache",
+        extensions: ["sda"]
+      },
+      "application/vnd.stardivision.impress": {
+        source: "apache",
+        extensions: ["sdd"]
+      },
+      "application/vnd.stardivision.math": {
+        source: "apache",
+        extensions: ["smf"]
+      },
+      "application/vnd.stardivision.writer": {
+        source: "apache",
+        extensions: ["sdw", "vor"]
+      },
+      "application/vnd.stardivision.writer-global": {
+        source: "apache",
+        extensions: ["sgl"]
+      },
+      "application/vnd.stepmania.package": {
+        source: "iana",
+        extensions: ["smzip"]
+      },
+      "application/vnd.stepmania.stepchart": {
+        source: "iana",
+        extensions: ["sm"]
+      },
+      "application/vnd.street-stream": {
+        source: "iana"
+      },
+      "application/vnd.sun.wadl+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["wadl"]
+      },
+      "application/vnd.sun.xml.calc": {
+        source: "apache",
+        extensions: ["sxc"]
+      },
+      "application/vnd.sun.xml.calc.template": {
+        source: "apache",
+        extensions: ["stc"]
+      },
+      "application/vnd.sun.xml.draw": {
+        source: "apache",
+        extensions: ["sxd"]
+      },
+      "application/vnd.sun.xml.draw.template": {
+        source: "apache",
+        extensions: ["std"]
+      },
+      "application/vnd.sun.xml.impress": {
+        source: "apache",
+        extensions: ["sxi"]
+      },
+      "application/vnd.sun.xml.impress.template": {
+        source: "apache",
+        extensions: ["sti"]
+      },
+      "application/vnd.sun.xml.math": {
+        source: "apache",
+        extensions: ["sxm"]
+      },
+      "application/vnd.sun.xml.writer": {
+        source: "apache",
+        extensions: ["sxw"]
+      },
+      "application/vnd.sun.xml.writer.global": {
+        source: "apache",
+        extensions: ["sxg"]
+      },
+      "application/vnd.sun.xml.writer.template": {
+        source: "apache",
+        extensions: ["stw"]
+      },
+      "application/vnd.sus-calendar": {
+        source: "iana",
+        extensions: ["sus", "susp"]
+      },
+      "application/vnd.svd": {
+        source: "iana",
+        extensions: ["svd"]
+      },
+      "application/vnd.swiftview-ics": {
+        source: "iana"
+      },
+      "application/vnd.sybyl.mol2": {
+        source: "iana"
+      },
+      "application/vnd.sycle+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.syft+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.symbian.install": {
+        source: "apache",
+        extensions: ["sis", "sisx"]
+      },
+      "application/vnd.syncml+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true,
+        extensions: ["xsm"]
+      },
+      "application/vnd.syncml.dm+wbxml": {
+        source: "iana",
+        charset: "UTF-8",
+        extensions: ["bdm"]
+      },
+      "application/vnd.syncml.dm+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true,
+        extensions: ["xdm"]
+      },
+      "application/vnd.syncml.dm.notification": {
+        source: "iana"
+      },
+      "application/vnd.syncml.dmddf+wbxml": {
+        source: "iana"
+      },
+      "application/vnd.syncml.dmddf+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true,
+        extensions: ["ddf"]
+      },
+      "application/vnd.syncml.dmtnds+wbxml": {
+        source: "iana"
+      },
+      "application/vnd.syncml.dmtnds+xml": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true
+      },
+      "application/vnd.syncml.ds.notification": {
+        source: "iana"
+      },
+      "application/vnd.tableschema+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.tao.intent-module-archive": {
+        source: "iana",
+        extensions: ["tao"]
+      },
+      "application/vnd.tcpdump.pcap": {
+        source: "iana",
+        extensions: ["pcap", "cap", "dmp"]
+      },
+      "application/vnd.think-cell.ppttc+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.tmd.mediaflex.api+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.tml": {
+        source: "iana"
+      },
+      "application/vnd.tmobile-livetv": {
+        source: "iana",
+        extensions: ["tmo"]
+      },
+      "application/vnd.tri.onesource": {
+        source: "iana"
+      },
+      "application/vnd.trid.tpt": {
+        source: "iana",
+        extensions: ["tpt"]
+      },
+      "application/vnd.triscape.mxs": {
+        source: "iana",
+        extensions: ["mxs"]
+      },
+      "application/vnd.trueapp": {
+        source: "iana",
+        extensions: ["tra"]
+      },
+      "application/vnd.truedoc": {
+        source: "iana"
+      },
+      "application/vnd.ubisoft.webplayer": {
+        source: "iana"
+      },
+      "application/vnd.ufdl": {
+        source: "iana",
+        extensions: ["ufd", "ufdl"]
+      },
+      "application/vnd.uic.osdm+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.uiq.theme": {
+        source: "iana",
+        extensions: ["utz"]
+      },
+      "application/vnd.umajin": {
+        source: "iana",
+        extensions: ["umj"]
+      },
+      "application/vnd.unity": {
+        source: "iana",
+        extensions: ["unityweb"]
+      },
+      "application/vnd.uoml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["uoml", "uo"]
+      },
+      "application/vnd.uplanet.alert": {
+        source: "iana"
+      },
+      "application/vnd.uplanet.alert-wbxml": {
+        source: "iana"
+      },
+      "application/vnd.uplanet.bearer-choice": {
+        source: "iana"
+      },
+      "application/vnd.uplanet.bearer-choice-wbxml": {
+        source: "iana"
+      },
+      "application/vnd.uplanet.cacheop": {
+        source: "iana"
+      },
+      "application/vnd.uplanet.cacheop-wbxml": {
+        source: "iana"
+      },
+      "application/vnd.uplanet.channel": {
+        source: "iana"
+      },
+      "application/vnd.uplanet.channel-wbxml": {
+        source: "iana"
+      },
+      "application/vnd.uplanet.list": {
+        source: "iana"
+      },
+      "application/vnd.uplanet.list-wbxml": {
+        source: "iana"
+      },
+      "application/vnd.uplanet.listcmd": {
+        source: "iana"
+      },
+      "application/vnd.uplanet.listcmd-wbxml": {
+        source: "iana"
+      },
+      "application/vnd.uplanet.signal": {
+        source: "iana"
+      },
+      "application/vnd.uri-map": {
+        source: "iana"
+      },
+      "application/vnd.valve.source.material": {
+        source: "iana"
+      },
+      "application/vnd.vcx": {
+        source: "iana",
+        extensions: ["vcx"]
+      },
+      "application/vnd.vd-study": {
+        source: "iana"
+      },
+      "application/vnd.vectorworks": {
+        source: "iana"
+      },
+      "application/vnd.vel+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.veraison.tsm-report+cbor": {
+        source: "iana"
+      },
+      "application/vnd.veraison.tsm-report+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.verimatrix.vcas": {
+        source: "iana"
+      },
+      "application/vnd.veritone.aion+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.veryant.thin": {
+        source: "iana"
+      },
+      "application/vnd.ves.encrypted": {
+        source: "iana"
+      },
+      "application/vnd.vidsoft.vidconference": {
+        source: "iana"
+      },
+      "application/vnd.visio": {
+        source: "iana",
+        extensions: ["vsd", "vst", "vss", "vsw", "vsdx", "vtx"]
+      },
+      "application/vnd.visionary": {
+        source: "iana",
+        extensions: ["vis"]
+      },
+      "application/vnd.vividence.scriptfile": {
+        source: "iana"
+      },
+      "application/vnd.vocalshaper.vsp4": {
+        source: "iana"
+      },
+      "application/vnd.vsf": {
+        source: "iana",
+        extensions: ["vsf"]
+      },
+      "application/vnd.wap.sic": {
+        source: "iana"
+      },
+      "application/vnd.wap.slc": {
+        source: "iana"
+      },
+      "application/vnd.wap.wbxml": {
+        source: "iana",
+        charset: "UTF-8",
+        extensions: ["wbxml"]
+      },
+      "application/vnd.wap.wmlc": {
+        source: "iana",
+        extensions: ["wmlc"]
+      },
+      "application/vnd.wap.wmlscriptc": {
+        source: "iana",
+        extensions: ["wmlsc"]
+      },
+      "application/vnd.wasmflow.wafl": {
+        source: "iana"
+      },
+      "application/vnd.webturbo": {
+        source: "iana",
+        extensions: ["wtb"]
+      },
+      "application/vnd.wfa.dpp": {
+        source: "iana"
+      },
+      "application/vnd.wfa.p2p": {
+        source: "iana"
+      },
+      "application/vnd.wfa.wsc": {
+        source: "iana"
+      },
+      "application/vnd.windows.devicepairing": {
+        source: "iana"
+      },
+      "application/vnd.wmc": {
+        source: "iana"
+      },
+      "application/vnd.wmf.bootstrap": {
+        source: "iana"
+      },
+      "application/vnd.wolfram.mathematica": {
+        source: "iana"
+      },
+      "application/vnd.wolfram.mathematica.package": {
+        source: "iana"
+      },
+      "application/vnd.wolfram.player": {
+        source: "iana",
+        extensions: ["nbp"]
+      },
+      "application/vnd.wordlift": {
+        source: "iana"
+      },
+      "application/vnd.wordperfect": {
+        source: "iana",
+        extensions: ["wpd"]
+      },
+      "application/vnd.wqd": {
+        source: "iana",
+        extensions: ["wqd"]
+      },
+      "application/vnd.wrq-hp3000-labelled": {
+        source: "iana"
+      },
+      "application/vnd.wt.stf": {
+        source: "iana",
+        extensions: ["stf"]
+      },
+      "application/vnd.wv.csp+wbxml": {
+        source: "iana"
+      },
+      "application/vnd.wv.csp+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.wv.ssp+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.xacml+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.xara": {
+        source: "iana",
+        extensions: ["xar"]
+      },
+      "application/vnd.xarin.cpj": {
+        source: "iana"
+      },
+      "application/vnd.xecrets-encrypted": {
+        source: "iana"
+      },
+      "application/vnd.xfdl": {
+        source: "iana",
+        extensions: ["xfdl"]
+      },
+      "application/vnd.xfdl.webform": {
+        source: "iana"
+      },
+      "application/vnd.xmi+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vnd.xmpie.cpkg": {
+        source: "iana"
+      },
+      "application/vnd.xmpie.dpkg": {
+        source: "iana"
+      },
+      "application/vnd.xmpie.plan": {
+        source: "iana"
+      },
+      "application/vnd.xmpie.ppkg": {
+        source: "iana"
+      },
+      "application/vnd.xmpie.xlim": {
+        source: "iana"
+      },
+      "application/vnd.yamaha.hv-dic": {
+        source: "iana",
+        extensions: ["hvd"]
+      },
+      "application/vnd.yamaha.hv-script": {
+        source: "iana",
+        extensions: ["hvs"]
+      },
+      "application/vnd.yamaha.hv-voice": {
+        source: "iana",
+        extensions: ["hvp"]
+      },
+      "application/vnd.yamaha.openscoreformat": {
+        source: "iana",
+        extensions: ["osf"]
+      },
+      "application/vnd.yamaha.openscoreformat.osfpvg+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["osfpvg"]
+      },
+      "application/vnd.yamaha.remote-setup": {
+        source: "iana"
+      },
+      "application/vnd.yamaha.smaf-audio": {
+        source: "iana",
+        extensions: ["saf"]
+      },
+      "application/vnd.yamaha.smaf-phrase": {
+        source: "iana",
+        extensions: ["spf"]
+      },
+      "application/vnd.yamaha.through-ngn": {
+        source: "iana"
+      },
+      "application/vnd.yamaha.tunnel-udpencap": {
+        source: "iana"
+      },
+      "application/vnd.yaoweme": {
+        source: "iana"
+      },
+      "application/vnd.yellowriver-custom-menu": {
+        source: "iana",
+        extensions: ["cmp"]
+      },
+      "application/vnd.zul": {
+        source: "iana",
+        extensions: ["zir", "zirz"]
+      },
+      "application/vnd.zzazz.deck+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["zaz"]
+      },
+      "application/voicexml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["vxml"]
+      },
+      "application/voucher-cms+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/voucher-jws+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/vp": {
+        source: "iana"
+      },
+      "application/vp+cose": {
+        source: "iana"
+      },
+      "application/vp+jwt": {
+        source: "iana"
+      },
+      "application/vq-rtcpxr": {
+        source: "iana"
+      },
+      "application/wasm": {
+        source: "iana",
+        compressible: true,
+        extensions: ["wasm"]
+      },
+      "application/watcherinfo+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["wif"]
+      },
+      "application/webpush-options+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/whoispp-query": {
+        source: "iana"
+      },
+      "application/whoispp-response": {
+        source: "iana"
+      },
+      "application/widget": {
+        source: "iana",
+        extensions: ["wgt"]
+      },
+      "application/winhlp": {
+        source: "apache",
+        extensions: ["hlp"]
+      },
+      "application/wita": {
+        source: "iana"
+      },
+      "application/wordperfect5.1": {
+        source: "iana"
+      },
+      "application/wsdl+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["wsdl"]
+      },
+      "application/wspolicy+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["wspolicy"]
+      },
+      "application/x-7z-compressed": {
+        source: "apache",
+        compressible: false,
+        extensions: ["7z"]
+      },
+      "application/x-abiword": {
+        source: "apache",
+        extensions: ["abw"]
+      },
+      "application/x-ace-compressed": {
+        source: "apache",
+        extensions: ["ace"]
+      },
+      "application/x-amf": {
+        source: "apache"
+      },
+      "application/x-apple-diskimage": {
+        source: "apache",
+        extensions: ["dmg"]
+      },
+      "application/x-arj": {
+        compressible: false,
+        extensions: ["arj"]
+      },
+      "application/x-authorware-bin": {
+        source: "apache",
+        extensions: ["aab", "x32", "u32", "vox"]
+      },
+      "application/x-authorware-map": {
+        source: "apache",
+        extensions: ["aam"]
+      },
+      "application/x-authorware-seg": {
+        source: "apache",
+        extensions: ["aas"]
+      },
+      "application/x-bcpio": {
+        source: "apache",
+        extensions: ["bcpio"]
+      },
+      "application/x-bdoc": {
+        compressible: false,
+        extensions: ["bdoc"]
+      },
+      "application/x-bittorrent": {
+        source: "apache",
+        extensions: ["torrent"]
+      },
+      "application/x-blender": {
+        extensions: ["blend"]
+      },
+      "application/x-blorb": {
+        source: "apache",
+        extensions: ["blb", "blorb"]
+      },
+      "application/x-bzip": {
+        source: "apache",
+        compressible: false,
+        extensions: ["bz"]
+      },
+      "application/x-bzip2": {
+        source: "apache",
+        compressible: false,
+        extensions: ["bz2", "boz"]
+      },
+      "application/x-cbr": {
+        source: "apache",
+        extensions: ["cbr", "cba", "cbt", "cbz", "cb7"]
+      },
+      "application/x-cdlink": {
+        source: "apache",
+        extensions: ["vcd"]
+      },
+      "application/x-cfs-compressed": {
+        source: "apache",
+        extensions: ["cfs"]
+      },
+      "application/x-chat": {
+        source: "apache",
+        extensions: ["chat"]
+      },
+      "application/x-chess-pgn": {
+        source: "apache",
+        extensions: ["pgn"]
+      },
+      "application/x-chrome-extension": {
+        extensions: ["crx"]
+      },
+      "application/x-cocoa": {
+        source: "nginx",
+        extensions: ["cco"]
+      },
+      "application/x-compress": {
+        source: "apache"
+      },
+      "application/x-compressed": {
+        extensions: ["rar"]
+      },
+      "application/x-conference": {
+        source: "apache",
+        extensions: ["nsc"]
+      },
+      "application/x-cpio": {
+        source: "apache",
+        extensions: ["cpio"]
+      },
+      "application/x-csh": {
+        source: "apache",
+        extensions: ["csh"]
+      },
+      "application/x-deb": {
+        compressible: false
+      },
+      "application/x-debian-package": {
+        source: "apache",
+        extensions: ["deb", "udeb"]
+      },
+      "application/x-dgc-compressed": {
+        source: "apache",
+        extensions: ["dgc"]
+      },
+      "application/x-director": {
+        source: "apache",
+        extensions: ["dir", "dcr", "dxr", "cst", "cct", "cxt", "w3d", "fgd", "swa"]
+      },
+      "application/x-doom": {
+        source: "apache",
+        extensions: ["wad"]
+      },
+      "application/x-dtbncx+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["ncx"]
+      },
+      "application/x-dtbook+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["dtb"]
+      },
+      "application/x-dtbresource+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["res"]
+      },
+      "application/x-dvi": {
+        source: "apache",
+        compressible: false,
+        extensions: ["dvi"]
+      },
+      "application/x-envoy": {
+        source: "apache",
+        extensions: ["evy"]
+      },
+      "application/x-eva": {
+        source: "apache",
+        extensions: ["eva"]
+      },
+      "application/x-font-bdf": {
+        source: "apache",
+        extensions: ["bdf"]
+      },
+      "application/x-font-dos": {
+        source: "apache"
+      },
+      "application/x-font-framemaker": {
+        source: "apache"
+      },
+      "application/x-font-ghostscript": {
+        source: "apache",
+        extensions: ["gsf"]
+      },
+      "application/x-font-libgrx": {
+        source: "apache"
+      },
+      "application/x-font-linux-psf": {
+        source: "apache",
+        extensions: ["psf"]
+      },
+      "application/x-font-pcf": {
+        source: "apache",
+        extensions: ["pcf"]
+      },
+      "application/x-font-snf": {
+        source: "apache",
+        extensions: ["snf"]
+      },
+      "application/x-font-speedo": {
+        source: "apache"
+      },
+      "application/x-font-sunos-news": {
+        source: "apache"
+      },
+      "application/x-font-type1": {
+        source: "apache",
+        extensions: ["pfa", "pfb", "pfm", "afm"]
+      },
+      "application/x-font-vfont": {
+        source: "apache"
+      },
+      "application/x-freearc": {
+        source: "apache",
+        extensions: ["arc"]
+      },
+      "application/x-futuresplash": {
+        source: "apache",
+        extensions: ["spl"]
+      },
+      "application/x-gca-compressed": {
+        source: "apache",
+        extensions: ["gca"]
+      },
+      "application/x-glulx": {
+        source: "apache",
+        extensions: ["ulx"]
+      },
+      "application/x-gnumeric": {
+        source: "apache",
+        extensions: ["gnumeric"]
+      },
+      "application/x-gramps-xml": {
+        source: "apache",
+        extensions: ["gramps"]
+      },
+      "application/x-gtar": {
+        source: "apache",
+        extensions: ["gtar"]
+      },
+      "application/x-gzip": {
+        source: "apache"
+      },
+      "application/x-hdf": {
+        source: "apache",
+        extensions: ["hdf"]
+      },
+      "application/x-httpd-php": {
+        compressible: true,
+        extensions: ["php"]
+      },
+      "application/x-install-instructions": {
+        source: "apache",
+        extensions: ["install"]
+      },
+      "application/x-ipynb+json": {
+        compressible: true,
+        extensions: ["ipynb"]
+      },
+      "application/x-iso9660-image": {
+        source: "apache",
+        extensions: ["iso"]
+      },
+      "application/x-iwork-keynote-sffkey": {
+        extensions: ["key"]
+      },
+      "application/x-iwork-numbers-sffnumbers": {
+        extensions: ["numbers"]
+      },
+      "application/x-iwork-pages-sffpages": {
+        extensions: ["pages"]
+      },
+      "application/x-java-archive-diff": {
+        source: "nginx",
+        extensions: ["jardiff"]
+      },
+      "application/x-java-jnlp-file": {
+        source: "apache",
+        compressible: false,
+        extensions: ["jnlp"]
+      },
+      "application/x-javascript": {
+        compressible: true
+      },
+      "application/x-keepass2": {
+        extensions: ["kdbx"]
+      },
+      "application/x-latex": {
+        source: "apache",
+        compressible: false,
+        extensions: ["latex"]
+      },
+      "application/x-lua-bytecode": {
+        extensions: ["luac"]
+      },
+      "application/x-lzh-compressed": {
+        source: "apache",
+        extensions: ["lzh", "lha"]
+      },
+      "application/x-makeself": {
+        source: "nginx",
+        extensions: ["run"]
+      },
+      "application/x-mie": {
+        source: "apache",
+        extensions: ["mie"]
+      },
+      "application/x-mobipocket-ebook": {
+        source: "apache",
+        extensions: ["prc", "mobi"]
+      },
+      "application/x-mpegurl": {
+        compressible: false
+      },
+      "application/x-ms-application": {
+        source: "apache",
+        extensions: ["application"]
+      },
+      "application/x-ms-shortcut": {
+        source: "apache",
+        extensions: ["lnk"]
+      },
+      "application/x-ms-wmd": {
+        source: "apache",
+        extensions: ["wmd"]
+      },
+      "application/x-ms-wmz": {
+        source: "apache",
+        extensions: ["wmz"]
+      },
+      "application/x-ms-xbap": {
+        source: "apache",
+        extensions: ["xbap"]
+      },
+      "application/x-msaccess": {
+        source: "apache",
+        extensions: ["mdb"]
+      },
+      "application/x-msbinder": {
+        source: "apache",
+        extensions: ["obd"]
+      },
+      "application/x-mscardfile": {
+        source: "apache",
+        extensions: ["crd"]
+      },
+      "application/x-msclip": {
+        source: "apache",
+        extensions: ["clp"]
+      },
+      "application/x-msdos-program": {
+        extensions: ["exe"]
+      },
+      "application/x-msdownload": {
+        source: "apache",
+        extensions: ["exe", "dll", "com", "bat", "msi"]
+      },
+      "application/x-msmediaview": {
+        source: "apache",
+        extensions: ["mvb", "m13", "m14"]
+      },
+      "application/x-msmetafile": {
+        source: "apache",
+        extensions: ["wmf", "wmz", "emf", "emz"]
+      },
+      "application/x-msmoney": {
+        source: "apache",
+        extensions: ["mny"]
+      },
+      "application/x-mspublisher": {
+        source: "apache",
+        extensions: ["pub"]
+      },
+      "application/x-msschedule": {
+        source: "apache",
+        extensions: ["scd"]
+      },
+      "application/x-msterminal": {
+        source: "apache",
+        extensions: ["trm"]
+      },
+      "application/x-mswrite": {
+        source: "apache",
+        extensions: ["wri"]
+      },
+      "application/x-netcdf": {
+        source: "apache",
+        extensions: ["nc", "cdf"]
+      },
+      "application/x-ns-proxy-autoconfig": {
+        compressible: true,
+        extensions: ["pac"]
+      },
+      "application/x-nzb": {
+        source: "apache",
+        extensions: ["nzb"]
+      },
+      "application/x-perl": {
+        source: "nginx",
+        extensions: ["pl", "pm"]
+      },
+      "application/x-pilot": {
+        source: "nginx",
+        extensions: ["prc", "pdb"]
+      },
+      "application/x-pkcs12": {
+        source: "apache",
+        compressible: false,
+        extensions: ["p12", "pfx"]
+      },
+      "application/x-pkcs7-certificates": {
+        source: "apache",
+        extensions: ["p7b", "spc"]
+      },
+      "application/x-pkcs7-certreqresp": {
+        source: "apache",
+        extensions: ["p7r"]
+      },
+      "application/x-pki-message": {
+        source: "iana"
+      },
+      "application/x-rar-compressed": {
+        source: "apache",
+        compressible: false,
+        extensions: ["rar"]
+      },
+      "application/x-redhat-package-manager": {
+        source: "nginx",
+        extensions: ["rpm"]
+      },
+      "application/x-research-info-systems": {
+        source: "apache",
+        extensions: ["ris"]
+      },
+      "application/x-sea": {
+        source: "nginx",
+        extensions: ["sea"]
+      },
+      "application/x-sh": {
+        source: "apache",
+        compressible: true,
+        extensions: ["sh"]
+      },
+      "application/x-shar": {
+        source: "apache",
+        extensions: ["shar"]
+      },
+      "application/x-shockwave-flash": {
+        source: "apache",
+        compressible: false,
+        extensions: ["swf"]
+      },
+      "application/x-silverlight-app": {
+        source: "apache",
+        extensions: ["xap"]
+      },
+      "application/x-sql": {
+        source: "apache",
+        extensions: ["sql"]
+      },
+      "application/x-stuffit": {
+        source: "apache",
+        compressible: false,
+        extensions: ["sit"]
+      },
+      "application/x-stuffitx": {
+        source: "apache",
+        extensions: ["sitx"]
+      },
+      "application/x-subrip": {
+        source: "apache",
+        extensions: ["srt"]
+      },
+      "application/x-sv4cpio": {
+        source: "apache",
+        extensions: ["sv4cpio"]
+      },
+      "application/x-sv4crc": {
+        source: "apache",
+        extensions: ["sv4crc"]
+      },
+      "application/x-t3vm-image": {
+        source: "apache",
+        extensions: ["t3"]
+      },
+      "application/x-tads": {
+        source: "apache",
+        extensions: ["gam"]
+      },
+      "application/x-tar": {
+        source: "apache",
+        compressible: true,
+        extensions: ["tar"]
+      },
+      "application/x-tcl": {
+        source: "apache",
+        extensions: ["tcl", "tk"]
+      },
+      "application/x-tex": {
+        source: "apache",
+        extensions: ["tex"]
+      },
+      "application/x-tex-tfm": {
+        source: "apache",
+        extensions: ["tfm"]
+      },
+      "application/x-texinfo": {
+        source: "apache",
+        extensions: ["texinfo", "texi"]
+      },
+      "application/x-tgif": {
+        source: "apache",
+        extensions: ["obj"]
+      },
+      "application/x-ustar": {
+        source: "apache",
+        extensions: ["ustar"]
+      },
+      "application/x-virtualbox-hdd": {
+        compressible: true,
+        extensions: ["hdd"]
+      },
+      "application/x-virtualbox-ova": {
+        compressible: true,
+        extensions: ["ova"]
+      },
+      "application/x-virtualbox-ovf": {
+        compressible: true,
+        extensions: ["ovf"]
+      },
+      "application/x-virtualbox-vbox": {
+        compressible: true,
+        extensions: ["vbox"]
+      },
+      "application/x-virtualbox-vbox-extpack": {
+        compressible: false,
+        extensions: ["vbox-extpack"]
+      },
+      "application/x-virtualbox-vdi": {
+        compressible: true,
+        extensions: ["vdi"]
+      },
+      "application/x-virtualbox-vhd": {
+        compressible: true,
+        extensions: ["vhd"]
+      },
+      "application/x-virtualbox-vmdk": {
+        compressible: true,
+        extensions: ["vmdk"]
+      },
+      "application/x-wais-source": {
+        source: "apache",
+        extensions: ["src"]
+      },
+      "application/x-web-app-manifest+json": {
+        compressible: true,
+        extensions: ["webapp"]
+      },
+      "application/x-www-form-urlencoded": {
+        source: "iana",
+        compressible: true
+      },
+      "application/x-x509-ca-cert": {
+        source: "iana",
+        extensions: ["der", "crt", "pem"]
+      },
+      "application/x-x509-ca-ra-cert": {
+        source: "iana"
+      },
+      "application/x-x509-next-ca-cert": {
+        source: "iana"
+      },
+      "application/x-xfig": {
+        source: "apache",
+        extensions: ["fig"]
+      },
+      "application/x-xliff+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["xlf"]
+      },
+      "application/x-xpinstall": {
+        source: "apache",
+        compressible: false,
+        extensions: ["xpi"]
+      },
+      "application/x-xz": {
+        source: "apache",
+        extensions: ["xz"]
+      },
+      "application/x-zip-compressed": {
+        extensions: ["zip"]
+      },
+      "application/x-zmachine": {
+        source: "apache",
+        extensions: ["z1", "z2", "z3", "z4", "z5", "z6", "z7", "z8"]
+      },
+      "application/x400-bp": {
+        source: "iana"
+      },
+      "application/xacml+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/xaml+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["xaml"]
+      },
+      "application/xcap-att+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xav"]
+      },
+      "application/xcap-caps+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xca"]
+      },
+      "application/xcap-diff+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xdf"]
+      },
+      "application/xcap-el+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xel"]
+      },
+      "application/xcap-error+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/xcap-ns+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xns"]
+      },
+      "application/xcon-conference-info+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/xcon-conference-info-diff+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/xenc+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xenc"]
+      },
+      "application/xfdf": {
+        source: "iana",
+        extensions: ["xfdf"]
+      },
+      "application/xhtml+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xhtml", "xht"]
+      },
+      "application/xhtml-voice+xml": {
+        source: "apache",
+        compressible: true
+      },
+      "application/xliff+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xlf"]
+      },
+      "application/xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xml", "xsl", "xsd", "rng"]
+      },
+      "application/xml-dtd": {
+        source: "iana",
+        compressible: true,
+        extensions: ["dtd"]
+      },
+      "application/xml-external-parsed-entity": {
+        source: "iana"
+      },
+      "application/xml-patch+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/xmpp+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/xop+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xop"]
+      },
+      "application/xproc+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["xpl"]
+      },
+      "application/xslt+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xsl", "xslt"]
+      },
+      "application/xspf+xml": {
+        source: "apache",
+        compressible: true,
+        extensions: ["xspf"]
+      },
+      "application/xv+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["mxml", "xhvml", "xvml", "xvm"]
+      },
+      "application/yaml": {
+        source: "iana"
+      },
+      "application/yang": {
+        source: "iana",
+        extensions: ["yang"]
+      },
+      "application/yang-data+cbor": {
+        source: "iana"
+      },
+      "application/yang-data+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/yang-data+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/yang-patch+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/yang-patch+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "application/yang-sid+json": {
+        source: "iana",
+        compressible: true
+      },
+      "application/yin+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["yin"]
+      },
+      "application/zip": {
+        source: "iana",
+        compressible: false,
+        extensions: ["zip"]
+      },
+      "application/zip+dotlottie": {
+        extensions: ["lottie"]
+      },
+      "application/zlib": {
+        source: "iana"
+      },
+      "application/zstd": {
+        source: "iana"
+      },
+      "audio/1d-interleaved-parityfec": {
+        source: "iana"
+      },
+      "audio/32kadpcm": {
+        source: "iana"
+      },
+      "audio/3gpp": {
+        source: "iana",
+        compressible: false,
+        extensions: ["3gpp"]
+      },
+      "audio/3gpp2": {
+        source: "iana"
+      },
+      "audio/aac": {
+        source: "iana",
+        extensions: ["adts", "aac"]
+      },
+      "audio/ac3": {
+        source: "iana"
+      },
+      "audio/adpcm": {
+        source: "apache",
+        extensions: ["adp"]
+      },
+      "audio/amr": {
+        source: "iana",
+        extensions: ["amr"]
+      },
+      "audio/amr-wb": {
+        source: "iana"
+      },
+      "audio/amr-wb+": {
+        source: "iana"
+      },
+      "audio/aptx": {
+        source: "iana"
+      },
+      "audio/asc": {
+        source: "iana"
+      },
+      "audio/atrac-advanced-lossless": {
+        source: "iana"
+      },
+      "audio/atrac-x": {
+        source: "iana"
+      },
+      "audio/atrac3": {
+        source: "iana"
+      },
+      "audio/basic": {
+        source: "iana",
+        compressible: false,
+        extensions: ["au", "snd"]
+      },
+      "audio/bv16": {
+        source: "iana"
+      },
+      "audio/bv32": {
+        source: "iana"
+      },
+      "audio/clearmode": {
+        source: "iana"
+      },
+      "audio/cn": {
+        source: "iana"
+      },
+      "audio/dat12": {
+        source: "iana"
+      },
+      "audio/dls": {
+        source: "iana"
+      },
+      "audio/dsr-es201108": {
+        source: "iana"
+      },
+      "audio/dsr-es202050": {
+        source: "iana"
+      },
+      "audio/dsr-es202211": {
+        source: "iana"
+      },
+      "audio/dsr-es202212": {
+        source: "iana"
+      },
+      "audio/dv": {
+        source: "iana"
+      },
+      "audio/dvi4": {
+        source: "iana"
+      },
+      "audio/eac3": {
+        source: "iana"
+      },
+      "audio/encaprtp": {
+        source: "iana"
+      },
+      "audio/evrc": {
+        source: "iana"
+      },
+      "audio/evrc-qcp": {
+        source: "iana"
+      },
+      "audio/evrc0": {
+        source: "iana"
+      },
+      "audio/evrc1": {
+        source: "iana"
+      },
+      "audio/evrcb": {
+        source: "iana"
+      },
+      "audio/evrcb0": {
+        source: "iana"
+      },
+      "audio/evrcb1": {
+        source: "iana"
+      },
+      "audio/evrcnw": {
+        source: "iana"
+      },
+      "audio/evrcnw0": {
+        source: "iana"
+      },
+      "audio/evrcnw1": {
+        source: "iana"
+      },
+      "audio/evrcwb": {
+        source: "iana"
+      },
+      "audio/evrcwb0": {
+        source: "iana"
+      },
+      "audio/evrcwb1": {
+        source: "iana"
+      },
+      "audio/evs": {
+        source: "iana"
+      },
+      "audio/flac": {
+        source: "iana"
+      },
+      "audio/flexfec": {
+        source: "iana"
+      },
+      "audio/fwdred": {
+        source: "iana"
+      },
+      "audio/g711-0": {
+        source: "iana"
+      },
+      "audio/g719": {
+        source: "iana"
+      },
+      "audio/g722": {
+        source: "iana"
+      },
+      "audio/g7221": {
+        source: "iana"
+      },
+      "audio/g723": {
+        source: "iana"
+      },
+      "audio/g726-16": {
+        source: "iana"
+      },
+      "audio/g726-24": {
+        source: "iana"
+      },
+      "audio/g726-32": {
+        source: "iana"
+      },
+      "audio/g726-40": {
+        source: "iana"
+      },
+      "audio/g728": {
+        source: "iana"
+      },
+      "audio/g729": {
+        source: "iana"
+      },
+      "audio/g7291": {
+        source: "iana"
+      },
+      "audio/g729d": {
+        source: "iana"
+      },
+      "audio/g729e": {
+        source: "iana"
+      },
+      "audio/gsm": {
+        source: "iana"
+      },
+      "audio/gsm-efr": {
+        source: "iana"
+      },
+      "audio/gsm-hr-08": {
+        source: "iana"
+      },
+      "audio/ilbc": {
+        source: "iana"
+      },
+      "audio/ip-mr_v2.5": {
+        source: "iana"
+      },
+      "audio/isac": {
+        source: "apache"
+      },
+      "audio/l16": {
+        source: "iana"
+      },
+      "audio/l20": {
+        source: "iana"
+      },
+      "audio/l24": {
+        source: "iana",
+        compressible: false
+      },
+      "audio/l8": {
+        source: "iana"
+      },
+      "audio/lpc": {
+        source: "iana"
+      },
+      "audio/matroska": {
+        source: "iana"
+      },
+      "audio/melp": {
+        source: "iana"
+      },
+      "audio/melp1200": {
+        source: "iana"
+      },
+      "audio/melp2400": {
+        source: "iana"
+      },
+      "audio/melp600": {
+        source: "iana"
+      },
+      "audio/mhas": {
+        source: "iana"
+      },
+      "audio/midi": {
+        source: "apache",
+        extensions: ["mid", "midi", "kar", "rmi"]
+      },
+      "audio/midi-clip": {
+        source: "iana"
+      },
+      "audio/mobile-xmf": {
+        source: "iana",
+        extensions: ["mxmf"]
+      },
+      "audio/mp3": {
+        compressible: false,
+        extensions: ["mp3"]
+      },
+      "audio/mp4": {
+        source: "iana",
+        compressible: false,
+        extensions: ["m4a", "mp4a", "m4b"]
+      },
+      "audio/mp4a-latm": {
+        source: "iana"
+      },
+      "audio/mpa": {
+        source: "iana"
+      },
+      "audio/mpa-robust": {
+        source: "iana"
+      },
+      "audio/mpeg": {
+        source: "iana",
+        compressible: false,
+        extensions: ["mpga", "mp2", "mp2a", "mp3", "m2a", "m3a"]
+      },
+      "audio/mpeg4-generic": {
+        source: "iana"
+      },
+      "audio/musepack": {
+        source: "apache"
+      },
+      "audio/ogg": {
+        source: "iana",
+        compressible: false,
+        extensions: ["oga", "ogg", "spx", "opus"]
+      },
+      "audio/opus": {
+        source: "iana"
+      },
+      "audio/parityfec": {
+        source: "iana"
+      },
+      "audio/pcma": {
+        source: "iana"
+      },
+      "audio/pcma-wb": {
+        source: "iana"
+      },
+      "audio/pcmu": {
+        source: "iana"
+      },
+      "audio/pcmu-wb": {
+        source: "iana"
+      },
+      "audio/prs.sid": {
+        source: "iana"
+      },
+      "audio/qcelp": {
+        source: "iana"
+      },
+      "audio/raptorfec": {
+        source: "iana"
+      },
+      "audio/red": {
+        source: "iana"
+      },
+      "audio/rtp-enc-aescm128": {
+        source: "iana"
+      },
+      "audio/rtp-midi": {
+        source: "iana"
+      },
+      "audio/rtploopback": {
+        source: "iana"
+      },
+      "audio/rtx": {
+        source: "iana"
+      },
+      "audio/s3m": {
+        source: "apache",
+        extensions: ["s3m"]
+      },
+      "audio/scip": {
+        source: "iana"
+      },
+      "audio/silk": {
+        source: "apache",
+        extensions: ["sil"]
+      },
+      "audio/smv": {
+        source: "iana"
+      },
+      "audio/smv-qcp": {
+        source: "iana"
+      },
+      "audio/smv0": {
+        source: "iana"
+      },
+      "audio/sofa": {
+        source: "iana"
+      },
+      "audio/sp-midi": {
+        source: "iana"
+      },
+      "audio/speex": {
+        source: "iana"
+      },
+      "audio/t140c": {
+        source: "iana"
+      },
+      "audio/t38": {
+        source: "iana"
+      },
+      "audio/telephone-event": {
+        source: "iana"
+      },
+      "audio/tetra_acelp": {
+        source: "iana"
+      },
+      "audio/tetra_acelp_bb": {
+        source: "iana"
+      },
+      "audio/tone": {
+        source: "iana"
+      },
+      "audio/tsvcis": {
+        source: "iana"
+      },
+      "audio/uemclip": {
+        source: "iana"
+      },
+      "audio/ulpfec": {
+        source: "iana"
+      },
+      "audio/usac": {
+        source: "iana"
+      },
+      "audio/vdvi": {
+        source: "iana"
+      },
+      "audio/vmr-wb": {
+        source: "iana"
+      },
+      "audio/vnd.3gpp.iufp": {
+        source: "iana"
+      },
+      "audio/vnd.4sb": {
+        source: "iana"
+      },
+      "audio/vnd.audiokoz": {
+        source: "iana"
+      },
+      "audio/vnd.celp": {
+        source: "iana"
+      },
+      "audio/vnd.cisco.nse": {
+        source: "iana"
+      },
+      "audio/vnd.cmles.radio-events": {
+        source: "iana"
+      },
+      "audio/vnd.cns.anp1": {
+        source: "iana"
+      },
+      "audio/vnd.cns.inf1": {
+        source: "iana"
+      },
+      "audio/vnd.dece.audio": {
+        source: "iana",
+        extensions: ["uva", "uvva"]
+      },
+      "audio/vnd.digital-winds": {
+        source: "iana",
+        extensions: ["eol"]
+      },
+      "audio/vnd.dlna.adts": {
+        source: "iana"
+      },
+      "audio/vnd.dolby.heaac.1": {
+        source: "iana"
+      },
+      "audio/vnd.dolby.heaac.2": {
+        source: "iana"
+      },
+      "audio/vnd.dolby.mlp": {
+        source: "iana"
+      },
+      "audio/vnd.dolby.mps": {
+        source: "iana"
+      },
+      "audio/vnd.dolby.pl2": {
+        source: "iana"
+      },
+      "audio/vnd.dolby.pl2x": {
+        source: "iana"
+      },
+      "audio/vnd.dolby.pl2z": {
+        source: "iana"
+      },
+      "audio/vnd.dolby.pulse.1": {
+        source: "iana"
+      },
+      "audio/vnd.dra": {
+        source: "iana",
+        extensions: ["dra"]
+      },
+      "audio/vnd.dts": {
+        source: "iana",
+        extensions: ["dts"]
+      },
+      "audio/vnd.dts.hd": {
+        source: "iana",
+        extensions: ["dtshd"]
+      },
+      "audio/vnd.dts.uhd": {
+        source: "iana"
+      },
+      "audio/vnd.dvb.file": {
+        source: "iana"
+      },
+      "audio/vnd.everad.plj": {
+        source: "iana"
+      },
+      "audio/vnd.hns.audio": {
+        source: "iana"
+      },
+      "audio/vnd.lucent.voice": {
+        source: "iana",
+        extensions: ["lvp"]
+      },
+      "audio/vnd.ms-playready.media.pya": {
+        source: "iana",
+        extensions: ["pya"]
+      },
+      "audio/vnd.nokia.mobile-xmf": {
+        source: "iana"
+      },
+      "audio/vnd.nortel.vbk": {
+        source: "iana"
+      },
+      "audio/vnd.nuera.ecelp4800": {
+        source: "iana",
+        extensions: ["ecelp4800"]
+      },
+      "audio/vnd.nuera.ecelp7470": {
+        source: "iana",
+        extensions: ["ecelp7470"]
+      },
+      "audio/vnd.nuera.ecelp9600": {
+        source: "iana",
+        extensions: ["ecelp9600"]
+      },
+      "audio/vnd.octel.sbc": {
+        source: "iana"
+      },
+      "audio/vnd.presonus.multitrack": {
+        source: "iana"
+      },
+      "audio/vnd.qcelp": {
+        source: "apache"
+      },
+      "audio/vnd.rhetorex.32kadpcm": {
+        source: "iana"
+      },
+      "audio/vnd.rip": {
+        source: "iana",
+        extensions: ["rip"]
+      },
+      "audio/vnd.rn-realaudio": {
+        compressible: false
+      },
+      "audio/vnd.sealedmedia.softseal.mpeg": {
+        source: "iana"
+      },
+      "audio/vnd.vmx.cvsd": {
+        source: "iana"
+      },
+      "audio/vnd.wave": {
+        compressible: false
+      },
+      "audio/vorbis": {
+        source: "iana",
+        compressible: false
+      },
+      "audio/vorbis-config": {
+        source: "iana"
+      },
+      "audio/wav": {
+        compressible: false,
+        extensions: ["wav"]
+      },
+      "audio/wave": {
+        compressible: false,
+        extensions: ["wav"]
+      },
+      "audio/webm": {
+        source: "apache",
+        compressible: false,
+        extensions: ["weba"]
+      },
+      "audio/x-aac": {
+        source: "apache",
+        compressible: false,
+        extensions: ["aac"]
+      },
+      "audio/x-aiff": {
+        source: "apache",
+        extensions: ["aif", "aiff", "aifc"]
+      },
+      "audio/x-caf": {
+        source: "apache",
+        compressible: false,
+        extensions: ["caf"]
+      },
+      "audio/x-flac": {
+        source: "apache",
+        extensions: ["flac"]
+      },
+      "audio/x-m4a": {
+        source: "nginx",
+        extensions: ["m4a"]
+      },
+      "audio/x-matroska": {
+        source: "apache",
+        extensions: ["mka"]
+      },
+      "audio/x-mpegurl": {
+        source: "apache",
+        extensions: ["m3u"]
+      },
+      "audio/x-ms-wax": {
+        source: "apache",
+        extensions: ["wax"]
+      },
+      "audio/x-ms-wma": {
+        source: "apache",
+        extensions: ["wma"]
+      },
+      "audio/x-pn-realaudio": {
+        source: "apache",
+        extensions: ["ram", "ra"]
+      },
+      "audio/x-pn-realaudio-plugin": {
+        source: "apache",
+        extensions: ["rmp"]
+      },
+      "audio/x-realaudio": {
+        source: "nginx",
+        extensions: ["ra"]
+      },
+      "audio/x-tta": {
+        source: "apache"
+      },
+      "audio/x-wav": {
+        source: "apache",
+        extensions: ["wav"]
+      },
+      "audio/xm": {
+        source: "apache",
+        extensions: ["xm"]
+      },
+      "chemical/x-cdx": {
+        source: "apache",
+        extensions: ["cdx"]
+      },
+      "chemical/x-cif": {
+        source: "apache",
+        extensions: ["cif"]
+      },
+      "chemical/x-cmdf": {
+        source: "apache",
+        extensions: ["cmdf"]
+      },
+      "chemical/x-cml": {
+        source: "apache",
+        extensions: ["cml"]
+      },
+      "chemical/x-csml": {
+        source: "apache",
+        extensions: ["csml"]
+      },
+      "chemical/x-pdb": {
+        source: "apache"
+      },
+      "chemical/x-xyz": {
+        source: "apache",
+        extensions: ["xyz"]
+      },
+      "font/collection": {
+        source: "iana",
+        extensions: ["ttc"]
+      },
+      "font/otf": {
+        source: "iana",
+        compressible: true,
+        extensions: ["otf"]
+      },
+      "font/sfnt": {
+        source: "iana"
+      },
+      "font/ttf": {
+        source: "iana",
+        compressible: true,
+        extensions: ["ttf"]
+      },
+      "font/woff": {
+        source: "iana",
+        extensions: ["woff"]
+      },
+      "font/woff2": {
+        source: "iana",
+        extensions: ["woff2"]
+      },
+      "image/aces": {
+        source: "iana",
+        extensions: ["exr"]
+      },
+      "image/apng": {
+        source: "iana",
+        compressible: false,
+        extensions: ["apng"]
+      },
+      "image/avci": {
+        source: "iana",
+        extensions: ["avci"]
+      },
+      "image/avcs": {
+        source: "iana",
+        extensions: ["avcs"]
+      },
+      "image/avif": {
+        source: "iana",
+        compressible: false,
+        extensions: ["avif"]
+      },
+      "image/bmp": {
+        source: "iana",
+        compressible: true,
+        extensions: ["bmp", "dib"]
+      },
+      "image/cgm": {
+        source: "iana",
+        extensions: ["cgm"]
+      },
+      "image/dicom-rle": {
+        source: "iana",
+        extensions: ["drle"]
+      },
+      "image/dpx": {
+        source: "iana",
+        extensions: ["dpx"]
+      },
+      "image/emf": {
+        source: "iana",
+        extensions: ["emf"]
+      },
+      "image/fits": {
+        source: "iana",
+        extensions: ["fits"]
+      },
+      "image/g3fax": {
+        source: "iana",
+        extensions: ["g3"]
+      },
+      "image/gif": {
+        source: "iana",
+        compressible: false,
+        extensions: ["gif"]
+      },
+      "image/heic": {
+        source: "iana",
+        extensions: ["heic"]
+      },
+      "image/heic-sequence": {
+        source: "iana",
+        extensions: ["heics"]
+      },
+      "image/heif": {
+        source: "iana",
+        extensions: ["heif"]
+      },
+      "image/heif-sequence": {
+        source: "iana",
+        extensions: ["heifs"]
+      },
+      "image/hej2k": {
+        source: "iana",
+        extensions: ["hej2"]
+      },
+      "image/ief": {
+        source: "iana",
+        extensions: ["ief"]
+      },
+      "image/j2c": {
+        source: "iana"
+      },
+      "image/jaii": {
+        source: "iana",
+        extensions: ["jaii"]
+      },
+      "image/jais": {
+        source: "iana",
+        extensions: ["jais"]
+      },
+      "image/jls": {
+        source: "iana",
+        extensions: ["jls"]
+      },
+      "image/jp2": {
+        source: "iana",
+        compressible: false,
+        extensions: ["jp2", "jpg2"]
+      },
+      "image/jpeg": {
+        source: "iana",
+        compressible: false,
+        extensions: ["jpg", "jpeg", "jpe"]
+      },
+      "image/jph": {
+        source: "iana",
+        extensions: ["jph"]
+      },
+      "image/jphc": {
+        source: "iana",
+        extensions: ["jhc"]
+      },
+      "image/jpm": {
+        source: "iana",
+        compressible: false,
+        extensions: ["jpm", "jpgm"]
+      },
+      "image/jpx": {
+        source: "iana",
+        compressible: false,
+        extensions: ["jpx", "jpf"]
+      },
+      "image/jxl": {
+        source: "iana",
+        extensions: ["jxl"]
+      },
+      "image/jxr": {
+        source: "iana",
+        extensions: ["jxr"]
+      },
+      "image/jxra": {
+        source: "iana",
+        extensions: ["jxra"]
+      },
+      "image/jxrs": {
+        source: "iana",
+        extensions: ["jxrs"]
+      },
+      "image/jxs": {
+        source: "iana",
+        extensions: ["jxs"]
+      },
+      "image/jxsc": {
+        source: "iana",
+        extensions: ["jxsc"]
+      },
+      "image/jxsi": {
+        source: "iana",
+        extensions: ["jxsi"]
+      },
+      "image/jxss": {
+        source: "iana",
+        extensions: ["jxss"]
+      },
+      "image/ktx": {
+        source: "iana",
+        extensions: ["ktx"]
+      },
+      "image/ktx2": {
+        source: "iana",
+        extensions: ["ktx2"]
+      },
+      "image/naplps": {
+        source: "iana"
+      },
+      "image/pjpeg": {
+        compressible: false,
+        extensions: ["jfif"]
+      },
+      "image/png": {
+        source: "iana",
+        compressible: false,
+        extensions: ["png"]
+      },
+      "image/prs.btif": {
+        source: "iana",
+        extensions: ["btif", "btf"]
+      },
+      "image/prs.pti": {
+        source: "iana",
+        extensions: ["pti"]
+      },
+      "image/pwg-raster": {
+        source: "iana"
+      },
+      "image/sgi": {
+        source: "apache",
+        extensions: ["sgi"]
+      },
+      "image/svg+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["svg", "svgz"]
+      },
+      "image/t38": {
+        source: "iana",
+        extensions: ["t38"]
+      },
+      "image/tiff": {
+        source: "iana",
+        compressible: false,
+        extensions: ["tif", "tiff"]
+      },
+      "image/tiff-fx": {
+        source: "iana",
+        extensions: ["tfx"]
+      },
+      "image/vnd.adobe.photoshop": {
+        source: "iana",
+        compressible: true,
+        extensions: ["psd"]
+      },
+      "image/vnd.airzip.accelerator.azv": {
+        source: "iana",
+        extensions: ["azv"]
+      },
+      "image/vnd.clip": {
+        source: "iana"
+      },
+      "image/vnd.cns.inf2": {
+        source: "iana"
+      },
+      "image/vnd.dece.graphic": {
+        source: "iana",
+        extensions: ["uvi", "uvvi", "uvg", "uvvg"]
+      },
+      "image/vnd.djvu": {
+        source: "iana",
+        extensions: ["djvu", "djv"]
+      },
+      "image/vnd.dvb.subtitle": {
+        source: "iana",
+        extensions: ["sub"]
+      },
+      "image/vnd.dwg": {
+        source: "iana",
+        extensions: ["dwg"]
+      },
+      "image/vnd.dxf": {
+        source: "iana",
+        extensions: ["dxf"]
+      },
+      "image/vnd.fastbidsheet": {
+        source: "iana",
+        extensions: ["fbs"]
+      },
+      "image/vnd.fpx": {
+        source: "iana",
+        extensions: ["fpx"]
+      },
+      "image/vnd.fst": {
+        source: "iana",
+        extensions: ["fst"]
+      },
+      "image/vnd.fujixerox.edmics-mmr": {
+        source: "iana",
+        extensions: ["mmr"]
+      },
+      "image/vnd.fujixerox.edmics-rlc": {
+        source: "iana",
+        extensions: ["rlc"]
+      },
+      "image/vnd.globalgraphics.pgb": {
+        source: "iana"
+      },
+      "image/vnd.microsoft.icon": {
+        source: "iana",
+        compressible: true,
+        extensions: ["ico"]
+      },
+      "image/vnd.mix": {
+        source: "iana"
+      },
+      "image/vnd.mozilla.apng": {
+        source: "iana"
+      },
+      "image/vnd.ms-dds": {
+        compressible: true,
+        extensions: ["dds"]
+      },
+      "image/vnd.ms-modi": {
+        source: "iana",
+        extensions: ["mdi"]
+      },
+      "image/vnd.ms-photo": {
+        source: "apache",
+        extensions: ["wdp"]
+      },
+      "image/vnd.net-fpx": {
+        source: "iana",
+        extensions: ["npx"]
+      },
+      "image/vnd.pco.b16": {
+        source: "iana",
+        extensions: ["b16"]
+      },
+      "image/vnd.radiance": {
+        source: "iana"
+      },
+      "image/vnd.sealed.png": {
+        source: "iana"
+      },
+      "image/vnd.sealedmedia.softseal.gif": {
+        source: "iana"
+      },
+      "image/vnd.sealedmedia.softseal.jpg": {
+        source: "iana"
+      },
+      "image/vnd.svf": {
+        source: "iana"
+      },
+      "image/vnd.tencent.tap": {
+        source: "iana",
+        extensions: ["tap"]
+      },
+      "image/vnd.valve.source.texture": {
+        source: "iana",
+        extensions: ["vtf"]
+      },
+      "image/vnd.wap.wbmp": {
+        source: "iana",
+        extensions: ["wbmp"]
+      },
+      "image/vnd.xiff": {
+        source: "iana",
+        extensions: ["xif"]
+      },
+      "image/vnd.zbrush.pcx": {
+        source: "iana",
+        extensions: ["pcx"]
+      },
+      "image/webp": {
+        source: "iana",
+        extensions: ["webp"]
+      },
+      "image/wmf": {
+        source: "iana",
+        extensions: ["wmf"]
+      },
+      "image/x-3ds": {
+        source: "apache",
+        extensions: ["3ds"]
+      },
+      "image/x-adobe-dng": {
+        extensions: ["dng"]
+      },
+      "image/x-cmu-raster": {
+        source: "apache",
+        extensions: ["ras"]
+      },
+      "image/x-cmx": {
+        source: "apache",
+        extensions: ["cmx"]
+      },
+      "image/x-emf": {
+        source: "iana"
+      },
+      "image/x-freehand": {
+        source: "apache",
+        extensions: ["fh", "fhc", "fh4", "fh5", "fh7"]
+      },
+      "image/x-icon": {
+        source: "apache",
+        compressible: true,
+        extensions: ["ico"]
+      },
+      "image/x-jng": {
+        source: "nginx",
+        extensions: ["jng"]
+      },
+      "image/x-mrsid-image": {
+        source: "apache",
+        extensions: ["sid"]
+      },
+      "image/x-ms-bmp": {
+        source: "nginx",
+        compressible: true,
+        extensions: ["bmp"]
+      },
+      "image/x-pcx": {
+        source: "apache",
+        extensions: ["pcx"]
+      },
+      "image/x-pict": {
+        source: "apache",
+        extensions: ["pic", "pct"]
+      },
+      "image/x-portable-anymap": {
+        source: "apache",
+        extensions: ["pnm"]
+      },
+      "image/x-portable-bitmap": {
+        source: "apache",
+        extensions: ["pbm"]
+      },
+      "image/x-portable-graymap": {
+        source: "apache",
+        extensions: ["pgm"]
+      },
+      "image/x-portable-pixmap": {
+        source: "apache",
+        extensions: ["ppm"]
+      },
+      "image/x-rgb": {
+        source: "apache",
+        extensions: ["rgb"]
+      },
+      "image/x-tga": {
+        source: "apache",
+        extensions: ["tga"]
+      },
+      "image/x-wmf": {
+        source: "iana"
+      },
+      "image/x-xbitmap": {
+        source: "apache",
+        extensions: ["xbm"]
+      },
+      "image/x-xcf": {
+        compressible: false
+      },
+      "image/x-xpixmap": {
+        source: "apache",
+        extensions: ["xpm"]
+      },
+      "image/x-xwindowdump": {
+        source: "apache",
+        extensions: ["xwd"]
+      },
+      "message/bhttp": {
+        source: "iana"
+      },
+      "message/cpim": {
+        source: "iana"
+      },
+      "message/delivery-status": {
+        source: "iana"
+      },
+      "message/disposition-notification": {
+        source: "iana",
+        extensions: [
+          "disposition-notification"
+        ]
+      },
+      "message/external-body": {
+        source: "iana"
+      },
+      "message/feedback-report": {
+        source: "iana"
+      },
+      "message/global": {
+        source: "iana",
+        extensions: ["u8msg"]
+      },
+      "message/global-delivery-status": {
+        source: "iana",
+        extensions: ["u8dsn"]
+      },
+      "message/global-disposition-notification": {
+        source: "iana",
+        extensions: ["u8mdn"]
+      },
+      "message/global-headers": {
+        source: "iana",
+        extensions: ["u8hdr"]
+      },
+      "message/http": {
+        source: "iana",
+        compressible: false
+      },
+      "message/imdn+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "message/mls": {
+        source: "iana"
+      },
+      "message/news": {
+        source: "apache"
+      },
+      "message/ohttp-req": {
+        source: "iana"
+      },
+      "message/ohttp-res": {
+        source: "iana"
+      },
+      "message/partial": {
+        source: "iana",
+        compressible: false
+      },
+      "message/rfc822": {
+        source: "iana",
+        compressible: true,
+        extensions: ["eml", "mime", "mht", "mhtml"]
+      },
+      "message/s-http": {
+        source: "apache"
+      },
+      "message/sip": {
+        source: "iana"
+      },
+      "message/sipfrag": {
+        source: "iana"
+      },
+      "message/tracking-status": {
+        source: "iana"
+      },
+      "message/vnd.si.simp": {
+        source: "apache"
+      },
+      "message/vnd.wfa.wsc": {
+        source: "iana",
+        extensions: ["wsc"]
+      },
+      "model/3mf": {
+        source: "iana",
+        extensions: ["3mf"]
+      },
+      "model/e57": {
+        source: "iana"
+      },
+      "model/gltf+json": {
+        source: "iana",
+        compressible: true,
+        extensions: ["gltf"]
+      },
+      "model/gltf-binary": {
+        source: "iana",
+        compressible: true,
+        extensions: ["glb"]
+      },
+      "model/iges": {
+        source: "iana",
+        compressible: false,
+        extensions: ["igs", "iges"]
+      },
+      "model/jt": {
+        source: "iana",
+        extensions: ["jt"]
+      },
+      "model/mesh": {
+        source: "iana",
+        compressible: false,
+        extensions: ["msh", "mesh", "silo"]
+      },
+      "model/mtl": {
+        source: "iana",
+        extensions: ["mtl"]
+      },
+      "model/obj": {
+        source: "iana",
+        extensions: ["obj"]
+      },
+      "model/prc": {
+        source: "iana",
+        extensions: ["prc"]
+      },
+      "model/step": {
+        source: "iana",
+        extensions: ["step", "stp", "stpnc", "p21", "210"]
+      },
+      "model/step+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["stpx"]
+      },
+      "model/step+zip": {
+        source: "iana",
+        compressible: false,
+        extensions: ["stpz"]
+      },
+      "model/step-xml+zip": {
+        source: "iana",
+        compressible: false,
+        extensions: ["stpxz"]
+      },
+      "model/stl": {
+        source: "iana",
+        extensions: ["stl"]
+      },
+      "model/u3d": {
+        source: "iana",
+        extensions: ["u3d"]
+      },
+      "model/vnd.bary": {
+        source: "iana",
+        extensions: ["bary"]
+      },
+      "model/vnd.cld": {
+        source: "iana",
+        extensions: ["cld"]
+      },
+      "model/vnd.collada+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["dae"]
+      },
+      "model/vnd.dwf": {
+        source: "iana",
+        extensions: ["dwf"]
+      },
+      "model/vnd.flatland.3dml": {
+        source: "iana"
+      },
+      "model/vnd.gdl": {
+        source: "iana",
+        extensions: ["gdl"]
+      },
+      "model/vnd.gs-gdl": {
+        source: "apache"
+      },
+      "model/vnd.gs.gdl": {
+        source: "iana"
+      },
+      "model/vnd.gtw": {
+        source: "iana",
+        extensions: ["gtw"]
+      },
+      "model/vnd.moml+xml": {
+        source: "iana",
+        compressible: true
+      },
+      "model/vnd.mts": {
+        source: "iana",
+        extensions: ["mts"]
+      },
+      "model/vnd.opengex": {
+        source: "iana",
+        extensions: ["ogex"]
+      },
+      "model/vnd.parasolid.transmit.binary": {
+        source: "iana",
+        extensions: ["x_b"]
+      },
+      "model/vnd.parasolid.transmit.text": {
+        source: "iana",
+        extensions: ["x_t"]
+      },
+      "model/vnd.pytha.pyox": {
+        source: "iana",
+        extensions: ["pyo", "pyox"]
+      },
+      "model/vnd.rosette.annotated-data-model": {
+        source: "iana"
+      },
+      "model/vnd.sap.vds": {
+        source: "iana",
+        extensions: ["vds"]
+      },
+      "model/vnd.usda": {
+        source: "iana",
+        extensions: ["usda"]
+      },
+      "model/vnd.usdz+zip": {
+        source: "iana",
+        compressible: false,
+        extensions: ["usdz"]
+      },
+      "model/vnd.valve.source.compiled-map": {
+        source: "iana",
+        extensions: ["bsp"]
+      },
+      "model/vnd.vtu": {
+        source: "iana",
+        extensions: ["vtu"]
+      },
+      "model/vrml": {
+        source: "iana",
+        compressible: false,
+        extensions: ["wrl", "vrml"]
+      },
+      "model/x3d+binary": {
+        source: "apache",
+        compressible: false,
+        extensions: ["x3db", "x3dbz"]
+      },
+      "model/x3d+fastinfoset": {
+        source: "iana",
+        extensions: ["x3db"]
+      },
+      "model/x3d+vrml": {
+        source: "apache",
+        compressible: false,
+        extensions: ["x3dv", "x3dvz"]
+      },
+      "model/x3d+xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["x3d", "x3dz"]
+      },
+      "model/x3d-vrml": {
+        source: "iana",
+        extensions: ["x3dv"]
+      },
+      "multipart/alternative": {
+        source: "iana",
+        compressible: false
+      },
+      "multipart/appledouble": {
+        source: "iana"
+      },
+      "multipart/byteranges": {
+        source: "iana"
+      },
+      "multipart/digest": {
+        source: "iana"
+      },
+      "multipart/encrypted": {
+        source: "iana",
+        compressible: false
+      },
+      "multipart/form-data": {
+        source: "iana",
+        compressible: false
+      },
+      "multipart/header-set": {
+        source: "iana"
+      },
+      "multipart/mixed": {
+        source: "iana"
+      },
+      "multipart/multilingual": {
+        source: "iana"
+      },
+      "multipart/parallel": {
+        source: "iana"
+      },
+      "multipart/related": {
+        source: "iana",
+        compressible: false
+      },
+      "multipart/report": {
+        source: "iana"
+      },
+      "multipart/signed": {
+        source: "iana",
+        compressible: false
+      },
+      "multipart/vnd.bint.med-plus": {
+        source: "iana"
+      },
+      "multipart/voice-message": {
+        source: "iana"
+      },
+      "multipart/x-mixed-replace": {
+        source: "iana"
+      },
+      "text/1d-interleaved-parityfec": {
+        source: "iana"
+      },
+      "text/cache-manifest": {
+        source: "iana",
+        compressible: true,
+        extensions: ["appcache", "manifest"]
+      },
+      "text/calendar": {
+        source: "iana",
+        extensions: ["ics", "ifb"]
+      },
+      "text/calender": {
+        compressible: true
+      },
+      "text/cmd": {
+        compressible: true
+      },
+      "text/coffeescript": {
+        extensions: ["coffee", "litcoffee"]
+      },
+      "text/cql": {
+        source: "iana"
+      },
+      "text/cql-expression": {
+        source: "iana"
+      },
+      "text/cql-identifier": {
+        source: "iana"
+      },
+      "text/css": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true,
+        extensions: ["css"]
+      },
+      "text/csv": {
+        source: "iana",
+        compressible: true,
+        extensions: ["csv"]
+      },
+      "text/csv-schema": {
+        source: "iana"
+      },
+      "text/directory": {
+        source: "iana"
+      },
+      "text/dns": {
+        source: "iana"
+      },
+      "text/ecmascript": {
+        source: "apache"
+      },
+      "text/encaprtp": {
+        source: "iana"
+      },
+      "text/enriched": {
+        source: "iana"
+      },
+      "text/fhirpath": {
+        source: "iana"
+      },
+      "text/flexfec": {
+        source: "iana"
+      },
+      "text/fwdred": {
+        source: "iana"
+      },
+      "text/gff3": {
+        source: "iana"
+      },
+      "text/grammar-ref-list": {
+        source: "iana"
+      },
+      "text/hl7v2": {
+        source: "iana"
+      },
+      "text/html": {
+        source: "iana",
+        compressible: true,
+        extensions: ["html", "htm", "shtml"]
+      },
+      "text/jade": {
+        extensions: ["jade"]
+      },
+      "text/javascript": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true,
+        extensions: ["js", "mjs"]
+      },
+      "text/jcr-cnd": {
+        source: "iana"
+      },
+      "text/jsx": {
+        compressible: true,
+        extensions: ["jsx"]
+      },
+      "text/less": {
+        compressible: true,
+        extensions: ["less"]
+      },
+      "text/markdown": {
+        source: "iana",
+        compressible: true,
+        extensions: ["md", "markdown"]
+      },
+      "text/mathml": {
+        source: "nginx",
+        extensions: ["mml"]
+      },
+      "text/mdx": {
+        compressible: true,
+        extensions: ["mdx"]
+      },
+      "text/mizar": {
+        source: "iana"
+      },
+      "text/n3": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true,
+        extensions: ["n3"]
+      },
+      "text/parameters": {
+        source: "iana",
+        charset: "UTF-8"
+      },
+      "text/parityfec": {
+        source: "iana"
+      },
+      "text/plain": {
+        source: "iana",
+        compressible: true,
+        extensions: ["txt", "text", "conf", "def", "list", "log", "in", "ini"]
+      },
+      "text/provenance-notation": {
+        source: "iana",
+        charset: "UTF-8"
+      },
+      "text/prs.fallenstein.rst": {
+        source: "iana"
+      },
+      "text/prs.lines.tag": {
+        source: "iana",
+        extensions: ["dsc"]
+      },
+      "text/prs.prop.logic": {
+        source: "iana"
+      },
+      "text/prs.texi": {
+        source: "iana"
+      },
+      "text/raptorfec": {
+        source: "iana"
+      },
+      "text/red": {
+        source: "iana"
+      },
+      "text/rfc822-headers": {
+        source: "iana"
+      },
+      "text/richtext": {
+        source: "iana",
+        compressible: true,
+        extensions: ["rtx"]
+      },
+      "text/rtf": {
+        source: "iana",
+        compressible: true,
+        extensions: ["rtf"]
+      },
+      "text/rtp-enc-aescm128": {
+        source: "iana"
+      },
+      "text/rtploopback": {
+        source: "iana"
+      },
+      "text/rtx": {
+        source: "iana"
+      },
+      "text/sgml": {
+        source: "iana",
+        extensions: ["sgml", "sgm"]
+      },
+      "text/shaclc": {
+        source: "iana"
+      },
+      "text/shex": {
+        source: "iana",
+        extensions: ["shex"]
+      },
+      "text/slim": {
+        extensions: ["slim", "slm"]
+      },
+      "text/spdx": {
+        source: "iana",
+        extensions: ["spdx"]
+      },
+      "text/strings": {
+        source: "iana"
+      },
+      "text/stylus": {
+        extensions: ["stylus", "styl"]
+      },
+      "text/t140": {
+        source: "iana"
+      },
+      "text/tab-separated-values": {
+        source: "iana",
+        compressible: true,
+        extensions: ["tsv"]
+      },
+      "text/troff": {
+        source: "iana",
+        extensions: ["t", "tr", "roff", "man", "me", "ms"]
+      },
+      "text/turtle": {
+        source: "iana",
+        charset: "UTF-8",
+        extensions: ["ttl"]
+      },
+      "text/ulpfec": {
+        source: "iana"
+      },
+      "text/uri-list": {
+        source: "iana",
+        compressible: true,
+        extensions: ["uri", "uris", "urls"]
+      },
+      "text/vcard": {
+        source: "iana",
+        compressible: true,
+        extensions: ["vcard"]
+      },
+      "text/vnd.a": {
+        source: "iana"
+      },
+      "text/vnd.abc": {
+        source: "iana"
+      },
+      "text/vnd.ascii-art": {
+        source: "iana"
+      },
+      "text/vnd.curl": {
+        source: "iana",
+        extensions: ["curl"]
+      },
+      "text/vnd.curl.dcurl": {
+        source: "apache",
+        extensions: ["dcurl"]
+      },
+      "text/vnd.curl.mcurl": {
+        source: "apache",
+        extensions: ["mcurl"]
+      },
+      "text/vnd.curl.scurl": {
+        source: "apache",
+        extensions: ["scurl"]
+      },
+      "text/vnd.debian.copyright": {
+        source: "iana",
+        charset: "UTF-8"
+      },
+      "text/vnd.dmclientscript": {
+        source: "iana"
+      },
+      "text/vnd.dvb.subtitle": {
+        source: "iana",
+        extensions: ["sub"]
+      },
+      "text/vnd.esmertec.theme-descriptor": {
+        source: "iana",
+        charset: "UTF-8"
+      },
+      "text/vnd.exchangeable": {
+        source: "iana"
+      },
+      "text/vnd.familysearch.gedcom": {
+        source: "iana",
+        extensions: ["ged"]
+      },
+      "text/vnd.ficlab.flt": {
+        source: "iana"
+      },
+      "text/vnd.fly": {
+        source: "iana",
+        extensions: ["fly"]
+      },
+      "text/vnd.fmi.flexstor": {
+        source: "iana",
+        extensions: ["flx"]
+      },
+      "text/vnd.gml": {
+        source: "iana"
+      },
+      "text/vnd.graphviz": {
+        source: "iana",
+        extensions: ["gv"]
+      },
+      "text/vnd.hans": {
+        source: "iana"
+      },
+      "text/vnd.hgl": {
+        source: "iana"
+      },
+      "text/vnd.in3d.3dml": {
+        source: "iana",
+        extensions: ["3dml"]
+      },
+      "text/vnd.in3d.spot": {
+        source: "iana",
+        extensions: ["spot"]
+      },
+      "text/vnd.iptc.newsml": {
+        source: "iana"
+      },
+      "text/vnd.iptc.nitf": {
+        source: "iana"
+      },
+      "text/vnd.latex-z": {
+        source: "iana"
+      },
+      "text/vnd.motorola.reflex": {
+        source: "iana"
+      },
+      "text/vnd.ms-mediapackage": {
+        source: "iana"
+      },
+      "text/vnd.net2phone.commcenter.command": {
+        source: "iana"
+      },
+      "text/vnd.radisys.msml-basic-layout": {
+        source: "iana"
+      },
+      "text/vnd.senx.warpscript": {
+        source: "iana"
+      },
+      "text/vnd.si.uricatalogue": {
+        source: "apache"
+      },
+      "text/vnd.sosi": {
+        source: "iana"
+      },
+      "text/vnd.sun.j2me.app-descriptor": {
+        source: "iana",
+        charset: "UTF-8",
+        extensions: ["jad"]
+      },
+      "text/vnd.trolltech.linguist": {
+        source: "iana",
+        charset: "UTF-8"
+      },
+      "text/vnd.vcf": {
+        source: "iana"
+      },
+      "text/vnd.wap.si": {
+        source: "iana"
+      },
+      "text/vnd.wap.sl": {
+        source: "iana"
+      },
+      "text/vnd.wap.wml": {
+        source: "iana",
+        extensions: ["wml"]
+      },
+      "text/vnd.wap.wmlscript": {
+        source: "iana",
+        extensions: ["wmls"]
+      },
+      "text/vnd.zoo.kcl": {
+        source: "iana"
+      },
+      "text/vtt": {
+        source: "iana",
+        charset: "UTF-8",
+        compressible: true,
+        extensions: ["vtt"]
+      },
+      "text/wgsl": {
+        source: "iana",
+        extensions: ["wgsl"]
+      },
+      "text/x-asm": {
+        source: "apache",
+        extensions: ["s", "asm"]
+      },
+      "text/x-c": {
+        source: "apache",
+        extensions: ["c", "cc", "cxx", "cpp", "h", "hh", "dic"]
+      },
+      "text/x-component": {
+        source: "nginx",
+        extensions: ["htc"]
+      },
+      "text/x-fortran": {
+        source: "apache",
+        extensions: ["f", "for", "f77", "f90"]
+      },
+      "text/x-gwt-rpc": {
+        compressible: true
+      },
+      "text/x-handlebars-template": {
+        extensions: ["hbs"]
+      },
+      "text/x-java-source": {
+        source: "apache",
+        extensions: ["java"]
+      },
+      "text/x-jquery-tmpl": {
+        compressible: true
+      },
+      "text/x-lua": {
+        extensions: ["lua"]
+      },
+      "text/x-markdown": {
+        compressible: true,
+        extensions: ["mkd"]
+      },
+      "text/x-nfo": {
+        source: "apache",
+        extensions: ["nfo"]
+      },
+      "text/x-opml": {
+        source: "apache",
+        extensions: ["opml"]
+      },
+      "text/x-org": {
+        compressible: true,
+        extensions: ["org"]
+      },
+      "text/x-pascal": {
+        source: "apache",
+        extensions: ["p", "pas"]
+      },
+      "text/x-processing": {
+        compressible: true,
+        extensions: ["pde"]
+      },
+      "text/x-sass": {
+        extensions: ["sass"]
+      },
+      "text/x-scss": {
+        extensions: ["scss"]
+      },
+      "text/x-setext": {
+        source: "apache",
+        extensions: ["etx"]
+      },
+      "text/x-sfv": {
+        source: "apache",
+        extensions: ["sfv"]
+      },
+      "text/x-suse-ymp": {
+        compressible: true,
+        extensions: ["ymp"]
+      },
+      "text/x-uuencode": {
+        source: "apache",
+        extensions: ["uu"]
+      },
+      "text/x-vcalendar": {
+        source: "apache",
+        extensions: ["vcs"]
+      },
+      "text/x-vcard": {
+        source: "apache",
+        extensions: ["vcf"]
+      },
+      "text/xml": {
+        source: "iana",
+        compressible: true,
+        extensions: ["xml"]
+      },
+      "text/xml-external-parsed-entity": {
+        source: "iana"
+      },
+      "text/yaml": {
+        compressible: true,
+        extensions: ["yaml", "yml"]
+      },
+      "video/1d-interleaved-parityfec": {
+        source: "iana"
+      },
+      "video/3gpp": {
+        source: "iana",
+        extensions: ["3gp", "3gpp"]
+      },
+      "video/3gpp-tt": {
+        source: "iana"
+      },
+      "video/3gpp2": {
+        source: "iana",
+        extensions: ["3g2"]
+      },
+      "video/av1": {
+        source: "iana"
+      },
+      "video/bmpeg": {
+        source: "iana"
+      },
+      "video/bt656": {
+        source: "iana"
+      },
+      "video/celb": {
+        source: "iana"
+      },
+      "video/dv": {
+        source: "iana"
+      },
+      "video/encaprtp": {
+        source: "iana"
+      },
+      "video/evc": {
+        source: "iana"
+      },
+      "video/ffv1": {
+        source: "iana"
+      },
+      "video/flexfec": {
+        source: "iana"
+      },
+      "video/h261": {
+        source: "iana",
+        extensions: ["h261"]
+      },
+      "video/h263": {
+        source: "iana",
+        extensions: ["h263"]
+      },
+      "video/h263-1998": {
+        source: "iana"
+      },
+      "video/h263-2000": {
+        source: "iana"
+      },
+      "video/h264": {
+        source: "iana",
+        extensions: ["h264"]
+      },
+      "video/h264-rcdo": {
+        source: "iana"
+      },
+      "video/h264-svc": {
+        source: "iana"
+      },
+      "video/h265": {
+        source: "iana"
+      },
+      "video/h266": {
+        source: "iana"
+      },
+      "video/iso.segment": {
+        source: "iana",
+        extensions: ["m4s"]
+      },
+      "video/jpeg": {
+        source: "iana",
+        extensions: ["jpgv"]
+      },
+      "video/jpeg2000": {
+        source: "iana"
+      },
+      "video/jpm": {
+        source: "apache",
+        extensions: ["jpm", "jpgm"]
+      },
+      "video/jxsv": {
+        source: "iana"
+      },
+      "video/lottie+json": {
+        source: "iana",
+        compressible: true
+      },
+      "video/matroska": {
+        source: "iana"
+      },
+      "video/matroska-3d": {
+        source: "iana"
+      },
+      "video/mj2": {
+        source: "iana",
+        extensions: ["mj2", "mjp2"]
+      },
+      "video/mp1s": {
+        source: "iana"
+      },
+      "video/mp2p": {
+        source: "iana"
+      },
+      "video/mp2t": {
+        source: "iana",
+        extensions: ["ts", "m2t", "m2ts", "mts"]
+      },
+      "video/mp4": {
+        source: "iana",
+        compressible: false,
+        extensions: ["mp4", "mp4v", "mpg4"]
+      },
+      "video/mp4v-es": {
+        source: "iana"
+      },
+      "video/mpeg": {
+        source: "iana",
+        compressible: false,
+        extensions: ["mpeg", "mpg", "mpe", "m1v", "m2v"]
+      },
+      "video/mpeg4-generic": {
+        source: "iana"
+      },
+      "video/mpv": {
+        source: "iana"
+      },
+      "video/nv": {
+        source: "iana"
+      },
+      "video/ogg": {
+        source: "iana",
+        compressible: false,
+        extensions: ["ogv"]
+      },
+      "video/parityfec": {
+        source: "iana"
+      },
+      "video/pointer": {
+        source: "iana"
+      },
+      "video/quicktime": {
+        source: "iana",
+        compressible: false,
+        extensions: ["qt", "mov"]
+      },
+      "video/raptorfec": {
+        source: "iana"
+      },
+      "video/raw": {
+        source: "iana"
+      },
+      "video/rtp-enc-aescm128": {
+        source: "iana"
+      },
+      "video/rtploopback": {
+        source: "iana"
+      },
+      "video/rtx": {
+        source: "iana"
+      },
+      "video/scip": {
+        source: "iana"
+      },
+      "video/smpte291": {
+        source: "iana"
+      },
+      "video/smpte292m": {
+        source: "iana"
+      },
+      "video/ulpfec": {
+        source: "iana"
+      },
+      "video/vc1": {
+        source: "iana"
+      },
+      "video/vc2": {
+        source: "iana"
+      },
+      "video/vnd.cctv": {
+        source: "iana"
+      },
+      "video/vnd.dece.hd": {
+        source: "iana",
+        extensions: ["uvh", "uvvh"]
+      },
+      "video/vnd.dece.mobile": {
+        source: "iana",
+        extensions: ["uvm", "uvvm"]
+      },
+      "video/vnd.dece.mp4": {
+        source: "iana"
+      },
+      "video/vnd.dece.pd": {
+        source: "iana",
+        extensions: ["uvp", "uvvp"]
+      },
+      "video/vnd.dece.sd": {
+        source: "iana",
+        extensions: ["uvs", "uvvs"]
+      },
+      "video/vnd.dece.video": {
+        source: "iana",
+        extensions: ["uvv", "uvvv"]
+      },
+      "video/vnd.directv.mpeg": {
+        source: "iana"
+      },
+      "video/vnd.directv.mpeg-tts": {
+        source: "iana"
+      },
+      "video/vnd.dlna.mpeg-tts": {
+        source: "iana"
+      },
+      "video/vnd.dvb.file": {
+        source: "iana",
+        extensions: ["dvb"]
+      },
+      "video/vnd.fvt": {
+        source: "iana",
+        extensions: ["fvt"]
+      },
+      "video/vnd.hns.video": {
+        source: "iana"
+      },
+      "video/vnd.iptvforum.1dparityfec-1010": {
+        source: "iana"
+      },
+      "video/vnd.iptvforum.1dparityfec-2005": {
+        source: "iana"
+      },
+      "video/vnd.iptvforum.2dparityfec-1010": {
+        source: "iana"
+      },
+      "video/vnd.iptvforum.2dparityfec-2005": {
+        source: "iana"
+      },
+      "video/vnd.iptvforum.ttsavc": {
+        source: "iana"
+      },
+      "video/vnd.iptvforum.ttsmpeg2": {
+        source: "iana"
+      },
+      "video/vnd.motorola.video": {
+        source: "iana"
+      },
+      "video/vnd.motorola.videop": {
+        source: "iana"
+      },
+      "video/vnd.mpegurl": {
+        source: "iana",
+        extensions: ["mxu", "m4u"]
+      },
+      "video/vnd.ms-playready.media.pyv": {
+        source: "iana",
+        extensions: ["pyv"]
+      },
+      "video/vnd.nokia.interleaved-multimedia": {
+        source: "iana"
+      },
+      "video/vnd.nokia.mp4vr": {
+        source: "iana"
+      },
+      "video/vnd.nokia.videovoip": {
+        source: "iana"
+      },
+      "video/vnd.objectvideo": {
+        source: "iana"
+      },
+      "video/vnd.planar": {
+        source: "iana"
+      },
+      "video/vnd.radgamettools.bink": {
+        source: "iana"
+      },
+      "video/vnd.radgamettools.smacker": {
+        source: "apache"
+      },
+      "video/vnd.sealed.mpeg1": {
+        source: "iana"
+      },
+      "video/vnd.sealed.mpeg4": {
+        source: "iana"
+      },
+      "video/vnd.sealed.swf": {
+        source: "iana"
+      },
+      "video/vnd.sealedmedia.softseal.mov": {
+        source: "iana"
+      },
+      "video/vnd.uvvu.mp4": {
+        source: "iana",
+        extensions: ["uvu", "uvvu"]
+      },
+      "video/vnd.vivo": {
+        source: "iana",
+        extensions: ["viv"]
+      },
+      "video/vnd.youtube.yt": {
+        source: "iana"
+      },
+      "video/vp8": {
+        source: "iana"
+      },
+      "video/vp9": {
+        source: "iana"
+      },
+      "video/webm": {
+        source: "apache",
+        compressible: false,
+        extensions: ["webm"]
+      },
+      "video/x-f4v": {
+        source: "apache",
+        extensions: ["f4v"]
+      },
+      "video/x-fli": {
+        source: "apache",
+        extensions: ["fli"]
+      },
+      "video/x-flv": {
+        source: "apache",
+        compressible: false,
+        extensions: ["flv"]
+      },
+      "video/x-m4v": {
+        source: "apache",
+        extensions: ["m4v"]
+      },
+      "video/x-matroska": {
+        source: "apache",
+        compressible: false,
+        extensions: ["mkv", "mk3d", "mks"]
+      },
+      "video/x-mng": {
+        source: "apache",
+        extensions: ["mng"]
+      },
+      "video/x-ms-asf": {
+        source: "apache",
+        extensions: ["asf", "asx"]
+      },
+      "video/x-ms-vob": {
+        source: "apache",
+        extensions: ["vob"]
+      },
+      "video/x-ms-wm": {
+        source: "apache",
+        extensions: ["wm"]
+      },
+      "video/x-ms-wmv": {
+        source: "apache",
+        compressible: false,
+        extensions: ["wmv"]
+      },
+      "video/x-ms-wmx": {
+        source: "apache",
+        extensions: ["wmx"]
+      },
+      "video/x-ms-wvx": {
+        source: "apache",
+        extensions: ["wvx"]
+      },
+      "video/x-msvideo": {
+        source: "apache",
+        extensions: ["avi"]
+      },
+      "video/x-sgi-movie": {
+        source: "apache",
+        extensions: ["movie"]
+      },
+      "video/x-smv": {
+        source: "apache",
+        extensions: ["smv"]
+      },
+      "x-conference/x-cooltalk": {
+        source: "apache",
+        extensions: ["ice"]
+      },
+      "x-shader/x-fragment": {
+        compressible: true
+      },
+      "x-shader/x-vertex": {
+        compressible: true
+      }
+    };
+  }
+});
+
+// node_modules/mime-db/index.js
+var require_mime_db = __commonJS({
+  "node_modules/mime-db/index.js"(exports, module) {
+    module.exports = require_db();
+  }
+});
+
+// node_modules/process-nextick-args/index.js
+var require_process_nextick_args = __commonJS({
+  "node_modules/process-nextick-args/index.js"(exports, module) {
+    "use strict";
+    if (typeof process === "undefined" || !process.version || process.version.indexOf("v0.") === 0 || process.version.indexOf("v1.") === 0 && process.version.indexOf("v1.8.") !== 0) {
+      module.exports = { nextTick };
+    } else {
+      module.exports = process;
+    }
+    function nextTick(fn, arg1, arg2, arg3) {
+      if (typeof fn !== "function") {
+        throw new TypeError('"callback" argument must be a function');
+      }
+      var len = arguments.length;
+      var args, i;
+      switch (len) {
+        case 0:
+        case 1:
+          return process.nextTick(fn);
+        case 2:
+          return process.nextTick(function afterTickOne() {
+            fn.call(null, arg1);
+          });
+        case 3:
+          return process.nextTick(function afterTickTwo() {
+            fn.call(null, arg1, arg2);
+          });
+        case 4:
+          return process.nextTick(function afterTickThree() {
+            fn.call(null, arg1, arg2, arg3);
+          });
+        default:
+          args = new Array(len - 1);
+          i = 0;
+          while (i < args.length) {
+            args[i++] = arguments[i];
+          }
+          return process.nextTick(function afterTick() {
+            fn.apply(null, args);
+          });
+      }
+    }
+  }
+});
+
+// node_modules/isarray/index.js
+var require_isarray = __commonJS({
+  "node_modules/isarray/index.js"(exports, module) {
+    var toString = {}.toString;
+    module.exports = Array.isArray || function(arr) {
+      return toString.call(arr) == "[object Array]";
+    };
+  }
+});
+
+// node_modules/duplexify/node_modules/readable-stream/lib/internal/streams/stream.js
+var require_stream = __commonJS({
+  "node_modules/duplexify/node_modules/readable-stream/lib/internal/streams/stream.js"(exports, module) {
+    module.exports = __require("stream");
+  }
+});
+
+// node_modules/duplexify/node_modules/safe-buffer/index.js
+var require_safe_buffer = __commonJS({
+  "node_modules/duplexify/node_modules/safe-buffer/index.js"(exports, module) {
+    var buffer = __require("buffer");
+    var Buffer2 = buffer.Buffer;
+    function copyProps(src, dst) {
+      for (var key in src) {
+        dst[key] = src[key];
+      }
+    }
+    if (Buffer2.from && Buffer2.alloc && Buffer2.allocUnsafe && Buffer2.allocUnsafeSlow) {
+      module.exports = buffer;
+    } else {
+      copyProps(buffer, exports);
+      exports.Buffer = SafeBuffer;
+    }
+    function SafeBuffer(arg, encodingOrOffset, length) {
+      return Buffer2(arg, encodingOrOffset, length);
+    }
+    copyProps(Buffer2, SafeBuffer);
+    SafeBuffer.from = function(arg, encodingOrOffset, length) {
+      if (typeof arg === "number") {
+        throw new TypeError("Argument must not be a number");
+      }
+      return Buffer2(arg, encodingOrOffset, length);
+    };
+    SafeBuffer.alloc = function(size, fill, encoding) {
+      if (typeof size !== "number") {
+        throw new TypeError("Argument must be a number");
+      }
+      var buf = Buffer2(size);
+      if (fill !== void 0) {
+        if (typeof encoding === "string") {
+          buf.fill(fill, encoding);
+        } else {
+          buf.fill(fill);
+        }
+      } else {
+        buf.fill(0);
+      }
+      return buf;
+    };
+    SafeBuffer.allocUnsafe = function(size) {
+      if (typeof size !== "number") {
+        throw new TypeError("Argument must be a number");
+      }
+      return Buffer2(size);
+    };
+    SafeBuffer.allocUnsafeSlow = function(size) {
+      if (typeof size !== "number") {
+        throw new TypeError("Argument must be a number");
+      }
+      return buffer.SlowBuffer(size);
+    };
+  }
+});
+
+// node_modules/core-util-is/lib/util.js
+var require_util3 = __commonJS({
+  "node_modules/core-util-is/lib/util.js"(exports) {
+    function isArray(arg) {
+      if (Array.isArray) {
+        return Array.isArray(arg);
+      }
+      return objectToString(arg) === "[object Array]";
+    }
+    exports.isArray = isArray;
+    function isBoolean(arg) {
+      return typeof arg === "boolean";
+    }
+    exports.isBoolean = isBoolean;
+    function isNull(arg) {
+      return arg === null;
+    }
+    exports.isNull = isNull;
+    function isNullOrUndefined(arg) {
+      return arg == null;
+    }
+    exports.isNullOrUndefined = isNullOrUndefined;
+    function isNumber(arg) {
+      return typeof arg === "number";
+    }
+    exports.isNumber = isNumber;
+    function isString(arg) {
+      return typeof arg === "string";
+    }
+    exports.isString = isString;
+    function isSymbol(arg) {
+      return typeof arg === "symbol";
+    }
+    exports.isSymbol = isSymbol;
+    function isUndefined(arg) {
+      return arg === void 0;
+    }
+    exports.isUndefined = isUndefined;
+    function isRegExp(re) {
+      return objectToString(re) === "[object RegExp]";
+    }
+    exports.isRegExp = isRegExp;
+    function isObject(arg) {
+      return typeof arg === "object" && arg !== null;
+    }
+    exports.isObject = isObject;
+    function isDate(d) {
+      return objectToString(d) === "[object Date]";
+    }
+    exports.isDate = isDate;
+    function isError(e) {
+      return objectToString(e) === "[object Error]" || e instanceof Error;
+    }
+    exports.isError = isError;
+    function isFunction(arg) {
+      return typeof arg === "function";
+    }
+    exports.isFunction = isFunction;
+    function isPrimitive(arg) {
+      return arg === null || typeof arg === "boolean" || typeof arg === "number" || typeof arg === "string" || typeof arg === "symbol" || // ES6 symbol
+      typeof arg === "undefined";
+    }
+    exports.isPrimitive = isPrimitive;
+    exports.isBuffer = __require("buffer").Buffer.isBuffer;
+    function objectToString(o) {
+      return Object.prototype.toString.call(o);
+    }
+  }
+});
+
+// node_modules/duplexify/node_modules/readable-stream/lib/internal/streams/BufferList.js
+var require_BufferList = __commonJS({
+  "node_modules/duplexify/node_modules/readable-stream/lib/internal/streams/BufferList.js"(exports, module) {
+    "use strict";
+    function _classCallCheck(instance, Constructor) {
+      if (!(instance instanceof Constructor)) {
+        throw new TypeError("Cannot call a class as a function");
+      }
+    }
+    var Buffer2 = require_safe_buffer().Buffer;
+    var util = __require("util");
+    function copyBuffer(src, target, offset) {
+      src.copy(target, offset);
+    }
+    module.exports = (function() {
+      function BufferList() {
+        _classCallCheck(this, BufferList);
+        this.head = null;
+        this.tail = null;
+        this.length = 0;
+      }
+      BufferList.prototype.push = function push(v) {
+        var entry = { data: v, next: null };
+        if (this.length > 0) this.tail.next = entry;
+        else this.head = entry;
+        this.tail = entry;
+        ++this.length;
+      };
+      BufferList.prototype.unshift = function unshift(v) {
+        var entry = { data: v, next: this.head };
+        if (this.length === 0) this.tail = entry;
+        this.head = entry;
+        ++this.length;
+      };
+      BufferList.prototype.shift = function shift() {
+        if (this.length === 0) return;
+        var ret = this.head.data;
+        if (this.length === 1) this.head = this.tail = null;
+        else this.head = this.head.next;
+        --this.length;
+        return ret;
+      };
+      BufferList.prototype.clear = function clear() {
+        this.head = this.tail = null;
+        this.length = 0;
+      };
+      BufferList.prototype.join = function join4(s) {
+        if (this.length === 0) return "";
+        var p = this.head;
+        var ret = "" + p.data;
+        while (p = p.next) {
+          ret += s + p.data;
+        }
+        return ret;
+      };
+      BufferList.prototype.concat = function concat(n) {
+        if (this.length === 0) return Buffer2.alloc(0);
+        var ret = Buffer2.allocUnsafe(n >>> 0);
+        var p = this.head;
+        var i = 0;
+        while (p) {
+          copyBuffer(p.data, ret, i);
+          i += p.data.length;
+          p = p.next;
+        }
+        return ret;
+      };
+      return BufferList;
+    })();
+    if (util && util.inspect && util.inspect.custom) {
+      module.exports.prototype[util.inspect.custom] = function() {
+        var obj = util.inspect({ length: this.length });
+        return this.constructor.name + " " + obj;
+      };
+    }
+  }
+});
+
+// node_modules/duplexify/node_modules/readable-stream/lib/internal/streams/destroy.js
+var require_destroy = __commonJS({
+  "node_modules/duplexify/node_modules/readable-stream/lib/internal/streams/destroy.js"(exports, module) {
+    "use strict";
+    var pna = require_process_nextick_args();
+    function destroy(err, cb) {
+      var _this = this;
+      var readableDestroyed = this._readableState && this._readableState.destroyed;
+      var writableDestroyed = this._writableState && this._writableState.destroyed;
+      if (readableDestroyed || writableDestroyed) {
+        if (cb) {
+          cb(err);
+        } else if (err) {
+          if (!this._writableState) {
+            pna.nextTick(emitErrorNT, this, err);
+          } else if (!this._writableState.errorEmitted) {
+            this._writableState.errorEmitted = true;
+            pna.nextTick(emitErrorNT, this, err);
+          }
+        }
+        return this;
+      }
+      if (this._readableState) {
+        this._readableState.destroyed = true;
+      }
+      if (this._writableState) {
+        this._writableState.destroyed = true;
+      }
+      this._destroy(err || null, function(err2) {
+        if (!cb && err2) {
+          if (!_this._writableState) {
+            pna.nextTick(emitErrorNT, _this, err2);
+          } else if (!_this._writableState.errorEmitted) {
+            _this._writableState.errorEmitted = true;
+            pna.nextTick(emitErrorNT, _this, err2);
+          }
+        } else if (cb) {
+          cb(err2);
+        }
+      });
+      return this;
+    }
+    function undestroy() {
+      if (this._readableState) {
+        this._readableState.destroyed = false;
+        this._readableState.reading = false;
+        this._readableState.ended = false;
+        this._readableState.endEmitted = false;
+      }
+      if (this._writableState) {
+        this._writableState.destroyed = false;
+        this._writableState.ended = false;
+        this._writableState.ending = false;
+        this._writableState.finalCalled = false;
+        this._writableState.prefinished = false;
+        this._writableState.finished = false;
+        this._writableState.errorEmitted = false;
+      }
+    }
+    function emitErrorNT(self2, err) {
+      self2.emit("error", err);
+    }
+    module.exports = {
+      destroy,
+      undestroy
+    };
+  }
+});
+
+// node_modules/util-deprecate/node.js
+var require_node2 = __commonJS({
+  "node_modules/util-deprecate/node.js"(exports, module) {
+    module.exports = __require("util").deprecate;
+  }
+});
+
+// node_modules/duplexify/node_modules/readable-stream/lib/_stream_writable.js
+var require_stream_writable = __commonJS({
+  "node_modules/duplexify/node_modules/readable-stream/lib/_stream_writable.js"(exports, module) {
+    "use strict";
+    var pna = require_process_nextick_args();
+    module.exports = Writable;
+    function CorkedRequest(state) {
+      var _this = this;
+      this.next = null;
+      this.entry = null;
+      this.finish = function() {
+        onCorkedFinish(_this, state);
+      };
+    }
+    var asyncWrite = !process.browser && ["v0.10", "v0.9."].indexOf(process.version.slice(0, 5)) > -1 ? setImmediate : pna.nextTick;
+    var Duplex;
+    Writable.WritableState = WritableState;
+    var util = Object.create(require_util3());
+    util.inherits = require_inherits();
+    var internalUtil = {
+      deprecate: require_node2()
+    };
+    var Stream = require_stream();
+    var Buffer2 = require_safe_buffer().Buffer;
+    var OurUint8Array = (typeof global !== "undefined" ? global : typeof window !== "undefined" ? window : typeof self !== "undefined" ? self : {}).Uint8Array || function() {
+    };
+    function _uint8ArrayToBuffer(chunk) {
+      return Buffer2.from(chunk);
+    }
+    function _isUint8Array(obj) {
+      return Buffer2.isBuffer(obj) || obj instanceof OurUint8Array;
+    }
+    var destroyImpl = require_destroy();
+    util.inherits(Writable, Stream);
+    function nop() {
+    }
+    function WritableState(options, stream) {
+      Duplex = Duplex || require_stream_duplex();
+      options = options || {};
+      var isDuplex = stream instanceof Duplex;
+      this.objectMode = !!options.objectMode;
+      if (isDuplex) this.objectMode = this.objectMode || !!options.writableObjectMode;
+      var hwm = options.highWaterMark;
+      var writableHwm = options.writableHighWaterMark;
+      var defaultHwm = this.objectMode ? 16 : 16 * 1024;
+      if (hwm || hwm === 0) this.highWaterMark = hwm;
+      else if (isDuplex && (writableHwm || writableHwm === 0)) this.highWaterMark = writableHwm;
+      else this.highWaterMark = defaultHwm;
+      this.highWaterMark = Math.floor(this.highWaterMark);
+      this.finalCalled = false;
+      this.needDrain = false;
+      this.ending = false;
+      this.ended = false;
+      this.finished = false;
+      this.destroyed = false;
+      var noDecode = options.decodeStrings === false;
+      this.decodeStrings = !noDecode;
+      this.defaultEncoding = options.defaultEncoding || "utf8";
+      this.length = 0;
+      this.writing = false;
+      this.corked = 0;
+      this.sync = true;
+      this.bufferProcessing = false;
+      this.onwrite = function(er) {
+        onwrite(stream, er);
+      };
+      this.writecb = null;
+      this.writelen = 0;
+      this.bufferedRequest = null;
+      this.lastBufferedRequest = null;
+      this.pendingcb = 0;
+      this.prefinished = false;
+      this.errorEmitted = false;
+      this.bufferedRequestCount = 0;
+      this.corkedRequestsFree = new CorkedRequest(this);
+    }
+    WritableState.prototype.getBuffer = function getBuffer() {
+      var current = this.bufferedRequest;
+      var out = [];
+      while (current) {
+        out.push(current);
+        current = current.next;
+      }
+      return out;
+    };
+    (function() {
+      try {
+        Object.defineProperty(WritableState.prototype, "buffer", {
+          get: internalUtil.deprecate(function() {
+            return this.getBuffer();
+          }, "_writableState.buffer is deprecated. Use _writableState.getBuffer instead.", "DEP0003")
+        });
+      } catch (_) {
+      }
+    })();
+    var realHasInstance;
+    if (typeof Symbol === "function" && Symbol.hasInstance && typeof Function.prototype[Symbol.hasInstance] === "function") {
+      realHasInstance = Function.prototype[Symbol.hasInstance];
+      Object.defineProperty(Writable, Symbol.hasInstance, {
+        value: function(object) {
+          if (realHasInstance.call(this, object)) return true;
+          if (this !== Writable) return false;
+          return object && object._writableState instanceof WritableState;
+        }
+      });
+    } else {
+      realHasInstance = function(object) {
+        return object instanceof this;
+      };
+    }
+    function Writable(options) {
+      Duplex = Duplex || require_stream_duplex();
+      if (!realHasInstance.call(Writable, this) && !(this instanceof Duplex)) {
+        return new Writable(options);
+      }
+      this._writableState = new WritableState(options, this);
+      this.writable = true;
+      if (options) {
+        if (typeof options.write === "function") this._write = options.write;
+        if (typeof options.writev === "function") this._writev = options.writev;
+        if (typeof options.destroy === "function") this._destroy = options.destroy;
+        if (typeof options.final === "function") this._final = options.final;
+      }
+      Stream.call(this);
+    }
+    Writable.prototype.pipe = function() {
+      this.emit("error", new Error("Cannot pipe, not readable"));
+    };
+    function writeAfterEnd(stream, cb) {
+      var er = new Error("write after end");
+      stream.emit("error", er);
+      pna.nextTick(cb, er);
+    }
+    function validChunk(stream, state, chunk, cb) {
+      var valid = true;
+      var er = false;
+      if (chunk === null) {
+        er = new TypeError("May not write null values to stream");
+      } else if (typeof chunk !== "string" && chunk !== void 0 && !state.objectMode) {
+        er = new TypeError("Invalid non-string/buffer chunk");
+      }
+      if (er) {
+        stream.emit("error", er);
+        pna.nextTick(cb, er);
+        valid = false;
+      }
+      return valid;
+    }
+    Writable.prototype.write = function(chunk, encoding, cb) {
+      var state = this._writableState;
+      var ret = false;
+      var isBuf = !state.objectMode && _isUint8Array(chunk);
+      if (isBuf && !Buffer2.isBuffer(chunk)) {
+        chunk = _uint8ArrayToBuffer(chunk);
+      }
+      if (typeof encoding === "function") {
+        cb = encoding;
+        encoding = null;
+      }
+      if (isBuf) encoding = "buffer";
+      else if (!encoding) encoding = state.defaultEncoding;
+      if (typeof cb !== "function") cb = nop;
+      if (state.ended) writeAfterEnd(this, cb);
+      else if (isBuf || validChunk(this, state, chunk, cb)) {
+        state.pendingcb++;
+        ret = writeOrBuffer(this, state, isBuf, chunk, encoding, cb);
+      }
+      return ret;
+    };
+    Writable.prototype.cork = function() {
+      var state = this._writableState;
+      state.corked++;
+    };
+    Writable.prototype.uncork = function() {
+      var state = this._writableState;
+      if (state.corked) {
+        state.corked--;
+        if (!state.writing && !state.corked && !state.bufferProcessing && state.bufferedRequest) clearBuffer(this, state);
+      }
+    };
+    Writable.prototype.setDefaultEncoding = function setDefaultEncoding(encoding) {
+      if (typeof encoding === "string") encoding = encoding.toLowerCase();
+      if (!(["hex", "utf8", "utf-8", "ascii", "binary", "base64", "ucs2", "ucs-2", "utf16le", "utf-16le", "raw"].indexOf((encoding + "").toLowerCase()) > -1)) throw new TypeError("Unknown encoding: " + encoding);
+      this._writableState.defaultEncoding = encoding;
+      return this;
+    };
+    function decodeChunk(state, chunk, encoding) {
+      if (!state.objectMode && state.decodeStrings !== false && typeof chunk === "string") {
+        chunk = Buffer2.from(chunk, encoding);
+      }
+      return chunk;
+    }
+    Object.defineProperty(Writable.prototype, "writableHighWaterMark", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function() {
+        return this._writableState.highWaterMark;
+      }
+    });
+    function writeOrBuffer(stream, state, isBuf, chunk, encoding, cb) {
+      if (!isBuf) {
+        var newChunk = decodeChunk(state, chunk, encoding);
+        if (chunk !== newChunk) {
+          isBuf = true;
+          encoding = "buffer";
+          chunk = newChunk;
+        }
+      }
+      var len = state.objectMode ? 1 : chunk.length;
+      state.length += len;
+      var ret = state.length < state.highWaterMark;
+      if (!ret) state.needDrain = true;
+      if (state.writing || state.corked) {
+        var last = state.lastBufferedRequest;
+        state.lastBufferedRequest = {
+          chunk,
+          encoding,
+          isBuf,
+          callback: cb,
+          next: null
+        };
+        if (last) {
+          last.next = state.lastBufferedRequest;
+        } else {
+          state.bufferedRequest = state.lastBufferedRequest;
+        }
+        state.bufferedRequestCount += 1;
+      } else {
+        doWrite(stream, state, false, len, chunk, encoding, cb);
+      }
+      return ret;
+    }
+    function doWrite(stream, state, writev, len, chunk, encoding, cb) {
+      state.writelen = len;
+      state.writecb = cb;
+      state.writing = true;
+      state.sync = true;
+      if (writev) stream._writev(chunk, state.onwrite);
+      else stream._write(chunk, encoding, state.onwrite);
+      state.sync = false;
+    }
+    function onwriteError(stream, state, sync, er, cb) {
+      --state.pendingcb;
+      if (sync) {
+        pna.nextTick(cb, er);
+        pna.nextTick(finishMaybe, stream, state);
+        stream._writableState.errorEmitted = true;
+        stream.emit("error", er);
+      } else {
+        cb(er);
+        stream._writableState.errorEmitted = true;
+        stream.emit("error", er);
+        finishMaybe(stream, state);
+      }
+    }
+    function onwriteStateUpdate(state) {
+      state.writing = false;
+      state.writecb = null;
+      state.length -= state.writelen;
+      state.writelen = 0;
+    }
+    function onwrite(stream, er) {
+      var state = stream._writableState;
+      var sync = state.sync;
+      var cb = state.writecb;
+      onwriteStateUpdate(state);
+      if (er) onwriteError(stream, state, sync, er, cb);
+      else {
+        var finished = needFinish(state);
+        if (!finished && !state.corked && !state.bufferProcessing && state.bufferedRequest) {
+          clearBuffer(stream, state);
+        }
+        if (sync) {
+          asyncWrite(afterWrite, stream, state, finished, cb);
+        } else {
+          afterWrite(stream, state, finished, cb);
+        }
+      }
+    }
+    function afterWrite(stream, state, finished, cb) {
+      if (!finished) onwriteDrain(stream, state);
+      state.pendingcb--;
+      cb();
+      finishMaybe(stream, state);
+    }
+    function onwriteDrain(stream, state) {
+      if (state.length === 0 && state.needDrain) {
+        state.needDrain = false;
+        stream.emit("drain");
+      }
+    }
+    function clearBuffer(stream, state) {
+      state.bufferProcessing = true;
+      var entry = state.bufferedRequest;
+      if (stream._writev && entry && entry.next) {
+        var l = state.bufferedRequestCount;
+        var buffer = new Array(l);
+        var holder = state.corkedRequestsFree;
+        holder.entry = entry;
+        var count = 0;
+        var allBuffers = true;
+        while (entry) {
+          buffer[count] = entry;
+          if (!entry.isBuf) allBuffers = false;
+          entry = entry.next;
+          count += 1;
+        }
+        buffer.allBuffers = allBuffers;
+        doWrite(stream, state, true, state.length, buffer, "", holder.finish);
+        state.pendingcb++;
+        state.lastBufferedRequest = null;
+        if (holder.next) {
+          state.corkedRequestsFree = holder.next;
+          holder.next = null;
+        } else {
+          state.corkedRequestsFree = new CorkedRequest(state);
+        }
+        state.bufferedRequestCount = 0;
+      } else {
+        while (entry) {
+          var chunk = entry.chunk;
+          var encoding = entry.encoding;
+          var cb = entry.callback;
+          var len = state.objectMode ? 1 : chunk.length;
+          doWrite(stream, state, false, len, chunk, encoding, cb);
+          entry = entry.next;
+          state.bufferedRequestCount--;
+          if (state.writing) {
+            break;
+          }
+        }
+        if (entry === null) state.lastBufferedRequest = null;
+      }
+      state.bufferedRequest = entry;
+      state.bufferProcessing = false;
+    }
+    Writable.prototype._write = function(chunk, encoding, cb) {
+      cb(new Error("_write() is not implemented"));
+    };
+    Writable.prototype._writev = null;
+    Writable.prototype.end = function(chunk, encoding, cb) {
+      var state = this._writableState;
+      if (typeof chunk === "function") {
+        cb = chunk;
+        chunk = null;
+        encoding = null;
+      } else if (typeof encoding === "function") {
+        cb = encoding;
+        encoding = null;
+      }
+      if (chunk !== null && chunk !== void 0) this.write(chunk, encoding);
+      if (state.corked) {
+        state.corked = 1;
+        this.uncork();
+      }
+      if (!state.ending) endWritable(this, state, cb);
+    };
+    function needFinish(state) {
+      return state.ending && state.length === 0 && state.bufferedRequest === null && !state.finished && !state.writing;
+    }
+    function callFinal(stream, state) {
+      stream._final(function(err) {
+        state.pendingcb--;
+        if (err) {
+          stream.emit("error", err);
+        }
+        state.prefinished = true;
+        stream.emit("prefinish");
+        finishMaybe(stream, state);
+      });
+    }
+    function prefinish(stream, state) {
+      if (!state.prefinished && !state.finalCalled) {
+        if (typeof stream._final === "function") {
+          state.pendingcb++;
+          state.finalCalled = true;
+          pna.nextTick(callFinal, stream, state);
+        } else {
+          state.prefinished = true;
+          stream.emit("prefinish");
+        }
+      }
+    }
+    function finishMaybe(stream, state) {
+      var need = needFinish(state);
+      if (need) {
+        prefinish(stream, state);
+        if (state.pendingcb === 0) {
+          state.finished = true;
+          stream.emit("finish");
+        }
+      }
+      return need;
+    }
+    function endWritable(stream, state, cb) {
+      state.ending = true;
+      finishMaybe(stream, state);
+      if (cb) {
+        if (state.finished) pna.nextTick(cb);
+        else stream.once("finish", cb);
+      }
+      state.ended = true;
+      stream.writable = false;
+    }
+    function onCorkedFinish(corkReq, state, err) {
+      var entry = corkReq.entry;
+      corkReq.entry = null;
+      while (entry) {
+        var cb = entry.callback;
+        state.pendingcb--;
+        cb(err);
+        entry = entry.next;
+      }
+      state.corkedRequestsFree.next = corkReq;
+    }
+    Object.defineProperty(Writable.prototype, "destroyed", {
+      get: function() {
+        if (this._writableState === void 0) {
+          return false;
+        }
+        return this._writableState.destroyed;
+      },
+      set: function(value) {
+        if (!this._writableState) {
+          return;
+        }
+        this._writableState.destroyed = value;
+      }
+    });
+    Writable.prototype.destroy = destroyImpl.destroy;
+    Writable.prototype._undestroy = destroyImpl.undestroy;
+    Writable.prototype._destroy = function(err, cb) {
+      this.end();
+      cb(err);
+    };
+  }
+});
+
+// node_modules/duplexify/node_modules/readable-stream/lib/_stream_duplex.js
+var require_stream_duplex = __commonJS({
+  "node_modules/duplexify/node_modules/readable-stream/lib/_stream_duplex.js"(exports, module) {
+    "use strict";
+    var pna = require_process_nextick_args();
+    var objectKeys = Object.keys || function(obj) {
+      var keys2 = [];
+      for (var key in obj) {
+        keys2.push(key);
+      }
+      return keys2;
+    };
+    module.exports = Duplex;
+    var util = Object.create(require_util3());
+    util.inherits = require_inherits();
+    var Readable = require_stream_readable();
+    var Writable = require_stream_writable();
+    util.inherits(Duplex, Readable);
+    {
+      keys = objectKeys(Writable.prototype);
+      for (v = 0; v < keys.length; v++) {
+        method = keys[v];
+        if (!Duplex.prototype[method]) Duplex.prototype[method] = Writable.prototype[method];
+      }
+    }
+    var keys;
+    var method;
+    var v;
+    function Duplex(options) {
+      if (!(this instanceof Duplex)) return new Duplex(options);
+      Readable.call(this, options);
+      Writable.call(this, options);
+      if (options && options.readable === false) this.readable = false;
+      if (options && options.writable === false) this.writable = false;
+      this.allowHalfOpen = true;
+      if (options && options.allowHalfOpen === false) this.allowHalfOpen = false;
+      this.once("end", onend);
+    }
+    Object.defineProperty(Duplex.prototype, "writableHighWaterMark", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function() {
+        return this._writableState.highWaterMark;
+      }
+    });
+    function onend() {
+      if (this.allowHalfOpen || this._writableState.ended) return;
+      pna.nextTick(onEndNT, this);
+    }
+    function onEndNT(self2) {
+      self2.end();
+    }
+    Object.defineProperty(Duplex.prototype, "destroyed", {
+      get: function() {
+        if (this._readableState === void 0 || this._writableState === void 0) {
+          return false;
+        }
+        return this._readableState.destroyed && this._writableState.destroyed;
+      },
+      set: function(value) {
+        if (this._readableState === void 0 || this._writableState === void 0) {
+          return;
+        }
+        this._readableState.destroyed = value;
+        this._writableState.destroyed = value;
+      }
+    });
+    Duplex.prototype._destroy = function(err, cb) {
+      this.push(null);
+      this.end();
+      pna.nextTick(cb, err);
+    };
+  }
+});
+
+// node_modules/duplexify/node_modules/string_decoder/lib/string_decoder.js
+var require_string_decoder = __commonJS({
+  "node_modules/duplexify/node_modules/string_decoder/lib/string_decoder.js"(exports) {
+    "use strict";
+    var Buffer2 = require_safe_buffer().Buffer;
+    var isEncoding = Buffer2.isEncoding || function(encoding) {
+      encoding = "" + encoding;
+      switch (encoding && encoding.toLowerCase()) {
+        case "hex":
+        case "utf8":
+        case "utf-8":
+        case "ascii":
+        case "binary":
+        case "base64":
+        case "ucs2":
+        case "ucs-2":
+        case "utf16le":
+        case "utf-16le":
+        case "raw":
+          return true;
+        default:
+          return false;
+      }
+    };
+    function _normalizeEncoding(enc) {
+      if (!enc) return "utf8";
+      var retried;
+      while (true) {
+        switch (enc) {
+          case "utf8":
+          case "utf-8":
+            return "utf8";
+          case "ucs2":
+          case "ucs-2":
+          case "utf16le":
+          case "utf-16le":
+            return "utf16le";
+          case "latin1":
+          case "binary":
+            return "latin1";
+          case "base64":
+          case "ascii":
+          case "hex":
+            return enc;
+          default:
+            if (retried) return;
+            enc = ("" + enc).toLowerCase();
+            retried = true;
+        }
+      }
+    }
+    function normalizeEncoding(enc) {
+      var nenc = _normalizeEncoding(enc);
+      if (typeof nenc !== "string" && (Buffer2.isEncoding === isEncoding || !isEncoding(enc))) throw new Error("Unknown encoding: " + enc);
+      return nenc || enc;
+    }
+    exports.StringDecoder = StringDecoder;
+    function StringDecoder(encoding) {
+      this.encoding = normalizeEncoding(encoding);
+      var nb;
+      switch (this.encoding) {
+        case "utf16le":
+          this.text = utf16Text;
+          this.end = utf16End;
+          nb = 4;
+          break;
+        case "utf8":
+          this.fillLast = utf8FillLast;
+          nb = 4;
+          break;
+        case "base64":
+          this.text = base64Text;
+          this.end = base64End;
+          nb = 3;
+          break;
+        default:
+          this.write = simpleWrite;
+          this.end = simpleEnd;
+          return;
+      }
+      this.lastNeed = 0;
+      this.lastTotal = 0;
+      this.lastChar = Buffer2.allocUnsafe(nb);
+    }
+    StringDecoder.prototype.write = function(buf) {
+      if (buf.length === 0) return "";
+      var r;
+      var i;
+      if (this.lastNeed) {
+        r = this.fillLast(buf);
+        if (r === void 0) return "";
+        i = this.lastNeed;
+        this.lastNeed = 0;
+      } else {
+        i = 0;
+      }
+      if (i < buf.length) return r ? r + this.text(buf, i) : this.text(buf, i);
+      return r || "";
+    };
+    StringDecoder.prototype.end = utf8End;
+    StringDecoder.prototype.text = utf8Text;
+    StringDecoder.prototype.fillLast = function(buf) {
+      if (this.lastNeed <= buf.length) {
+        buf.copy(this.lastChar, this.lastTotal - this.lastNeed, 0, this.lastNeed);
+        return this.lastChar.toString(this.encoding, 0, this.lastTotal);
+      }
+      buf.copy(this.lastChar, this.lastTotal - this.lastNeed, 0, buf.length);
+      this.lastNeed -= buf.length;
+    };
+    function utf8CheckByte(byte) {
+      if (byte <= 127) return 0;
+      else if (byte >> 5 === 6) return 2;
+      else if (byte >> 4 === 14) return 3;
+      else if (byte >> 3 === 30) return 4;
+      return byte >> 6 === 2 ? -1 : -2;
+    }
+    function utf8CheckIncomplete(self2, buf, i) {
+      var j = buf.length - 1;
+      if (j < i) return 0;
+      var nb = utf8CheckByte(buf[j]);
+      if (nb >= 0) {
+        if (nb > 0) self2.lastNeed = nb - 1;
+        return nb;
+      }
+      if (--j < i || nb === -2) return 0;
+      nb = utf8CheckByte(buf[j]);
+      if (nb >= 0) {
+        if (nb > 0) self2.lastNeed = nb - 2;
+        return nb;
+      }
+      if (--j < i || nb === -2) return 0;
+      nb = utf8CheckByte(buf[j]);
+      if (nb >= 0) {
+        if (nb > 0) {
+          if (nb === 2) nb = 0;
+          else self2.lastNeed = nb - 3;
+        }
+        return nb;
+      }
+      return 0;
+    }
+    function utf8CheckExtraBytes(self2, buf, p) {
+      if ((buf[0] & 192) !== 128) {
+        self2.lastNeed = 0;
+        return "\uFFFD";
+      }
+      if (self2.lastNeed > 1 && buf.length > 1) {
+        if ((buf[1] & 192) !== 128) {
+          self2.lastNeed = 1;
+          return "\uFFFD";
+        }
+        if (self2.lastNeed > 2 && buf.length > 2) {
+          if ((buf[2] & 192) !== 128) {
+            self2.lastNeed = 2;
+            return "\uFFFD";
+          }
+        }
+      }
+    }
+    function utf8FillLast(buf) {
+      var p = this.lastTotal - this.lastNeed;
+      var r = utf8CheckExtraBytes(this, buf, p);
+      if (r !== void 0) return r;
+      if (this.lastNeed <= buf.length) {
+        buf.copy(this.lastChar, p, 0, this.lastNeed);
+        return this.lastChar.toString(this.encoding, 0, this.lastTotal);
+      }
+      buf.copy(this.lastChar, p, 0, buf.length);
+      this.lastNeed -= buf.length;
+    }
+    function utf8Text(buf, i) {
+      var total = utf8CheckIncomplete(this, buf, i);
+      if (!this.lastNeed) return buf.toString("utf8", i);
+      this.lastTotal = total;
+      var end = buf.length - (total - this.lastNeed);
+      buf.copy(this.lastChar, 0, end);
+      return buf.toString("utf8", i, end);
+    }
+    function utf8End(buf) {
+      var r = buf && buf.length ? this.write(buf) : "";
+      if (this.lastNeed) return r + "\uFFFD";
+      return r;
+    }
+    function utf16Text(buf, i) {
+      if ((buf.length - i) % 2 === 0) {
+        var r = buf.toString("utf16le", i);
+        if (r) {
+          var c = r.charCodeAt(r.length - 1);
+          if (c >= 55296 && c <= 56319) {
+            this.lastNeed = 2;
+            this.lastTotal = 4;
+            this.lastChar[0] = buf[buf.length - 2];
+            this.lastChar[1] = buf[buf.length - 1];
+            return r.slice(0, -1);
+          }
+        }
+        return r;
+      }
+      this.lastNeed = 1;
+      this.lastTotal = 2;
+      this.lastChar[0] = buf[buf.length - 1];
+      return buf.toString("utf16le", i, buf.length - 1);
+    }
+    function utf16End(buf) {
+      var r = buf && buf.length ? this.write(buf) : "";
+      if (this.lastNeed) {
+        var end = this.lastTotal - this.lastNeed;
+        return r + this.lastChar.toString("utf16le", 0, end);
+      }
+      return r;
+    }
+    function base64Text(buf, i) {
+      var n = (buf.length - i) % 3;
+      if (n === 0) return buf.toString("base64", i);
+      this.lastNeed = 3 - n;
+      this.lastTotal = 3;
+      if (n === 1) {
+        this.lastChar[0] = buf[buf.length - 1];
+      } else {
+        this.lastChar[0] = buf[buf.length - 2];
+        this.lastChar[1] = buf[buf.length - 1];
+      }
+      return buf.toString("base64", i, buf.length - n);
+    }
+    function base64End(buf) {
+      var r = buf && buf.length ? this.write(buf) : "";
+      if (this.lastNeed) return r + this.lastChar.toString("base64", 0, 3 - this.lastNeed);
+      return r;
+    }
+    function simpleWrite(buf) {
+      return buf.toString(this.encoding);
+    }
+    function simpleEnd(buf) {
+      return buf && buf.length ? this.write(buf) : "";
+    }
+  }
+});
+
+// node_modules/duplexify/node_modules/readable-stream/lib/_stream_readable.js
+var require_stream_readable = __commonJS({
+  "node_modules/duplexify/node_modules/readable-stream/lib/_stream_readable.js"(exports, module) {
+    "use strict";
+    var pna = require_process_nextick_args();
+    module.exports = Readable;
+    var isArray = require_isarray();
+    var Duplex;
+    Readable.ReadableState = ReadableState;
+    var EE = __require("events").EventEmitter;
+    var EElistenerCount = function(emitter, type) {
+      return emitter.listeners(type).length;
+    };
+    var Stream = require_stream();
+    var Buffer2 = require_safe_buffer().Buffer;
+    var OurUint8Array = (typeof global !== "undefined" ? global : typeof window !== "undefined" ? window : typeof self !== "undefined" ? self : {}).Uint8Array || function() {
+    };
+    function _uint8ArrayToBuffer(chunk) {
+      return Buffer2.from(chunk);
+    }
+    function _isUint8Array(obj) {
+      return Buffer2.isBuffer(obj) || obj instanceof OurUint8Array;
+    }
+    var util = Object.create(require_util3());
+    util.inherits = require_inherits();
+    var debugUtil = __require("util");
+    var debug = void 0;
+    if (debugUtil && debugUtil.debuglog) {
+      debug = debugUtil.debuglog("stream");
+    } else {
+      debug = function() {
+      };
+    }
+    var BufferList = require_BufferList();
+    var destroyImpl = require_destroy();
+    var StringDecoder;
+    util.inherits(Readable, Stream);
+    var kProxyEvents = ["error", "close", "destroy", "pause", "resume"];
+    function prependListener(emitter, event, fn) {
+      if (typeof emitter.prependListener === "function") return emitter.prependListener(event, fn);
+      if (!emitter._events || !emitter._events[event]) emitter.on(event, fn);
+      else if (isArray(emitter._events[event])) emitter._events[event].unshift(fn);
+      else emitter._events[event] = [fn, emitter._events[event]];
+    }
+    function ReadableState(options, stream) {
+      Duplex = Duplex || require_stream_duplex();
+      options = options || {};
+      var isDuplex = stream instanceof Duplex;
+      this.objectMode = !!options.objectMode;
+      if (isDuplex) this.objectMode = this.objectMode || !!options.readableObjectMode;
+      var hwm = options.highWaterMark;
+      var readableHwm = options.readableHighWaterMark;
+      var defaultHwm = this.objectMode ? 16 : 16 * 1024;
+      if (hwm || hwm === 0) this.highWaterMark = hwm;
+      else if (isDuplex && (readableHwm || readableHwm === 0)) this.highWaterMark = readableHwm;
+      else this.highWaterMark = defaultHwm;
+      this.highWaterMark = Math.floor(this.highWaterMark);
+      this.buffer = new BufferList();
+      this.length = 0;
+      this.pipes = null;
+      this.pipesCount = 0;
+      this.flowing = null;
+      this.ended = false;
+      this.endEmitted = false;
+      this.reading = false;
+      this.sync = true;
+      this.needReadable = false;
+      this.emittedReadable = false;
+      this.readableListening = false;
+      this.resumeScheduled = false;
+      this.destroyed = false;
+      this.defaultEncoding = options.defaultEncoding || "utf8";
+      this.awaitDrain = 0;
+      this.readingMore = false;
+      this.decoder = null;
+      this.encoding = null;
+      if (options.encoding) {
+        if (!StringDecoder) StringDecoder = require_string_decoder().StringDecoder;
+        this.decoder = new StringDecoder(options.encoding);
+        this.encoding = options.encoding;
+      }
+    }
+    function Readable(options) {
+      Duplex = Duplex || require_stream_duplex();
+      if (!(this instanceof Readable)) return new Readable(options);
+      this._readableState = new ReadableState(options, this);
+      this.readable = true;
+      if (options) {
+        if (typeof options.read === "function") this._read = options.read;
+        if (typeof options.destroy === "function") this._destroy = options.destroy;
+      }
+      Stream.call(this);
+    }
+    Object.defineProperty(Readable.prototype, "destroyed", {
+      get: function() {
+        if (this._readableState === void 0) {
+          return false;
+        }
+        return this._readableState.destroyed;
+      },
+      set: function(value) {
+        if (!this._readableState) {
+          return;
+        }
+        this._readableState.destroyed = value;
+      }
+    });
+    Readable.prototype.destroy = destroyImpl.destroy;
+    Readable.prototype._undestroy = destroyImpl.undestroy;
+    Readable.prototype._destroy = function(err, cb) {
+      this.push(null);
+      cb(err);
+    };
+    Readable.prototype.push = function(chunk, encoding) {
+      var state = this._readableState;
+      var skipChunkCheck;
+      if (!state.objectMode) {
+        if (typeof chunk === "string") {
+          encoding = encoding || state.defaultEncoding;
+          if (encoding !== state.encoding) {
+            chunk = Buffer2.from(chunk, encoding);
+            encoding = "";
+          }
+          skipChunkCheck = true;
+        }
+      } else {
+        skipChunkCheck = true;
+      }
+      return readableAddChunk(this, chunk, encoding, false, skipChunkCheck);
+    };
+    Readable.prototype.unshift = function(chunk) {
+      return readableAddChunk(this, chunk, null, true, false);
+    };
+    function readableAddChunk(stream, chunk, encoding, addToFront, skipChunkCheck) {
+      var state = stream._readableState;
+      if (chunk === null) {
+        state.reading = false;
+        onEofChunk(stream, state);
+      } else {
+        var er;
+        if (!skipChunkCheck) er = chunkInvalid(state, chunk);
+        if (er) {
+          stream.emit("error", er);
+        } else if (state.objectMode || chunk && chunk.length > 0) {
+          if (typeof chunk !== "string" && !state.objectMode && Object.getPrototypeOf(chunk) !== Buffer2.prototype) {
+            chunk = _uint8ArrayToBuffer(chunk);
+          }
+          if (addToFront) {
+            if (state.endEmitted) stream.emit("error", new Error("stream.unshift() after end event"));
+            else addChunk(stream, state, chunk, true);
+          } else if (state.ended) {
+            stream.emit("error", new Error("stream.push() after EOF"));
+          } else {
+            state.reading = false;
+            if (state.decoder && !encoding) {
+              chunk = state.decoder.write(chunk);
+              if (state.objectMode || chunk.length !== 0) addChunk(stream, state, chunk, false);
+              else maybeReadMore(stream, state);
+            } else {
+              addChunk(stream, state, chunk, false);
+            }
+          }
+        } else if (!addToFront) {
+          state.reading = false;
+        }
+      }
+      return needMoreData(state);
+    }
+    function addChunk(stream, state, chunk, addToFront) {
+      if (state.flowing && state.length === 0 && !state.sync) {
+        stream.emit("data", chunk);
+        stream.read(0);
+      } else {
+        state.length += state.objectMode ? 1 : chunk.length;
+        if (addToFront) state.buffer.unshift(chunk);
+        else state.buffer.push(chunk);
+        if (state.needReadable) emitReadable(stream);
+      }
+      maybeReadMore(stream, state);
+    }
+    function chunkInvalid(state, chunk) {
+      var er;
+      if (!_isUint8Array(chunk) && typeof chunk !== "string" && chunk !== void 0 && !state.objectMode) {
+        er = new TypeError("Invalid non-string/buffer chunk");
+      }
+      return er;
+    }
+    function needMoreData(state) {
+      return !state.ended && (state.needReadable || state.length < state.highWaterMark || state.length === 0);
+    }
+    Readable.prototype.isPaused = function() {
+      return this._readableState.flowing === false;
+    };
+    Readable.prototype.setEncoding = function(enc) {
+      if (!StringDecoder) StringDecoder = require_string_decoder().StringDecoder;
+      this._readableState.decoder = new StringDecoder(enc);
+      this._readableState.encoding = enc;
+      return this;
+    };
+    var MAX_HWM = 8388608;
+    function computeNewHighWaterMark(n) {
+      if (n >= MAX_HWM) {
+        n = MAX_HWM;
+      } else {
+        n--;
+        n |= n >>> 1;
+        n |= n >>> 2;
+        n |= n >>> 4;
+        n |= n >>> 8;
+        n |= n >>> 16;
+        n++;
+      }
+      return n;
+    }
+    function howMuchToRead(n, state) {
+      if (n <= 0 || state.length === 0 && state.ended) return 0;
+      if (state.objectMode) return 1;
+      if (n !== n) {
+        if (state.flowing && state.length) return state.buffer.head.data.length;
+        else return state.length;
+      }
+      if (n > state.highWaterMark) state.highWaterMark = computeNewHighWaterMark(n);
+      if (n <= state.length) return n;
+      if (!state.ended) {
+        state.needReadable = true;
+        return 0;
+      }
+      return state.length;
+    }
+    Readable.prototype.read = function(n) {
+      debug("read", n);
+      n = parseInt(n, 10);
+      var state = this._readableState;
+      var nOrig = n;
+      if (n !== 0) state.emittedReadable = false;
+      if (n === 0 && state.needReadable && (state.length >= state.highWaterMark || state.ended)) {
+        debug("read: emitReadable", state.length, state.ended);
+        if (state.length === 0 && state.ended) endReadable(this);
+        else emitReadable(this);
+        return null;
+      }
+      n = howMuchToRead(n, state);
+      if (n === 0 && state.ended) {
+        if (state.length === 0) endReadable(this);
+        return null;
+      }
+      var doRead = state.needReadable;
+      debug("need readable", doRead);
+      if (state.length === 0 || state.length - n < state.highWaterMark) {
+        doRead = true;
+        debug("length less than watermark", doRead);
+      }
+      if (state.ended || state.reading) {
+        doRead = false;
+        debug("reading or ended", doRead);
+      } else if (doRead) {
+        debug("do read");
+        state.reading = true;
+        state.sync = true;
+        if (state.length === 0) state.needReadable = true;
+        this._read(state.highWaterMark);
+        state.sync = false;
+        if (!state.reading) n = howMuchToRead(nOrig, state);
+      }
+      var ret;
+      if (n > 0) ret = fromList(n, state);
+      else ret = null;
+      if (ret === null) {
+        state.needReadable = true;
+        n = 0;
+      } else {
+        state.length -= n;
+      }
+      if (state.length === 0) {
+        if (!state.ended) state.needReadable = true;
+        if (nOrig !== n && state.ended) endReadable(this);
+      }
+      if (ret !== null) this.emit("data", ret);
+      return ret;
+    };
+    function onEofChunk(stream, state) {
+      if (state.ended) return;
+      if (state.decoder) {
+        var chunk = state.decoder.end();
+        if (chunk && chunk.length) {
+          state.buffer.push(chunk);
+          state.length += state.objectMode ? 1 : chunk.length;
+        }
+      }
+      state.ended = true;
+      emitReadable(stream);
+    }
+    function emitReadable(stream) {
+      var state = stream._readableState;
+      state.needReadable = false;
+      if (!state.emittedReadable) {
+        debug("emitReadable", state.flowing);
+        state.emittedReadable = true;
+        if (state.sync) pna.nextTick(emitReadable_, stream);
+        else emitReadable_(stream);
+      }
+    }
+    function emitReadable_(stream) {
+      debug("emit readable");
+      stream.emit("readable");
+      flow(stream);
+    }
+    function maybeReadMore(stream, state) {
+      if (!state.readingMore) {
+        state.readingMore = true;
+        pna.nextTick(maybeReadMore_, stream, state);
+      }
+    }
+    function maybeReadMore_(stream, state) {
+      var len = state.length;
+      while (!state.reading && !state.flowing && !state.ended && state.length < state.highWaterMark) {
+        debug("maybeReadMore read 0");
+        stream.read(0);
+        if (len === state.length)
+          break;
+        else len = state.length;
+      }
+      state.readingMore = false;
+    }
+    Readable.prototype._read = function(n) {
+      this.emit("error", new Error("_read() is not implemented"));
+    };
+    Readable.prototype.pipe = function(dest, pipeOpts) {
+      var src = this;
+      var state = this._readableState;
+      switch (state.pipesCount) {
+        case 0:
+          state.pipes = dest;
+          break;
+        case 1:
+          state.pipes = [state.pipes, dest];
+          break;
+        default:
+          state.pipes.push(dest);
+          break;
+      }
+      state.pipesCount += 1;
+      debug("pipe count=%d opts=%j", state.pipesCount, pipeOpts);
+      var doEnd = (!pipeOpts || pipeOpts.end !== false) && dest !== process.stdout && dest !== process.stderr;
+      var endFn = doEnd ? onend : unpipe;
+      if (state.endEmitted) pna.nextTick(endFn);
+      else src.once("end", endFn);
+      dest.on("unpipe", onunpipe);
+      function onunpipe(readable, unpipeInfo) {
+        debug("onunpipe");
+        if (readable === src) {
+          if (unpipeInfo && unpipeInfo.hasUnpiped === false) {
+            unpipeInfo.hasUnpiped = true;
+            cleanup();
+          }
+        }
+      }
+      function onend() {
+        debug("onend");
+        dest.end();
+      }
+      var ondrain = pipeOnDrain(src);
+      dest.on("drain", ondrain);
+      var cleanedUp = false;
+      function cleanup() {
+        debug("cleanup");
+        dest.removeListener("close", onclose);
+        dest.removeListener("finish", onfinish);
+        dest.removeListener("drain", ondrain);
+        dest.removeListener("error", onerror);
+        dest.removeListener("unpipe", onunpipe);
+        src.removeListener("end", onend);
+        src.removeListener("end", unpipe);
+        src.removeListener("data", ondata);
+        cleanedUp = true;
+        if (state.awaitDrain && (!dest._writableState || dest._writableState.needDrain)) ondrain();
+      }
+      var increasedAwaitDrain = false;
+      src.on("data", ondata);
+      function ondata(chunk) {
+        debug("ondata");
+        increasedAwaitDrain = false;
+        var ret = dest.write(chunk);
+        if (false === ret && !increasedAwaitDrain) {
+          if ((state.pipesCount === 1 && state.pipes === dest || state.pipesCount > 1 && indexOf(state.pipes, dest) !== -1) && !cleanedUp) {
+            debug("false write response, pause", state.awaitDrain);
+            state.awaitDrain++;
+            increasedAwaitDrain = true;
+          }
+          src.pause();
+        }
+      }
+      function onerror(er) {
+        debug("onerror", er);
+        unpipe();
+        dest.removeListener("error", onerror);
+        if (EElistenerCount(dest, "error") === 0) dest.emit("error", er);
+      }
+      prependListener(dest, "error", onerror);
+      function onclose() {
+        dest.removeListener("finish", onfinish);
+        unpipe();
+      }
+      dest.once("close", onclose);
+      function onfinish() {
+        debug("onfinish");
+        dest.removeListener("close", onclose);
+        unpipe();
+      }
+      dest.once("finish", onfinish);
+      function unpipe() {
+        debug("unpipe");
+        src.unpipe(dest);
+      }
+      dest.emit("pipe", src);
+      if (!state.flowing) {
+        debug("pipe resume");
+        src.resume();
+      }
+      return dest;
+    };
+    function pipeOnDrain(src) {
+      return function() {
+        var state = src._readableState;
+        debug("pipeOnDrain", state.awaitDrain);
+        if (state.awaitDrain) state.awaitDrain--;
+        if (state.awaitDrain === 0 && EElistenerCount(src, "data")) {
+          state.flowing = true;
+          flow(src);
+        }
+      };
+    }
+    Readable.prototype.unpipe = function(dest) {
+      var state = this._readableState;
+      var unpipeInfo = { hasUnpiped: false };
+      if (state.pipesCount === 0) return this;
+      if (state.pipesCount === 1) {
+        if (dest && dest !== state.pipes) return this;
+        if (!dest) dest = state.pipes;
+        state.pipes = null;
+        state.pipesCount = 0;
+        state.flowing = false;
+        if (dest) dest.emit("unpipe", this, unpipeInfo);
+        return this;
+      }
+      if (!dest) {
+        var dests = state.pipes;
+        var len = state.pipesCount;
+        state.pipes = null;
+        state.pipesCount = 0;
+        state.flowing = false;
+        for (var i = 0; i < len; i++) {
+          dests[i].emit("unpipe", this, { hasUnpiped: false });
+        }
+        return this;
+      }
+      var index = indexOf(state.pipes, dest);
+      if (index === -1) return this;
+      state.pipes.splice(index, 1);
+      state.pipesCount -= 1;
+      if (state.pipesCount === 1) state.pipes = state.pipes[0];
+      dest.emit("unpipe", this, unpipeInfo);
+      return this;
+    };
+    Readable.prototype.on = function(ev, fn) {
+      var res = Stream.prototype.on.call(this, ev, fn);
+      if (ev === "data") {
+        if (this._readableState.flowing !== false) this.resume();
+      } else if (ev === "readable") {
+        var state = this._readableState;
+        if (!state.endEmitted && !state.readableListening) {
+          state.readableListening = state.needReadable = true;
+          state.emittedReadable = false;
+          if (!state.reading) {
+            pna.nextTick(nReadingNextTick, this);
+          } else if (state.length) {
+            emitReadable(this);
+          }
+        }
+      }
+      return res;
+    };
+    Readable.prototype.addListener = Readable.prototype.on;
+    function nReadingNextTick(self2) {
+      debug("readable nexttick read 0");
+      self2.read(0);
+    }
+    Readable.prototype.resume = function() {
+      var state = this._readableState;
+      if (!state.flowing) {
+        debug("resume");
+        state.flowing = true;
+        resume(this, state);
+      }
+      return this;
+    };
+    function resume(stream, state) {
+      if (!state.resumeScheduled) {
+        state.resumeScheduled = true;
+        pna.nextTick(resume_, stream, state);
+      }
+    }
+    function resume_(stream, state) {
+      if (!state.reading) {
+        debug("resume read 0");
+        stream.read(0);
+      }
+      state.resumeScheduled = false;
+      state.awaitDrain = 0;
+      stream.emit("resume");
+      flow(stream);
+      if (state.flowing && !state.reading) stream.read(0);
+    }
+    Readable.prototype.pause = function() {
+      debug("call pause flowing=%j", this._readableState.flowing);
+      if (false !== this._readableState.flowing) {
+        debug("pause");
+        this._readableState.flowing = false;
+        this.emit("pause");
+      }
+      return this;
+    };
+    function flow(stream) {
+      var state = stream._readableState;
+      debug("flow", state.flowing);
+      while (state.flowing && stream.read() !== null) {
+      }
+    }
+    Readable.prototype.wrap = function(stream) {
+      var _this = this;
+      var state = this._readableState;
+      var paused = false;
+      stream.on("end", function() {
+        debug("wrapped end");
+        if (state.decoder && !state.ended) {
+          var chunk = state.decoder.end();
+          if (chunk && chunk.length) _this.push(chunk);
+        }
+        _this.push(null);
+      });
+      stream.on("data", function(chunk) {
+        debug("wrapped data");
+        if (state.decoder) chunk = state.decoder.write(chunk);
+        if (state.objectMode && (chunk === null || chunk === void 0)) return;
+        else if (!state.objectMode && (!chunk || !chunk.length)) return;
+        var ret = _this.push(chunk);
+        if (!ret) {
+          paused = true;
+          stream.pause();
+        }
+      });
+      for (var i in stream) {
+        if (this[i] === void 0 && typeof stream[i] === "function") {
+          this[i] = /* @__PURE__ */ (function(method) {
+            return function() {
+              return stream[method].apply(stream, arguments);
+            };
+          })(i);
+        }
+      }
+      for (var n = 0; n < kProxyEvents.length; n++) {
+        stream.on(kProxyEvents[n], this.emit.bind(this, kProxyEvents[n]));
+      }
+      this._read = function(n2) {
+        debug("wrapped _read", n2);
+        if (paused) {
+          paused = false;
+          stream.resume();
+        }
+      };
+      return this;
+    };
+    Object.defineProperty(Readable.prototype, "readableHighWaterMark", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function() {
+        return this._readableState.highWaterMark;
+      }
+    });
+    Readable._fromList = fromList;
+    function fromList(n, state) {
+      if (state.length === 0) return null;
+      var ret;
+      if (state.objectMode) ret = state.buffer.shift();
+      else if (!n || n >= state.length) {
+        if (state.decoder) ret = state.buffer.join("");
+        else if (state.buffer.length === 1) ret = state.buffer.head.data;
+        else ret = state.buffer.concat(state.length);
+        state.buffer.clear();
+      } else {
+        ret = fromListPartial(n, state.buffer, state.decoder);
+      }
+      return ret;
+    }
+    function fromListPartial(n, list, hasStrings) {
+      var ret;
+      if (n < list.head.data.length) {
+        ret = list.head.data.slice(0, n);
+        list.head.data = list.head.data.slice(n);
+      } else if (n === list.head.data.length) {
+        ret = list.shift();
+      } else {
+        ret = hasStrings ? copyFromBufferString(n, list) : copyFromBuffer(n, list);
+      }
+      return ret;
+    }
+    function copyFromBufferString(n, list) {
+      var p = list.head;
+      var c = 1;
+      var ret = p.data;
+      n -= ret.length;
+      while (p = p.next) {
+        var str = p.data;
+        var nb = n > str.length ? str.length : n;
+        if (nb === str.length) ret += str;
+        else ret += str.slice(0, n);
+        n -= nb;
+        if (n === 0) {
+          if (nb === str.length) {
+            ++c;
+            if (p.next) list.head = p.next;
+            else list.head = list.tail = null;
+          } else {
+            list.head = p;
+            p.data = str.slice(nb);
+          }
+          break;
+        }
+        ++c;
+      }
+      list.length -= c;
+      return ret;
+    }
+    function copyFromBuffer(n, list) {
+      var ret = Buffer2.allocUnsafe(n);
+      var p = list.head;
+      var c = 1;
+      p.data.copy(ret);
+      n -= p.data.length;
+      while (p = p.next) {
+        var buf = p.data;
+        var nb = n > buf.length ? buf.length : n;
+        buf.copy(ret, ret.length - n, 0, nb);
+        n -= nb;
+        if (n === 0) {
+          if (nb === buf.length) {
+            ++c;
+            if (p.next) list.head = p.next;
+            else list.head = list.tail = null;
+          } else {
+            list.head = p;
+            p.data = buf.slice(nb);
+          }
+          break;
+        }
+        ++c;
+      }
+      list.length -= c;
+      return ret;
+    }
+    function endReadable(stream) {
+      var state = stream._readableState;
+      if (state.length > 0) throw new Error('"endReadable()" called on non-empty stream');
+      if (!state.endEmitted) {
+        state.ended = true;
+        pna.nextTick(endReadableNT, state, stream);
+      }
+    }
+    function endReadableNT(state, stream) {
+      if (!state.endEmitted && state.length === 0) {
+        state.endEmitted = true;
+        stream.readable = false;
+        stream.emit("end");
+      }
+    }
+    function indexOf(xs, x) {
+      for (var i = 0, l = xs.length; i < l; i++) {
+        if (xs[i] === x) return i;
+      }
+      return -1;
+    }
+  }
+});
+
+// node_modules/duplexify/node_modules/readable-stream/lib/_stream_transform.js
+var require_stream_transform = __commonJS({
+  "node_modules/duplexify/node_modules/readable-stream/lib/_stream_transform.js"(exports, module) {
+    "use strict";
+    module.exports = Transform;
+    var Duplex = require_stream_duplex();
+    var util = Object.create(require_util3());
+    util.inherits = require_inherits();
+    util.inherits(Transform, Duplex);
+    function afterTransform(er, data) {
+      var ts = this._transformState;
+      ts.transforming = false;
+      var cb = ts.writecb;
+      if (!cb) {
+        return this.emit("error", new Error("write callback called multiple times"));
+      }
+      ts.writechunk = null;
+      ts.writecb = null;
+      if (data != null)
+        this.push(data);
+      cb(er);
+      var rs = this._readableState;
+      rs.reading = false;
+      if (rs.needReadable || rs.length < rs.highWaterMark) {
+        this._read(rs.highWaterMark);
+      }
+    }
+    function Transform(options) {
+      if (!(this instanceof Transform)) return new Transform(options);
+      Duplex.call(this, options);
+      this._transformState = {
+        afterTransform: afterTransform.bind(this),
+        needTransform: false,
+        transforming: false,
+        writecb: null,
+        writechunk: null,
+        writeencoding: null
+      };
+      this._readableState.needReadable = true;
+      this._readableState.sync = false;
+      if (options) {
+        if (typeof options.transform === "function") this._transform = options.transform;
+        if (typeof options.flush === "function") this._flush = options.flush;
+      }
+      this.on("prefinish", prefinish);
+    }
+    function prefinish() {
+      var _this = this;
+      if (typeof this._flush === "function") {
+        this._flush(function(er, data) {
+          done(_this, er, data);
+        });
+      } else {
+        done(this, null, null);
+      }
+    }
+    Transform.prototype.push = function(chunk, encoding) {
+      this._transformState.needTransform = false;
+      return Duplex.prototype.push.call(this, chunk, encoding);
+    };
+    Transform.prototype._transform = function(chunk, encoding, cb) {
+      throw new Error("_transform() is not implemented");
+    };
+    Transform.prototype._write = function(chunk, encoding, cb) {
+      var ts = this._transformState;
+      ts.writecb = cb;
+      ts.writechunk = chunk;
+      ts.writeencoding = encoding;
+      if (!ts.transforming) {
+        var rs = this._readableState;
+        if (ts.needTransform || rs.needReadable || rs.length < rs.highWaterMark) this._read(rs.highWaterMark);
+      }
+    };
+    Transform.prototype._read = function(n) {
+      var ts = this._transformState;
+      if (ts.writechunk !== null && ts.writecb && !ts.transforming) {
+        ts.transforming = true;
+        this._transform(ts.writechunk, ts.writeencoding, ts.afterTransform);
+      } else {
+        ts.needTransform = true;
+      }
+    };
+    Transform.prototype._destroy = function(err, cb) {
+      var _this2 = this;
+      Duplex.prototype._destroy.call(this, err, function(err2) {
+        cb(err2);
+        _this2.emit("close");
+      });
+    };
+    function done(stream, er, data) {
+      if (er) return stream.emit("error", er);
+      if (data != null)
+        stream.push(data);
+      if (stream._writableState.length) throw new Error("Calling transform done when ws.length != 0");
+      if (stream._transformState.transforming) throw new Error("Calling transform done when still transforming");
+      return stream.push(null);
+    }
+  }
+});
+
+// node_modules/duplexify/node_modules/readable-stream/lib/_stream_passthrough.js
+var require_stream_passthrough = __commonJS({
+  "node_modules/duplexify/node_modules/readable-stream/lib/_stream_passthrough.js"(exports, module) {
+    "use strict";
+    module.exports = PassThrough;
+    var Transform = require_stream_transform();
+    var util = Object.create(require_util3());
+    util.inherits = require_inherits();
+    util.inherits(PassThrough, Transform);
+    function PassThrough(options) {
+      if (!(this instanceof PassThrough)) return new PassThrough(options);
+      Transform.call(this, options);
+    }
+    PassThrough.prototype._transform = function(chunk, encoding, cb) {
+      cb(null, chunk);
+    };
+  }
+});
+
+// node_modules/duplexify/node_modules/readable-stream/readable.js
+var require_readable = __commonJS({
+  "node_modules/duplexify/node_modules/readable-stream/readable.js"(exports, module) {
+    var Stream = __require("stream");
+    if (process.env.READABLE_STREAM === "disable" && Stream) {
+      module.exports = Stream;
+      exports = module.exports = Stream.Readable;
+      exports.Readable = Stream.Readable;
+      exports.Writable = Stream.Writable;
+      exports.Duplex = Stream.Duplex;
+      exports.Transform = Stream.Transform;
+      exports.PassThrough = Stream.PassThrough;
+      exports.Stream = Stream;
+    } else {
+      exports = module.exports = require_stream_readable();
+      exports.Stream = Stream || exports;
+      exports.Readable = exports;
+      exports.Writable = require_stream_writable();
+      exports.Duplex = require_stream_duplex();
+      exports.Transform = require_stream_transform();
+      exports.PassThrough = require_stream_passthrough();
+    }
+  }
+});
+
+// node_modules/stream-shift/index.js
+var require_stream_shift = __commonJS({
+  "node_modules/stream-shift/index.js"(exports, module) {
+    module.exports = shift;
+    function shift(stream) {
+      var rs = stream._readableState;
+      if (!rs) return null;
+      return rs.objectMode || typeof stream._duplexState === "number" ? stream.read() : stream.read(getStateLength(rs));
+    }
+    function getStateLength(state) {
+      if (state.buffer.length) {
+        var idx = state.bufferIndex || 0;
+        if (state.buffer.head) {
+          return state.buffer.head.data.length;
+        } else if (state.buffer.length - idx > 0 && state.buffer[idx]) {
+          return state.buffer[idx].length;
+        }
+      }
+      return state.length;
+    }
+  }
+});
+
+// node_modules/duplexify/index.js
+var require_duplexify = __commonJS({
+  "node_modules/duplexify/index.js"(exports, module) {
+    var stream = require_readable();
+    var eos = require_end_of_stream();
+    var inherits = require_inherits();
+    var shift = require_stream_shift();
+    var SIGNAL_FLUSH = Buffer.from && Buffer.from !== Uint8Array.from ? Buffer.from([0]) : new Buffer([0]);
+    var onuncork = function(self2, fn) {
+      if (self2._corked) self2.once("uncork", fn);
+      else fn();
+    };
+    var autoDestroy = function(self2, err) {
+      if (self2._autoDestroy) self2.destroy(err);
+    };
+    var destroyer = function(self2, end2) {
+      return function(err) {
+        if (err) autoDestroy(self2, err.message === "premature close" ? null : err);
+        else if (end2 && !self2._ended) self2.end();
+      };
+    };
+    var end = function(ws, fn) {
+      if (!ws) return fn();
+      if (ws._writableState && ws._writableState.finished) return fn();
+      if (ws._writableState) return ws.end(fn);
+      ws.end();
+      fn();
+    };
+    var toStreams2 = function(rs) {
+      return new stream.Readable({ objectMode: true, highWaterMark: 16 }).wrap(rs);
+    };
+    var Duplexify = function(writable, readable, opts) {
+      if (!(this instanceof Duplexify)) return new Duplexify(writable, readable, opts);
+      stream.Duplex.call(this, opts);
+      this._writable = null;
+      this._readable = null;
+      this._readable2 = null;
+      this._autoDestroy = !opts || opts.autoDestroy !== false;
+      this._forwardDestroy = !opts || opts.destroy !== false;
+      this._forwardEnd = !opts || opts.end !== false;
+      this._corked = 1;
+      this._ondrain = null;
+      this._drained = false;
+      this._forwarding = false;
+      this._unwrite = null;
+      this._unread = null;
+      this._ended = false;
+      this.destroyed = false;
+      if (writable) this.setWritable(writable);
+      if (readable) this.setReadable(readable);
+    };
+    inherits(Duplexify, stream.Duplex);
+    Duplexify.obj = function(writable, readable, opts) {
+      if (!opts) opts = {};
+      opts.objectMode = true;
+      opts.highWaterMark = 16;
+      return new Duplexify(writable, readable, opts);
+    };
+    Duplexify.prototype.cork = function() {
+      if (++this._corked === 1) this.emit("cork");
+    };
+    Duplexify.prototype.uncork = function() {
+      if (this._corked && --this._corked === 0) this.emit("uncork");
+    };
+    Duplexify.prototype.setWritable = function(writable) {
+      if (this._unwrite) this._unwrite();
+      if (this.destroyed) {
+        if (writable && writable.destroy) writable.destroy();
+        return;
+      }
+      if (writable === null || writable === false) {
+        this.end();
+        return;
+      }
+      var self2 = this;
+      var unend = eos(writable, { writable: true, readable: false }, destroyer(this, this._forwardEnd));
+      var ondrain = function() {
+        var ondrain2 = self2._ondrain;
+        self2._ondrain = null;
+        if (ondrain2) ondrain2();
+      };
+      var clear = function() {
+        self2._writable.removeListener("drain", ondrain);
+        unend();
+      };
+      if (this._unwrite) process.nextTick(ondrain);
+      this._writable = writable;
+      this._writable.on("drain", ondrain);
+      this._unwrite = clear;
+      this.uncork();
+    };
+    Duplexify.prototype.setReadable = function(readable) {
+      if (this._unread) this._unread();
+      if (this.destroyed) {
+        if (readable && readable.destroy) readable.destroy();
+        return;
+      }
+      if (readable === null || readable === false) {
+        this.push(null);
+        this.resume();
+        return;
+      }
+      var self2 = this;
+      var unend = eos(readable, { writable: false, readable: true }, destroyer(this));
+      var onreadable = function() {
+        self2._forward();
+      };
+      var onend = function() {
+        self2.push(null);
+      };
+      var clear = function() {
+        self2._readable2.removeListener("readable", onreadable);
+        self2._readable2.removeListener("end", onend);
+        unend();
+      };
+      this._drained = true;
+      this._readable = readable;
+      this._readable2 = readable._readableState ? readable : toStreams2(readable);
+      this._readable2.on("readable", onreadable);
+      this._readable2.on("end", onend);
+      this._unread = clear;
+      this._forward();
+    };
+    Duplexify.prototype._read = function() {
+      this._drained = true;
+      this._forward();
+    };
+    Duplexify.prototype._forward = function() {
+      if (this._forwarding || !this._readable2 || !this._drained) return;
+      this._forwarding = true;
+      var data;
+      while (this._drained && (data = shift(this._readable2)) !== null) {
+        if (this.destroyed) continue;
+        this._drained = this.push(data);
+      }
+      this._forwarding = false;
+    };
+    Duplexify.prototype.destroy = function(err) {
+      if (this.destroyed) return;
+      this.destroyed = true;
+      var self2 = this;
+      process.nextTick(function() {
+        self2._destroy(err);
+      });
+    };
+    Duplexify.prototype._destroy = function(err) {
+      if (err) {
+        var ondrain = this._ondrain;
+        this._ondrain = null;
+        if (ondrain) ondrain(err);
+        else this.emit("error", err);
+      }
+      if (this._forwardDestroy) {
+        if (this._readable && this._readable.destroy) this._readable.destroy();
+        if (this._writable && this._writable.destroy) this._writable.destroy();
+      }
+      this.emit("close");
+    };
+    Duplexify.prototype._write = function(data, enc, cb) {
+      if (this.destroyed) return cb();
+      if (this._corked) return onuncork(this, this._write.bind(this, data, enc, cb));
+      if (data === SIGNAL_FLUSH) return this._finish(cb);
+      if (!this._writable) return cb();
+      if (this._writable.write(data) === false) this._ondrain = cb;
+      else cb();
+    };
+    Duplexify.prototype._finish = function(cb) {
+      var self2 = this;
+      this.emit("preend");
+      onuncork(this, function() {
+        end(self2._forwardEnd && self2._writable, function() {
+          if (self2._writableState.prefinished === false) self2._writableState.prefinished = true;
+          self2.emit("prefinish");
+          onuncork(self2, cb);
+        });
+      });
+    };
+    Duplexify.prototype.end = function(data, enc, cb) {
+      if (typeof data === "function") return this.end(null, null, data);
+      if (typeof enc === "function") return this.end(data, null, enc);
+      this._ended = true;
+      if (data) this.write(data);
+      if (!this._writableState.ending) this.write(SIGNAL_FLUSH);
+      return stream.Writable.prototype.end.call(this, cb);
+    };
+    module.exports = Duplexify;
+  }
+});
+
+// node_modules/through2/node_modules/readable-stream/lib/internal/streams/stream.js
+var require_stream2 = __commonJS({
+  "node_modules/through2/node_modules/readable-stream/lib/internal/streams/stream.js"(exports, module) {
+    module.exports = __require("stream");
+  }
+});
+
+// node_modules/through2/node_modules/safe-buffer/index.js
+var require_safe_buffer2 = __commonJS({
+  "node_modules/through2/node_modules/safe-buffer/index.js"(exports, module) {
+    var buffer = __require("buffer");
+    var Buffer2 = buffer.Buffer;
+    function copyProps(src, dst) {
+      for (var key in src) {
+        dst[key] = src[key];
+      }
+    }
+    if (Buffer2.from && Buffer2.alloc && Buffer2.allocUnsafe && Buffer2.allocUnsafeSlow) {
+      module.exports = buffer;
+    } else {
+      copyProps(buffer, exports);
+      exports.Buffer = SafeBuffer;
+    }
+    function SafeBuffer(arg, encodingOrOffset, length) {
+      return Buffer2(arg, encodingOrOffset, length);
+    }
+    copyProps(Buffer2, SafeBuffer);
+    SafeBuffer.from = function(arg, encodingOrOffset, length) {
+      if (typeof arg === "number") {
+        throw new TypeError("Argument must not be a number");
+      }
+      return Buffer2(arg, encodingOrOffset, length);
+    };
+    SafeBuffer.alloc = function(size, fill, encoding) {
+      if (typeof size !== "number") {
+        throw new TypeError("Argument must be a number");
+      }
+      var buf = Buffer2(size);
+      if (fill !== void 0) {
+        if (typeof encoding === "string") {
+          buf.fill(fill, encoding);
+        } else {
+          buf.fill(fill);
+        }
+      } else {
+        buf.fill(0);
+      }
+      return buf;
+    };
+    SafeBuffer.allocUnsafe = function(size) {
+      if (typeof size !== "number") {
+        throw new TypeError("Argument must be a number");
+      }
+      return Buffer2(size);
+    };
+    SafeBuffer.allocUnsafeSlow = function(size) {
+      if (typeof size !== "number") {
+        throw new TypeError("Argument must be a number");
+      }
+      return buffer.SlowBuffer(size);
+    };
+  }
+});
+
+// node_modules/through2/node_modules/readable-stream/lib/internal/streams/BufferList.js
+var require_BufferList2 = __commonJS({
+  "node_modules/through2/node_modules/readable-stream/lib/internal/streams/BufferList.js"(exports, module) {
+    "use strict";
+    function _classCallCheck(instance, Constructor) {
+      if (!(instance instanceof Constructor)) {
+        throw new TypeError("Cannot call a class as a function");
+      }
+    }
+    var Buffer2 = require_safe_buffer2().Buffer;
+    var util = __require("util");
+    function copyBuffer(src, target, offset) {
+      src.copy(target, offset);
+    }
+    module.exports = (function() {
+      function BufferList() {
+        _classCallCheck(this, BufferList);
+        this.head = null;
+        this.tail = null;
+        this.length = 0;
+      }
+      BufferList.prototype.push = function push(v) {
+        var entry = { data: v, next: null };
+        if (this.length > 0) this.tail.next = entry;
+        else this.head = entry;
+        this.tail = entry;
+        ++this.length;
+      };
+      BufferList.prototype.unshift = function unshift(v) {
+        var entry = { data: v, next: this.head };
+        if (this.length === 0) this.tail = entry;
+        this.head = entry;
+        ++this.length;
+      };
+      BufferList.prototype.shift = function shift() {
+        if (this.length === 0) return;
+        var ret = this.head.data;
+        if (this.length === 1) this.head = this.tail = null;
+        else this.head = this.head.next;
+        --this.length;
+        return ret;
+      };
+      BufferList.prototype.clear = function clear() {
+        this.head = this.tail = null;
+        this.length = 0;
+      };
+      BufferList.prototype.join = function join4(s) {
+        if (this.length === 0) return "";
+        var p = this.head;
+        var ret = "" + p.data;
+        while (p = p.next) {
+          ret += s + p.data;
+        }
+        return ret;
+      };
+      BufferList.prototype.concat = function concat(n) {
+        if (this.length === 0) return Buffer2.alloc(0);
+        var ret = Buffer2.allocUnsafe(n >>> 0);
+        var p = this.head;
+        var i = 0;
+        while (p) {
+          copyBuffer(p.data, ret, i);
+          i += p.data.length;
+          p = p.next;
+        }
+        return ret;
+      };
+      return BufferList;
+    })();
+    if (util && util.inspect && util.inspect.custom) {
+      module.exports.prototype[util.inspect.custom] = function() {
+        var obj = util.inspect({ length: this.length });
+        return this.constructor.name + " " + obj;
+      };
+    }
+  }
+});
+
+// node_modules/through2/node_modules/readable-stream/lib/internal/streams/destroy.js
+var require_destroy2 = __commonJS({
+  "node_modules/through2/node_modules/readable-stream/lib/internal/streams/destroy.js"(exports, module) {
+    "use strict";
+    var pna = require_process_nextick_args();
+    function destroy(err, cb) {
+      var _this = this;
+      var readableDestroyed = this._readableState && this._readableState.destroyed;
+      var writableDestroyed = this._writableState && this._writableState.destroyed;
+      if (readableDestroyed || writableDestroyed) {
+        if (cb) {
+          cb(err);
+        } else if (err) {
+          if (!this._writableState) {
+            pna.nextTick(emitErrorNT, this, err);
+          } else if (!this._writableState.errorEmitted) {
+            this._writableState.errorEmitted = true;
+            pna.nextTick(emitErrorNT, this, err);
+          }
+        }
+        return this;
+      }
+      if (this._readableState) {
+        this._readableState.destroyed = true;
+      }
+      if (this._writableState) {
+        this._writableState.destroyed = true;
+      }
+      this._destroy(err || null, function(err2) {
+        if (!cb && err2) {
+          if (!_this._writableState) {
+            pna.nextTick(emitErrorNT, _this, err2);
+          } else if (!_this._writableState.errorEmitted) {
+            _this._writableState.errorEmitted = true;
+            pna.nextTick(emitErrorNT, _this, err2);
+          }
+        } else if (cb) {
+          cb(err2);
+        }
+      });
+      return this;
+    }
+    function undestroy() {
+      if (this._readableState) {
+        this._readableState.destroyed = false;
+        this._readableState.reading = false;
+        this._readableState.ended = false;
+        this._readableState.endEmitted = false;
+      }
+      if (this._writableState) {
+        this._writableState.destroyed = false;
+        this._writableState.ended = false;
+        this._writableState.ending = false;
+        this._writableState.finalCalled = false;
+        this._writableState.prefinished = false;
+        this._writableState.finished = false;
+        this._writableState.errorEmitted = false;
+      }
+    }
+    function emitErrorNT(self2, err) {
+      self2.emit("error", err);
+    }
+    module.exports = {
+      destroy,
+      undestroy
+    };
+  }
+});
+
+// node_modules/through2/node_modules/readable-stream/lib/_stream_writable.js
+var require_stream_writable2 = __commonJS({
+  "node_modules/through2/node_modules/readable-stream/lib/_stream_writable.js"(exports, module) {
+    "use strict";
+    var pna = require_process_nextick_args();
+    module.exports = Writable;
+    function CorkedRequest(state) {
+      var _this = this;
+      this.next = null;
+      this.entry = null;
+      this.finish = function() {
+        onCorkedFinish(_this, state);
+      };
+    }
+    var asyncWrite = !process.browser && ["v0.10", "v0.9."].indexOf(process.version.slice(0, 5)) > -1 ? setImmediate : pna.nextTick;
+    var Duplex;
+    Writable.WritableState = WritableState;
+    var util = Object.create(require_util3());
+    util.inherits = require_inherits();
+    var internalUtil = {
+      deprecate: require_node2()
+    };
+    var Stream = require_stream2();
+    var Buffer2 = require_safe_buffer2().Buffer;
+    var OurUint8Array = (typeof global !== "undefined" ? global : typeof window !== "undefined" ? window : typeof self !== "undefined" ? self : {}).Uint8Array || function() {
+    };
+    function _uint8ArrayToBuffer(chunk) {
+      return Buffer2.from(chunk);
+    }
+    function _isUint8Array(obj) {
+      return Buffer2.isBuffer(obj) || obj instanceof OurUint8Array;
+    }
+    var destroyImpl = require_destroy2();
+    util.inherits(Writable, Stream);
+    function nop() {
+    }
+    function WritableState(options, stream) {
+      Duplex = Duplex || require_stream_duplex2();
+      options = options || {};
+      var isDuplex = stream instanceof Duplex;
+      this.objectMode = !!options.objectMode;
+      if (isDuplex) this.objectMode = this.objectMode || !!options.writableObjectMode;
+      var hwm = options.highWaterMark;
+      var writableHwm = options.writableHighWaterMark;
+      var defaultHwm = this.objectMode ? 16 : 16 * 1024;
+      if (hwm || hwm === 0) this.highWaterMark = hwm;
+      else if (isDuplex && (writableHwm || writableHwm === 0)) this.highWaterMark = writableHwm;
+      else this.highWaterMark = defaultHwm;
+      this.highWaterMark = Math.floor(this.highWaterMark);
+      this.finalCalled = false;
+      this.needDrain = false;
+      this.ending = false;
+      this.ended = false;
+      this.finished = false;
+      this.destroyed = false;
+      var noDecode = options.decodeStrings === false;
+      this.decodeStrings = !noDecode;
+      this.defaultEncoding = options.defaultEncoding || "utf8";
+      this.length = 0;
+      this.writing = false;
+      this.corked = 0;
+      this.sync = true;
+      this.bufferProcessing = false;
+      this.onwrite = function(er) {
+        onwrite(stream, er);
+      };
+      this.writecb = null;
+      this.writelen = 0;
+      this.bufferedRequest = null;
+      this.lastBufferedRequest = null;
+      this.pendingcb = 0;
+      this.prefinished = false;
+      this.errorEmitted = false;
+      this.bufferedRequestCount = 0;
+      this.corkedRequestsFree = new CorkedRequest(this);
+    }
+    WritableState.prototype.getBuffer = function getBuffer() {
+      var current = this.bufferedRequest;
+      var out = [];
+      while (current) {
+        out.push(current);
+        current = current.next;
+      }
+      return out;
+    };
+    (function() {
+      try {
+        Object.defineProperty(WritableState.prototype, "buffer", {
+          get: internalUtil.deprecate(function() {
+            return this.getBuffer();
+          }, "_writableState.buffer is deprecated. Use _writableState.getBuffer instead.", "DEP0003")
+        });
+      } catch (_) {
+      }
+    })();
+    var realHasInstance;
+    if (typeof Symbol === "function" && Symbol.hasInstance && typeof Function.prototype[Symbol.hasInstance] === "function") {
+      realHasInstance = Function.prototype[Symbol.hasInstance];
+      Object.defineProperty(Writable, Symbol.hasInstance, {
+        value: function(object) {
+          if (realHasInstance.call(this, object)) return true;
+          if (this !== Writable) return false;
+          return object && object._writableState instanceof WritableState;
+        }
+      });
+    } else {
+      realHasInstance = function(object) {
+        return object instanceof this;
+      };
+    }
+    function Writable(options) {
+      Duplex = Duplex || require_stream_duplex2();
+      if (!realHasInstance.call(Writable, this) && !(this instanceof Duplex)) {
+        return new Writable(options);
+      }
+      this._writableState = new WritableState(options, this);
+      this.writable = true;
+      if (options) {
+        if (typeof options.write === "function") this._write = options.write;
+        if (typeof options.writev === "function") this._writev = options.writev;
+        if (typeof options.destroy === "function") this._destroy = options.destroy;
+        if (typeof options.final === "function") this._final = options.final;
+      }
+      Stream.call(this);
+    }
+    Writable.prototype.pipe = function() {
+      this.emit("error", new Error("Cannot pipe, not readable"));
+    };
+    function writeAfterEnd(stream, cb) {
+      var er = new Error("write after end");
+      stream.emit("error", er);
+      pna.nextTick(cb, er);
+    }
+    function validChunk(stream, state, chunk, cb) {
+      var valid = true;
+      var er = false;
+      if (chunk === null) {
+        er = new TypeError("May not write null values to stream");
+      } else if (typeof chunk !== "string" && chunk !== void 0 && !state.objectMode) {
+        er = new TypeError("Invalid non-string/buffer chunk");
+      }
+      if (er) {
+        stream.emit("error", er);
+        pna.nextTick(cb, er);
+        valid = false;
+      }
+      return valid;
+    }
+    Writable.prototype.write = function(chunk, encoding, cb) {
+      var state = this._writableState;
+      var ret = false;
+      var isBuf = !state.objectMode && _isUint8Array(chunk);
+      if (isBuf && !Buffer2.isBuffer(chunk)) {
+        chunk = _uint8ArrayToBuffer(chunk);
+      }
+      if (typeof encoding === "function") {
+        cb = encoding;
+        encoding = null;
+      }
+      if (isBuf) encoding = "buffer";
+      else if (!encoding) encoding = state.defaultEncoding;
+      if (typeof cb !== "function") cb = nop;
+      if (state.ended) writeAfterEnd(this, cb);
+      else if (isBuf || validChunk(this, state, chunk, cb)) {
+        state.pendingcb++;
+        ret = writeOrBuffer(this, state, isBuf, chunk, encoding, cb);
+      }
+      return ret;
+    };
+    Writable.prototype.cork = function() {
+      var state = this._writableState;
+      state.corked++;
+    };
+    Writable.prototype.uncork = function() {
+      var state = this._writableState;
+      if (state.corked) {
+        state.corked--;
+        if (!state.writing && !state.corked && !state.bufferProcessing && state.bufferedRequest) clearBuffer(this, state);
+      }
+    };
+    Writable.prototype.setDefaultEncoding = function setDefaultEncoding(encoding) {
+      if (typeof encoding === "string") encoding = encoding.toLowerCase();
+      if (!(["hex", "utf8", "utf-8", "ascii", "binary", "base64", "ucs2", "ucs-2", "utf16le", "utf-16le", "raw"].indexOf((encoding + "").toLowerCase()) > -1)) throw new TypeError("Unknown encoding: " + encoding);
+      this._writableState.defaultEncoding = encoding;
+      return this;
+    };
+    function decodeChunk(state, chunk, encoding) {
+      if (!state.objectMode && state.decodeStrings !== false && typeof chunk === "string") {
+        chunk = Buffer2.from(chunk, encoding);
+      }
+      return chunk;
+    }
+    Object.defineProperty(Writable.prototype, "writableHighWaterMark", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function() {
+        return this._writableState.highWaterMark;
+      }
+    });
+    function writeOrBuffer(stream, state, isBuf, chunk, encoding, cb) {
+      if (!isBuf) {
+        var newChunk = decodeChunk(state, chunk, encoding);
+        if (chunk !== newChunk) {
+          isBuf = true;
+          encoding = "buffer";
+          chunk = newChunk;
+        }
+      }
+      var len = state.objectMode ? 1 : chunk.length;
+      state.length += len;
+      var ret = state.length < state.highWaterMark;
+      if (!ret) state.needDrain = true;
+      if (state.writing || state.corked) {
+        var last = state.lastBufferedRequest;
+        state.lastBufferedRequest = {
+          chunk,
+          encoding,
+          isBuf,
+          callback: cb,
+          next: null
+        };
+        if (last) {
+          last.next = state.lastBufferedRequest;
+        } else {
+          state.bufferedRequest = state.lastBufferedRequest;
+        }
+        state.bufferedRequestCount += 1;
+      } else {
+        doWrite(stream, state, false, len, chunk, encoding, cb);
+      }
+      return ret;
+    }
+    function doWrite(stream, state, writev, len, chunk, encoding, cb) {
+      state.writelen = len;
+      state.writecb = cb;
+      state.writing = true;
+      state.sync = true;
+      if (writev) stream._writev(chunk, state.onwrite);
+      else stream._write(chunk, encoding, state.onwrite);
+      state.sync = false;
+    }
+    function onwriteError(stream, state, sync, er, cb) {
+      --state.pendingcb;
+      if (sync) {
+        pna.nextTick(cb, er);
+        pna.nextTick(finishMaybe, stream, state);
+        stream._writableState.errorEmitted = true;
+        stream.emit("error", er);
+      } else {
+        cb(er);
+        stream._writableState.errorEmitted = true;
+        stream.emit("error", er);
+        finishMaybe(stream, state);
+      }
+    }
+    function onwriteStateUpdate(state) {
+      state.writing = false;
+      state.writecb = null;
+      state.length -= state.writelen;
+      state.writelen = 0;
+    }
+    function onwrite(stream, er) {
+      var state = stream._writableState;
+      var sync = state.sync;
+      var cb = state.writecb;
+      onwriteStateUpdate(state);
+      if (er) onwriteError(stream, state, sync, er, cb);
+      else {
+        var finished = needFinish(state);
+        if (!finished && !state.corked && !state.bufferProcessing && state.bufferedRequest) {
+          clearBuffer(stream, state);
+        }
+        if (sync) {
+          asyncWrite(afterWrite, stream, state, finished, cb);
+        } else {
+          afterWrite(stream, state, finished, cb);
+        }
+      }
+    }
+    function afterWrite(stream, state, finished, cb) {
+      if (!finished) onwriteDrain(stream, state);
+      state.pendingcb--;
+      cb();
+      finishMaybe(stream, state);
+    }
+    function onwriteDrain(stream, state) {
+      if (state.length === 0 && state.needDrain) {
+        state.needDrain = false;
+        stream.emit("drain");
+      }
+    }
+    function clearBuffer(stream, state) {
+      state.bufferProcessing = true;
+      var entry = state.bufferedRequest;
+      if (stream._writev && entry && entry.next) {
+        var l = state.bufferedRequestCount;
+        var buffer = new Array(l);
+        var holder = state.corkedRequestsFree;
+        holder.entry = entry;
+        var count = 0;
+        var allBuffers = true;
+        while (entry) {
+          buffer[count] = entry;
+          if (!entry.isBuf) allBuffers = false;
+          entry = entry.next;
+          count += 1;
+        }
+        buffer.allBuffers = allBuffers;
+        doWrite(stream, state, true, state.length, buffer, "", holder.finish);
+        state.pendingcb++;
+        state.lastBufferedRequest = null;
+        if (holder.next) {
+          state.corkedRequestsFree = holder.next;
+          holder.next = null;
+        } else {
+          state.corkedRequestsFree = new CorkedRequest(state);
+        }
+        state.bufferedRequestCount = 0;
+      } else {
+        while (entry) {
+          var chunk = entry.chunk;
+          var encoding = entry.encoding;
+          var cb = entry.callback;
+          var len = state.objectMode ? 1 : chunk.length;
+          doWrite(stream, state, false, len, chunk, encoding, cb);
+          entry = entry.next;
+          state.bufferedRequestCount--;
+          if (state.writing) {
+            break;
+          }
+        }
+        if (entry === null) state.lastBufferedRequest = null;
+      }
+      state.bufferedRequest = entry;
+      state.bufferProcessing = false;
+    }
+    Writable.prototype._write = function(chunk, encoding, cb) {
+      cb(new Error("_write() is not implemented"));
+    };
+    Writable.prototype._writev = null;
+    Writable.prototype.end = function(chunk, encoding, cb) {
+      var state = this._writableState;
+      if (typeof chunk === "function") {
+        cb = chunk;
+        chunk = null;
+        encoding = null;
+      } else if (typeof encoding === "function") {
+        cb = encoding;
+        encoding = null;
+      }
+      if (chunk !== null && chunk !== void 0) this.write(chunk, encoding);
+      if (state.corked) {
+        state.corked = 1;
+        this.uncork();
+      }
+      if (!state.ending) endWritable(this, state, cb);
+    };
+    function needFinish(state) {
+      return state.ending && state.length === 0 && state.bufferedRequest === null && !state.finished && !state.writing;
+    }
+    function callFinal(stream, state) {
+      stream._final(function(err) {
+        state.pendingcb--;
+        if (err) {
+          stream.emit("error", err);
+        }
+        state.prefinished = true;
+        stream.emit("prefinish");
+        finishMaybe(stream, state);
+      });
+    }
+    function prefinish(stream, state) {
+      if (!state.prefinished && !state.finalCalled) {
+        if (typeof stream._final === "function") {
+          state.pendingcb++;
+          state.finalCalled = true;
+          pna.nextTick(callFinal, stream, state);
+        } else {
+          state.prefinished = true;
+          stream.emit("prefinish");
+        }
+      }
+    }
+    function finishMaybe(stream, state) {
+      var need = needFinish(state);
+      if (need) {
+        prefinish(stream, state);
+        if (state.pendingcb === 0) {
+          state.finished = true;
+          stream.emit("finish");
+        }
+      }
+      return need;
+    }
+    function endWritable(stream, state, cb) {
+      state.ending = true;
+      finishMaybe(stream, state);
+      if (cb) {
+        if (state.finished) pna.nextTick(cb);
+        else stream.once("finish", cb);
+      }
+      state.ended = true;
+      stream.writable = false;
+    }
+    function onCorkedFinish(corkReq, state, err) {
+      var entry = corkReq.entry;
+      corkReq.entry = null;
+      while (entry) {
+        var cb = entry.callback;
+        state.pendingcb--;
+        cb(err);
+        entry = entry.next;
+      }
+      state.corkedRequestsFree.next = corkReq;
+    }
+    Object.defineProperty(Writable.prototype, "destroyed", {
+      get: function() {
+        if (this._writableState === void 0) {
+          return false;
+        }
+        return this._writableState.destroyed;
+      },
+      set: function(value) {
+        if (!this._writableState) {
+          return;
+        }
+        this._writableState.destroyed = value;
+      }
+    });
+    Writable.prototype.destroy = destroyImpl.destroy;
+    Writable.prototype._undestroy = destroyImpl.undestroy;
+    Writable.prototype._destroy = function(err, cb) {
+      this.end();
+      cb(err);
+    };
+  }
+});
+
+// node_modules/through2/node_modules/readable-stream/lib/_stream_duplex.js
+var require_stream_duplex2 = __commonJS({
+  "node_modules/through2/node_modules/readable-stream/lib/_stream_duplex.js"(exports, module) {
+    "use strict";
+    var pna = require_process_nextick_args();
+    var objectKeys = Object.keys || function(obj) {
+      var keys2 = [];
+      for (var key in obj) {
+        keys2.push(key);
+      }
+      return keys2;
+    };
+    module.exports = Duplex;
+    var util = Object.create(require_util3());
+    util.inherits = require_inherits();
+    var Readable = require_stream_readable2();
+    var Writable = require_stream_writable2();
+    util.inherits(Duplex, Readable);
+    {
+      keys = objectKeys(Writable.prototype);
+      for (v = 0; v < keys.length; v++) {
+        method = keys[v];
+        if (!Duplex.prototype[method]) Duplex.prototype[method] = Writable.prototype[method];
+      }
+    }
+    var keys;
+    var method;
+    var v;
+    function Duplex(options) {
+      if (!(this instanceof Duplex)) return new Duplex(options);
+      Readable.call(this, options);
+      Writable.call(this, options);
+      if (options && options.readable === false) this.readable = false;
+      if (options && options.writable === false) this.writable = false;
+      this.allowHalfOpen = true;
+      if (options && options.allowHalfOpen === false) this.allowHalfOpen = false;
+      this.once("end", onend);
+    }
+    Object.defineProperty(Duplex.prototype, "writableHighWaterMark", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function() {
+        return this._writableState.highWaterMark;
+      }
+    });
+    function onend() {
+      if (this.allowHalfOpen || this._writableState.ended) return;
+      pna.nextTick(onEndNT, this);
+    }
+    function onEndNT(self2) {
+      self2.end();
+    }
+    Object.defineProperty(Duplex.prototype, "destroyed", {
+      get: function() {
+        if (this._readableState === void 0 || this._writableState === void 0) {
+          return false;
+        }
+        return this._readableState.destroyed && this._writableState.destroyed;
+      },
+      set: function(value) {
+        if (this._readableState === void 0 || this._writableState === void 0) {
+          return;
+        }
+        this._readableState.destroyed = value;
+        this._writableState.destroyed = value;
+      }
+    });
+    Duplex.prototype._destroy = function(err, cb) {
+      this.push(null);
+      this.end();
+      pna.nextTick(cb, err);
+    };
+  }
+});
+
+// node_modules/through2/node_modules/string_decoder/lib/string_decoder.js
+var require_string_decoder2 = __commonJS({
+  "node_modules/through2/node_modules/string_decoder/lib/string_decoder.js"(exports) {
+    "use strict";
+    var Buffer2 = require_safe_buffer2().Buffer;
+    var isEncoding = Buffer2.isEncoding || function(encoding) {
+      encoding = "" + encoding;
+      switch (encoding && encoding.toLowerCase()) {
+        case "hex":
+        case "utf8":
+        case "utf-8":
+        case "ascii":
+        case "binary":
+        case "base64":
+        case "ucs2":
+        case "ucs-2":
+        case "utf16le":
+        case "utf-16le":
+        case "raw":
+          return true;
+        default:
+          return false;
+      }
+    };
+    function _normalizeEncoding(enc) {
+      if (!enc) return "utf8";
+      var retried;
+      while (true) {
+        switch (enc) {
+          case "utf8":
+          case "utf-8":
+            return "utf8";
+          case "ucs2":
+          case "ucs-2":
+          case "utf16le":
+          case "utf-16le":
+            return "utf16le";
+          case "latin1":
+          case "binary":
+            return "latin1";
+          case "base64":
+          case "ascii":
+          case "hex":
+            return enc;
+          default:
+            if (retried) return;
+            enc = ("" + enc).toLowerCase();
+            retried = true;
+        }
+      }
+    }
+    function normalizeEncoding(enc) {
+      var nenc = _normalizeEncoding(enc);
+      if (typeof nenc !== "string" && (Buffer2.isEncoding === isEncoding || !isEncoding(enc))) throw new Error("Unknown encoding: " + enc);
+      return nenc || enc;
+    }
+    exports.StringDecoder = StringDecoder;
+    function StringDecoder(encoding) {
+      this.encoding = normalizeEncoding(encoding);
+      var nb;
+      switch (this.encoding) {
+        case "utf16le":
+          this.text = utf16Text;
+          this.end = utf16End;
+          nb = 4;
+          break;
+        case "utf8":
+          this.fillLast = utf8FillLast;
+          nb = 4;
+          break;
+        case "base64":
+          this.text = base64Text;
+          this.end = base64End;
+          nb = 3;
+          break;
+        default:
+          this.write = simpleWrite;
+          this.end = simpleEnd;
+          return;
+      }
+      this.lastNeed = 0;
+      this.lastTotal = 0;
+      this.lastChar = Buffer2.allocUnsafe(nb);
+    }
+    StringDecoder.prototype.write = function(buf) {
+      if (buf.length === 0) return "";
+      var r;
+      var i;
+      if (this.lastNeed) {
+        r = this.fillLast(buf);
+        if (r === void 0) return "";
+        i = this.lastNeed;
+        this.lastNeed = 0;
+      } else {
+        i = 0;
+      }
+      if (i < buf.length) return r ? r + this.text(buf, i) : this.text(buf, i);
+      return r || "";
+    };
+    StringDecoder.prototype.end = utf8End;
+    StringDecoder.prototype.text = utf8Text;
+    StringDecoder.prototype.fillLast = function(buf) {
+      if (this.lastNeed <= buf.length) {
+        buf.copy(this.lastChar, this.lastTotal - this.lastNeed, 0, this.lastNeed);
+        return this.lastChar.toString(this.encoding, 0, this.lastTotal);
+      }
+      buf.copy(this.lastChar, this.lastTotal - this.lastNeed, 0, buf.length);
+      this.lastNeed -= buf.length;
+    };
+    function utf8CheckByte(byte) {
+      if (byte <= 127) return 0;
+      else if (byte >> 5 === 6) return 2;
+      else if (byte >> 4 === 14) return 3;
+      else if (byte >> 3 === 30) return 4;
+      return byte >> 6 === 2 ? -1 : -2;
+    }
+    function utf8CheckIncomplete(self2, buf, i) {
+      var j = buf.length - 1;
+      if (j < i) return 0;
+      var nb = utf8CheckByte(buf[j]);
+      if (nb >= 0) {
+        if (nb > 0) self2.lastNeed = nb - 1;
+        return nb;
+      }
+      if (--j < i || nb === -2) return 0;
+      nb = utf8CheckByte(buf[j]);
+      if (nb >= 0) {
+        if (nb > 0) self2.lastNeed = nb - 2;
+        return nb;
+      }
+      if (--j < i || nb === -2) return 0;
+      nb = utf8CheckByte(buf[j]);
+      if (nb >= 0) {
+        if (nb > 0) {
+          if (nb === 2) nb = 0;
+          else self2.lastNeed = nb - 3;
+        }
+        return nb;
+      }
+      return 0;
+    }
+    function utf8CheckExtraBytes(self2, buf, p) {
+      if ((buf[0] & 192) !== 128) {
+        self2.lastNeed = 0;
+        return "\uFFFD";
+      }
+      if (self2.lastNeed > 1 && buf.length > 1) {
+        if ((buf[1] & 192) !== 128) {
+          self2.lastNeed = 1;
+          return "\uFFFD";
+        }
+        if (self2.lastNeed > 2 && buf.length > 2) {
+          if ((buf[2] & 192) !== 128) {
+            self2.lastNeed = 2;
+            return "\uFFFD";
+          }
+        }
+      }
+    }
+    function utf8FillLast(buf) {
+      var p = this.lastTotal - this.lastNeed;
+      var r = utf8CheckExtraBytes(this, buf, p);
+      if (r !== void 0) return r;
+      if (this.lastNeed <= buf.length) {
+        buf.copy(this.lastChar, p, 0, this.lastNeed);
+        return this.lastChar.toString(this.encoding, 0, this.lastTotal);
+      }
+      buf.copy(this.lastChar, p, 0, buf.length);
+      this.lastNeed -= buf.length;
+    }
+    function utf8Text(buf, i) {
+      var total = utf8CheckIncomplete(this, buf, i);
+      if (!this.lastNeed) return buf.toString("utf8", i);
+      this.lastTotal = total;
+      var end = buf.length - (total - this.lastNeed);
+      buf.copy(this.lastChar, 0, end);
+      return buf.toString("utf8", i, end);
+    }
+    function utf8End(buf) {
+      var r = buf && buf.length ? this.write(buf) : "";
+      if (this.lastNeed) return r + "\uFFFD";
+      return r;
+    }
+    function utf16Text(buf, i) {
+      if ((buf.length - i) % 2 === 0) {
+        var r = buf.toString("utf16le", i);
+        if (r) {
+          var c = r.charCodeAt(r.length - 1);
+          if (c >= 55296 && c <= 56319) {
+            this.lastNeed = 2;
+            this.lastTotal = 4;
+            this.lastChar[0] = buf[buf.length - 2];
+            this.lastChar[1] = buf[buf.length - 1];
+            return r.slice(0, -1);
+          }
+        }
+        return r;
+      }
+      this.lastNeed = 1;
+      this.lastTotal = 2;
+      this.lastChar[0] = buf[buf.length - 1];
+      return buf.toString("utf16le", i, buf.length - 1);
+    }
+    function utf16End(buf) {
+      var r = buf && buf.length ? this.write(buf) : "";
+      if (this.lastNeed) {
+        var end = this.lastTotal - this.lastNeed;
+        return r + this.lastChar.toString("utf16le", 0, end);
+      }
+      return r;
+    }
+    function base64Text(buf, i) {
+      var n = (buf.length - i) % 3;
+      if (n === 0) return buf.toString("base64", i);
+      this.lastNeed = 3 - n;
+      this.lastTotal = 3;
+      if (n === 1) {
+        this.lastChar[0] = buf[buf.length - 1];
+      } else {
+        this.lastChar[0] = buf[buf.length - 2];
+        this.lastChar[1] = buf[buf.length - 1];
+      }
+      return buf.toString("base64", i, buf.length - n);
+    }
+    function base64End(buf) {
+      var r = buf && buf.length ? this.write(buf) : "";
+      if (this.lastNeed) return r + this.lastChar.toString("base64", 0, 3 - this.lastNeed);
+      return r;
+    }
+    function simpleWrite(buf) {
+      return buf.toString(this.encoding);
+    }
+    function simpleEnd(buf) {
+      return buf && buf.length ? this.write(buf) : "";
+    }
+  }
+});
+
+// node_modules/through2/node_modules/readable-stream/lib/_stream_readable.js
+var require_stream_readable2 = __commonJS({
+  "node_modules/through2/node_modules/readable-stream/lib/_stream_readable.js"(exports, module) {
+    "use strict";
+    var pna = require_process_nextick_args();
+    module.exports = Readable;
+    var isArray = require_isarray();
+    var Duplex;
+    Readable.ReadableState = ReadableState;
+    var EE = __require("events").EventEmitter;
+    var EElistenerCount = function(emitter, type) {
+      return emitter.listeners(type).length;
+    };
+    var Stream = require_stream2();
+    var Buffer2 = require_safe_buffer2().Buffer;
+    var OurUint8Array = (typeof global !== "undefined" ? global : typeof window !== "undefined" ? window : typeof self !== "undefined" ? self : {}).Uint8Array || function() {
+    };
+    function _uint8ArrayToBuffer(chunk) {
+      return Buffer2.from(chunk);
+    }
+    function _isUint8Array(obj) {
+      return Buffer2.isBuffer(obj) || obj instanceof OurUint8Array;
+    }
+    var util = Object.create(require_util3());
+    util.inherits = require_inherits();
+    var debugUtil = __require("util");
+    var debug = void 0;
+    if (debugUtil && debugUtil.debuglog) {
+      debug = debugUtil.debuglog("stream");
+    } else {
+      debug = function() {
+      };
+    }
+    var BufferList = require_BufferList2();
+    var destroyImpl = require_destroy2();
+    var StringDecoder;
+    util.inherits(Readable, Stream);
+    var kProxyEvents = ["error", "close", "destroy", "pause", "resume"];
+    function prependListener(emitter, event, fn) {
+      if (typeof emitter.prependListener === "function") return emitter.prependListener(event, fn);
+      if (!emitter._events || !emitter._events[event]) emitter.on(event, fn);
+      else if (isArray(emitter._events[event])) emitter._events[event].unshift(fn);
+      else emitter._events[event] = [fn, emitter._events[event]];
+    }
+    function ReadableState(options, stream) {
+      Duplex = Duplex || require_stream_duplex2();
+      options = options || {};
+      var isDuplex = stream instanceof Duplex;
+      this.objectMode = !!options.objectMode;
+      if (isDuplex) this.objectMode = this.objectMode || !!options.readableObjectMode;
+      var hwm = options.highWaterMark;
+      var readableHwm = options.readableHighWaterMark;
+      var defaultHwm = this.objectMode ? 16 : 16 * 1024;
+      if (hwm || hwm === 0) this.highWaterMark = hwm;
+      else if (isDuplex && (readableHwm || readableHwm === 0)) this.highWaterMark = readableHwm;
+      else this.highWaterMark = defaultHwm;
+      this.highWaterMark = Math.floor(this.highWaterMark);
+      this.buffer = new BufferList();
+      this.length = 0;
+      this.pipes = null;
+      this.pipesCount = 0;
+      this.flowing = null;
+      this.ended = false;
+      this.endEmitted = false;
+      this.reading = false;
+      this.sync = true;
+      this.needReadable = false;
+      this.emittedReadable = false;
+      this.readableListening = false;
+      this.resumeScheduled = false;
+      this.destroyed = false;
+      this.defaultEncoding = options.defaultEncoding || "utf8";
+      this.awaitDrain = 0;
+      this.readingMore = false;
+      this.decoder = null;
+      this.encoding = null;
+      if (options.encoding) {
+        if (!StringDecoder) StringDecoder = require_string_decoder2().StringDecoder;
+        this.decoder = new StringDecoder(options.encoding);
+        this.encoding = options.encoding;
+      }
+    }
+    function Readable(options) {
+      Duplex = Duplex || require_stream_duplex2();
+      if (!(this instanceof Readable)) return new Readable(options);
+      this._readableState = new ReadableState(options, this);
+      this.readable = true;
+      if (options) {
+        if (typeof options.read === "function") this._read = options.read;
+        if (typeof options.destroy === "function") this._destroy = options.destroy;
+      }
+      Stream.call(this);
+    }
+    Object.defineProperty(Readable.prototype, "destroyed", {
+      get: function() {
+        if (this._readableState === void 0) {
+          return false;
+        }
+        return this._readableState.destroyed;
+      },
+      set: function(value) {
+        if (!this._readableState) {
+          return;
+        }
+        this._readableState.destroyed = value;
+      }
+    });
+    Readable.prototype.destroy = destroyImpl.destroy;
+    Readable.prototype._undestroy = destroyImpl.undestroy;
+    Readable.prototype._destroy = function(err, cb) {
+      this.push(null);
+      cb(err);
+    };
+    Readable.prototype.push = function(chunk, encoding) {
+      var state = this._readableState;
+      var skipChunkCheck;
+      if (!state.objectMode) {
+        if (typeof chunk === "string") {
+          encoding = encoding || state.defaultEncoding;
+          if (encoding !== state.encoding) {
+            chunk = Buffer2.from(chunk, encoding);
+            encoding = "";
+          }
+          skipChunkCheck = true;
+        }
+      } else {
+        skipChunkCheck = true;
+      }
+      return readableAddChunk(this, chunk, encoding, false, skipChunkCheck);
+    };
+    Readable.prototype.unshift = function(chunk) {
+      return readableAddChunk(this, chunk, null, true, false);
+    };
+    function readableAddChunk(stream, chunk, encoding, addToFront, skipChunkCheck) {
+      var state = stream._readableState;
+      if (chunk === null) {
+        state.reading = false;
+        onEofChunk(stream, state);
+      } else {
+        var er;
+        if (!skipChunkCheck) er = chunkInvalid(state, chunk);
+        if (er) {
+          stream.emit("error", er);
+        } else if (state.objectMode || chunk && chunk.length > 0) {
+          if (typeof chunk !== "string" && !state.objectMode && Object.getPrototypeOf(chunk) !== Buffer2.prototype) {
+            chunk = _uint8ArrayToBuffer(chunk);
+          }
+          if (addToFront) {
+            if (state.endEmitted) stream.emit("error", new Error("stream.unshift() after end event"));
+            else addChunk(stream, state, chunk, true);
+          } else if (state.ended) {
+            stream.emit("error", new Error("stream.push() after EOF"));
+          } else {
+            state.reading = false;
+            if (state.decoder && !encoding) {
+              chunk = state.decoder.write(chunk);
+              if (state.objectMode || chunk.length !== 0) addChunk(stream, state, chunk, false);
+              else maybeReadMore(stream, state);
+            } else {
+              addChunk(stream, state, chunk, false);
+            }
+          }
+        } else if (!addToFront) {
+          state.reading = false;
+        }
+      }
+      return needMoreData(state);
+    }
+    function addChunk(stream, state, chunk, addToFront) {
+      if (state.flowing && state.length === 0 && !state.sync) {
+        stream.emit("data", chunk);
+        stream.read(0);
+      } else {
+        state.length += state.objectMode ? 1 : chunk.length;
+        if (addToFront) state.buffer.unshift(chunk);
+        else state.buffer.push(chunk);
+        if (state.needReadable) emitReadable(stream);
+      }
+      maybeReadMore(stream, state);
+    }
+    function chunkInvalid(state, chunk) {
+      var er;
+      if (!_isUint8Array(chunk) && typeof chunk !== "string" && chunk !== void 0 && !state.objectMode) {
+        er = new TypeError("Invalid non-string/buffer chunk");
+      }
+      return er;
+    }
+    function needMoreData(state) {
+      return !state.ended && (state.needReadable || state.length < state.highWaterMark || state.length === 0);
+    }
+    Readable.prototype.isPaused = function() {
+      return this._readableState.flowing === false;
+    };
+    Readable.prototype.setEncoding = function(enc) {
+      if (!StringDecoder) StringDecoder = require_string_decoder2().StringDecoder;
+      this._readableState.decoder = new StringDecoder(enc);
+      this._readableState.encoding = enc;
+      return this;
+    };
+    var MAX_HWM = 8388608;
+    function computeNewHighWaterMark(n) {
+      if (n >= MAX_HWM) {
+        n = MAX_HWM;
+      } else {
+        n--;
+        n |= n >>> 1;
+        n |= n >>> 2;
+        n |= n >>> 4;
+        n |= n >>> 8;
+        n |= n >>> 16;
+        n++;
+      }
+      return n;
+    }
+    function howMuchToRead(n, state) {
+      if (n <= 0 || state.length === 0 && state.ended) return 0;
+      if (state.objectMode) return 1;
+      if (n !== n) {
+        if (state.flowing && state.length) return state.buffer.head.data.length;
+        else return state.length;
+      }
+      if (n > state.highWaterMark) state.highWaterMark = computeNewHighWaterMark(n);
+      if (n <= state.length) return n;
+      if (!state.ended) {
+        state.needReadable = true;
+        return 0;
+      }
+      return state.length;
+    }
+    Readable.prototype.read = function(n) {
+      debug("read", n);
+      n = parseInt(n, 10);
+      var state = this._readableState;
+      var nOrig = n;
+      if (n !== 0) state.emittedReadable = false;
+      if (n === 0 && state.needReadable && (state.length >= state.highWaterMark || state.ended)) {
+        debug("read: emitReadable", state.length, state.ended);
+        if (state.length === 0 && state.ended) endReadable(this);
+        else emitReadable(this);
+        return null;
+      }
+      n = howMuchToRead(n, state);
+      if (n === 0 && state.ended) {
+        if (state.length === 0) endReadable(this);
+        return null;
+      }
+      var doRead = state.needReadable;
+      debug("need readable", doRead);
+      if (state.length === 0 || state.length - n < state.highWaterMark) {
+        doRead = true;
+        debug("length less than watermark", doRead);
+      }
+      if (state.ended || state.reading) {
+        doRead = false;
+        debug("reading or ended", doRead);
+      } else if (doRead) {
+        debug("do read");
+        state.reading = true;
+        state.sync = true;
+        if (state.length === 0) state.needReadable = true;
+        this._read(state.highWaterMark);
+        state.sync = false;
+        if (!state.reading) n = howMuchToRead(nOrig, state);
+      }
+      var ret;
+      if (n > 0) ret = fromList(n, state);
+      else ret = null;
+      if (ret === null) {
+        state.needReadable = true;
+        n = 0;
+      } else {
+        state.length -= n;
+      }
+      if (state.length === 0) {
+        if (!state.ended) state.needReadable = true;
+        if (nOrig !== n && state.ended) endReadable(this);
+      }
+      if (ret !== null) this.emit("data", ret);
+      return ret;
+    };
+    function onEofChunk(stream, state) {
+      if (state.ended) return;
+      if (state.decoder) {
+        var chunk = state.decoder.end();
+        if (chunk && chunk.length) {
+          state.buffer.push(chunk);
+          state.length += state.objectMode ? 1 : chunk.length;
+        }
+      }
+      state.ended = true;
+      emitReadable(stream);
+    }
+    function emitReadable(stream) {
+      var state = stream._readableState;
+      state.needReadable = false;
+      if (!state.emittedReadable) {
+        debug("emitReadable", state.flowing);
+        state.emittedReadable = true;
+        if (state.sync) pna.nextTick(emitReadable_, stream);
+        else emitReadable_(stream);
+      }
+    }
+    function emitReadable_(stream) {
+      debug("emit readable");
+      stream.emit("readable");
+      flow(stream);
+    }
+    function maybeReadMore(stream, state) {
+      if (!state.readingMore) {
+        state.readingMore = true;
+        pna.nextTick(maybeReadMore_, stream, state);
+      }
+    }
+    function maybeReadMore_(stream, state) {
+      var len = state.length;
+      while (!state.reading && !state.flowing && !state.ended && state.length < state.highWaterMark) {
+        debug("maybeReadMore read 0");
+        stream.read(0);
+        if (len === state.length)
+          break;
+        else len = state.length;
+      }
+      state.readingMore = false;
+    }
+    Readable.prototype._read = function(n) {
+      this.emit("error", new Error("_read() is not implemented"));
+    };
+    Readable.prototype.pipe = function(dest, pipeOpts) {
+      var src = this;
+      var state = this._readableState;
+      switch (state.pipesCount) {
+        case 0:
+          state.pipes = dest;
+          break;
+        case 1:
+          state.pipes = [state.pipes, dest];
+          break;
+        default:
+          state.pipes.push(dest);
+          break;
+      }
+      state.pipesCount += 1;
+      debug("pipe count=%d opts=%j", state.pipesCount, pipeOpts);
+      var doEnd = (!pipeOpts || pipeOpts.end !== false) && dest !== process.stdout && dest !== process.stderr;
+      var endFn = doEnd ? onend : unpipe;
+      if (state.endEmitted) pna.nextTick(endFn);
+      else src.once("end", endFn);
+      dest.on("unpipe", onunpipe);
+      function onunpipe(readable, unpipeInfo) {
+        debug("onunpipe");
+        if (readable === src) {
+          if (unpipeInfo && unpipeInfo.hasUnpiped === false) {
+            unpipeInfo.hasUnpiped = true;
+            cleanup();
+          }
+        }
+      }
+      function onend() {
+        debug("onend");
+        dest.end();
+      }
+      var ondrain = pipeOnDrain(src);
+      dest.on("drain", ondrain);
+      var cleanedUp = false;
+      function cleanup() {
+        debug("cleanup");
+        dest.removeListener("close", onclose);
+        dest.removeListener("finish", onfinish);
+        dest.removeListener("drain", ondrain);
+        dest.removeListener("error", onerror);
+        dest.removeListener("unpipe", onunpipe);
+        src.removeListener("end", onend);
+        src.removeListener("end", unpipe);
+        src.removeListener("data", ondata);
+        cleanedUp = true;
+        if (state.awaitDrain && (!dest._writableState || dest._writableState.needDrain)) ondrain();
+      }
+      var increasedAwaitDrain = false;
+      src.on("data", ondata);
+      function ondata(chunk) {
+        debug("ondata");
+        increasedAwaitDrain = false;
+        var ret = dest.write(chunk);
+        if (false === ret && !increasedAwaitDrain) {
+          if ((state.pipesCount === 1 && state.pipes === dest || state.pipesCount > 1 && indexOf(state.pipes, dest) !== -1) && !cleanedUp) {
+            debug("false write response, pause", state.awaitDrain);
+            state.awaitDrain++;
+            increasedAwaitDrain = true;
+          }
+          src.pause();
+        }
+      }
+      function onerror(er) {
+        debug("onerror", er);
+        unpipe();
+        dest.removeListener("error", onerror);
+        if (EElistenerCount(dest, "error") === 0) dest.emit("error", er);
+      }
+      prependListener(dest, "error", onerror);
+      function onclose() {
+        dest.removeListener("finish", onfinish);
+        unpipe();
+      }
+      dest.once("close", onclose);
+      function onfinish() {
+        debug("onfinish");
+        dest.removeListener("close", onclose);
+        unpipe();
+      }
+      dest.once("finish", onfinish);
+      function unpipe() {
+        debug("unpipe");
+        src.unpipe(dest);
+      }
+      dest.emit("pipe", src);
+      if (!state.flowing) {
+        debug("pipe resume");
+        src.resume();
+      }
+      return dest;
+    };
+    function pipeOnDrain(src) {
+      return function() {
+        var state = src._readableState;
+        debug("pipeOnDrain", state.awaitDrain);
+        if (state.awaitDrain) state.awaitDrain--;
+        if (state.awaitDrain === 0 && EElistenerCount(src, "data")) {
+          state.flowing = true;
+          flow(src);
+        }
+      };
+    }
+    Readable.prototype.unpipe = function(dest) {
+      var state = this._readableState;
+      var unpipeInfo = { hasUnpiped: false };
+      if (state.pipesCount === 0) return this;
+      if (state.pipesCount === 1) {
+        if (dest && dest !== state.pipes) return this;
+        if (!dest) dest = state.pipes;
+        state.pipes = null;
+        state.pipesCount = 0;
+        state.flowing = false;
+        if (dest) dest.emit("unpipe", this, unpipeInfo);
+        return this;
+      }
+      if (!dest) {
+        var dests = state.pipes;
+        var len = state.pipesCount;
+        state.pipes = null;
+        state.pipesCount = 0;
+        state.flowing = false;
+        for (var i = 0; i < len; i++) {
+          dests[i].emit("unpipe", this, { hasUnpiped: false });
+        }
+        return this;
+      }
+      var index = indexOf(state.pipes, dest);
+      if (index === -1) return this;
+      state.pipes.splice(index, 1);
+      state.pipesCount -= 1;
+      if (state.pipesCount === 1) state.pipes = state.pipes[0];
+      dest.emit("unpipe", this, unpipeInfo);
+      return this;
+    };
+    Readable.prototype.on = function(ev, fn) {
+      var res = Stream.prototype.on.call(this, ev, fn);
+      if (ev === "data") {
+        if (this._readableState.flowing !== false) this.resume();
+      } else if (ev === "readable") {
+        var state = this._readableState;
+        if (!state.endEmitted && !state.readableListening) {
+          state.readableListening = state.needReadable = true;
+          state.emittedReadable = false;
+          if (!state.reading) {
+            pna.nextTick(nReadingNextTick, this);
+          } else if (state.length) {
+            emitReadable(this);
+          }
+        }
+      }
+      return res;
+    };
+    Readable.prototype.addListener = Readable.prototype.on;
+    function nReadingNextTick(self2) {
+      debug("readable nexttick read 0");
+      self2.read(0);
+    }
+    Readable.prototype.resume = function() {
+      var state = this._readableState;
+      if (!state.flowing) {
+        debug("resume");
+        state.flowing = true;
+        resume(this, state);
+      }
+      return this;
+    };
+    function resume(stream, state) {
+      if (!state.resumeScheduled) {
+        state.resumeScheduled = true;
+        pna.nextTick(resume_, stream, state);
+      }
+    }
+    function resume_(stream, state) {
+      if (!state.reading) {
+        debug("resume read 0");
+        stream.read(0);
+      }
+      state.resumeScheduled = false;
+      state.awaitDrain = 0;
+      stream.emit("resume");
+      flow(stream);
+      if (state.flowing && !state.reading) stream.read(0);
+    }
+    Readable.prototype.pause = function() {
+      debug("call pause flowing=%j", this._readableState.flowing);
+      if (false !== this._readableState.flowing) {
+        debug("pause");
+        this._readableState.flowing = false;
+        this.emit("pause");
+      }
+      return this;
+    };
+    function flow(stream) {
+      var state = stream._readableState;
+      debug("flow", state.flowing);
+      while (state.flowing && stream.read() !== null) {
+      }
+    }
+    Readable.prototype.wrap = function(stream) {
+      var _this = this;
+      var state = this._readableState;
+      var paused = false;
+      stream.on("end", function() {
+        debug("wrapped end");
+        if (state.decoder && !state.ended) {
+          var chunk = state.decoder.end();
+          if (chunk && chunk.length) _this.push(chunk);
+        }
+        _this.push(null);
+      });
+      stream.on("data", function(chunk) {
+        debug("wrapped data");
+        if (state.decoder) chunk = state.decoder.write(chunk);
+        if (state.objectMode && (chunk === null || chunk === void 0)) return;
+        else if (!state.objectMode && (!chunk || !chunk.length)) return;
+        var ret = _this.push(chunk);
+        if (!ret) {
+          paused = true;
+          stream.pause();
+        }
+      });
+      for (var i in stream) {
+        if (this[i] === void 0 && typeof stream[i] === "function") {
+          this[i] = /* @__PURE__ */ (function(method) {
+            return function() {
+              return stream[method].apply(stream, arguments);
+            };
+          })(i);
+        }
+      }
+      for (var n = 0; n < kProxyEvents.length; n++) {
+        stream.on(kProxyEvents[n], this.emit.bind(this, kProxyEvents[n]));
+      }
+      this._read = function(n2) {
+        debug("wrapped _read", n2);
+        if (paused) {
+          paused = false;
+          stream.resume();
+        }
+      };
+      return this;
+    };
+    Object.defineProperty(Readable.prototype, "readableHighWaterMark", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function() {
+        return this._readableState.highWaterMark;
+      }
+    });
+    Readable._fromList = fromList;
+    function fromList(n, state) {
+      if (state.length === 0) return null;
+      var ret;
+      if (state.objectMode) ret = state.buffer.shift();
+      else if (!n || n >= state.length) {
+        if (state.decoder) ret = state.buffer.join("");
+        else if (state.buffer.length === 1) ret = state.buffer.head.data;
+        else ret = state.buffer.concat(state.length);
+        state.buffer.clear();
+      } else {
+        ret = fromListPartial(n, state.buffer, state.decoder);
+      }
+      return ret;
+    }
+    function fromListPartial(n, list, hasStrings) {
+      var ret;
+      if (n < list.head.data.length) {
+        ret = list.head.data.slice(0, n);
+        list.head.data = list.head.data.slice(n);
+      } else if (n === list.head.data.length) {
+        ret = list.shift();
+      } else {
+        ret = hasStrings ? copyFromBufferString(n, list) : copyFromBuffer(n, list);
+      }
+      return ret;
+    }
+    function copyFromBufferString(n, list) {
+      var p = list.head;
+      var c = 1;
+      var ret = p.data;
+      n -= ret.length;
+      while (p = p.next) {
+        var str = p.data;
+        var nb = n > str.length ? str.length : n;
+        if (nb === str.length) ret += str;
+        else ret += str.slice(0, n);
+        n -= nb;
+        if (n === 0) {
+          if (nb === str.length) {
+            ++c;
+            if (p.next) list.head = p.next;
+            else list.head = list.tail = null;
+          } else {
+            list.head = p;
+            p.data = str.slice(nb);
+          }
+          break;
+        }
+        ++c;
+      }
+      list.length -= c;
+      return ret;
+    }
+    function copyFromBuffer(n, list) {
+      var ret = Buffer2.allocUnsafe(n);
+      var p = list.head;
+      var c = 1;
+      p.data.copy(ret);
+      n -= p.data.length;
+      while (p = p.next) {
+        var buf = p.data;
+        var nb = n > buf.length ? buf.length : n;
+        buf.copy(ret, ret.length - n, 0, nb);
+        n -= nb;
+        if (n === 0) {
+          if (nb === buf.length) {
+            ++c;
+            if (p.next) list.head = p.next;
+            else list.head = list.tail = null;
+          } else {
+            list.head = p;
+            p.data = buf.slice(nb);
+          }
+          break;
+        }
+        ++c;
+      }
+      list.length -= c;
+      return ret;
+    }
+    function endReadable(stream) {
+      var state = stream._readableState;
+      if (state.length > 0) throw new Error('"endReadable()" called on non-empty stream');
+      if (!state.endEmitted) {
+        state.ended = true;
+        pna.nextTick(endReadableNT, state, stream);
+      }
+    }
+    function endReadableNT(state, stream) {
+      if (!state.endEmitted && state.length === 0) {
+        state.endEmitted = true;
+        stream.readable = false;
+        stream.emit("end");
+      }
+    }
+    function indexOf(xs, x) {
+      for (var i = 0, l = xs.length; i < l; i++) {
+        if (xs[i] === x) return i;
+      }
+      return -1;
+    }
+  }
+});
+
+// node_modules/through2/node_modules/readable-stream/lib/_stream_transform.js
+var require_stream_transform2 = __commonJS({
+  "node_modules/through2/node_modules/readable-stream/lib/_stream_transform.js"(exports, module) {
+    "use strict";
+    module.exports = Transform;
+    var Duplex = require_stream_duplex2();
+    var util = Object.create(require_util3());
+    util.inherits = require_inherits();
+    util.inherits(Transform, Duplex);
+    function afterTransform(er, data) {
+      var ts = this._transformState;
+      ts.transforming = false;
+      var cb = ts.writecb;
+      if (!cb) {
+        return this.emit("error", new Error("write callback called multiple times"));
+      }
+      ts.writechunk = null;
+      ts.writecb = null;
+      if (data != null)
+        this.push(data);
+      cb(er);
+      var rs = this._readableState;
+      rs.reading = false;
+      if (rs.needReadable || rs.length < rs.highWaterMark) {
+        this._read(rs.highWaterMark);
+      }
+    }
+    function Transform(options) {
+      if (!(this instanceof Transform)) return new Transform(options);
+      Duplex.call(this, options);
+      this._transformState = {
+        afterTransform: afterTransform.bind(this),
+        needTransform: false,
+        transforming: false,
+        writecb: null,
+        writechunk: null,
+        writeencoding: null
+      };
+      this._readableState.needReadable = true;
+      this._readableState.sync = false;
+      if (options) {
+        if (typeof options.transform === "function") this._transform = options.transform;
+        if (typeof options.flush === "function") this._flush = options.flush;
+      }
+      this.on("prefinish", prefinish);
+    }
+    function prefinish() {
+      var _this = this;
+      if (typeof this._flush === "function") {
+        this._flush(function(er, data) {
+          done(_this, er, data);
+        });
+      } else {
+        done(this, null, null);
+      }
+    }
+    Transform.prototype.push = function(chunk, encoding) {
+      this._transformState.needTransform = false;
+      return Duplex.prototype.push.call(this, chunk, encoding);
+    };
+    Transform.prototype._transform = function(chunk, encoding, cb) {
+      throw new Error("_transform() is not implemented");
+    };
+    Transform.prototype._write = function(chunk, encoding, cb) {
+      var ts = this._transformState;
+      ts.writecb = cb;
+      ts.writechunk = chunk;
+      ts.writeencoding = encoding;
+      if (!ts.transforming) {
+        var rs = this._readableState;
+        if (ts.needTransform || rs.needReadable || rs.length < rs.highWaterMark) this._read(rs.highWaterMark);
+      }
+    };
+    Transform.prototype._read = function(n) {
+      var ts = this._transformState;
+      if (ts.writechunk !== null && ts.writecb && !ts.transforming) {
+        ts.transforming = true;
+        this._transform(ts.writechunk, ts.writeencoding, ts.afterTransform);
+      } else {
+        ts.needTransform = true;
+      }
+    };
+    Transform.prototype._destroy = function(err, cb) {
+      var _this2 = this;
+      Duplex.prototype._destroy.call(this, err, function(err2) {
+        cb(err2);
+        _this2.emit("close");
+      });
+    };
+    function done(stream, er, data) {
+      if (er) return stream.emit("error", er);
+      if (data != null)
+        stream.push(data);
+      if (stream._writableState.length) throw new Error("Calling transform done when ws.length != 0");
+      if (stream._transformState.transforming) throw new Error("Calling transform done when still transforming");
+      return stream.push(null);
+    }
+  }
+});
+
+// node_modules/through2/node_modules/readable-stream/lib/_stream_passthrough.js
+var require_stream_passthrough2 = __commonJS({
+  "node_modules/through2/node_modules/readable-stream/lib/_stream_passthrough.js"(exports, module) {
+    "use strict";
+    module.exports = PassThrough;
+    var Transform = require_stream_transform2();
+    var util = Object.create(require_util3());
+    util.inherits = require_inherits();
+    util.inherits(PassThrough, Transform);
+    function PassThrough(options) {
+      if (!(this instanceof PassThrough)) return new PassThrough(options);
+      Transform.call(this, options);
+    }
+    PassThrough.prototype._transform = function(chunk, encoding, cb) {
+      cb(null, chunk);
+    };
+  }
+});
+
+// node_modules/through2/node_modules/readable-stream/readable.js
+var require_readable2 = __commonJS({
+  "node_modules/through2/node_modules/readable-stream/readable.js"(exports, module) {
+    var Stream = __require("stream");
+    if (process.env.READABLE_STREAM === "disable" && Stream) {
+      module.exports = Stream;
+      exports = module.exports = Stream.Readable;
+      exports.Readable = Stream.Readable;
+      exports.Writable = Stream.Writable;
+      exports.Duplex = Stream.Duplex;
+      exports.Transform = Stream.Transform;
+      exports.PassThrough = Stream.PassThrough;
+      exports.Stream = Stream;
+    } else {
+      exports = module.exports = require_stream_readable2();
+      exports.Stream = Stream || exports;
+      exports.Readable = exports;
+      exports.Writable = require_stream_writable2();
+      exports.Duplex = require_stream_duplex2();
+      exports.Transform = require_stream_transform2();
+      exports.PassThrough = require_stream_passthrough2();
+    }
+  }
+});
+
+// node_modules/xtend/immutable.js
+var require_immutable = __commonJS({
+  "node_modules/xtend/immutable.js"(exports, module) {
+    module.exports = extend;
+    var hasOwnProperty = Object.prototype.hasOwnProperty;
+    function extend() {
+      var target = {};
+      for (var i = 0; i < arguments.length; i++) {
+        var source = arguments[i];
+        for (var key in source) {
+          if (hasOwnProperty.call(source, key)) {
+            target[key] = source[key];
+          }
+        }
+      }
+      return target;
+    }
+  }
+});
+
+// node_modules/through2/through2.js
+var require_through2 = __commonJS({
+  "node_modules/through2/through2.js"(exports, module) {
+    var Transform = require_readable2().Transform;
+    var inherits = __require("util").inherits;
+    var xtend = require_immutable();
+    function DestroyableTransform(opts) {
+      Transform.call(this, opts);
+      this._destroyed = false;
+    }
+    inherits(DestroyableTransform, Transform);
+    DestroyableTransform.prototype.destroy = function(err) {
+      if (this._destroyed) return;
+      this._destroyed = true;
+      var self2 = this;
+      process.nextTick(function() {
+        if (err)
+          self2.emit("error", err);
+        self2.emit("close");
+      });
+    };
+    function noop(chunk, enc, callback) {
+      callback(null, chunk);
+    }
+    function through2(construct) {
+      return function(options, transform, flush) {
+        if (typeof options == "function") {
+          flush = transform;
+          transform = options;
+          options = {};
+        }
+        if (typeof transform != "function")
+          transform = noop;
+        if (typeof flush != "function")
+          flush = null;
+        return construct(options, transform, flush);
+      };
+    }
+    module.exports = through2(function(options, transform, flush) {
+      var t2 = new DestroyableTransform(options);
+      t2._transform = transform;
+      if (flush)
+        t2._flush = flush;
+      return t2;
+    });
+    module.exports.ctor = through2(function(options, transform, flush) {
+      function Through2(override) {
+        if (!(this instanceof Through2))
+          return new Through2(override);
+        this.options = xtend(options, override);
+        DestroyableTransform.call(this, this.options);
+      }
+      inherits(Through2, DestroyableTransform);
+      Through2.prototype._transform = transform;
+      if (flush)
+        Through2.prototype._flush = flush;
+      return Through2;
+    });
+    module.exports.obj = through2(function(options, transform, flush) {
+      var t2 = new DestroyableTransform(xtend({ objectMode: true, highWaterMark: 16 }, options));
+      t2._transform = transform;
+      if (flush)
+        t2._flush = flush;
+      return t2;
+    });
+  }
+});
+
+// node_modules/buffer-from/index.js
+var require_buffer_from = __commonJS({
+  "node_modules/buffer-from/index.js"(exports, module) {
+    var toString = Object.prototype.toString;
+    var isModern = typeof Buffer !== "undefined" && typeof Buffer.alloc === "function" && typeof Buffer.allocUnsafe === "function" && typeof Buffer.from === "function";
+    function isArrayBuffer(input) {
+      return toString.call(input).slice(8, -1) === "ArrayBuffer";
+    }
+    function fromArrayBuffer(obj, byteOffset, length) {
+      byteOffset >>>= 0;
+      var maxLength = obj.byteLength - byteOffset;
+      if (maxLength < 0) {
+        throw new RangeError("'offset' is out of bounds");
+      }
+      if (length === void 0) {
+        length = maxLength;
+      } else {
+        length >>>= 0;
+        if (length > maxLength) {
+          throw new RangeError("'length' is out of bounds");
+        }
+      }
+      return isModern ? Buffer.from(obj.slice(byteOffset, byteOffset + length)) : new Buffer(new Uint8Array(obj.slice(byteOffset, byteOffset + length)));
+    }
+    function fromString(string, encoding) {
+      if (typeof encoding !== "string" || encoding === "") {
+        encoding = "utf8";
+      }
+      if (!Buffer.isEncoding(encoding)) {
+        throw new TypeError('"encoding" must be a valid string encoding');
+      }
+      return isModern ? Buffer.from(string, encoding) : new Buffer(string, encoding);
+    }
+    function bufferFrom(value, encodingOrOffset, length) {
+      if (typeof value === "number") {
+        throw new TypeError('"value" argument must not be a number');
+      }
+      if (isArrayBuffer(value)) {
+        return fromArrayBuffer(value, encodingOrOffset, length);
+      }
+      if (typeof value === "string") {
+        return fromString(value, encodingOrOffset);
+      }
+      return isModern ? Buffer.from(value) : new Buffer(value);
+    }
+    module.exports = bufferFrom;
+  }
+});
+
+// node_modules/peek-stream/index.js
+var require_peek_stream = __commonJS({
+  "node_modules/peek-stream/index.js"(exports, module) {
+    var duplexify = require_duplexify();
+    var through = require_through2();
+    var bufferFrom = require_buffer_from();
+    var isObject = function(data) {
+      return !Buffer.isBuffer(data) && typeof data !== "string";
+    };
+    var peek = function(opts, onpeek) {
+      if (typeof opts === "number") opts = { maxBuffer: opts };
+      if (typeof opts === "function") return peek(null, opts);
+      if (!opts) opts = {};
+      var maxBuffer = typeof opts.maxBuffer === "number" ? opts.maxBuffer : 65535;
+      var strict = opts.strict;
+      var newline = opts.newline !== false;
+      var buffer = [];
+      var bufferSize = 0;
+      var dup = duplexify.obj();
+      var peeker = through.obj({ highWaterMark: 1 }, function(data, enc, cb) {
+        if (isObject(data)) return ready(data, null, cb);
+        if (!Buffer.isBuffer(data)) data = bufferFrom(data);
+        if (newline) {
+          var nl = Array.prototype.indexOf.call(data, 10);
+          if (nl > 0 && data[nl - 1] === 13) nl--;
+          if (nl > -1) {
+            buffer.push(data.slice(0, nl));
+            return ready(Buffer.concat(buffer), data.slice(nl), cb);
+          }
+        }
+        buffer.push(data);
+        bufferSize += data.length;
+        if (bufferSize < maxBuffer) return cb();
+        if (strict) return cb(new Error("No newline found"));
+        ready(Buffer.concat(buffer), null, cb);
+      });
+      var onpreend = function() {
+        if (strict) return dup.destroy(new Error("No newline found"));
+        dup.cork();
+        ready(Buffer.concat(buffer), null, function(err) {
+          if (err) return dup.destroy(err);
+          dup.uncork();
+        });
+      };
+      var ready = function(data, overflow, cb) {
+        dup.removeListener("preend", onpreend);
+        onpeek(data, function(err, parser) {
+          if (err) return cb(err);
+          dup.setWritable(parser);
+          dup.setReadable(parser);
+          if (data) parser.write(data);
+          if (overflow) parser.write(overflow);
+          overflow = buffer = peeker = null;
+          cb();
+        });
+      };
+      dup.on("preend", onpreend);
+      dup.setWritable(peeker);
+      return dup;
+    };
+    module.exports = peek;
+  }
+});
+
+// node_modules/minipass/dist/commonjs/index.js
+var require_commonjs = __commonJS({
+  "node_modules/minipass/dist/commonjs/index.js"(exports) {
+    "use strict";
+    var __importDefault = exports && exports.__importDefault || function(mod) {
+      return mod && mod.__esModule ? mod : { "default": mod };
+    };
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.Minipass = exports.isWritable = exports.isReadable = exports.isStream = void 0;
+    var proc = typeof process === "object" && process ? process : {
+      stdout: null,
+      stderr: null
+    };
+    var node_events_1 = __require("node:events");
+    var node_stream_1 = __importDefault(__require("node:stream"));
+    var node_string_decoder_1 = __require("node:string_decoder");
+    var isStream = (s) => !!s && typeof s === "object" && (s instanceof Minipass || s instanceof node_stream_1.default || (0, exports.isReadable)(s) || (0, exports.isWritable)(s));
+    exports.isStream = isStream;
+    var isReadable = (s) => !!s && typeof s === "object" && s instanceof node_events_1.EventEmitter && typeof s.pipe === "function" && // node core Writable streams have a pipe() method, but it throws
+    s.pipe !== node_stream_1.default.Writable.prototype.pipe;
+    exports.isReadable = isReadable;
+    var isWritable = (s) => !!s && typeof s === "object" && s instanceof node_events_1.EventEmitter && typeof s.write === "function" && typeof s.end === "function";
+    exports.isWritable = isWritable;
+    var EOF = /* @__PURE__ */ Symbol("EOF");
+    var MAYBE_EMIT_END = /* @__PURE__ */ Symbol("maybeEmitEnd");
+    var EMITTED_END = /* @__PURE__ */ Symbol("emittedEnd");
+    var EMITTING_END = /* @__PURE__ */ Symbol("emittingEnd");
+    var EMITTED_ERROR = /* @__PURE__ */ Symbol("emittedError");
+    var CLOSED = /* @__PURE__ */ Symbol("closed");
+    var READ = /* @__PURE__ */ Symbol("read");
+    var FLUSH = /* @__PURE__ */ Symbol("flush");
+    var FLUSHCHUNK = /* @__PURE__ */ Symbol("flushChunk");
+    var ENCODING = /* @__PURE__ */ Symbol("encoding");
+    var DECODER = /* @__PURE__ */ Symbol("decoder");
+    var FLOWING = /* @__PURE__ */ Symbol("flowing");
+    var PAUSED = /* @__PURE__ */ Symbol("paused");
+    var RESUME = /* @__PURE__ */ Symbol("resume");
+    var BUFFER = /* @__PURE__ */ Symbol("buffer");
+    var PIPES = /* @__PURE__ */ Symbol("pipes");
+    var BUFFERLENGTH = /* @__PURE__ */ Symbol("bufferLength");
+    var BUFFERPUSH = /* @__PURE__ */ Symbol("bufferPush");
+    var BUFFERSHIFT = /* @__PURE__ */ Symbol("bufferShift");
+    var OBJECTMODE = /* @__PURE__ */ Symbol("objectMode");
+    var DESTROYED = /* @__PURE__ */ Symbol("destroyed");
+    var ERROR = /* @__PURE__ */ Symbol("error");
+    var EMITDATA = /* @__PURE__ */ Symbol("emitData");
+    var EMITEND = /* @__PURE__ */ Symbol("emitEnd");
+    var EMITEND2 = /* @__PURE__ */ Symbol("emitEnd2");
+    var ASYNC = /* @__PURE__ */ Symbol("async");
+    var ABORT = /* @__PURE__ */ Symbol("abort");
+    var ABORTED = /* @__PURE__ */ Symbol("aborted");
+    var SIGNAL = /* @__PURE__ */ Symbol("signal");
+    var DATALISTENERS = /* @__PURE__ */ Symbol("dataListeners");
+    var DISCARDED = /* @__PURE__ */ Symbol("discarded");
+    var defer = (fn) => Promise.resolve().then(fn);
+    var nodefer = (fn) => fn();
+    var isEndish = (ev) => ev === "end" || ev === "finish" || ev === "prefinish";
+    var isArrayBufferLike = (b) => b instanceof ArrayBuffer || !!b && typeof b === "object" && b.constructor && b.constructor.name === "ArrayBuffer" && b.byteLength >= 0;
+    var isArrayBufferView = (b) => !Buffer.isBuffer(b) && ArrayBuffer.isView(b);
+    var Pipe = class {
+      src;
+      dest;
+      opts;
+      ondrain;
+      constructor(src, dest, opts) {
+        this.src = src;
+        this.dest = dest;
+        this.opts = opts;
+        this.ondrain = () => src[RESUME]();
+        this.dest.on("drain", this.ondrain);
+      }
+      unpipe() {
+        this.dest.removeListener("drain", this.ondrain);
+      }
+      // only here for the prototype
+      /* c8 ignore start */
+      proxyErrors(_er) {
+      }
+      /* c8 ignore stop */
+      end() {
+        this.unpipe();
+        if (this.opts.end)
+          this.dest.end();
+      }
+    };
+    var PipeProxyErrors = class extends Pipe {
+      unpipe() {
+        this.src.removeListener("error", this.proxyErrors);
+        super.unpipe();
+      }
+      constructor(src, dest, opts) {
+        super(src, dest, opts);
+        this.proxyErrors = (er) => this.dest.emit("error", er);
+        src.on("error", this.proxyErrors);
+      }
+    };
+    var isObjectModeOptions = (o) => !!o.objectMode;
+    var isEncodingOptions = (o) => !o.objectMode && !!o.encoding && o.encoding !== "buffer";
+    var Minipass = class extends node_events_1.EventEmitter {
+      [FLOWING] = false;
+      [PAUSED] = false;
+      [PIPES] = [];
+      [BUFFER] = [];
+      [OBJECTMODE];
+      [ENCODING];
+      [ASYNC];
+      [DECODER];
+      [EOF] = false;
+      [EMITTED_END] = false;
+      [EMITTING_END] = false;
+      [CLOSED] = false;
+      [EMITTED_ERROR] = null;
+      [BUFFERLENGTH] = 0;
+      [DESTROYED] = false;
+      [SIGNAL];
+      [ABORTED] = false;
+      [DATALISTENERS] = 0;
+      [DISCARDED] = false;
+      /**
+       * true if the stream can be written
+       */
+      writable = true;
+      /**
+       * true if the stream can be read
+       */
+      readable = true;
+      /**
+       * If `RType` is Buffer, then options do not need to be provided.
+       * Otherwise, an options object must be provided to specify either
+       * {@link Minipass.SharedOptions.objectMode} or
+       * {@link Minipass.SharedOptions.encoding}, as appropriate.
+       */
+      constructor(...args) {
+        const options = args[0] || {};
+        super();
+        if (options.objectMode && typeof options.encoding === "string") {
+          throw new TypeError("Encoding and objectMode may not be used together");
+        }
+        if (isObjectModeOptions(options)) {
+          this[OBJECTMODE] = true;
+          this[ENCODING] = null;
+        } else if (isEncodingOptions(options)) {
+          this[ENCODING] = options.encoding;
+          this[OBJECTMODE] = false;
+        } else {
+          this[OBJECTMODE] = false;
+          this[ENCODING] = null;
+        }
+        this[ASYNC] = !!options.async;
+        this[DECODER] = this[ENCODING] ? new node_string_decoder_1.StringDecoder(this[ENCODING]) : null;
+        if (options && options.debugExposeBuffer === true) {
+          Object.defineProperty(this, "buffer", { get: () => this[BUFFER] });
+        }
+        if (options && options.debugExposePipes === true) {
+          Object.defineProperty(this, "pipes", { get: () => this[PIPES] });
+        }
+        const { signal } = options;
+        if (signal) {
+          this[SIGNAL] = signal;
+          if (signal.aborted) {
+            this[ABORT]();
+          } else {
+            signal.addEventListener("abort", () => this[ABORT]());
+          }
+        }
+      }
+      /**
+       * The amount of data stored in the buffer waiting to be read.
+       *
+       * For Buffer strings, this will be the total byte length.
+       * For string encoding streams, this will be the string character length,
+       * according to JavaScript's `string.length` logic.
+       * For objectMode streams, this is a count of the items waiting to be
+       * emitted.
+       */
+      get bufferLength() {
+        return this[BUFFERLENGTH];
+      }
+      /**
+       * The `BufferEncoding` currently in use, or `null`
+       */
+      get encoding() {
+        return this[ENCODING];
+      }
+      /**
+       * @deprecated - This is a read only property
+       */
+      set encoding(_enc) {
+        throw new Error("Encoding must be set at instantiation time");
+      }
+      /**
+       * @deprecated - Encoding may only be set at instantiation time
+       */
+      setEncoding(_enc) {
+        throw new Error("Encoding must be set at instantiation time");
+      }
+      /**
+       * True if this is an objectMode stream
+       */
+      get objectMode() {
+        return this[OBJECTMODE];
+      }
+      /**
+       * @deprecated - This is a read-only property
+       */
+      set objectMode(_om) {
+        throw new Error("objectMode must be set at instantiation time");
+      }
+      /**
+       * true if this is an async stream
+       */
+      get ["async"]() {
+        return this[ASYNC];
+      }
+      /**
+       * Set to true to make this stream async.
+       *
+       * Once set, it cannot be unset, as this would potentially cause incorrect
+       * behavior.  Ie, a sync stream can be made async, but an async stream
+       * cannot be safely made sync.
+       */
+      set ["async"](a) {
+        this[ASYNC] = this[ASYNC] || !!a;
+      }
+      // drop everything and get out of the flow completely
+      [ABORT]() {
+        this[ABORTED] = true;
+        this.emit("abort", this[SIGNAL]?.reason);
+        this.destroy(this[SIGNAL]?.reason);
+      }
+      /**
+       * True if the stream has been aborted.
+       */
+      get aborted() {
+        return this[ABORTED];
+      }
+      /**
+       * No-op setter. Stream aborted status is set via the AbortSignal provided
+       * in the constructor options.
+       */
+      set aborted(_) {
+      }
+      write(chunk, encoding, cb) {
+        if (this[ABORTED])
+          return false;
+        if (this[EOF])
+          throw new Error("write after end");
+        if (this[DESTROYED]) {
+          this.emit("error", Object.assign(new Error("Cannot call write after a stream was destroyed"), { code: "ERR_STREAM_DESTROYED" }));
+          return true;
+        }
+        if (typeof encoding === "function") {
+          cb = encoding;
+          encoding = "utf8";
+        }
+        if (!encoding)
+          encoding = "utf8";
+        const fn = this[ASYNC] ? defer : nodefer;
+        if (!this[OBJECTMODE] && !Buffer.isBuffer(chunk)) {
+          if (isArrayBufferView(chunk)) {
+            chunk = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+          } else if (isArrayBufferLike(chunk)) {
+            chunk = Buffer.from(chunk);
+          } else if (typeof chunk !== "string") {
+            throw new Error("Non-contiguous data written to non-objectMode stream");
+          }
+        }
+        if (this[OBJECTMODE]) {
+          if (this[FLOWING] && this[BUFFERLENGTH] !== 0)
+            this[FLUSH](true);
+          if (this[FLOWING])
+            this.emit("data", chunk);
+          else
+            this[BUFFERPUSH](chunk);
+          if (this[BUFFERLENGTH] !== 0)
+            this.emit("readable");
+          if (cb)
+            fn(cb);
+          return this[FLOWING];
+        }
+        if (!chunk.length) {
+          if (this[BUFFERLENGTH] !== 0)
+            this.emit("readable");
+          if (cb)
+            fn(cb);
+          return this[FLOWING];
+        }
+        if (typeof chunk === "string" && // unless it is a string already ready for us to use
+        !(encoding === this[ENCODING] && !this[DECODER]?.lastNeed)) {
+          chunk = Buffer.from(chunk, encoding);
+        }
+        if (Buffer.isBuffer(chunk) && this[ENCODING]) {
+          chunk = this[DECODER].write(chunk);
+        }
+        if (this[FLOWING] && this[BUFFERLENGTH] !== 0)
+          this[FLUSH](true);
+        if (this[FLOWING])
+          this.emit("data", chunk);
+        else
+          this[BUFFERPUSH](chunk);
+        if (this[BUFFERLENGTH] !== 0)
+          this.emit("readable");
+        if (cb)
+          fn(cb);
+        return this[FLOWING];
+      }
+      /**
+       * Low-level explicit read method.
+       *
+       * In objectMode, the argument is ignored, and one item is returned if
+       * available.
+       *
+       * `n` is the number of bytes (or in the case of encoding streams,
+       * characters) to consume. If `n` is not provided, then the entire buffer
+       * is returned, or `null` is returned if no data is available.
+       *
+       * If `n` is greater that the amount of data in the internal buffer,
+       * then `null` is returned.
+       */
+      read(n) {
+        if (this[DESTROYED])
+          return null;
+        this[DISCARDED] = false;
+        if (this[BUFFERLENGTH] === 0 || n === 0 || n && n > this[BUFFERLENGTH]) {
+          this[MAYBE_EMIT_END]();
+          return null;
+        }
+        if (this[OBJECTMODE])
+          n = null;
+        if (this[BUFFER].length > 1 && !this[OBJECTMODE]) {
+          this[BUFFER] = [
+            this[ENCODING] ? this[BUFFER].join("") : Buffer.concat(this[BUFFER], this[BUFFERLENGTH])
+          ];
+        }
+        const ret = this[READ](n || null, this[BUFFER][0]);
+        this[MAYBE_EMIT_END]();
+        return ret;
+      }
+      [READ](n, chunk) {
+        if (this[OBJECTMODE])
+          this[BUFFERSHIFT]();
+        else {
+          const c = chunk;
+          if (n === c.length || n === null)
+            this[BUFFERSHIFT]();
+          else if (typeof c === "string") {
+            this[BUFFER][0] = c.slice(n);
+            chunk = c.slice(0, n);
+            this[BUFFERLENGTH] -= n;
+          } else {
+            this[BUFFER][0] = c.subarray(n);
+            chunk = c.subarray(0, n);
+            this[BUFFERLENGTH] -= n;
+          }
+        }
+        this.emit("data", chunk);
+        if (!this[BUFFER].length && !this[EOF])
+          this.emit("drain");
+        return chunk;
+      }
+      end(chunk, encoding, cb) {
+        if (typeof chunk === "function") {
+          cb = chunk;
+          chunk = void 0;
+        }
+        if (typeof encoding === "function") {
+          cb = encoding;
+          encoding = "utf8";
+        }
+        if (chunk !== void 0)
+          this.write(chunk, encoding);
+        if (cb)
+          this.once("end", cb);
+        this[EOF] = true;
+        this.writable = false;
+        if (this[FLOWING] || !this[PAUSED])
+          this[MAYBE_EMIT_END]();
+        return this;
+      }
+      // don't let the internal resume be overwritten
+      [RESUME]() {
+        if (this[DESTROYED])
+          return;
+        if (!this[DATALISTENERS] && !this[PIPES].length) {
+          this[DISCARDED] = true;
+        }
+        this[PAUSED] = false;
+        this[FLOWING] = true;
+        this.emit("resume");
+        if (this[BUFFER].length)
+          this[FLUSH]();
+        else if (this[EOF])
+          this[MAYBE_EMIT_END]();
+        else
+          this.emit("drain");
+      }
+      /**
+       * Resume the stream if it is currently in a paused state
+       *
+       * If called when there are no pipe destinations or `data` event listeners,
+       * this will place the stream in a "discarded" state, where all data will
+       * be thrown away. The discarded state is removed if a pipe destination or
+       * data handler is added, if pause() is called, or if any synchronous or
+       * asynchronous iteration is started.
+       */
+      resume() {
+        return this[RESUME]();
+      }
+      /**
+       * Pause the stream
+       */
+      pause() {
+        this[FLOWING] = false;
+        this[PAUSED] = true;
+        this[DISCARDED] = false;
+      }
+      /**
+       * true if the stream has been forcibly destroyed
+       */
+      get destroyed() {
+        return this[DESTROYED];
+      }
+      /**
+       * true if the stream is currently in a flowing state, meaning that
+       * any writes will be immediately emitted.
+       */
+      get flowing() {
+        return this[FLOWING];
+      }
+      /**
+       * true if the stream is currently in a paused state
+       */
+      get paused() {
+        return this[PAUSED];
+      }
+      [BUFFERPUSH](chunk) {
+        if (this[OBJECTMODE])
+          this[BUFFERLENGTH] += 1;
+        else
+          this[BUFFERLENGTH] += chunk.length;
+        this[BUFFER].push(chunk);
+      }
+      [BUFFERSHIFT]() {
+        if (this[OBJECTMODE])
+          this[BUFFERLENGTH] -= 1;
+        else
+          this[BUFFERLENGTH] -= this[BUFFER][0].length;
+        return this[BUFFER].shift();
+      }
+      [FLUSH](noDrain = false) {
+        do {
+        } while (this[FLUSHCHUNK](this[BUFFERSHIFT]()) && this[BUFFER].length);
+        if (!noDrain && !this[BUFFER].length && !this[EOF])
+          this.emit("drain");
+      }
+      [FLUSHCHUNK](chunk) {
+        this.emit("data", chunk);
+        return this[FLOWING];
+      }
+      /**
+       * Pipe all data emitted by this stream into the destination provided.
+       *
+       * Triggers the flow of data.
+       */
+      pipe(dest, opts) {
+        if (this[DESTROYED])
+          return dest;
+        this[DISCARDED] = false;
+        const ended = this[EMITTED_END];
+        opts = opts || {};
+        if (dest === proc.stdout || dest === proc.stderr)
+          opts.end = false;
+        else
+          opts.end = opts.end !== false;
+        opts.proxyErrors = !!opts.proxyErrors;
+        if (ended) {
+          if (opts.end)
+            dest.end();
+        } else {
+          this[PIPES].push(!opts.proxyErrors ? new Pipe(this, dest, opts) : new PipeProxyErrors(this, dest, opts));
+          if (this[ASYNC])
+            defer(() => this[RESUME]());
+          else
+            this[RESUME]();
+        }
+        return dest;
+      }
+      /**
+       * Fully unhook a piped destination stream.
+       *
+       * If the destination stream was the only consumer of this stream (ie,
+       * there are no other piped destinations or `'data'` event listeners)
+       * then the flow of data will stop until there is another consumer or
+       * {@link Minipass#resume} is explicitly called.
+       */
+      unpipe(dest) {
+        const p = this[PIPES].find((p2) => p2.dest === dest);
+        if (p) {
+          if (this[PIPES].length === 1) {
+            if (this[FLOWING] && this[DATALISTENERS] === 0) {
+              this[FLOWING] = false;
+            }
+            this[PIPES] = [];
+          } else
+            this[PIPES].splice(this[PIPES].indexOf(p), 1);
+          p.unpipe();
+        }
+      }
+      /**
+       * Alias for {@link Minipass#on}
+       */
+      addListener(ev, handler) {
+        return this.on(ev, handler);
+      }
+      /**
+       * Mostly identical to `EventEmitter.on`, with the following
+       * behavior differences to prevent data loss and unnecessary hangs:
+       *
+       * - Adding a 'data' event handler will trigger the flow of data
+       *
+       * - Adding a 'readable' event handler when there is data waiting to be read
+       *   will cause 'readable' to be emitted immediately.
+       *
+       * - Adding an 'endish' event handler ('end', 'finish', etc.) which has
+       *   already passed will cause the event to be emitted immediately and all
+       *   handlers removed.
+       *
+       * - Adding an 'error' event handler after an error has been emitted will
+       *   cause the event to be re-emitted immediately with the error previously
+       *   raised.
+       */
+      on(ev, handler) {
+        const ret = super.on(ev, handler);
+        if (ev === "data") {
+          this[DISCARDED] = false;
+          this[DATALISTENERS]++;
+          if (!this[PIPES].length && !this[FLOWING]) {
+            this[RESUME]();
+          }
+        } else if (ev === "readable" && this[BUFFERLENGTH] !== 0) {
+          super.emit("readable");
+        } else if (isEndish(ev) && this[EMITTED_END]) {
+          super.emit(ev);
+          this.removeAllListeners(ev);
+        } else if (ev === "error" && this[EMITTED_ERROR]) {
+          const h = handler;
+          if (this[ASYNC])
+            defer(() => h.call(this, this[EMITTED_ERROR]));
+          else
+            h.call(this, this[EMITTED_ERROR]);
+        }
+        return ret;
+      }
+      /**
+       * Alias for {@link Minipass#off}
+       */
+      removeListener(ev, handler) {
+        return this.off(ev, handler);
+      }
+      /**
+       * Mostly identical to `EventEmitter.off`
+       *
+       * If a 'data' event handler is removed, and it was the last consumer
+       * (ie, there are no pipe destinations or other 'data' event listeners),
+       * then the flow of data will stop until there is another consumer or
+       * {@link Minipass#resume} is explicitly called.
+       */
+      off(ev, handler) {
+        const ret = super.off(ev, handler);
+        if (ev === "data") {
+          this[DATALISTENERS] = this.listeners("data").length;
+          if (this[DATALISTENERS] === 0 && !this[DISCARDED] && !this[PIPES].length) {
+            this[FLOWING] = false;
+          }
+        }
+        return ret;
+      }
+      /**
+       * Mostly identical to `EventEmitter.removeAllListeners`
+       *
+       * If all 'data' event handlers are removed, and they were the last consumer
+       * (ie, there are no pipe destinations), then the flow of data will stop
+       * until there is another consumer or {@link Minipass#resume} is explicitly
+       * called.
+       */
+      removeAllListeners(ev) {
+        const ret = super.removeAllListeners(ev);
+        if (ev === "data" || ev === void 0) {
+          this[DATALISTENERS] = 0;
+          if (!this[DISCARDED] && !this[PIPES].length) {
+            this[FLOWING] = false;
+          }
+        }
+        return ret;
+      }
+      /**
+       * true if the 'end' event has been emitted
+       */
+      get emittedEnd() {
+        return this[EMITTED_END];
+      }
+      [MAYBE_EMIT_END]() {
+        if (!this[EMITTING_END] && !this[EMITTED_END] && !this[DESTROYED] && this[BUFFER].length === 0 && this[EOF]) {
+          this[EMITTING_END] = true;
+          this.emit("end");
+          this.emit("prefinish");
+          this.emit("finish");
+          if (this[CLOSED])
+            this.emit("close");
+          this[EMITTING_END] = false;
+        }
+      }
+      /**
+       * Mostly identical to `EventEmitter.emit`, with the following
+       * behavior differences to prevent data loss and unnecessary hangs:
+       *
+       * If the stream has been destroyed, and the event is something other
+       * than 'close' or 'error', then `false` is returned and no handlers
+       * are called.
+       *
+       * If the event is 'end', and has already been emitted, then the event
+       * is ignored. If the stream is in a paused or non-flowing state, then
+       * the event will be deferred until data flow resumes. If the stream is
+       * async, then handlers will be called on the next tick rather than
+       * immediately.
+       *
+       * If the event is 'close', and 'end' has not yet been emitted, then
+       * the event will be deferred until after 'end' is emitted.
+       *
+       * If the event is 'error', and an AbortSignal was provided for the stream,
+       * and there are no listeners, then the event is ignored, matching the
+       * behavior of node core streams in the presense of an AbortSignal.
+       *
+       * If the event is 'finish' or 'prefinish', then all listeners will be
+       * removed after emitting the event, to prevent double-firing.
+       */
+      emit(ev, ...args) {
+        const data = args[0];
+        if (ev !== "error" && ev !== "close" && ev !== DESTROYED && this[DESTROYED]) {
+          return false;
+        } else if (ev === "data") {
+          return !this[OBJECTMODE] && !data ? false : this[ASYNC] ? (defer(() => this[EMITDATA](data)), true) : this[EMITDATA](data);
+        } else if (ev === "end") {
+          return this[EMITEND]();
+        } else if (ev === "close") {
+          this[CLOSED] = true;
+          if (!this[EMITTED_END] && !this[DESTROYED])
+            return false;
+          const ret2 = super.emit("close");
+          this.removeAllListeners("close");
+          return ret2;
+        } else if (ev === "error") {
+          this[EMITTED_ERROR] = data;
+          super.emit(ERROR, data);
+          const ret2 = !this[SIGNAL] || this.listeners("error").length ? super.emit("error", data) : false;
+          this[MAYBE_EMIT_END]();
+          return ret2;
+        } else if (ev === "resume") {
+          const ret2 = super.emit("resume");
+          this[MAYBE_EMIT_END]();
+          return ret2;
+        } else if (ev === "finish" || ev === "prefinish") {
+          const ret2 = super.emit(ev);
+          this.removeAllListeners(ev);
+          return ret2;
+        }
+        const ret = super.emit(ev, ...args);
+        this[MAYBE_EMIT_END]();
+        return ret;
+      }
+      [EMITDATA](data) {
+        for (const p of this[PIPES]) {
+          if (p.dest.write(data) === false)
+            this.pause();
+        }
+        const ret = this[DISCARDED] ? false : super.emit("data", data);
+        this[MAYBE_EMIT_END]();
+        return ret;
+      }
+      [EMITEND]() {
+        if (this[EMITTED_END])
+          return false;
+        this[EMITTED_END] = true;
+        this.readable = false;
+        return this[ASYNC] ? (defer(() => this[EMITEND2]()), true) : this[EMITEND2]();
+      }
+      [EMITEND2]() {
+        if (this[DECODER]) {
+          const data = this[DECODER].end();
+          if (data) {
+            for (const p of this[PIPES]) {
+              p.dest.write(data);
+            }
+            if (!this[DISCARDED])
+              super.emit("data", data);
+          }
+        }
+        for (const p of this[PIPES]) {
+          p.end();
+        }
+        const ret = super.emit("end");
+        this.removeAllListeners("end");
+        return ret;
+      }
+      /**
+       * Return a Promise that resolves to an array of all emitted data once
+       * the stream ends.
+       */
+      async collect() {
+        const buf = Object.assign([], {
+          dataLength: 0
+        });
+        if (!this[OBJECTMODE])
+          buf.dataLength = 0;
+        const p = this.promise();
+        this.on("data", (c) => {
+          buf.push(c);
+          if (!this[OBJECTMODE])
+            buf.dataLength += c.length;
+        });
+        await p;
+        return buf;
+      }
+      /**
+       * Return a Promise that resolves to the concatenation of all emitted data
+       * once the stream ends.
+       *
+       * Not allowed on objectMode streams.
+       */
+      async concat() {
+        if (this[OBJECTMODE]) {
+          throw new Error("cannot concat in objectMode");
+        }
+        const buf = await this.collect();
+        return this[ENCODING] ? buf.join("") : Buffer.concat(buf, buf.dataLength);
+      }
+      /**
+       * Return a void Promise that resolves once the stream ends.
+       */
+      async promise() {
+        return new Promise((resolve, reject) => {
+          this.on(DESTROYED, () => reject(new Error("stream destroyed")));
+          this.on("error", (er) => reject(er));
+          this.on("end", () => resolve());
+        });
+      }
+      /**
+       * Asynchronous `for await of` iteration.
+       *
+       * This will continue emitting all chunks until the stream terminates.
+       */
+      [Symbol.asyncIterator]() {
+        this[DISCARDED] = false;
+        let stopped = false;
+        const stop = async () => {
+          this.pause();
+          stopped = true;
+          return { value: void 0, done: true };
+        };
+        const next = () => {
+          if (stopped)
+            return stop();
+          const res = this.read();
+          if (res !== null)
+            return Promise.resolve({ done: false, value: res });
+          if (this[EOF])
+            return stop();
+          let resolve;
+          let reject;
+          const onerr = (er) => {
+            this.off("data", ondata);
+            this.off("end", onend);
+            this.off(DESTROYED, ondestroy);
+            stop();
+            reject(er);
+          };
+          const ondata = (value) => {
+            this.off("error", onerr);
+            this.off("end", onend);
+            this.off(DESTROYED, ondestroy);
+            this.pause();
+            resolve({ value, done: !!this[EOF] });
+          };
+          const onend = () => {
+            this.off("error", onerr);
+            this.off("data", ondata);
+            this.off(DESTROYED, ondestroy);
+            stop();
+            resolve({ done: true, value: void 0 });
+          };
+          const ondestroy = () => onerr(new Error("stream destroyed"));
+          return new Promise((res2, rej) => {
+            reject = rej;
+            resolve = res2;
+            this.once(DESTROYED, ondestroy);
+            this.once("error", onerr);
+            this.once("end", onend);
+            this.once("data", ondata);
+          });
+        };
+        return {
+          next,
+          throw: stop,
+          return: stop,
+          [Symbol.asyncIterator]() {
+            return this;
+          },
+          [Symbol.asyncDispose]: async () => {
+          }
+        };
+      }
+      /**
+       * Synchronous `for of` iteration.
+       *
+       * The iteration will terminate when the internal buffer runs out, even
+       * if the stream has not yet terminated.
+       */
+      [Symbol.iterator]() {
+        this[DISCARDED] = false;
+        let stopped = false;
+        const stop = () => {
+          this.pause();
+          this.off(ERROR, stop);
+          this.off(DESTROYED, stop);
+          this.off("end", stop);
+          stopped = true;
+          return { done: true, value: void 0 };
+        };
+        const next = () => {
+          if (stopped)
+            return stop();
+          const value = this.read();
+          return value === null ? stop() : { done: false, value };
+        };
+        this.once("end", stop);
+        this.once(ERROR, stop);
+        this.once(DESTROYED, stop);
+        return {
+          next,
+          throw: stop,
+          return: stop,
+          [Symbol.iterator]() {
+            return this;
+          },
+          [Symbol.dispose]: () => {
+          }
+        };
+      }
+      /**
+       * Destroy a stream, preventing it from being used for any further purpose.
+       *
+       * If the stream has a `close()` method, then it will be called on
+       * destruction.
+       *
+       * After destruction, any attempt to write data, read data, or emit most
+       * events will be ignored.
+       *
+       * If an error argument is provided, then it will be emitted in an
+       * 'error' event.
+       */
+      destroy(er) {
+        if (this[DESTROYED]) {
+          if (er)
+            this.emit("error", er);
+          else
+            this.emit(DESTROYED);
+          return this;
+        }
+        this[DESTROYED] = true;
+        this[DISCARDED] = true;
+        this[BUFFER].length = 0;
+        this[BUFFERLENGTH] = 0;
+        const wc = this;
+        if (typeof wc.close === "function" && !this[CLOSED])
+          wc.close();
+        if (er)
+          this.emit("error", er);
+        else
+          this.emit(DESTROYED);
+        return this;
+      }
+      /**
+       * Alias for {@link isStream}
+       *
+       * Former export location, maintained for backwards compatibility.
+       *
+       * @deprecated
+       */
+      static get isStream() {
+        return exports.isStream;
+      }
+    };
+    exports.Minipass = Minipass;
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/stream.js
+var require_stream3 = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/stream.js"(exports, module) {
+    module.exports = __require("stream");
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/buffer_list.js
+var require_buffer_list = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/buffer_list.js"(exports, module) {
+    "use strict";
+    function ownKeys(object, enumerableOnly) {
+      var keys = Object.keys(object);
+      if (Object.getOwnPropertySymbols) {
+        var symbols = Object.getOwnPropertySymbols(object);
+        enumerableOnly && (symbols = symbols.filter(function(sym) {
+          return Object.getOwnPropertyDescriptor(object, sym).enumerable;
+        })), keys.push.apply(keys, symbols);
+      }
+      return keys;
+    }
+    function _objectSpread(target) {
+      for (var i = 1; i < arguments.length; i++) {
+        var source = null != arguments[i] ? arguments[i] : {};
+        i % 2 ? ownKeys(Object(source), true).forEach(function(key) {
+          _defineProperty(target, key, source[key]);
+        }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(target, Object.getOwnPropertyDescriptors(source)) : ownKeys(Object(source)).forEach(function(key) {
+          Object.defineProperty(target, key, Object.getOwnPropertyDescriptor(source, key));
+        });
+      }
+      return target;
+    }
+    function _defineProperty(obj, key, value) {
+      key = _toPropertyKey(key);
+      if (key in obj) {
+        Object.defineProperty(obj, key, { value, enumerable: true, configurable: true, writable: true });
+      } else {
+        obj[key] = value;
+      }
+      return obj;
+    }
+    function _classCallCheck(instance, Constructor) {
+      if (!(instance instanceof Constructor)) {
+        throw new TypeError("Cannot call a class as a function");
+      }
+    }
+    function _defineProperties(target, props) {
+      for (var i = 0; i < props.length; i++) {
+        var descriptor = props[i];
+        descriptor.enumerable = descriptor.enumerable || false;
+        descriptor.configurable = true;
+        if ("value" in descriptor) descriptor.writable = true;
+        Object.defineProperty(target, _toPropertyKey(descriptor.key), descriptor);
+      }
+    }
+    function _createClass(Constructor, protoProps, staticProps) {
+      if (protoProps) _defineProperties(Constructor.prototype, protoProps);
+      if (staticProps) _defineProperties(Constructor, staticProps);
+      Object.defineProperty(Constructor, "prototype", { writable: false });
+      return Constructor;
+    }
+    function _toPropertyKey(arg) {
+      var key = _toPrimitive(arg, "string");
+      return typeof key === "symbol" ? key : String(key);
+    }
+    function _toPrimitive(input, hint) {
+      if (typeof input !== "object" || input === null) return input;
+      var prim = input[Symbol.toPrimitive];
+      if (prim !== void 0) {
+        var res = prim.call(input, hint || "default");
+        if (typeof res !== "object") return res;
+        throw new TypeError("@@toPrimitive must return a primitive value.");
+      }
+      return (hint === "string" ? String : Number)(input);
+    }
+    var _require = __require("buffer");
+    var Buffer2 = _require.Buffer;
+    var _require2 = __require("util");
+    var inspect = _require2.inspect;
+    var custom = inspect && inspect.custom || "inspect";
+    function copyBuffer(src, target, offset) {
+      Buffer2.prototype.copy.call(src, target, offset);
+    }
+    module.exports = /* @__PURE__ */ (function() {
+      function BufferList() {
+        _classCallCheck(this, BufferList);
+        this.head = null;
+        this.tail = null;
+        this.length = 0;
+      }
+      _createClass(BufferList, [{
+        key: "push",
+        value: function push(v) {
+          var entry = {
+            data: v,
+            next: null
+          };
+          if (this.length > 0) this.tail.next = entry;
+          else this.head = entry;
+          this.tail = entry;
+          ++this.length;
+        }
+      }, {
+        key: "unshift",
+        value: function unshift(v) {
+          var entry = {
+            data: v,
+            next: this.head
+          };
+          if (this.length === 0) this.tail = entry;
+          this.head = entry;
+          ++this.length;
+        }
+      }, {
+        key: "shift",
+        value: function shift() {
+          if (this.length === 0) return;
+          var ret = this.head.data;
+          if (this.length === 1) this.head = this.tail = null;
+          else this.head = this.head.next;
+          --this.length;
+          return ret;
+        }
+      }, {
+        key: "clear",
+        value: function clear() {
+          this.head = this.tail = null;
+          this.length = 0;
+        }
+      }, {
+        key: "join",
+        value: function join4(s) {
+          if (this.length === 0) return "";
+          var p = this.head;
+          var ret = "" + p.data;
+          while (p = p.next) ret += s + p.data;
+          return ret;
+        }
+      }, {
+        key: "concat",
+        value: function concat(n) {
+          if (this.length === 0) return Buffer2.alloc(0);
+          var ret = Buffer2.allocUnsafe(n >>> 0);
+          var p = this.head;
+          var i = 0;
+          while (p) {
+            copyBuffer(p.data, ret, i);
+            i += p.data.length;
+            p = p.next;
+          }
+          return ret;
+        }
+        // Consumes a specified amount of bytes or characters from the buffered data.
+      }, {
+        key: "consume",
+        value: function consume(n, hasStrings) {
+          var ret;
+          if (n < this.head.data.length) {
+            ret = this.head.data.slice(0, n);
+            this.head.data = this.head.data.slice(n);
+          } else if (n === this.head.data.length) {
+            ret = this.shift();
+          } else {
+            ret = hasStrings ? this._getString(n) : this._getBuffer(n);
+          }
+          return ret;
+        }
+      }, {
+        key: "first",
+        value: function first() {
+          return this.head.data;
+        }
+        // Consumes a specified amount of characters from the buffered data.
+      }, {
+        key: "_getString",
+        value: function _getString(n) {
+          var p = this.head;
+          var c = 1;
+          var ret = p.data;
+          n -= ret.length;
+          while (p = p.next) {
+            var str = p.data;
+            var nb = n > str.length ? str.length : n;
+            if (nb === str.length) ret += str;
+            else ret += str.slice(0, n);
+            n -= nb;
+            if (n === 0) {
+              if (nb === str.length) {
+                ++c;
+                if (p.next) this.head = p.next;
+                else this.head = this.tail = null;
+              } else {
+                this.head = p;
+                p.data = str.slice(nb);
+              }
+              break;
+            }
+            ++c;
+          }
+          this.length -= c;
+          return ret;
+        }
+        // Consumes a specified amount of bytes from the buffered data.
+      }, {
+        key: "_getBuffer",
+        value: function _getBuffer(n) {
+          var ret = Buffer2.allocUnsafe(n);
+          var p = this.head;
+          var c = 1;
+          p.data.copy(ret);
+          n -= p.data.length;
+          while (p = p.next) {
+            var buf = p.data;
+            var nb = n > buf.length ? buf.length : n;
+            buf.copy(ret, ret.length - n, 0, nb);
+            n -= nb;
+            if (n === 0) {
+              if (nb === buf.length) {
+                ++c;
+                if (p.next) this.head = p.next;
+                else this.head = this.tail = null;
+              } else {
+                this.head = p;
+                p.data = buf.slice(nb);
+              }
+              break;
+            }
+            ++c;
+          }
+          this.length -= c;
+          return ret;
+        }
+        // Make sure the linked list only shows the minimal necessary information.
+      }, {
+        key: custom,
+        value: function value(_, options) {
+          return inspect(this, _objectSpread(_objectSpread({}, options), {}, {
+            // Only inspect one level.
+            depth: 0,
+            // It should not recurse.
+            customInspect: false
+          }));
+        }
+      }]);
+      return BufferList;
+    })();
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/destroy.js
+var require_destroy3 = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/destroy.js"(exports, module) {
+    "use strict";
+    function destroy(err, cb) {
+      var _this = this;
+      var readableDestroyed = this._readableState && this._readableState.destroyed;
+      var writableDestroyed = this._writableState && this._writableState.destroyed;
+      if (readableDestroyed || writableDestroyed) {
+        if (cb) {
+          cb(err);
+        } else if (err) {
+          if (!this._writableState) {
+            process.nextTick(emitErrorNT, this, err);
+          } else if (!this._writableState.errorEmitted) {
+            this._writableState.errorEmitted = true;
+            process.nextTick(emitErrorNT, this, err);
+          }
+        }
+        return this;
+      }
+      if (this._readableState) {
+        this._readableState.destroyed = true;
+      }
+      if (this._writableState) {
+        this._writableState.destroyed = true;
+      }
+      this._destroy(err || null, function(err2) {
+        if (!cb && err2) {
+          if (!_this._writableState) {
+            process.nextTick(emitErrorAndCloseNT, _this, err2);
+          } else if (!_this._writableState.errorEmitted) {
+            _this._writableState.errorEmitted = true;
+            process.nextTick(emitErrorAndCloseNT, _this, err2);
+          } else {
+            process.nextTick(emitCloseNT, _this);
+          }
+        } else if (cb) {
+          process.nextTick(emitCloseNT, _this);
+          cb(err2);
+        } else {
+          process.nextTick(emitCloseNT, _this);
+        }
+      });
+      return this;
+    }
+    function emitErrorAndCloseNT(self2, err) {
+      emitErrorNT(self2, err);
+      emitCloseNT(self2);
+    }
+    function emitCloseNT(self2) {
+      if (self2._writableState && !self2._writableState.emitClose) return;
+      if (self2._readableState && !self2._readableState.emitClose) return;
+      self2.emit("close");
+    }
+    function undestroy() {
+      if (this._readableState) {
+        this._readableState.destroyed = false;
+        this._readableState.reading = false;
+        this._readableState.ended = false;
+        this._readableState.endEmitted = false;
+      }
+      if (this._writableState) {
+        this._writableState.destroyed = false;
+        this._writableState.ended = false;
+        this._writableState.ending = false;
+        this._writableState.finalCalled = false;
+        this._writableState.prefinished = false;
+        this._writableState.finished = false;
+        this._writableState.errorEmitted = false;
+      }
+    }
+    function emitErrorNT(self2, err) {
+      self2.emit("error", err);
+    }
+    function errorOrDestroy(stream, err) {
+      var rState = stream._readableState;
+      var wState = stream._writableState;
+      if (rState && rState.autoDestroy || wState && wState.autoDestroy) stream.destroy(err);
+      else stream.emit("error", err);
+    }
+    module.exports = {
+      destroy,
+      undestroy,
+      errorOrDestroy
+    };
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/errors.js
+var require_errors6 = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/errors.js"(exports, module) {
+    "use strict";
+    var codes = {};
+    function createErrorType(code, message, Base) {
+      if (!Base) {
+        Base = Error;
+      }
+      function getMessage(arg1, arg2, arg3) {
+        if (typeof message === "string") {
+          return message;
+        } else {
+          return message(arg1, arg2, arg3);
+        }
+      }
+      class NodeError extends Base {
+        constructor(arg1, arg2, arg3) {
+          super(getMessage(arg1, arg2, arg3));
+        }
+      }
+      NodeError.prototype.name = Base.name;
+      NodeError.prototype.code = code;
+      codes[code] = NodeError;
+    }
+    function oneOf(expected, thing) {
+      if (Array.isArray(expected)) {
+        const len = expected.length;
+        expected = expected.map((i) => String(i));
+        if (len > 2) {
+          return `one of ${thing} ${expected.slice(0, len - 1).join(", ")}, or ` + expected[len - 1];
+        } else if (len === 2) {
+          return `one of ${thing} ${expected[0]} or ${expected[1]}`;
+        } else {
+          return `of ${thing} ${expected[0]}`;
+        }
+      } else {
+        return `of ${thing} ${String(expected)}`;
+      }
+    }
+    function startsWith(str, search, pos) {
+      return str.substr(!pos || pos < 0 ? 0 : +pos, search.length) === search;
+    }
+    function endsWith(str, search, this_len) {
+      if (this_len === void 0 || this_len > str.length) {
+        this_len = str.length;
+      }
+      return str.substring(this_len - search.length, this_len) === search;
+    }
+    function includes(str, search, start) {
+      if (typeof start !== "number") {
+        start = 0;
+      }
+      if (start + search.length > str.length) {
+        return false;
+      } else {
+        return str.indexOf(search, start) !== -1;
+      }
+    }
+    createErrorType("ERR_INVALID_OPT_VALUE", function(name, value) {
+      return 'The value "' + value + '" is invalid for option "' + name + '"';
+    }, TypeError);
+    createErrorType("ERR_INVALID_ARG_TYPE", function(name, expected, actual) {
+      let determiner;
+      if (typeof expected === "string" && startsWith(expected, "not ")) {
+        determiner = "must not be";
+        expected = expected.replace(/^not /, "");
+      } else {
+        determiner = "must be";
+      }
+      let msg;
+      if (endsWith(name, " argument")) {
+        msg = `The ${name} ${determiner} ${oneOf(expected, "type")}`;
+      } else {
+        const type = includes(name, ".") ? "property" : "argument";
+        msg = `The "${name}" ${type} ${determiner} ${oneOf(expected, "type")}`;
+      }
+      msg += `. Received type ${typeof actual}`;
+      return msg;
+    }, TypeError);
+    createErrorType("ERR_STREAM_PUSH_AFTER_EOF", "stream.push() after EOF");
+    createErrorType("ERR_METHOD_NOT_IMPLEMENTED", function(name) {
+      return "The " + name + " method is not implemented";
+    });
+    createErrorType("ERR_STREAM_PREMATURE_CLOSE", "Premature close");
+    createErrorType("ERR_STREAM_DESTROYED", function(name) {
+      return "Cannot call " + name + " after a stream was destroyed";
+    });
+    createErrorType("ERR_MULTIPLE_CALLBACK", "Callback called multiple times");
+    createErrorType("ERR_STREAM_CANNOT_PIPE", "Cannot pipe, not readable");
+    createErrorType("ERR_STREAM_WRITE_AFTER_END", "write after end");
+    createErrorType("ERR_STREAM_NULL_VALUES", "May not write null values to stream", TypeError);
+    createErrorType("ERR_UNKNOWN_ENCODING", function(arg) {
+      return "Unknown encoding: " + arg;
+    }, TypeError);
+    createErrorType("ERR_STREAM_UNSHIFT_AFTER_END_EVENT", "stream.unshift() after end event");
+    module.exports.codes = codes;
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/state.js
+var require_state = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/state.js"(exports, module) {
+    "use strict";
+    var ERR_INVALID_OPT_VALUE = require_errors6().codes.ERR_INVALID_OPT_VALUE;
+    function highWaterMarkFrom(options, isDuplex, duplexKey) {
+      return options.highWaterMark != null ? options.highWaterMark : isDuplex ? options[duplexKey] : null;
+    }
+    function getHighWaterMark(state, options, duplexKey, isDuplex) {
+      var hwm = highWaterMarkFrom(options, isDuplex, duplexKey);
+      if (hwm != null) {
+        if (!(isFinite(hwm) && Math.floor(hwm) === hwm) || hwm < 0) {
+          var name = isDuplex ? duplexKey : "highWaterMark";
+          throw new ERR_INVALID_OPT_VALUE(name, hwm);
+        }
+        return Math.floor(hwm);
+      }
+      return state.objectMode ? 16 : 16 * 1024;
+    }
+    module.exports = {
+      getHighWaterMark
+    };
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/lib/_stream_writable.js
+var require_stream_writable3 = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/lib/_stream_writable.js"(exports, module) {
+    "use strict";
+    module.exports = Writable;
+    function CorkedRequest(state) {
+      var _this = this;
+      this.next = null;
+      this.entry = null;
+      this.finish = function() {
+        onCorkedFinish(_this, state);
+      };
+    }
+    var Duplex;
+    Writable.WritableState = WritableState;
+    var internalUtil = {
+      deprecate: require_node2()
+    };
+    var Stream = require_stream3();
+    var Buffer2 = __require("buffer").Buffer;
+    var OurUint8Array = (typeof global !== "undefined" ? global : typeof window !== "undefined" ? window : typeof self !== "undefined" ? self : {}).Uint8Array || function() {
+    };
+    function _uint8ArrayToBuffer(chunk) {
+      return Buffer2.from(chunk);
+    }
+    function _isUint8Array(obj) {
+      return Buffer2.isBuffer(obj) || obj instanceof OurUint8Array;
+    }
+    var destroyImpl = require_destroy3();
+    var _require = require_state();
+    var getHighWaterMark = _require.getHighWaterMark;
+    var _require$codes = require_errors6().codes;
+    var ERR_INVALID_ARG_TYPE = _require$codes.ERR_INVALID_ARG_TYPE;
+    var ERR_METHOD_NOT_IMPLEMENTED = _require$codes.ERR_METHOD_NOT_IMPLEMENTED;
+    var ERR_MULTIPLE_CALLBACK = _require$codes.ERR_MULTIPLE_CALLBACK;
+    var ERR_STREAM_CANNOT_PIPE = _require$codes.ERR_STREAM_CANNOT_PIPE;
+    var ERR_STREAM_DESTROYED = _require$codes.ERR_STREAM_DESTROYED;
+    var ERR_STREAM_NULL_VALUES = _require$codes.ERR_STREAM_NULL_VALUES;
+    var ERR_STREAM_WRITE_AFTER_END = _require$codes.ERR_STREAM_WRITE_AFTER_END;
+    var ERR_UNKNOWN_ENCODING = _require$codes.ERR_UNKNOWN_ENCODING;
+    var errorOrDestroy = destroyImpl.errorOrDestroy;
+    require_inherits()(Writable, Stream);
+    function nop() {
+    }
+    function WritableState(options, stream, isDuplex) {
+      Duplex = Duplex || require_stream_duplex3();
+      options = options || {};
+      if (typeof isDuplex !== "boolean") isDuplex = stream instanceof Duplex;
+      this.objectMode = !!options.objectMode;
+      if (isDuplex) this.objectMode = this.objectMode || !!options.writableObjectMode;
+      this.highWaterMark = getHighWaterMark(this, options, "writableHighWaterMark", isDuplex);
+      this.finalCalled = false;
+      this.needDrain = false;
+      this.ending = false;
+      this.ended = false;
+      this.finished = false;
+      this.destroyed = false;
+      var noDecode = options.decodeStrings === false;
+      this.decodeStrings = !noDecode;
+      this.defaultEncoding = options.defaultEncoding || "utf8";
+      this.length = 0;
+      this.writing = false;
+      this.corked = 0;
+      this.sync = true;
+      this.bufferProcessing = false;
+      this.onwrite = function(er) {
+        onwrite(stream, er);
+      };
+      this.writecb = null;
+      this.writelen = 0;
+      this.bufferedRequest = null;
+      this.lastBufferedRequest = null;
+      this.pendingcb = 0;
+      this.prefinished = false;
+      this.errorEmitted = false;
+      this.emitClose = options.emitClose !== false;
+      this.autoDestroy = !!options.autoDestroy;
+      this.bufferedRequestCount = 0;
+      this.corkedRequestsFree = new CorkedRequest(this);
+    }
+    WritableState.prototype.getBuffer = function getBuffer() {
+      var current = this.bufferedRequest;
+      var out = [];
+      while (current) {
+        out.push(current);
+        current = current.next;
+      }
+      return out;
+    };
+    (function() {
+      try {
+        Object.defineProperty(WritableState.prototype, "buffer", {
+          get: internalUtil.deprecate(function writableStateBufferGetter() {
+            return this.getBuffer();
+          }, "_writableState.buffer is deprecated. Use _writableState.getBuffer instead.", "DEP0003")
+        });
+      } catch (_) {
+      }
+    })();
+    var realHasInstance;
+    if (typeof Symbol === "function" && Symbol.hasInstance && typeof Function.prototype[Symbol.hasInstance] === "function") {
+      realHasInstance = Function.prototype[Symbol.hasInstance];
+      Object.defineProperty(Writable, Symbol.hasInstance, {
+        value: function value(object) {
+          if (realHasInstance.call(this, object)) return true;
+          if (this !== Writable) return false;
+          return object && object._writableState instanceof WritableState;
+        }
+      });
+    } else {
+      realHasInstance = function realHasInstance2(object) {
+        return object instanceof this;
+      };
+    }
+    function Writable(options) {
+      Duplex = Duplex || require_stream_duplex3();
+      var isDuplex = this instanceof Duplex;
+      if (!isDuplex && !realHasInstance.call(Writable, this)) return new Writable(options);
+      this._writableState = new WritableState(options, this, isDuplex);
+      this.writable = true;
+      if (options) {
+        if (typeof options.write === "function") this._write = options.write;
+        if (typeof options.writev === "function") this._writev = options.writev;
+        if (typeof options.destroy === "function") this._destroy = options.destroy;
+        if (typeof options.final === "function") this._final = options.final;
+      }
+      Stream.call(this);
+    }
+    Writable.prototype.pipe = function() {
+      errorOrDestroy(this, new ERR_STREAM_CANNOT_PIPE());
+    };
+    function writeAfterEnd(stream, cb) {
+      var er = new ERR_STREAM_WRITE_AFTER_END();
+      errorOrDestroy(stream, er);
+      process.nextTick(cb, er);
+    }
+    function validChunk(stream, state, chunk, cb) {
+      var er;
+      if (chunk === null) {
+        er = new ERR_STREAM_NULL_VALUES();
+      } else if (typeof chunk !== "string" && !state.objectMode) {
+        er = new ERR_INVALID_ARG_TYPE("chunk", ["string", "Buffer"], chunk);
+      }
+      if (er) {
+        errorOrDestroy(stream, er);
+        process.nextTick(cb, er);
+        return false;
+      }
+      return true;
+    }
+    Writable.prototype.write = function(chunk, encoding, cb) {
+      var state = this._writableState;
+      var ret = false;
+      var isBuf = !state.objectMode && _isUint8Array(chunk);
+      if (isBuf && !Buffer2.isBuffer(chunk)) {
+        chunk = _uint8ArrayToBuffer(chunk);
+      }
+      if (typeof encoding === "function") {
+        cb = encoding;
+        encoding = null;
+      }
+      if (isBuf) encoding = "buffer";
+      else if (!encoding) encoding = state.defaultEncoding;
+      if (typeof cb !== "function") cb = nop;
+      if (state.ending) writeAfterEnd(this, cb);
+      else if (isBuf || validChunk(this, state, chunk, cb)) {
+        state.pendingcb++;
+        ret = writeOrBuffer(this, state, isBuf, chunk, encoding, cb);
+      }
+      return ret;
+    };
+    Writable.prototype.cork = function() {
+      this._writableState.corked++;
+    };
+    Writable.prototype.uncork = function() {
+      var state = this._writableState;
+      if (state.corked) {
+        state.corked--;
+        if (!state.writing && !state.corked && !state.bufferProcessing && state.bufferedRequest) clearBuffer(this, state);
+      }
+    };
+    Writable.prototype.setDefaultEncoding = function setDefaultEncoding(encoding) {
+      if (typeof encoding === "string") encoding = encoding.toLowerCase();
+      if (!(["hex", "utf8", "utf-8", "ascii", "binary", "base64", "ucs2", "ucs-2", "utf16le", "utf-16le", "raw"].indexOf((encoding + "").toLowerCase()) > -1)) throw new ERR_UNKNOWN_ENCODING(encoding);
+      this._writableState.defaultEncoding = encoding;
+      return this;
+    };
+    Object.defineProperty(Writable.prototype, "writableBuffer", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function get() {
+        return this._writableState && this._writableState.getBuffer();
+      }
+    });
+    function decodeChunk(state, chunk, encoding) {
+      if (!state.objectMode && state.decodeStrings !== false && typeof chunk === "string") {
+        chunk = Buffer2.from(chunk, encoding);
+      }
+      return chunk;
+    }
+    Object.defineProperty(Writable.prototype, "writableHighWaterMark", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function get() {
+        return this._writableState.highWaterMark;
+      }
+    });
+    function writeOrBuffer(stream, state, isBuf, chunk, encoding, cb) {
+      if (!isBuf) {
+        var newChunk = decodeChunk(state, chunk, encoding);
+        if (chunk !== newChunk) {
+          isBuf = true;
+          encoding = "buffer";
+          chunk = newChunk;
+        }
+      }
+      var len = state.objectMode ? 1 : chunk.length;
+      state.length += len;
+      var ret = state.length < state.highWaterMark;
+      if (!ret) state.needDrain = true;
+      if (state.writing || state.corked) {
+        var last = state.lastBufferedRequest;
+        state.lastBufferedRequest = {
+          chunk,
+          encoding,
+          isBuf,
+          callback: cb,
+          next: null
+        };
+        if (last) {
+          last.next = state.lastBufferedRequest;
+        } else {
+          state.bufferedRequest = state.lastBufferedRequest;
+        }
+        state.bufferedRequestCount += 1;
+      } else {
+        doWrite(stream, state, false, len, chunk, encoding, cb);
+      }
+      return ret;
+    }
+    function doWrite(stream, state, writev, len, chunk, encoding, cb) {
+      state.writelen = len;
+      state.writecb = cb;
+      state.writing = true;
+      state.sync = true;
+      if (state.destroyed) state.onwrite(new ERR_STREAM_DESTROYED("write"));
+      else if (writev) stream._writev(chunk, state.onwrite);
+      else stream._write(chunk, encoding, state.onwrite);
+      state.sync = false;
+    }
+    function onwriteError(stream, state, sync, er, cb) {
+      --state.pendingcb;
+      if (sync) {
+        process.nextTick(cb, er);
+        process.nextTick(finishMaybe, stream, state);
+        stream._writableState.errorEmitted = true;
+        errorOrDestroy(stream, er);
+      } else {
+        cb(er);
+        stream._writableState.errorEmitted = true;
+        errorOrDestroy(stream, er);
+        finishMaybe(stream, state);
+      }
+    }
+    function onwriteStateUpdate(state) {
+      state.writing = false;
+      state.writecb = null;
+      state.length -= state.writelen;
+      state.writelen = 0;
+    }
+    function onwrite(stream, er) {
+      var state = stream._writableState;
+      var sync = state.sync;
+      var cb = state.writecb;
+      if (typeof cb !== "function") throw new ERR_MULTIPLE_CALLBACK();
+      onwriteStateUpdate(state);
+      if (er) onwriteError(stream, state, sync, er, cb);
+      else {
+        var finished = needFinish(state) || stream.destroyed;
+        if (!finished && !state.corked && !state.bufferProcessing && state.bufferedRequest) {
+          clearBuffer(stream, state);
+        }
+        if (sync) {
+          process.nextTick(afterWrite, stream, state, finished, cb);
+        } else {
+          afterWrite(stream, state, finished, cb);
+        }
+      }
+    }
+    function afterWrite(stream, state, finished, cb) {
+      if (!finished) onwriteDrain(stream, state);
+      state.pendingcb--;
+      cb();
+      finishMaybe(stream, state);
+    }
+    function onwriteDrain(stream, state) {
+      if (state.length === 0 && state.needDrain) {
+        state.needDrain = false;
+        stream.emit("drain");
+      }
+    }
+    function clearBuffer(stream, state) {
+      state.bufferProcessing = true;
+      var entry = state.bufferedRequest;
+      if (stream._writev && entry && entry.next) {
+        var l = state.bufferedRequestCount;
+        var buffer = new Array(l);
+        var holder = state.corkedRequestsFree;
+        holder.entry = entry;
+        var count = 0;
+        var allBuffers = true;
+        while (entry) {
+          buffer[count] = entry;
+          if (!entry.isBuf) allBuffers = false;
+          entry = entry.next;
+          count += 1;
+        }
+        buffer.allBuffers = allBuffers;
+        doWrite(stream, state, true, state.length, buffer, "", holder.finish);
+        state.pendingcb++;
+        state.lastBufferedRequest = null;
+        if (holder.next) {
+          state.corkedRequestsFree = holder.next;
+          holder.next = null;
+        } else {
+          state.corkedRequestsFree = new CorkedRequest(state);
+        }
+        state.bufferedRequestCount = 0;
+      } else {
+        while (entry) {
+          var chunk = entry.chunk;
+          var encoding = entry.encoding;
+          var cb = entry.callback;
+          var len = state.objectMode ? 1 : chunk.length;
+          doWrite(stream, state, false, len, chunk, encoding, cb);
+          entry = entry.next;
+          state.bufferedRequestCount--;
+          if (state.writing) {
+            break;
+          }
+        }
+        if (entry === null) state.lastBufferedRequest = null;
+      }
+      state.bufferedRequest = entry;
+      state.bufferProcessing = false;
+    }
+    Writable.prototype._write = function(chunk, encoding, cb) {
+      cb(new ERR_METHOD_NOT_IMPLEMENTED("_write()"));
+    };
+    Writable.prototype._writev = null;
+    Writable.prototype.end = function(chunk, encoding, cb) {
+      var state = this._writableState;
+      if (typeof chunk === "function") {
+        cb = chunk;
+        chunk = null;
+        encoding = null;
+      } else if (typeof encoding === "function") {
+        cb = encoding;
+        encoding = null;
+      }
+      if (chunk !== null && chunk !== void 0) this.write(chunk, encoding);
+      if (state.corked) {
+        state.corked = 1;
+        this.uncork();
+      }
+      if (!state.ending) endWritable(this, state, cb);
+      return this;
+    };
+    Object.defineProperty(Writable.prototype, "writableLength", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function get() {
+        return this._writableState.length;
+      }
+    });
+    function needFinish(state) {
+      return state.ending && state.length === 0 && state.bufferedRequest === null && !state.finished && !state.writing;
+    }
+    function callFinal(stream, state) {
+      stream._final(function(err) {
+        state.pendingcb--;
+        if (err) {
+          errorOrDestroy(stream, err);
+        }
+        state.prefinished = true;
+        stream.emit("prefinish");
+        finishMaybe(stream, state);
+      });
+    }
+    function prefinish(stream, state) {
+      if (!state.prefinished && !state.finalCalled) {
+        if (typeof stream._final === "function" && !state.destroyed) {
+          state.pendingcb++;
+          state.finalCalled = true;
+          process.nextTick(callFinal, stream, state);
+        } else {
+          state.prefinished = true;
+          stream.emit("prefinish");
+        }
+      }
+    }
+    function finishMaybe(stream, state) {
+      var need = needFinish(state);
+      if (need) {
+        prefinish(stream, state);
+        if (state.pendingcb === 0) {
+          state.finished = true;
+          stream.emit("finish");
+          if (state.autoDestroy) {
+            var rState = stream._readableState;
+            if (!rState || rState.autoDestroy && rState.endEmitted) {
+              stream.destroy();
+            }
+          }
+        }
+      }
+      return need;
+    }
+    function endWritable(stream, state, cb) {
+      state.ending = true;
+      finishMaybe(stream, state);
+      if (cb) {
+        if (state.finished) process.nextTick(cb);
+        else stream.once("finish", cb);
+      }
+      state.ended = true;
+      stream.writable = false;
+    }
+    function onCorkedFinish(corkReq, state, err) {
+      var entry = corkReq.entry;
+      corkReq.entry = null;
+      while (entry) {
+        var cb = entry.callback;
+        state.pendingcb--;
+        cb(err);
+        entry = entry.next;
+      }
+      state.corkedRequestsFree.next = corkReq;
+    }
+    Object.defineProperty(Writable.prototype, "destroyed", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function get() {
+        if (this._writableState === void 0) {
+          return false;
+        }
+        return this._writableState.destroyed;
+      },
+      set: function set(value) {
+        if (!this._writableState) {
+          return;
+        }
+        this._writableState.destroyed = value;
+      }
+    });
+    Writable.prototype.destroy = destroyImpl.destroy;
+    Writable.prototype._undestroy = destroyImpl.undestroy;
+    Writable.prototype._destroy = function(err, cb) {
+      cb(err);
+    };
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/lib/_stream_duplex.js
+var require_stream_duplex3 = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/lib/_stream_duplex.js"(exports, module) {
+    "use strict";
+    var objectKeys = Object.keys || function(obj) {
+      var keys2 = [];
+      for (var key in obj) keys2.push(key);
+      return keys2;
+    };
+    module.exports = Duplex;
+    var Readable = require_stream_readable3();
+    var Writable = require_stream_writable3();
+    require_inherits()(Duplex, Readable);
+    {
+      keys = objectKeys(Writable.prototype);
+      for (v = 0; v < keys.length; v++) {
+        method = keys[v];
+        if (!Duplex.prototype[method]) Duplex.prototype[method] = Writable.prototype[method];
+      }
+    }
+    var keys;
+    var method;
+    var v;
+    function Duplex(options) {
+      if (!(this instanceof Duplex)) return new Duplex(options);
+      Readable.call(this, options);
+      Writable.call(this, options);
+      this.allowHalfOpen = true;
+      if (options) {
+        if (options.readable === false) this.readable = false;
+        if (options.writable === false) this.writable = false;
+        if (options.allowHalfOpen === false) {
+          this.allowHalfOpen = false;
+          this.once("end", onend);
+        }
+      }
+    }
+    Object.defineProperty(Duplex.prototype, "writableHighWaterMark", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function get() {
+        return this._writableState.highWaterMark;
+      }
+    });
+    Object.defineProperty(Duplex.prototype, "writableBuffer", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function get() {
+        return this._writableState && this._writableState.getBuffer();
+      }
+    });
+    Object.defineProperty(Duplex.prototype, "writableLength", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function get() {
+        return this._writableState.length;
+      }
+    });
+    function onend() {
+      if (this._writableState.ended) return;
+      process.nextTick(onEndNT, this);
+    }
+    function onEndNT(self2) {
+      self2.end();
+    }
+    Object.defineProperty(Duplex.prototype, "destroyed", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function get() {
+        if (this._readableState === void 0 || this._writableState === void 0) {
+          return false;
+        }
+        return this._readableState.destroyed && this._writableState.destroyed;
+      },
+      set: function set(value) {
+        if (this._readableState === void 0 || this._writableState === void 0) {
+          return;
+        }
+        this._readableState.destroyed = value;
+        this._writableState.destroyed = value;
+      }
+    });
+  }
+});
+
+// node_modules/safe-buffer/index.js
+var require_safe_buffer3 = __commonJS({
+  "node_modules/safe-buffer/index.js"(exports, module) {
+    var buffer = __require("buffer");
+    var Buffer2 = buffer.Buffer;
+    function copyProps(src, dst) {
+      for (var key in src) {
+        dst[key] = src[key];
+      }
+    }
+    if (Buffer2.from && Buffer2.alloc && Buffer2.allocUnsafe && Buffer2.allocUnsafeSlow) {
+      module.exports = buffer;
+    } else {
+      copyProps(buffer, exports);
+      exports.Buffer = SafeBuffer;
+    }
+    function SafeBuffer(arg, encodingOrOffset, length) {
+      return Buffer2(arg, encodingOrOffset, length);
+    }
+    SafeBuffer.prototype = Object.create(Buffer2.prototype);
+    copyProps(Buffer2, SafeBuffer);
+    SafeBuffer.from = function(arg, encodingOrOffset, length) {
+      if (typeof arg === "number") {
+        throw new TypeError("Argument must not be a number");
+      }
+      return Buffer2(arg, encodingOrOffset, length);
+    };
+    SafeBuffer.alloc = function(size, fill, encoding) {
+      if (typeof size !== "number") {
+        throw new TypeError("Argument must be a number");
+      }
+      var buf = Buffer2(size);
+      if (fill !== void 0) {
+        if (typeof encoding === "string") {
+          buf.fill(fill, encoding);
+        } else {
+          buf.fill(fill);
+        }
+      } else {
+        buf.fill(0);
+      }
+      return buf;
+    };
+    SafeBuffer.allocUnsafe = function(size) {
+      if (typeof size !== "number") {
+        throw new TypeError("Argument must be a number");
+      }
+      return Buffer2(size);
+    };
+    SafeBuffer.allocUnsafeSlow = function(size) {
+      if (typeof size !== "number") {
+        throw new TypeError("Argument must be a number");
+      }
+      return buffer.SlowBuffer(size);
+    };
+  }
+});
+
+// node_modules/string_decoder/lib/string_decoder.js
+var require_string_decoder3 = __commonJS({
+  "node_modules/string_decoder/lib/string_decoder.js"(exports) {
+    "use strict";
+    var Buffer2 = require_safe_buffer3().Buffer;
+    var isEncoding = Buffer2.isEncoding || function(encoding) {
+      encoding = "" + encoding;
+      switch (encoding && encoding.toLowerCase()) {
+        case "hex":
+        case "utf8":
+        case "utf-8":
+        case "ascii":
+        case "binary":
+        case "base64":
+        case "ucs2":
+        case "ucs-2":
+        case "utf16le":
+        case "utf-16le":
+        case "raw":
+          return true;
+        default:
+          return false;
+      }
+    };
+    function _normalizeEncoding(enc) {
+      if (!enc) return "utf8";
+      var retried;
+      while (true) {
+        switch (enc) {
+          case "utf8":
+          case "utf-8":
+            return "utf8";
+          case "ucs2":
+          case "ucs-2":
+          case "utf16le":
+          case "utf-16le":
+            return "utf16le";
+          case "latin1":
+          case "binary":
+            return "latin1";
+          case "base64":
+          case "ascii":
+          case "hex":
+            return enc;
+          default:
+            if (retried) return;
+            enc = ("" + enc).toLowerCase();
+            retried = true;
+        }
+      }
+    }
+    function normalizeEncoding(enc) {
+      var nenc = _normalizeEncoding(enc);
+      if (typeof nenc !== "string" && (Buffer2.isEncoding === isEncoding || !isEncoding(enc))) throw new Error("Unknown encoding: " + enc);
+      return nenc || enc;
+    }
+    exports.StringDecoder = StringDecoder;
+    function StringDecoder(encoding) {
+      this.encoding = normalizeEncoding(encoding);
+      var nb;
+      switch (this.encoding) {
+        case "utf16le":
+          this.text = utf16Text;
+          this.end = utf16End;
+          nb = 4;
+          break;
+        case "utf8":
+          this.fillLast = utf8FillLast;
+          nb = 4;
+          break;
+        case "base64":
+          this.text = base64Text;
+          this.end = base64End;
+          nb = 3;
+          break;
+        default:
+          this.write = simpleWrite;
+          this.end = simpleEnd;
+          return;
+      }
+      this.lastNeed = 0;
+      this.lastTotal = 0;
+      this.lastChar = Buffer2.allocUnsafe(nb);
+    }
+    StringDecoder.prototype.write = function(buf) {
+      if (buf.length === 0) return "";
+      var r;
+      var i;
+      if (this.lastNeed) {
+        r = this.fillLast(buf);
+        if (r === void 0) return "";
+        i = this.lastNeed;
+        this.lastNeed = 0;
+      } else {
+        i = 0;
+      }
+      if (i < buf.length) return r ? r + this.text(buf, i) : this.text(buf, i);
+      return r || "";
+    };
+    StringDecoder.prototype.end = utf8End;
+    StringDecoder.prototype.text = utf8Text;
+    StringDecoder.prototype.fillLast = function(buf) {
+      if (this.lastNeed <= buf.length) {
+        buf.copy(this.lastChar, this.lastTotal - this.lastNeed, 0, this.lastNeed);
+        return this.lastChar.toString(this.encoding, 0, this.lastTotal);
+      }
+      buf.copy(this.lastChar, this.lastTotal - this.lastNeed, 0, buf.length);
+      this.lastNeed -= buf.length;
+    };
+    function utf8CheckByte(byte) {
+      if (byte <= 127) return 0;
+      else if (byte >> 5 === 6) return 2;
+      else if (byte >> 4 === 14) return 3;
+      else if (byte >> 3 === 30) return 4;
+      return byte >> 6 === 2 ? -1 : -2;
+    }
+    function utf8CheckIncomplete(self2, buf, i) {
+      var j = buf.length - 1;
+      if (j < i) return 0;
+      var nb = utf8CheckByte(buf[j]);
+      if (nb >= 0) {
+        if (nb > 0) self2.lastNeed = nb - 1;
+        return nb;
+      }
+      if (--j < i || nb === -2) return 0;
+      nb = utf8CheckByte(buf[j]);
+      if (nb >= 0) {
+        if (nb > 0) self2.lastNeed = nb - 2;
+        return nb;
+      }
+      if (--j < i || nb === -2) return 0;
+      nb = utf8CheckByte(buf[j]);
+      if (nb >= 0) {
+        if (nb > 0) {
+          if (nb === 2) nb = 0;
+          else self2.lastNeed = nb - 3;
+        }
+        return nb;
+      }
+      return 0;
+    }
+    function utf8CheckExtraBytes(self2, buf, p) {
+      if ((buf[0] & 192) !== 128) {
+        self2.lastNeed = 0;
+        return "\uFFFD";
+      }
+      if (self2.lastNeed > 1 && buf.length > 1) {
+        if ((buf[1] & 192) !== 128) {
+          self2.lastNeed = 1;
+          return "\uFFFD";
+        }
+        if (self2.lastNeed > 2 && buf.length > 2) {
+          if ((buf[2] & 192) !== 128) {
+            self2.lastNeed = 2;
+            return "\uFFFD";
+          }
+        }
+      }
+    }
+    function utf8FillLast(buf) {
+      var p = this.lastTotal - this.lastNeed;
+      var r = utf8CheckExtraBytes(this, buf, p);
+      if (r !== void 0) return r;
+      if (this.lastNeed <= buf.length) {
+        buf.copy(this.lastChar, p, 0, this.lastNeed);
+        return this.lastChar.toString(this.encoding, 0, this.lastTotal);
+      }
+      buf.copy(this.lastChar, p, 0, buf.length);
+      this.lastNeed -= buf.length;
+    }
+    function utf8Text(buf, i) {
+      var total = utf8CheckIncomplete(this, buf, i);
+      if (!this.lastNeed) return buf.toString("utf8", i);
+      this.lastTotal = total;
+      var end = buf.length - (total - this.lastNeed);
+      buf.copy(this.lastChar, 0, end);
+      return buf.toString("utf8", i, end);
+    }
+    function utf8End(buf) {
+      var r = buf && buf.length ? this.write(buf) : "";
+      if (this.lastNeed) return r + "\uFFFD";
+      return r;
+    }
+    function utf16Text(buf, i) {
+      if ((buf.length - i) % 2 === 0) {
+        var r = buf.toString("utf16le", i);
+        if (r) {
+          var c = r.charCodeAt(r.length - 1);
+          if (c >= 55296 && c <= 56319) {
+            this.lastNeed = 2;
+            this.lastTotal = 4;
+            this.lastChar[0] = buf[buf.length - 2];
+            this.lastChar[1] = buf[buf.length - 1];
+            return r.slice(0, -1);
+          }
+        }
+        return r;
+      }
+      this.lastNeed = 1;
+      this.lastTotal = 2;
+      this.lastChar[0] = buf[buf.length - 1];
+      return buf.toString("utf16le", i, buf.length - 1);
+    }
+    function utf16End(buf) {
+      var r = buf && buf.length ? this.write(buf) : "";
+      if (this.lastNeed) {
+        var end = this.lastTotal - this.lastNeed;
+        return r + this.lastChar.toString("utf16le", 0, end);
+      }
+      return r;
+    }
+    function base64Text(buf, i) {
+      var n = (buf.length - i) % 3;
+      if (n === 0) return buf.toString("base64", i);
+      this.lastNeed = 3 - n;
+      this.lastTotal = 3;
+      if (n === 1) {
+        this.lastChar[0] = buf[buf.length - 1];
+      } else {
+        this.lastChar[0] = buf[buf.length - 2];
+        this.lastChar[1] = buf[buf.length - 1];
+      }
+      return buf.toString("base64", i, buf.length - n);
+    }
+    function base64End(buf) {
+      var r = buf && buf.length ? this.write(buf) : "";
+      if (this.lastNeed) return r + this.lastChar.toString("base64", 0, 3 - this.lastNeed);
+      return r;
+    }
+    function simpleWrite(buf) {
+      return buf.toString(this.encoding);
+    }
+    function simpleEnd(buf) {
+      return buf && buf.length ? this.write(buf) : "";
+    }
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/end-of-stream.js
+var require_end_of_stream2 = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/end-of-stream.js"(exports, module) {
+    "use strict";
+    var ERR_STREAM_PREMATURE_CLOSE = require_errors6().codes.ERR_STREAM_PREMATURE_CLOSE;
+    function once(callback) {
+      var called = false;
+      return function() {
+        if (called) return;
+        called = true;
+        for (var _len = arguments.length, args = new Array(_len), _key = 0; _key < _len; _key++) {
+          args[_key] = arguments[_key];
+        }
+        callback.apply(this, args);
+      };
+    }
+    function noop() {
+    }
+    function isRequest(stream) {
+      return stream.setHeader && typeof stream.abort === "function";
+    }
+    function eos(stream, opts, callback) {
+      if (typeof opts === "function") return eos(stream, null, opts);
+      if (!opts) opts = {};
+      callback = once(callback || noop);
+      var readable = opts.readable || opts.readable !== false && stream.readable;
+      var writable = opts.writable || opts.writable !== false && stream.writable;
+      var onlegacyfinish = function onlegacyfinish2() {
+        if (!stream.writable) onfinish();
+      };
+      var writableEnded = stream._writableState && stream._writableState.finished;
+      var onfinish = function onfinish2() {
+        writable = false;
+        writableEnded = true;
+        if (!readable) callback.call(stream);
+      };
+      var readableEnded = stream._readableState && stream._readableState.endEmitted;
+      var onend = function onend2() {
+        readable = false;
+        readableEnded = true;
+        if (!writable) callback.call(stream);
+      };
+      var onerror = function onerror2(err) {
+        callback.call(stream, err);
+      };
+      var onclose = function onclose2() {
+        var err;
+        if (readable && !readableEnded) {
+          if (!stream._readableState || !stream._readableState.ended) err = new ERR_STREAM_PREMATURE_CLOSE();
+          return callback.call(stream, err);
+        }
+        if (writable && !writableEnded) {
+          if (!stream._writableState || !stream._writableState.ended) err = new ERR_STREAM_PREMATURE_CLOSE();
+          return callback.call(stream, err);
+        }
+      };
+      var onrequest = function onrequest2() {
+        stream.req.on("finish", onfinish);
+      };
+      if (isRequest(stream)) {
+        stream.on("complete", onfinish);
+        stream.on("abort", onclose);
+        if (stream.req) onrequest();
+        else stream.on("request", onrequest);
+      } else if (writable && !stream._writableState) {
+        stream.on("end", onlegacyfinish);
+        stream.on("close", onlegacyfinish);
+      }
+      stream.on("end", onend);
+      stream.on("finish", onfinish);
+      if (opts.error !== false) stream.on("error", onerror);
+      stream.on("close", onclose);
+      return function() {
+        stream.removeListener("complete", onfinish);
+        stream.removeListener("abort", onclose);
+        stream.removeListener("request", onrequest);
+        if (stream.req) stream.req.removeListener("finish", onfinish);
+        stream.removeListener("end", onlegacyfinish);
+        stream.removeListener("close", onlegacyfinish);
+        stream.removeListener("finish", onfinish);
+        stream.removeListener("end", onend);
+        stream.removeListener("error", onerror);
+        stream.removeListener("close", onclose);
+      };
+    }
+    module.exports = eos;
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/async_iterator.js
+var require_async_iterator = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/async_iterator.js"(exports, module) {
+    "use strict";
+    var _Object$setPrototypeO;
+    function _defineProperty(obj, key, value) {
+      key = _toPropertyKey(key);
+      if (key in obj) {
+        Object.defineProperty(obj, key, { value, enumerable: true, configurable: true, writable: true });
+      } else {
+        obj[key] = value;
+      }
+      return obj;
+    }
+    function _toPropertyKey(arg) {
+      var key = _toPrimitive(arg, "string");
+      return typeof key === "symbol" ? key : String(key);
+    }
+    function _toPrimitive(input, hint) {
+      if (typeof input !== "object" || input === null) return input;
+      var prim = input[Symbol.toPrimitive];
+      if (prim !== void 0) {
+        var res = prim.call(input, hint || "default");
+        if (typeof res !== "object") return res;
+        throw new TypeError("@@toPrimitive must return a primitive value.");
+      }
+      return (hint === "string" ? String : Number)(input);
+    }
+    var finished = require_end_of_stream2();
+    var kLastResolve = /* @__PURE__ */ Symbol("lastResolve");
+    var kLastReject = /* @__PURE__ */ Symbol("lastReject");
+    var kError = /* @__PURE__ */ Symbol("error");
+    var kEnded = /* @__PURE__ */ Symbol("ended");
+    var kLastPromise = /* @__PURE__ */ Symbol("lastPromise");
+    var kHandlePromise = /* @__PURE__ */ Symbol("handlePromise");
+    var kStream = /* @__PURE__ */ Symbol("stream");
+    function createIterResult(value, done) {
+      return {
+        value,
+        done
+      };
+    }
+    function readAndResolve(iter) {
+      var resolve = iter[kLastResolve];
+      if (resolve !== null) {
+        var data = iter[kStream].read();
+        if (data !== null) {
+          iter[kLastPromise] = null;
+          iter[kLastResolve] = null;
+          iter[kLastReject] = null;
+          resolve(createIterResult(data, false));
+        }
+      }
+    }
+    function onReadable(iter) {
+      process.nextTick(readAndResolve, iter);
+    }
+    function wrapForNext(lastPromise, iter) {
+      return function(resolve, reject) {
+        lastPromise.then(function() {
+          if (iter[kEnded]) {
+            resolve(createIterResult(void 0, true));
+            return;
+          }
+          iter[kHandlePromise](resolve, reject);
+        }, reject);
+      };
+    }
+    var AsyncIteratorPrototype = Object.getPrototypeOf(function() {
+    });
+    var ReadableStreamAsyncIteratorPrototype = Object.setPrototypeOf((_Object$setPrototypeO = {
+      get stream() {
+        return this[kStream];
+      },
+      next: function next() {
+        var _this = this;
+        var error = this[kError];
+        if (error !== null) {
+          return Promise.reject(error);
+        }
+        if (this[kEnded]) {
+          return Promise.resolve(createIterResult(void 0, true));
+        }
+        if (this[kStream].destroyed) {
+          return new Promise(function(resolve, reject) {
+            process.nextTick(function() {
+              if (_this[kError]) {
+                reject(_this[kError]);
+              } else {
+                resolve(createIterResult(void 0, true));
+              }
+            });
+          });
+        }
+        var lastPromise = this[kLastPromise];
+        var promise;
+        if (lastPromise) {
+          promise = new Promise(wrapForNext(lastPromise, this));
+        } else {
+          var data = this[kStream].read();
+          if (data !== null) {
+            return Promise.resolve(createIterResult(data, false));
+          }
+          promise = new Promise(this[kHandlePromise]);
+        }
+        this[kLastPromise] = promise;
+        return promise;
+      }
+    }, _defineProperty(_Object$setPrototypeO, Symbol.asyncIterator, function() {
+      return this;
+    }), _defineProperty(_Object$setPrototypeO, "return", function _return() {
+      var _this2 = this;
+      return new Promise(function(resolve, reject) {
+        _this2[kStream].destroy(null, function(err) {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve(createIterResult(void 0, true));
+        });
+      });
+    }), _Object$setPrototypeO), AsyncIteratorPrototype);
+    var createReadableStreamAsyncIterator = function createReadableStreamAsyncIterator2(stream) {
+      var _Object$create;
+      var iterator = Object.create(ReadableStreamAsyncIteratorPrototype, (_Object$create = {}, _defineProperty(_Object$create, kStream, {
+        value: stream,
+        writable: true
+      }), _defineProperty(_Object$create, kLastResolve, {
+        value: null,
+        writable: true
+      }), _defineProperty(_Object$create, kLastReject, {
+        value: null,
+        writable: true
+      }), _defineProperty(_Object$create, kError, {
+        value: null,
+        writable: true
+      }), _defineProperty(_Object$create, kEnded, {
+        value: stream._readableState.endEmitted,
+        writable: true
+      }), _defineProperty(_Object$create, kHandlePromise, {
+        value: function value(resolve, reject) {
+          var data = iterator[kStream].read();
+          if (data) {
+            iterator[kLastPromise] = null;
+            iterator[kLastResolve] = null;
+            iterator[kLastReject] = null;
+            resolve(createIterResult(data, false));
+          } else {
+            iterator[kLastResolve] = resolve;
+            iterator[kLastReject] = reject;
+          }
+        },
+        writable: true
+      }), _Object$create));
+      iterator[kLastPromise] = null;
+      finished(stream, function(err) {
+        if (err && err.code !== "ERR_STREAM_PREMATURE_CLOSE") {
+          var reject = iterator[kLastReject];
+          if (reject !== null) {
+            iterator[kLastPromise] = null;
+            iterator[kLastResolve] = null;
+            iterator[kLastReject] = null;
+            reject(err);
+          }
+          iterator[kError] = err;
+          return;
+        }
+        var resolve = iterator[kLastResolve];
+        if (resolve !== null) {
+          iterator[kLastPromise] = null;
+          iterator[kLastResolve] = null;
+          iterator[kLastReject] = null;
+          resolve(createIterResult(void 0, true));
+        }
+        iterator[kEnded] = true;
+      });
+      stream.on("readable", onReadable.bind(null, iterator));
+      return iterator;
+    };
+    module.exports = createReadableStreamAsyncIterator;
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/from.js
+var require_from = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/from.js"(exports, module) {
+    "use strict";
+    function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
+      try {
+        var info = gen[key](arg);
+        var value = info.value;
+      } catch (error) {
+        reject(error);
+        return;
+      }
+      if (info.done) {
+        resolve(value);
+      } else {
+        Promise.resolve(value).then(_next, _throw);
+      }
+    }
+    function _asyncToGenerator(fn) {
+      return function() {
+        var self2 = this, args = arguments;
+        return new Promise(function(resolve, reject) {
+          var gen = fn.apply(self2, args);
+          function _next(value) {
+            asyncGeneratorStep(gen, resolve, reject, _next, _throw, "next", value);
+          }
+          function _throw(err) {
+            asyncGeneratorStep(gen, resolve, reject, _next, _throw, "throw", err);
+          }
+          _next(void 0);
+        });
+      };
+    }
+    function ownKeys(object, enumerableOnly) {
+      var keys = Object.keys(object);
+      if (Object.getOwnPropertySymbols) {
+        var symbols = Object.getOwnPropertySymbols(object);
+        enumerableOnly && (symbols = symbols.filter(function(sym) {
+          return Object.getOwnPropertyDescriptor(object, sym).enumerable;
+        })), keys.push.apply(keys, symbols);
+      }
+      return keys;
+    }
+    function _objectSpread(target) {
+      for (var i = 1; i < arguments.length; i++) {
+        var source = null != arguments[i] ? arguments[i] : {};
+        i % 2 ? ownKeys(Object(source), true).forEach(function(key) {
+          _defineProperty(target, key, source[key]);
+        }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(target, Object.getOwnPropertyDescriptors(source)) : ownKeys(Object(source)).forEach(function(key) {
+          Object.defineProperty(target, key, Object.getOwnPropertyDescriptor(source, key));
+        });
+      }
+      return target;
+    }
+    function _defineProperty(obj, key, value) {
+      key = _toPropertyKey(key);
+      if (key in obj) {
+        Object.defineProperty(obj, key, { value, enumerable: true, configurable: true, writable: true });
+      } else {
+        obj[key] = value;
+      }
+      return obj;
+    }
+    function _toPropertyKey(arg) {
+      var key = _toPrimitive(arg, "string");
+      return typeof key === "symbol" ? key : String(key);
+    }
+    function _toPrimitive(input, hint) {
+      if (typeof input !== "object" || input === null) return input;
+      var prim = input[Symbol.toPrimitive];
+      if (prim !== void 0) {
+        var res = prim.call(input, hint || "default");
+        if (typeof res !== "object") return res;
+        throw new TypeError("@@toPrimitive must return a primitive value.");
+      }
+      return (hint === "string" ? String : Number)(input);
+    }
+    var ERR_INVALID_ARG_TYPE = require_errors6().codes.ERR_INVALID_ARG_TYPE;
+    function from(Readable, iterable, opts) {
+      var iterator;
+      if (iterable && typeof iterable.next === "function") {
+        iterator = iterable;
+      } else if (iterable && iterable[Symbol.asyncIterator]) iterator = iterable[Symbol.asyncIterator]();
+      else if (iterable && iterable[Symbol.iterator]) iterator = iterable[Symbol.iterator]();
+      else throw new ERR_INVALID_ARG_TYPE("iterable", ["Iterable"], iterable);
+      var readable = new Readable(_objectSpread({
+        objectMode: true
+      }, opts));
+      var reading = false;
+      readable._read = function() {
+        if (!reading) {
+          reading = true;
+          next();
+        }
+      };
+      function next() {
+        return _next2.apply(this, arguments);
+      }
+      function _next2() {
+        _next2 = _asyncToGenerator(function* () {
+          try {
+            var _yield$iterator$next = yield iterator.next(), value = _yield$iterator$next.value, done = _yield$iterator$next.done;
+            if (done) {
+              readable.push(null);
+            } else if (readable.push(yield value)) {
+              next();
+            } else {
+              reading = false;
+            }
+          } catch (err) {
+            readable.destroy(err);
+          }
+        });
+        return _next2.apply(this, arguments);
+      }
+      return readable;
+    }
+    module.exports = from;
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/lib/_stream_readable.js
+var require_stream_readable3 = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/lib/_stream_readable.js"(exports, module) {
+    "use strict";
+    module.exports = Readable;
+    var Duplex;
+    Readable.ReadableState = ReadableState;
+    var EE = __require("events").EventEmitter;
+    var EElistenerCount = function EElistenerCount2(emitter, type) {
+      return emitter.listeners(type).length;
+    };
+    var Stream = require_stream3();
+    var Buffer2 = __require("buffer").Buffer;
+    var OurUint8Array = (typeof global !== "undefined" ? global : typeof window !== "undefined" ? window : typeof self !== "undefined" ? self : {}).Uint8Array || function() {
+    };
+    function _uint8ArrayToBuffer(chunk) {
+      return Buffer2.from(chunk);
+    }
+    function _isUint8Array(obj) {
+      return Buffer2.isBuffer(obj) || obj instanceof OurUint8Array;
+    }
+    var debugUtil = __require("util");
+    var debug;
+    if (debugUtil && debugUtil.debuglog) {
+      debug = debugUtil.debuglog("stream");
+    } else {
+      debug = function debug2() {
+      };
+    }
+    var BufferList = require_buffer_list();
+    var destroyImpl = require_destroy3();
+    var _require = require_state();
+    var getHighWaterMark = _require.getHighWaterMark;
+    var _require$codes = require_errors6().codes;
+    var ERR_INVALID_ARG_TYPE = _require$codes.ERR_INVALID_ARG_TYPE;
+    var ERR_STREAM_PUSH_AFTER_EOF = _require$codes.ERR_STREAM_PUSH_AFTER_EOF;
+    var ERR_METHOD_NOT_IMPLEMENTED = _require$codes.ERR_METHOD_NOT_IMPLEMENTED;
+    var ERR_STREAM_UNSHIFT_AFTER_END_EVENT = _require$codes.ERR_STREAM_UNSHIFT_AFTER_END_EVENT;
+    var StringDecoder;
+    var createReadableStreamAsyncIterator;
+    var from;
+    require_inherits()(Readable, Stream);
+    var errorOrDestroy = destroyImpl.errorOrDestroy;
+    var kProxyEvents = ["error", "close", "destroy", "pause", "resume"];
+    function prependListener(emitter, event, fn) {
+      if (typeof emitter.prependListener === "function") return emitter.prependListener(event, fn);
+      if (!emitter._events || !emitter._events[event]) emitter.on(event, fn);
+      else if (Array.isArray(emitter._events[event])) emitter._events[event].unshift(fn);
+      else emitter._events[event] = [fn, emitter._events[event]];
+    }
+    function ReadableState(options, stream, isDuplex) {
+      Duplex = Duplex || require_stream_duplex3();
+      options = options || {};
+      if (typeof isDuplex !== "boolean") isDuplex = stream instanceof Duplex;
+      this.objectMode = !!options.objectMode;
+      if (isDuplex) this.objectMode = this.objectMode || !!options.readableObjectMode;
+      this.highWaterMark = getHighWaterMark(this, options, "readableHighWaterMark", isDuplex);
+      this.buffer = new BufferList();
+      this.length = 0;
+      this.pipes = null;
+      this.pipesCount = 0;
+      this.flowing = null;
+      this.ended = false;
+      this.endEmitted = false;
+      this.reading = false;
+      this.sync = true;
+      this.needReadable = false;
+      this.emittedReadable = false;
+      this.readableListening = false;
+      this.resumeScheduled = false;
+      this.paused = true;
+      this.emitClose = options.emitClose !== false;
+      this.autoDestroy = !!options.autoDestroy;
+      this.destroyed = false;
+      this.defaultEncoding = options.defaultEncoding || "utf8";
+      this.awaitDrain = 0;
+      this.readingMore = false;
+      this.decoder = null;
+      this.encoding = null;
+      if (options.encoding) {
+        if (!StringDecoder) StringDecoder = require_string_decoder3().StringDecoder;
+        this.decoder = new StringDecoder(options.encoding);
+        this.encoding = options.encoding;
+      }
+    }
+    function Readable(options) {
+      Duplex = Duplex || require_stream_duplex3();
+      if (!(this instanceof Readable)) return new Readable(options);
+      var isDuplex = this instanceof Duplex;
+      this._readableState = new ReadableState(options, this, isDuplex);
+      this.readable = true;
+      if (options) {
+        if (typeof options.read === "function") this._read = options.read;
+        if (typeof options.destroy === "function") this._destroy = options.destroy;
+      }
+      Stream.call(this);
+    }
+    Object.defineProperty(Readable.prototype, "destroyed", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function get() {
+        if (this._readableState === void 0) {
+          return false;
+        }
+        return this._readableState.destroyed;
+      },
+      set: function set(value) {
+        if (!this._readableState) {
+          return;
+        }
+        this._readableState.destroyed = value;
+      }
+    });
+    Readable.prototype.destroy = destroyImpl.destroy;
+    Readable.prototype._undestroy = destroyImpl.undestroy;
+    Readable.prototype._destroy = function(err, cb) {
+      cb(err);
+    };
+    Readable.prototype.push = function(chunk, encoding) {
+      var state = this._readableState;
+      var skipChunkCheck;
+      if (!state.objectMode) {
+        if (typeof chunk === "string") {
+          encoding = encoding || state.defaultEncoding;
+          if (encoding !== state.encoding) {
+            chunk = Buffer2.from(chunk, encoding);
+            encoding = "";
+          }
+          skipChunkCheck = true;
+        }
+      } else {
+        skipChunkCheck = true;
+      }
+      return readableAddChunk(this, chunk, encoding, false, skipChunkCheck);
+    };
+    Readable.prototype.unshift = function(chunk) {
+      return readableAddChunk(this, chunk, null, true, false);
+    };
+    function readableAddChunk(stream, chunk, encoding, addToFront, skipChunkCheck) {
+      debug("readableAddChunk", chunk);
+      var state = stream._readableState;
+      if (chunk === null) {
+        state.reading = false;
+        onEofChunk(stream, state);
+      } else {
+        var er;
+        if (!skipChunkCheck) er = chunkInvalid(state, chunk);
+        if (er) {
+          errorOrDestroy(stream, er);
+        } else if (state.objectMode || chunk && chunk.length > 0) {
+          if (typeof chunk !== "string" && !state.objectMode && Object.getPrototypeOf(chunk) !== Buffer2.prototype) {
+            chunk = _uint8ArrayToBuffer(chunk);
+          }
+          if (addToFront) {
+            if (state.endEmitted) errorOrDestroy(stream, new ERR_STREAM_UNSHIFT_AFTER_END_EVENT());
+            else addChunk(stream, state, chunk, true);
+          } else if (state.ended) {
+            errorOrDestroy(stream, new ERR_STREAM_PUSH_AFTER_EOF());
+          } else if (state.destroyed) {
+            return false;
+          } else {
+            state.reading = false;
+            if (state.decoder && !encoding) {
+              chunk = state.decoder.write(chunk);
+              if (state.objectMode || chunk.length !== 0) addChunk(stream, state, chunk, false);
+              else maybeReadMore(stream, state);
+            } else {
+              addChunk(stream, state, chunk, false);
+            }
+          }
+        } else if (!addToFront) {
+          state.reading = false;
+          maybeReadMore(stream, state);
+        }
+      }
+      return !state.ended && (state.length < state.highWaterMark || state.length === 0);
+    }
+    function addChunk(stream, state, chunk, addToFront) {
+      if (state.flowing && state.length === 0 && !state.sync) {
+        state.awaitDrain = 0;
+        stream.emit("data", chunk);
+      } else {
+        state.length += state.objectMode ? 1 : chunk.length;
+        if (addToFront) state.buffer.unshift(chunk);
+        else state.buffer.push(chunk);
+        if (state.needReadable) emitReadable(stream);
+      }
+      maybeReadMore(stream, state);
+    }
+    function chunkInvalid(state, chunk) {
+      var er;
+      if (!_isUint8Array(chunk) && typeof chunk !== "string" && chunk !== void 0 && !state.objectMode) {
+        er = new ERR_INVALID_ARG_TYPE("chunk", ["string", "Buffer", "Uint8Array"], chunk);
+      }
+      return er;
+    }
+    Readable.prototype.isPaused = function() {
+      return this._readableState.flowing === false;
+    };
+    Readable.prototype.setEncoding = function(enc) {
+      if (!StringDecoder) StringDecoder = require_string_decoder3().StringDecoder;
+      var decoder = new StringDecoder(enc);
+      this._readableState.decoder = decoder;
+      this._readableState.encoding = this._readableState.decoder.encoding;
+      var p = this._readableState.buffer.head;
+      var content = "";
+      while (p !== null) {
+        content += decoder.write(p.data);
+        p = p.next;
+      }
+      this._readableState.buffer.clear();
+      if (content !== "") this._readableState.buffer.push(content);
+      this._readableState.length = content.length;
+      return this;
+    };
+    var MAX_HWM = 1073741824;
+    function computeNewHighWaterMark(n) {
+      if (n >= MAX_HWM) {
+        n = MAX_HWM;
+      } else {
+        n--;
+        n |= n >>> 1;
+        n |= n >>> 2;
+        n |= n >>> 4;
+        n |= n >>> 8;
+        n |= n >>> 16;
+        n++;
+      }
+      return n;
+    }
+    function howMuchToRead(n, state) {
+      if (n <= 0 || state.length === 0 && state.ended) return 0;
+      if (state.objectMode) return 1;
+      if (n !== n) {
+        if (state.flowing && state.length) return state.buffer.head.data.length;
+        else return state.length;
+      }
+      if (n > state.highWaterMark) state.highWaterMark = computeNewHighWaterMark(n);
+      if (n <= state.length) return n;
+      if (!state.ended) {
+        state.needReadable = true;
+        return 0;
+      }
+      return state.length;
+    }
+    Readable.prototype.read = function(n) {
+      debug("read", n);
+      n = parseInt(n, 10);
+      var state = this._readableState;
+      var nOrig = n;
+      if (n !== 0) state.emittedReadable = false;
+      if (n === 0 && state.needReadable && ((state.highWaterMark !== 0 ? state.length >= state.highWaterMark : state.length > 0) || state.ended)) {
+        debug("read: emitReadable", state.length, state.ended);
+        if (state.length === 0 && state.ended) endReadable(this);
+        else emitReadable(this);
+        return null;
+      }
+      n = howMuchToRead(n, state);
+      if (n === 0 && state.ended) {
+        if (state.length === 0) endReadable(this);
+        return null;
+      }
+      var doRead = state.needReadable;
+      debug("need readable", doRead);
+      if (state.length === 0 || state.length - n < state.highWaterMark) {
+        doRead = true;
+        debug("length less than watermark", doRead);
+      }
+      if (state.ended || state.reading) {
+        doRead = false;
+        debug("reading or ended", doRead);
+      } else if (doRead) {
+        debug("do read");
+        state.reading = true;
+        state.sync = true;
+        if (state.length === 0) state.needReadable = true;
+        this._read(state.highWaterMark);
+        state.sync = false;
+        if (!state.reading) n = howMuchToRead(nOrig, state);
+      }
+      var ret;
+      if (n > 0) ret = fromList(n, state);
+      else ret = null;
+      if (ret === null) {
+        state.needReadable = state.length <= state.highWaterMark;
+        n = 0;
+      } else {
+        state.length -= n;
+        state.awaitDrain = 0;
+      }
+      if (state.length === 0) {
+        if (!state.ended) state.needReadable = true;
+        if (nOrig !== n && state.ended) endReadable(this);
+      }
+      if (ret !== null) this.emit("data", ret);
+      return ret;
+    };
+    function onEofChunk(stream, state) {
+      debug("onEofChunk");
+      if (state.ended) return;
+      if (state.decoder) {
+        var chunk = state.decoder.end();
+        if (chunk && chunk.length) {
+          state.buffer.push(chunk);
+          state.length += state.objectMode ? 1 : chunk.length;
+        }
+      }
+      state.ended = true;
+      if (state.sync) {
+        emitReadable(stream);
+      } else {
+        state.needReadable = false;
+        if (!state.emittedReadable) {
+          state.emittedReadable = true;
+          emitReadable_(stream);
+        }
+      }
+    }
+    function emitReadable(stream) {
+      var state = stream._readableState;
+      debug("emitReadable", state.needReadable, state.emittedReadable);
+      state.needReadable = false;
+      if (!state.emittedReadable) {
+        debug("emitReadable", state.flowing);
+        state.emittedReadable = true;
+        process.nextTick(emitReadable_, stream);
+      }
+    }
+    function emitReadable_(stream) {
+      var state = stream._readableState;
+      debug("emitReadable_", state.destroyed, state.length, state.ended);
+      if (!state.destroyed && (state.length || state.ended)) {
+        stream.emit("readable");
+        state.emittedReadable = false;
+      }
+      state.needReadable = !state.flowing && !state.ended && state.length <= state.highWaterMark;
+      flow(stream);
+    }
+    function maybeReadMore(stream, state) {
+      if (!state.readingMore) {
+        state.readingMore = true;
+        process.nextTick(maybeReadMore_, stream, state);
+      }
+    }
+    function maybeReadMore_(stream, state) {
+      while (!state.reading && !state.ended && (state.length < state.highWaterMark || state.flowing && state.length === 0)) {
+        var len = state.length;
+        debug("maybeReadMore read 0");
+        stream.read(0);
+        if (len === state.length)
+          break;
+      }
+      state.readingMore = false;
+    }
+    Readable.prototype._read = function(n) {
+      errorOrDestroy(this, new ERR_METHOD_NOT_IMPLEMENTED("_read()"));
+    };
+    Readable.prototype.pipe = function(dest, pipeOpts) {
+      var src = this;
+      var state = this._readableState;
+      switch (state.pipesCount) {
+        case 0:
+          state.pipes = dest;
+          break;
+        case 1:
+          state.pipes = [state.pipes, dest];
+          break;
+        default:
+          state.pipes.push(dest);
+          break;
+      }
+      state.pipesCount += 1;
+      debug("pipe count=%d opts=%j", state.pipesCount, pipeOpts);
+      var doEnd = (!pipeOpts || pipeOpts.end !== false) && dest !== process.stdout && dest !== process.stderr;
+      var endFn = doEnd ? onend : unpipe;
+      if (state.endEmitted) process.nextTick(endFn);
+      else src.once("end", endFn);
+      dest.on("unpipe", onunpipe);
+      function onunpipe(readable, unpipeInfo) {
+        debug("onunpipe");
+        if (readable === src) {
+          if (unpipeInfo && unpipeInfo.hasUnpiped === false) {
+            unpipeInfo.hasUnpiped = true;
+            cleanup();
+          }
+        }
+      }
+      function onend() {
+        debug("onend");
+        dest.end();
+      }
+      var ondrain = pipeOnDrain(src);
+      dest.on("drain", ondrain);
+      var cleanedUp = false;
+      function cleanup() {
+        debug("cleanup");
+        dest.removeListener("close", onclose);
+        dest.removeListener("finish", onfinish);
+        dest.removeListener("drain", ondrain);
+        dest.removeListener("error", onerror);
+        dest.removeListener("unpipe", onunpipe);
+        src.removeListener("end", onend);
+        src.removeListener("end", unpipe);
+        src.removeListener("data", ondata);
+        cleanedUp = true;
+        if (state.awaitDrain && (!dest._writableState || dest._writableState.needDrain)) ondrain();
+      }
+      src.on("data", ondata);
+      function ondata(chunk) {
+        debug("ondata");
+        var ret = dest.write(chunk);
+        debug("dest.write", ret);
+        if (ret === false) {
+          if ((state.pipesCount === 1 && state.pipes === dest || state.pipesCount > 1 && indexOf(state.pipes, dest) !== -1) && !cleanedUp) {
+            debug("false write response, pause", state.awaitDrain);
+            state.awaitDrain++;
+          }
+          src.pause();
+        }
+      }
+      function onerror(er) {
+        debug("onerror", er);
+        unpipe();
+        dest.removeListener("error", onerror);
+        if (EElistenerCount(dest, "error") === 0) errorOrDestroy(dest, er);
+      }
+      prependListener(dest, "error", onerror);
+      function onclose() {
+        dest.removeListener("finish", onfinish);
+        unpipe();
+      }
+      dest.once("close", onclose);
+      function onfinish() {
+        debug("onfinish");
+        dest.removeListener("close", onclose);
+        unpipe();
+      }
+      dest.once("finish", onfinish);
+      function unpipe() {
+        debug("unpipe");
+        src.unpipe(dest);
+      }
+      dest.emit("pipe", src);
+      if (!state.flowing) {
+        debug("pipe resume");
+        src.resume();
+      }
+      return dest;
+    };
+    function pipeOnDrain(src) {
+      return function pipeOnDrainFunctionResult() {
+        var state = src._readableState;
+        debug("pipeOnDrain", state.awaitDrain);
+        if (state.awaitDrain) state.awaitDrain--;
+        if (state.awaitDrain === 0 && EElistenerCount(src, "data")) {
+          state.flowing = true;
+          flow(src);
+        }
+      };
+    }
+    Readable.prototype.unpipe = function(dest) {
+      var state = this._readableState;
+      var unpipeInfo = {
+        hasUnpiped: false
+      };
+      if (state.pipesCount === 0) return this;
+      if (state.pipesCount === 1) {
+        if (dest && dest !== state.pipes) return this;
+        if (!dest) dest = state.pipes;
+        state.pipes = null;
+        state.pipesCount = 0;
+        state.flowing = false;
+        if (dest) dest.emit("unpipe", this, unpipeInfo);
+        return this;
+      }
+      if (!dest) {
+        var dests = state.pipes;
+        var len = state.pipesCount;
+        state.pipes = null;
+        state.pipesCount = 0;
+        state.flowing = false;
+        for (var i = 0; i < len; i++) dests[i].emit("unpipe", this, {
+          hasUnpiped: false
+        });
+        return this;
+      }
+      var index = indexOf(state.pipes, dest);
+      if (index === -1) return this;
+      state.pipes.splice(index, 1);
+      state.pipesCount -= 1;
+      if (state.pipesCount === 1) state.pipes = state.pipes[0];
+      dest.emit("unpipe", this, unpipeInfo);
+      return this;
+    };
+    Readable.prototype.on = function(ev, fn) {
+      var res = Stream.prototype.on.call(this, ev, fn);
+      var state = this._readableState;
+      if (ev === "data") {
+        state.readableListening = this.listenerCount("readable") > 0;
+        if (state.flowing !== false) this.resume();
+      } else if (ev === "readable") {
+        if (!state.endEmitted && !state.readableListening) {
+          state.readableListening = state.needReadable = true;
+          state.flowing = false;
+          state.emittedReadable = false;
+          debug("on readable", state.length, state.reading);
+          if (state.length) {
+            emitReadable(this);
+          } else if (!state.reading) {
+            process.nextTick(nReadingNextTick, this);
+          }
+        }
+      }
+      return res;
+    };
+    Readable.prototype.addListener = Readable.prototype.on;
+    Readable.prototype.removeListener = function(ev, fn) {
+      var res = Stream.prototype.removeListener.call(this, ev, fn);
+      if (ev === "readable") {
+        process.nextTick(updateReadableListening, this);
+      }
+      return res;
+    };
+    Readable.prototype.removeAllListeners = function(ev) {
+      var res = Stream.prototype.removeAllListeners.apply(this, arguments);
+      if (ev === "readable" || ev === void 0) {
+        process.nextTick(updateReadableListening, this);
+      }
+      return res;
+    };
+    function updateReadableListening(self2) {
+      var state = self2._readableState;
+      state.readableListening = self2.listenerCount("readable") > 0;
+      if (state.resumeScheduled && !state.paused) {
+        state.flowing = true;
+      } else if (self2.listenerCount("data") > 0) {
+        self2.resume();
+      }
+    }
+    function nReadingNextTick(self2) {
+      debug("readable nexttick read 0");
+      self2.read(0);
+    }
+    Readable.prototype.resume = function() {
+      var state = this._readableState;
+      if (!state.flowing) {
+        debug("resume");
+        state.flowing = !state.readableListening;
+        resume(this, state);
+      }
+      state.paused = false;
+      return this;
+    };
+    function resume(stream, state) {
+      if (!state.resumeScheduled) {
+        state.resumeScheduled = true;
+        process.nextTick(resume_, stream, state);
+      }
+    }
+    function resume_(stream, state) {
+      debug("resume", state.reading);
+      if (!state.reading) {
+        stream.read(0);
+      }
+      state.resumeScheduled = false;
+      stream.emit("resume");
+      flow(stream);
+      if (state.flowing && !state.reading) stream.read(0);
+    }
+    Readable.prototype.pause = function() {
+      debug("call pause flowing=%j", this._readableState.flowing);
+      if (this._readableState.flowing !== false) {
+        debug("pause");
+        this._readableState.flowing = false;
+        this.emit("pause");
+      }
+      this._readableState.paused = true;
+      return this;
+    };
+    function flow(stream) {
+      var state = stream._readableState;
+      debug("flow", state.flowing);
+      while (state.flowing && stream.read() !== null) ;
+    }
+    Readable.prototype.wrap = function(stream) {
+      var _this = this;
+      var state = this._readableState;
+      var paused = false;
+      stream.on("end", function() {
+        debug("wrapped end");
+        if (state.decoder && !state.ended) {
+          var chunk = state.decoder.end();
+          if (chunk && chunk.length) _this.push(chunk);
+        }
+        _this.push(null);
+      });
+      stream.on("data", function(chunk) {
+        debug("wrapped data");
+        if (state.decoder) chunk = state.decoder.write(chunk);
+        if (state.objectMode && (chunk === null || chunk === void 0)) return;
+        else if (!state.objectMode && (!chunk || !chunk.length)) return;
+        var ret = _this.push(chunk);
+        if (!ret) {
+          paused = true;
+          stream.pause();
+        }
+      });
+      for (var i in stream) {
+        if (this[i] === void 0 && typeof stream[i] === "function") {
+          this[i] = /* @__PURE__ */ (function methodWrap(method) {
+            return function methodWrapReturnFunction() {
+              return stream[method].apply(stream, arguments);
+            };
+          })(i);
+        }
+      }
+      for (var n = 0; n < kProxyEvents.length; n++) {
+        stream.on(kProxyEvents[n], this.emit.bind(this, kProxyEvents[n]));
+      }
+      this._read = function(n2) {
+        debug("wrapped _read", n2);
+        if (paused) {
+          paused = false;
+          stream.resume();
+        }
+      };
+      return this;
+    };
+    if (typeof Symbol === "function") {
+      Readable.prototype[Symbol.asyncIterator] = function() {
+        if (createReadableStreamAsyncIterator === void 0) {
+          createReadableStreamAsyncIterator = require_async_iterator();
+        }
+        return createReadableStreamAsyncIterator(this);
+      };
+    }
+    Object.defineProperty(Readable.prototype, "readableHighWaterMark", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function get() {
+        return this._readableState.highWaterMark;
+      }
+    });
+    Object.defineProperty(Readable.prototype, "readableBuffer", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function get() {
+        return this._readableState && this._readableState.buffer;
+      }
+    });
+    Object.defineProperty(Readable.prototype, "readableFlowing", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function get() {
+        return this._readableState.flowing;
+      },
+      set: function set(state) {
+        if (this._readableState) {
+          this._readableState.flowing = state;
+        }
+      }
+    });
+    Readable._fromList = fromList;
+    Object.defineProperty(Readable.prototype, "readableLength", {
+      // making it explicit this property is not enumerable
+      // because otherwise some prototype manipulation in
+      // userland will fail
+      enumerable: false,
+      get: function get() {
+        return this._readableState.length;
+      }
+    });
+    function fromList(n, state) {
+      if (state.length === 0) return null;
+      var ret;
+      if (state.objectMode) ret = state.buffer.shift();
+      else if (!n || n >= state.length) {
+        if (state.decoder) ret = state.buffer.join("");
+        else if (state.buffer.length === 1) ret = state.buffer.first();
+        else ret = state.buffer.concat(state.length);
+        state.buffer.clear();
+      } else {
+        ret = state.buffer.consume(n, state.decoder);
+      }
+      return ret;
+    }
+    function endReadable(stream) {
+      var state = stream._readableState;
+      debug("endReadable", state.endEmitted);
+      if (!state.endEmitted) {
+        state.ended = true;
+        process.nextTick(endReadableNT, state, stream);
+      }
+    }
+    function endReadableNT(state, stream) {
+      debug("endReadableNT", state.endEmitted, state.length);
+      if (!state.endEmitted && state.length === 0) {
+        state.endEmitted = true;
+        stream.readable = false;
+        stream.emit("end");
+        if (state.autoDestroy) {
+          var wState = stream._writableState;
+          if (!wState || wState.autoDestroy && wState.finished) {
+            stream.destroy();
+          }
+        }
+      }
+    }
+    if (typeof Symbol === "function") {
+      Readable.from = function(iterable, opts) {
+        if (from === void 0) {
+          from = require_from();
+        }
+        return from(Readable, iterable, opts);
+      };
+    }
+    function indexOf(xs, x) {
+      for (var i = 0, l = xs.length; i < l; i++) {
+        if (xs[i] === x) return i;
+      }
+      return -1;
+    }
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/lib/_stream_transform.js
+var require_stream_transform3 = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/lib/_stream_transform.js"(exports, module) {
+    "use strict";
+    module.exports = Transform;
+    var _require$codes = require_errors6().codes;
+    var ERR_METHOD_NOT_IMPLEMENTED = _require$codes.ERR_METHOD_NOT_IMPLEMENTED;
+    var ERR_MULTIPLE_CALLBACK = _require$codes.ERR_MULTIPLE_CALLBACK;
+    var ERR_TRANSFORM_ALREADY_TRANSFORMING = _require$codes.ERR_TRANSFORM_ALREADY_TRANSFORMING;
+    var ERR_TRANSFORM_WITH_LENGTH_0 = _require$codes.ERR_TRANSFORM_WITH_LENGTH_0;
+    var Duplex = require_stream_duplex3();
+    require_inherits()(Transform, Duplex);
+    function afterTransform(er, data) {
+      var ts = this._transformState;
+      ts.transforming = false;
+      var cb = ts.writecb;
+      if (cb === null) {
+        return this.emit("error", new ERR_MULTIPLE_CALLBACK());
+      }
+      ts.writechunk = null;
+      ts.writecb = null;
+      if (data != null)
+        this.push(data);
+      cb(er);
+      var rs = this._readableState;
+      rs.reading = false;
+      if (rs.needReadable || rs.length < rs.highWaterMark) {
+        this._read(rs.highWaterMark);
+      }
+    }
+    function Transform(options) {
+      if (!(this instanceof Transform)) return new Transform(options);
+      Duplex.call(this, options);
+      this._transformState = {
+        afterTransform: afterTransform.bind(this),
+        needTransform: false,
+        transforming: false,
+        writecb: null,
+        writechunk: null,
+        writeencoding: null
+      };
+      this._readableState.needReadable = true;
+      this._readableState.sync = false;
+      if (options) {
+        if (typeof options.transform === "function") this._transform = options.transform;
+        if (typeof options.flush === "function") this._flush = options.flush;
+      }
+      this.on("prefinish", prefinish);
+    }
+    function prefinish() {
+      var _this = this;
+      if (typeof this._flush === "function" && !this._readableState.destroyed) {
+        this._flush(function(er, data) {
+          done(_this, er, data);
+        });
+      } else {
+        done(this, null, null);
+      }
+    }
+    Transform.prototype.push = function(chunk, encoding) {
+      this._transformState.needTransform = false;
+      return Duplex.prototype.push.call(this, chunk, encoding);
+    };
+    Transform.prototype._transform = function(chunk, encoding, cb) {
+      cb(new ERR_METHOD_NOT_IMPLEMENTED("_transform()"));
+    };
+    Transform.prototype._write = function(chunk, encoding, cb) {
+      var ts = this._transformState;
+      ts.writecb = cb;
+      ts.writechunk = chunk;
+      ts.writeencoding = encoding;
+      if (!ts.transforming) {
+        var rs = this._readableState;
+        if (ts.needTransform || rs.needReadable || rs.length < rs.highWaterMark) this._read(rs.highWaterMark);
+      }
+    };
+    Transform.prototype._read = function(n) {
+      var ts = this._transformState;
+      if (ts.writechunk !== null && !ts.transforming) {
+        ts.transforming = true;
+        this._transform(ts.writechunk, ts.writeencoding, ts.afterTransform);
+      } else {
+        ts.needTransform = true;
+      }
+    };
+    Transform.prototype._destroy = function(err, cb) {
+      Duplex.prototype._destroy.call(this, err, function(err2) {
+        cb(err2);
+      });
+    };
+    function done(stream, er, data) {
+      if (er) return stream.emit("error", er);
+      if (data != null)
+        stream.push(data);
+      if (stream._writableState.length) throw new ERR_TRANSFORM_WITH_LENGTH_0();
+      if (stream._transformState.transforming) throw new ERR_TRANSFORM_ALREADY_TRANSFORMING();
+      return stream.push(null);
+    }
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/lib/_stream_passthrough.js
+var require_stream_passthrough3 = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/lib/_stream_passthrough.js"(exports, module) {
+    "use strict";
+    module.exports = PassThrough;
+    var Transform = require_stream_transform3();
+    require_inherits()(PassThrough, Transform);
+    function PassThrough(options) {
+      if (!(this instanceof PassThrough)) return new PassThrough(options);
+      Transform.call(this, options);
+    }
+    PassThrough.prototype._transform = function(chunk, encoding, cb) {
+      cb(null, chunk);
+    };
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/pipeline.js
+var require_pipeline = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/lib/internal/streams/pipeline.js"(exports, module) {
+    "use strict";
+    var eos;
+    function once(callback) {
+      var called = false;
+      return function() {
+        if (called) return;
+        called = true;
+        callback.apply(void 0, arguments);
+      };
+    }
+    var _require$codes = require_errors6().codes;
+    var ERR_MISSING_ARGS = _require$codes.ERR_MISSING_ARGS;
+    var ERR_STREAM_DESTROYED = _require$codes.ERR_STREAM_DESTROYED;
+    function noop(err) {
+      if (err) throw err;
+    }
+    function isRequest(stream) {
+      return stream.setHeader && typeof stream.abort === "function";
+    }
+    function destroyer(stream, reading, writing, callback) {
+      callback = once(callback);
+      var closed = false;
+      stream.on("close", function() {
+        closed = true;
+      });
+      if (eos === void 0) eos = require_end_of_stream2();
+      eos(stream, {
+        readable: reading,
+        writable: writing
+      }, function(err) {
+        if (err) return callback(err);
+        closed = true;
+        callback();
+      });
+      var destroyed = false;
+      return function(err) {
+        if (closed) return;
+        if (destroyed) return;
+        destroyed = true;
+        if (isRequest(stream)) return stream.abort();
+        if (typeof stream.destroy === "function") return stream.destroy();
+        callback(err || new ERR_STREAM_DESTROYED("pipe"));
+      };
+    }
+    function call(fn) {
+      fn();
+    }
+    function pipe(from, to) {
+      return from.pipe(to);
+    }
+    function popCallback(streams) {
+      if (!streams.length) return noop;
+      if (typeof streams[streams.length - 1] !== "function") return noop;
+      return streams.pop();
+    }
+    function pipeline() {
+      for (var _len = arguments.length, streams = new Array(_len), _key = 0; _key < _len; _key++) {
+        streams[_key] = arguments[_key];
+      }
+      var callback = popCallback(streams);
+      if (Array.isArray(streams[0])) streams = streams[0];
+      if (streams.length < 2) {
+        throw new ERR_MISSING_ARGS("streams");
+      }
+      var error;
+      var destroys = streams.map(function(stream, i) {
+        var reading = i < streams.length - 1;
+        var writing = i > 0;
+        return destroyer(stream, reading, writing, function(err) {
+          if (!error) error = err;
+          if (err) destroys.forEach(call);
+          if (reading) return;
+          destroys.forEach(call);
+          callback(error);
+        });
+      });
+      return streams.reduce(pipe);
+    }
+    module.exports = pipeline;
+  }
+});
+
+// node_modules/pumpify/node_modules/readable-stream/readable.js
+var require_readable3 = __commonJS({
+  "node_modules/pumpify/node_modules/readable-stream/readable.js"(exports, module) {
+    var Stream = __require("stream");
+    if (process.env.READABLE_STREAM === "disable" && Stream) {
+      module.exports = Stream.Readable;
+      Object.assign(module.exports, Stream);
+      module.exports.Stream = Stream;
+    } else {
+      exports = module.exports = require_stream_readable3();
+      exports.Stream = Stream || exports;
+      exports.Readable = exports;
+      exports.Writable = require_stream_writable3();
+      exports.Duplex = require_stream_duplex3();
+      exports.Transform = require_stream_transform3();
+      exports.PassThrough = require_stream_passthrough3();
+      exports.finished = require_end_of_stream2();
+      exports.pipeline = require_pipeline();
+    }
+  }
+});
+
+// node_modules/pumpify/node_modules/duplexify/index.js
+var require_duplexify2 = __commonJS({
+  "node_modules/pumpify/node_modules/duplexify/index.js"(exports, module) {
+    var stream = require_readable3();
+    var eos = require_end_of_stream();
+    var inherits = require_inherits();
+    var shift = require_stream_shift();
+    var SIGNAL_FLUSH = Buffer.from && Buffer.from !== Uint8Array.from ? Buffer.from([0]) : new Buffer([0]);
+    var onuncork = function(self2, fn) {
+      if (self2._corked) self2.once("uncork", fn);
+      else fn();
+    };
+    var autoDestroy = function(self2, err) {
+      if (self2._autoDestroy) self2.destroy(err);
+    };
+    var destroyer = function(self2, end2) {
+      return function(err) {
+        if (err) autoDestroy(self2, err.message === "premature close" ? null : err);
+        else if (end2 && !self2._ended) self2.end();
+      };
+    };
+    var end = function(ws, fn) {
+      if (!ws) return fn();
+      if (ws._writableState && ws._writableState.finished) return fn();
+      if (ws._writableState) return ws.end(fn);
+      ws.end();
+      fn();
+    };
+    var noop = function() {
+    };
+    var toStreams2 = function(rs) {
+      return new stream.Readable({ objectMode: true, highWaterMark: 16 }).wrap(rs);
+    };
+    var Duplexify = function(writable, readable, opts) {
+      if (!(this instanceof Duplexify)) return new Duplexify(writable, readable, opts);
+      stream.Duplex.call(this, opts);
+      this._writable = null;
+      this._readable = null;
+      this._readable2 = null;
+      this._autoDestroy = !opts || opts.autoDestroy !== false;
+      this._forwardDestroy = !opts || opts.destroy !== false;
+      this._forwardEnd = !opts || opts.end !== false;
+      this._corked = 1;
+      this._ondrain = null;
+      this._drained = false;
+      this._forwarding = false;
+      this._unwrite = null;
+      this._unread = null;
+      this._ended = false;
+      this.destroyed = false;
+      if (writable) this.setWritable(writable);
+      if (readable) this.setReadable(readable);
+    };
+    inherits(Duplexify, stream.Duplex);
+    Duplexify.obj = function(writable, readable, opts) {
+      if (!opts) opts = {};
+      opts.objectMode = true;
+      opts.highWaterMark = 16;
+      return new Duplexify(writable, readable, opts);
+    };
+    Duplexify.prototype.cork = function() {
+      if (++this._corked === 1) this.emit("cork");
+    };
+    Duplexify.prototype.uncork = function() {
+      if (this._corked && --this._corked === 0) this.emit("uncork");
+    };
+    Duplexify.prototype.setWritable = function(writable) {
+      if (this._unwrite) this._unwrite();
+      if (this.destroyed) {
+        if (writable && writable.destroy) writable.destroy();
+        return;
+      }
+      if (writable === null || writable === false) {
+        this.end();
+        return;
+      }
+      var self2 = this;
+      var unend = eos(writable, { writable: true, readable: false }, destroyer(this, this._forwardEnd));
+      var ondrain = function() {
+        var ondrain2 = self2._ondrain;
+        self2._ondrain = null;
+        if (ondrain2) ondrain2();
+      };
+      var clear = function() {
+        self2._writable.removeListener("drain", ondrain);
+        unend();
+      };
+      if (this._unwrite) process.nextTick(ondrain);
+      this._writable = writable;
+      this._writable.on("drain", ondrain);
+      this._unwrite = clear;
+      this.uncork();
+    };
+    Duplexify.prototype.setReadable = function(readable) {
+      if (this._unread) this._unread();
+      if (this.destroyed) {
+        if (readable && readable.destroy) readable.destroy();
+        return;
+      }
+      if (readable === null || readable === false) {
+        this.push(null);
+        this.resume();
+        return;
+      }
+      var self2 = this;
+      var unend = eos(readable, { writable: false, readable: true }, destroyer(this));
+      var onreadable = function() {
+        self2._forward();
+      };
+      var onend = function() {
+        self2.push(null);
+      };
+      var clear = function() {
+        self2._readable2.removeListener("readable", onreadable);
+        self2._readable2.removeListener("end", onend);
+        unend();
+      };
+      this._drained = true;
+      this._readable = readable;
+      this._readable2 = readable._readableState ? readable : toStreams2(readable);
+      this._readable2.on("readable", onreadable);
+      this._readable2.on("end", onend);
+      this._unread = clear;
+      this._forward();
+    };
+    Duplexify.prototype._read = function() {
+      this._drained = true;
+      this._forward();
+    };
+    Duplexify.prototype._forward = function() {
+      if (this._forwarding || !this._readable2 || !this._drained) return;
+      this._forwarding = true;
+      var data;
+      while (this._drained && (data = shift(this._readable2)) !== null) {
+        if (this.destroyed) continue;
+        this._drained = this.push(data);
+      }
+      this._forwarding = false;
+    };
+    Duplexify.prototype.destroy = function(err, cb) {
+      if (!cb) cb = noop;
+      if (this.destroyed) return cb(null);
+      this.destroyed = true;
+      var self2 = this;
+      process.nextTick(function() {
+        self2._destroy(err);
+        cb(null);
+      });
+    };
+    Duplexify.prototype._destroy = function(err) {
+      if (err) {
+        var ondrain = this._ondrain;
+        this._ondrain = null;
+        if (ondrain) ondrain(err);
+        else this.emit("error", err);
+      }
+      if (this._forwardDestroy) {
+        if (this._readable && this._readable.destroy) this._readable.destroy();
+        if (this._writable && this._writable.destroy) this._writable.destroy();
+      }
+      this.emit("close");
+    };
+    Duplexify.prototype._write = function(data, enc, cb) {
+      if (this.destroyed) return;
+      if (this._corked) return onuncork(this, this._write.bind(this, data, enc, cb));
+      if (data === SIGNAL_FLUSH) return this._finish(cb);
+      if (!this._writable) return cb();
+      if (this._writable.write(data) === false) this._ondrain = cb;
+      else if (!this.destroyed) cb();
+    };
+    Duplexify.prototype._finish = function(cb) {
+      var self2 = this;
+      this.emit("preend");
+      onuncork(this, function() {
+        end(self2._forwardEnd && self2._writable, function() {
+          if (self2._writableState.prefinished === false) self2._writableState.prefinished = true;
+          self2.emit("prefinish");
+          onuncork(self2, cb);
+        });
+      });
+    };
+    Duplexify.prototype.end = function(data, enc, cb) {
+      if (typeof data === "function") return this.end(null, null, data);
+      if (typeof enc === "function") return this.end(data, null, enc);
+      this._ended = true;
+      if (data) this.write(data);
+      if (!this._writableState.ending && !this._writableState.destroyed) this.write(SIGNAL_FLUSH);
+      return stream.Writable.prototype.end.call(this, cb);
+    };
+    module.exports = Duplexify;
+  }
+});
+
+// node_modules/pumpify/index.js
+var require_pumpify = __commonJS({
+  "node_modules/pumpify/index.js"(exports, module) {
+    var pump = require_pump();
+    var inherits = require_inherits();
+    var Duplexify = require_duplexify2();
+    var toArray = function(args) {
+      if (!args.length) return [];
+      return Array.isArray(args[0]) ? args[0] : Array.prototype.slice.call(args);
+    };
+    var define = function(opts) {
+      var Pumpify = function() {
+        var streams = toArray(arguments);
+        if (!(this instanceof Pumpify)) return new Pumpify(streams);
+        Duplexify.call(this, null, null, opts);
+        if (streams.length) this.setPipeline(streams);
+      };
+      inherits(Pumpify, Duplexify);
+      Pumpify.prototype.setPipeline = function() {
+        var streams = toArray(arguments);
+        var self2 = this;
+        var ended = false;
+        var w = streams[0];
+        var r = streams[streams.length - 1];
+        r = r.readable ? r : null;
+        w = w.writable ? w : null;
+        var onclose = function() {
+          streams[0].emit("error", new Error("stream was destroyed"));
+        };
+        this.on("close", onclose);
+        this.on("prefinish", function() {
+          if (!ended) self2.cork();
+        });
+        pump(streams, function(err) {
+          self2.removeListener("close", onclose);
+          if (err) return self2.destroy(err.message === "premature close" ? null : err);
+          ended = true;
+          if (self2._autoDestroy === false) self2._autoDestroy = true;
+          self2.uncork();
+        });
+        if (this.destroyed) return onclose();
+        this.setWritable(w);
+        this.setReadable(r);
+      };
+      return Pumpify;
+    };
+    module.exports = define({ autoDestroy: false, destroy: false });
+    module.exports.obj = define({ autoDestroy: false, destroy: false, objectMode: true, highWaterMark: 16 });
+    module.exports.ctor = define;
+  }
+});
+
+// node_modules/readable-stream/lib/ours/primordials.js
+var require_primordials = __commonJS({
+  "node_modules/readable-stream/lib/ours/primordials.js"(exports, module) {
+    "use strict";
+    var AggregateError = class extends Error {
+      constructor(errors) {
+        if (!Array.isArray(errors)) {
+          throw new TypeError(`Expected input to be an Array, got ${typeof errors}`);
+        }
+        let message = "";
+        for (let i = 0; i < errors.length; i++) {
+          message += `    ${errors[i].stack}
+`;
+        }
+        super(message);
+        this.name = "AggregateError";
+        this.errors = errors;
+      }
+    };
+    module.exports = {
+      AggregateError,
+      ArrayIsArray(self2) {
+        return Array.isArray(self2);
+      },
+      ArrayPrototypeIncludes(self2, el) {
+        return self2.includes(el);
+      },
+      ArrayPrototypeIndexOf(self2, el) {
+        return self2.indexOf(el);
+      },
+      ArrayPrototypeJoin(self2, sep) {
+        return self2.join(sep);
+      },
+      ArrayPrototypeMap(self2, fn) {
+        return self2.map(fn);
+      },
+      ArrayPrototypePop(self2, el) {
+        return self2.pop(el);
+      },
+      ArrayPrototypePush(self2, el) {
+        return self2.push(el);
+      },
+      ArrayPrototypeSlice(self2, start, end) {
+        return self2.slice(start, end);
+      },
+      Error,
+      FunctionPrototypeCall(fn, thisArgs, ...args) {
+        return fn.call(thisArgs, ...args);
+      },
+      FunctionPrototypeSymbolHasInstance(self2, instance) {
+        return Function.prototype[Symbol.hasInstance].call(self2, instance);
+      },
+      MathFloor: Math.floor,
+      Number,
+      NumberIsInteger: Number.isInteger,
+      NumberIsNaN: Number.isNaN,
+      NumberMAX_SAFE_INTEGER: Number.MAX_SAFE_INTEGER,
+      NumberMIN_SAFE_INTEGER: Number.MIN_SAFE_INTEGER,
+      NumberParseInt: Number.parseInt,
+      ObjectDefineProperties(self2, props) {
+        return Object.defineProperties(self2, props);
+      },
+      ObjectDefineProperty(self2, name, prop) {
+        return Object.defineProperty(self2, name, prop);
+      },
+      ObjectGetOwnPropertyDescriptor(self2, name) {
+        return Object.getOwnPropertyDescriptor(self2, name);
+      },
+      ObjectKeys(obj) {
+        return Object.keys(obj);
+      },
+      ObjectSetPrototypeOf(target, proto) {
+        return Object.setPrototypeOf(target, proto);
+      },
+      Promise,
+      PromisePrototypeCatch(self2, fn) {
+        return self2.catch(fn);
+      },
+      PromisePrototypeThen(self2, thenFn, catchFn) {
+        return self2.then(thenFn, catchFn);
+      },
+      PromiseReject(err) {
+        return Promise.reject(err);
+      },
+      PromiseResolve(val) {
+        return Promise.resolve(val);
+      },
+      ReflectApply: Reflect.apply,
+      RegExpPrototypeTest(self2, value) {
+        return self2.test(value);
+      },
+      SafeSet: Set,
+      String,
+      StringPrototypeSlice(self2, start, end) {
+        return self2.slice(start, end);
+      },
+      StringPrototypeToLowerCase(self2) {
+        return self2.toLowerCase();
+      },
+      StringPrototypeToUpperCase(self2) {
+        return self2.toUpperCase();
+      },
+      StringPrototypeTrim(self2) {
+        return self2.trim();
+      },
+      Symbol,
+      SymbolFor: Symbol.for,
+      SymbolAsyncIterator: Symbol.asyncIterator,
+      SymbolHasInstance: Symbol.hasInstance,
+      SymbolIterator: Symbol.iterator,
+      SymbolDispose: Symbol.dispose || /* @__PURE__ */ Symbol("Symbol.dispose"),
+      SymbolAsyncDispose: Symbol.asyncDispose || /* @__PURE__ */ Symbol("Symbol.asyncDispose"),
+      TypedArrayPrototypeSet(self2, buf, len) {
+        return self2.set(buf, len);
+      },
+      Boolean,
+      Uint8Array
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/ours/util/inspect.js
+var require_inspect = __commonJS({
+  "node_modules/readable-stream/lib/ours/util/inspect.js"(exports, module) {
+    "use strict";
+    module.exports = {
+      format(format2, ...args) {
+        return format2.replace(/%([sdifj])/g, function(...[_unused, type]) {
+          const replacement = args.shift();
+          if (type === "f") {
+            return replacement.toFixed(6);
+          } else if (type === "j") {
+            return JSON.stringify(replacement);
+          } else if (type === "s" && typeof replacement === "object") {
+            const ctor = replacement.constructor !== Object ? replacement.constructor.name : "";
+            return `${ctor} {}`.trim();
+          } else {
+            return replacement.toString();
+          }
+        });
+      },
+      inspect(value) {
+        switch (typeof value) {
+          case "string":
+            if (value.includes("'")) {
+              if (!value.includes('"')) {
+                return `"${value}"`;
+              } else if (!value.includes("`") && !value.includes("${")) {
+                return `\`${value}\``;
+              }
+            }
+            return `'${value}'`;
+          case "number":
+            if (isNaN(value)) {
+              return "NaN";
+            } else if (Object.is(value, -0)) {
+              return String(value);
+            }
+            return value;
+          case "bigint":
+            return `${String(value)}n`;
+          case "boolean":
+          case "undefined":
+            return String(value);
+          case "object":
+            return "{}";
+        }
+      }
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/ours/errors.js
+var require_errors7 = __commonJS({
+  "node_modules/readable-stream/lib/ours/errors.js"(exports, module) {
+    "use strict";
+    var { format: format2, inspect } = require_inspect();
+    var { AggregateError: CustomAggregateError } = require_primordials();
+    var AggregateError = globalThis.AggregateError || CustomAggregateError;
+    var kIsNodeError = /* @__PURE__ */ Symbol("kIsNodeError");
+    var kTypes = [
+      "string",
+      "function",
+      "number",
+      "object",
+      // Accept 'Function' and 'Object' as alternative to the lower cased version.
+      "Function",
+      "Object",
+      "boolean",
+      "bigint",
+      "symbol"
+    ];
+    var classRegExp = /^([A-Z][a-z0-9]*)+$/;
+    var nodeInternalPrefix = "__node_internal_";
+    var codes = {};
+    function assert(value, message) {
+      if (!value) {
+        throw new codes.ERR_INTERNAL_ASSERTION(message);
+      }
+    }
+    function addNumericalSeparator(val) {
+      let res = "";
+      let i = val.length;
+      const start = val[0] === "-" ? 1 : 0;
+      for (; i >= start + 4; i -= 3) {
+        res = `_${val.slice(i - 3, i)}${res}`;
+      }
+      return `${val.slice(0, i)}${res}`;
+    }
+    function getMessage(key, msg, args) {
+      if (typeof msg === "function") {
+        assert(
+          msg.length <= args.length,
+          // Default options do not count.
+          `Code: ${key}; The provided arguments length (${args.length}) does not match the required ones (${msg.length}).`
+        );
+        return msg(...args);
+      }
+      const expectedLength = (msg.match(/%[dfijoOs]/g) || []).length;
+      assert(
+        expectedLength === args.length,
+        `Code: ${key}; The provided arguments length (${args.length}) does not match the required ones (${expectedLength}).`
+      );
+      if (args.length === 0) {
+        return msg;
+      }
+      return format2(msg, ...args);
+    }
+    function E(code, message, Base) {
+      if (!Base) {
+        Base = Error;
+      }
+      class NodeError extends Base {
+        constructor(...args) {
+          super(getMessage(code, message, args));
+        }
+        toString() {
+          return `${this.name} [${code}]: ${this.message}`;
+        }
+      }
+      Object.defineProperties(NodeError.prototype, {
+        name: {
+          value: Base.name,
+          writable: true,
+          enumerable: false,
+          configurable: true
+        },
+        toString: {
+          value() {
+            return `${this.name} [${code}]: ${this.message}`;
+          },
+          writable: true,
+          enumerable: false,
+          configurable: true
+        }
+      });
+      NodeError.prototype.code = code;
+      NodeError.prototype[kIsNodeError] = true;
+      codes[code] = NodeError;
+    }
+    function hideStackFrames(fn) {
+      const hidden = nodeInternalPrefix + fn.name;
+      Object.defineProperty(fn, "name", {
+        value: hidden
+      });
+      return fn;
+    }
+    function aggregateTwoErrors(innerError, outerError) {
+      if (innerError && outerError && innerError !== outerError) {
+        if (Array.isArray(outerError.errors)) {
+          outerError.errors.push(innerError);
+          return outerError;
+        }
+        const err = new AggregateError([outerError, innerError], outerError.message);
+        err.code = outerError.code;
+        return err;
+      }
+      return innerError || outerError;
+    }
+    var AbortError = class extends Error {
+      constructor(message = "The operation was aborted", options = void 0) {
+        if (options !== void 0 && typeof options !== "object") {
+          throw new codes.ERR_INVALID_ARG_TYPE("options", "Object", options);
+        }
+        super(message, options);
+        this.code = "ABORT_ERR";
+        this.name = "AbortError";
+      }
+    };
+    E("ERR_ASSERTION", "%s", Error);
+    E(
+      "ERR_INVALID_ARG_TYPE",
+      (name, expected, actual) => {
+        assert(typeof name === "string", "'name' must be a string");
+        if (!Array.isArray(expected)) {
+          expected = [expected];
+        }
+        let msg = "The ";
+        if (name.endsWith(" argument")) {
+          msg += `${name} `;
+        } else {
+          msg += `"${name}" ${name.includes(".") ? "property" : "argument"} `;
+        }
+        msg += "must be ";
+        const types2 = [];
+        const instances = [];
+        const other = [];
+        for (const value of expected) {
+          assert(typeof value === "string", "All expected entries have to be of type string");
+          if (kTypes.includes(value)) {
+            types2.push(value.toLowerCase());
+          } else if (classRegExp.test(value)) {
+            instances.push(value);
+          } else {
+            assert(value !== "object", 'The value "object" should be written as "Object"');
+            other.push(value);
+          }
+        }
+        if (instances.length > 0) {
+          const pos = types2.indexOf("object");
+          if (pos !== -1) {
+            types2.splice(types2, pos, 1);
+            instances.push("Object");
+          }
+        }
+        if (types2.length > 0) {
+          switch (types2.length) {
+            case 1:
+              msg += `of type ${types2[0]}`;
+              break;
+            case 2:
+              msg += `one of type ${types2[0]} or ${types2[1]}`;
+              break;
+            default: {
+              const last = types2.pop();
+              msg += `one of type ${types2.join(", ")}, or ${last}`;
+            }
+          }
+          if (instances.length > 0 || other.length > 0) {
+            msg += " or ";
+          }
+        }
+        if (instances.length > 0) {
+          switch (instances.length) {
+            case 1:
+              msg += `an instance of ${instances[0]}`;
+              break;
+            case 2:
+              msg += `an instance of ${instances[0]} or ${instances[1]}`;
+              break;
+            default: {
+              const last = instances.pop();
+              msg += `an instance of ${instances.join(", ")}, or ${last}`;
+            }
+          }
+          if (other.length > 0) {
+            msg += " or ";
+          }
+        }
+        switch (other.length) {
+          case 0:
+            break;
+          case 1:
+            if (other[0].toLowerCase() !== other[0]) {
+              msg += "an ";
+            }
+            msg += `${other[0]}`;
+            break;
+          case 2:
+            msg += `one of ${other[0]} or ${other[1]}`;
+            break;
+          default: {
+            const last = other.pop();
+            msg += `one of ${other.join(", ")}, or ${last}`;
+          }
+        }
+        if (actual == null) {
+          msg += `. Received ${actual}`;
+        } else if (typeof actual === "function" && actual.name) {
+          msg += `. Received function ${actual.name}`;
+        } else if (typeof actual === "object") {
+          var _actual$constructor;
+          if ((_actual$constructor = actual.constructor) !== null && _actual$constructor !== void 0 && _actual$constructor.name) {
+            msg += `. Received an instance of ${actual.constructor.name}`;
+          } else {
+            const inspected = inspect(actual, {
+              depth: -1
+            });
+            msg += `. Received ${inspected}`;
+          }
+        } else {
+          let inspected = inspect(actual, {
+            colors: false
+          });
+          if (inspected.length > 25) {
+            inspected = `${inspected.slice(0, 25)}...`;
+          }
+          msg += `. Received type ${typeof actual} (${inspected})`;
+        }
+        return msg;
+      },
+      TypeError
+    );
+    E(
+      "ERR_INVALID_ARG_VALUE",
+      (name, value, reason = "is invalid") => {
+        let inspected = inspect(value);
+        if (inspected.length > 128) {
+          inspected = inspected.slice(0, 128) + "...";
+        }
+        const type = name.includes(".") ? "property" : "argument";
+        return `The ${type} '${name}' ${reason}. Received ${inspected}`;
+      },
+      TypeError
+    );
+    E(
+      "ERR_INVALID_RETURN_VALUE",
+      (input, name, value) => {
+        var _value$constructor;
+        const type = value !== null && value !== void 0 && (_value$constructor = value.constructor) !== null && _value$constructor !== void 0 && _value$constructor.name ? `instance of ${value.constructor.name}` : `type ${typeof value}`;
+        return `Expected ${input} to be returned from the "${name}" function but got ${type}.`;
+      },
+      TypeError
+    );
+    E(
+      "ERR_MISSING_ARGS",
+      (...args) => {
+        assert(args.length > 0, "At least one arg needs to be specified");
+        let msg;
+        const len = args.length;
+        args = (Array.isArray(args) ? args : [args]).map((a) => `"${a}"`).join(" or ");
+        switch (len) {
+          case 1:
+            msg += `The ${args[0]} argument`;
+            break;
+          case 2:
+            msg += `The ${args[0]} and ${args[1]} arguments`;
+            break;
+          default:
+            {
+              const last = args.pop();
+              msg += `The ${args.join(", ")}, and ${last} arguments`;
+            }
+            break;
+        }
+        return `${msg} must be specified`;
+      },
+      TypeError
+    );
+    E(
+      "ERR_OUT_OF_RANGE",
+      (str, range, input) => {
+        assert(range, 'Missing "range" argument');
+        let received;
+        if (Number.isInteger(input) && Math.abs(input) > 2 ** 32) {
+          received = addNumericalSeparator(String(input));
+        } else if (typeof input === "bigint") {
+          received = String(input);
+          const limit = BigInt(2) ** BigInt(32);
+          if (input > limit || input < -limit) {
+            received = addNumericalSeparator(received);
+          }
+          received += "n";
+        } else {
+          received = inspect(input);
+        }
+        return `The value of "${str}" is out of range. It must be ${range}. Received ${received}`;
+      },
+      RangeError
+    );
+    E("ERR_MULTIPLE_CALLBACK", "Callback called multiple times", Error);
+    E("ERR_METHOD_NOT_IMPLEMENTED", "The %s method is not implemented", Error);
+    E("ERR_STREAM_ALREADY_FINISHED", "Cannot call %s after a stream was finished", Error);
+    E("ERR_STREAM_CANNOT_PIPE", "Cannot pipe, not readable", Error);
+    E("ERR_STREAM_DESTROYED", "Cannot call %s after a stream was destroyed", Error);
+    E("ERR_STREAM_NULL_VALUES", "May not write null values to stream", TypeError);
+    E("ERR_STREAM_PREMATURE_CLOSE", "Premature close", Error);
+    E("ERR_STREAM_PUSH_AFTER_EOF", "stream.push() after EOF", Error);
+    E("ERR_STREAM_UNSHIFT_AFTER_END_EVENT", "stream.unshift() after end event", Error);
+    E("ERR_STREAM_WRITE_AFTER_END", "write after end", Error);
+    E("ERR_UNKNOWN_ENCODING", "Unknown encoding: %s", TypeError);
+    module.exports = {
+      AbortError,
+      aggregateTwoErrors: hideStackFrames(aggregateTwoErrors),
+      hideStackFrames,
+      codes
+    };
+  }
+});
+
+// node_modules/event-target-shim/dist/event-target-shim.js
+var require_event_target_shim = __commonJS({
+  "node_modules/event-target-shim/dist/event-target-shim.js"(exports, module) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    var privateData = /* @__PURE__ */ new WeakMap();
+    var wrappers = /* @__PURE__ */ new WeakMap();
+    function pd(event) {
+      const retv = privateData.get(event);
+      console.assert(
+        retv != null,
+        "'this' is expected an Event object, but got",
+        event
+      );
+      return retv;
+    }
+    function setCancelFlag(data) {
+      if (data.passiveListener != null) {
+        if (typeof console !== "undefined" && typeof console.error === "function") {
+          console.error(
+            "Unable to preventDefault inside passive event listener invocation.",
+            data.passiveListener
+          );
+        }
+        return;
+      }
+      if (!data.event.cancelable) {
+        return;
+      }
+      data.canceled = true;
+      if (typeof data.event.preventDefault === "function") {
+        data.event.preventDefault();
+      }
+    }
+    function Event(eventTarget, event) {
+      privateData.set(this, {
+        eventTarget,
+        event,
+        eventPhase: 2,
+        currentTarget: eventTarget,
+        canceled: false,
+        stopped: false,
+        immediateStopped: false,
+        passiveListener: null,
+        timeStamp: event.timeStamp || Date.now()
+      });
+      Object.defineProperty(this, "isTrusted", { value: false, enumerable: true });
+      const keys = Object.keys(event);
+      for (let i = 0; i < keys.length; ++i) {
+        const key = keys[i];
+        if (!(key in this)) {
+          Object.defineProperty(this, key, defineRedirectDescriptor(key));
+        }
+      }
+    }
+    Event.prototype = {
+      /**
+       * The type of this event.
+       * @type {string}
+       */
+      get type() {
+        return pd(this).event.type;
+      },
+      /**
+       * The target of this event.
+       * @type {EventTarget}
+       */
+      get target() {
+        return pd(this).eventTarget;
+      },
+      /**
+       * The target of this event.
+       * @type {EventTarget}
+       */
+      get currentTarget() {
+        return pd(this).currentTarget;
+      },
+      /**
+       * @returns {EventTarget[]} The composed path of this event.
+       */
+      composedPath() {
+        const currentTarget = pd(this).currentTarget;
+        if (currentTarget == null) {
+          return [];
+        }
+        return [currentTarget];
+      },
+      /**
+       * Constant of NONE.
+       * @type {number}
+       */
+      get NONE() {
+        return 0;
+      },
+      /**
+       * Constant of CAPTURING_PHASE.
+       * @type {number}
+       */
+      get CAPTURING_PHASE() {
+        return 1;
+      },
+      /**
+       * Constant of AT_TARGET.
+       * @type {number}
+       */
+      get AT_TARGET() {
+        return 2;
+      },
+      /**
+       * Constant of BUBBLING_PHASE.
+       * @type {number}
+       */
+      get BUBBLING_PHASE() {
+        return 3;
+      },
+      /**
+       * The target of this event.
+       * @type {number}
+       */
+      get eventPhase() {
+        return pd(this).eventPhase;
+      },
+      /**
+       * Stop event bubbling.
+       * @returns {void}
+       */
+      stopPropagation() {
+        const data = pd(this);
+        data.stopped = true;
+        if (typeof data.event.stopPropagation === "function") {
+          data.event.stopPropagation();
+        }
+      },
+      /**
+       * Stop event bubbling.
+       * @returns {void}
+       */
+      stopImmediatePropagation() {
+        const data = pd(this);
+        data.stopped = true;
+        data.immediateStopped = true;
+        if (typeof data.event.stopImmediatePropagation === "function") {
+          data.event.stopImmediatePropagation();
+        }
+      },
+      /**
+       * The flag to be bubbling.
+       * @type {boolean}
+       */
+      get bubbles() {
+        return Boolean(pd(this).event.bubbles);
+      },
+      /**
+       * The flag to be cancelable.
+       * @type {boolean}
+       */
+      get cancelable() {
+        return Boolean(pd(this).event.cancelable);
+      },
+      /**
+       * Cancel this event.
+       * @returns {void}
+       */
+      preventDefault() {
+        setCancelFlag(pd(this));
+      },
+      /**
+       * The flag to indicate cancellation state.
+       * @type {boolean}
+       */
+      get defaultPrevented() {
+        return pd(this).canceled;
+      },
+      /**
+       * The flag to be composed.
+       * @type {boolean}
+       */
+      get composed() {
+        return Boolean(pd(this).event.composed);
+      },
+      /**
+       * The unix time of this event.
+       * @type {number}
+       */
+      get timeStamp() {
+        return pd(this).timeStamp;
+      },
+      /**
+       * The target of this event.
+       * @type {EventTarget}
+       * @deprecated
+       */
+      get srcElement() {
+        return pd(this).eventTarget;
+      },
+      /**
+       * The flag to stop event bubbling.
+       * @type {boolean}
+       * @deprecated
+       */
+      get cancelBubble() {
+        return pd(this).stopped;
+      },
+      set cancelBubble(value) {
+        if (!value) {
+          return;
+        }
+        const data = pd(this);
+        data.stopped = true;
+        if (typeof data.event.cancelBubble === "boolean") {
+          data.event.cancelBubble = true;
+        }
+      },
+      /**
+       * The flag to indicate cancellation state.
+       * @type {boolean}
+       * @deprecated
+       */
+      get returnValue() {
+        return !pd(this).canceled;
+      },
+      set returnValue(value) {
+        if (!value) {
+          setCancelFlag(pd(this));
+        }
+      },
+      /**
+       * Initialize this event object. But do nothing under event dispatching.
+       * @param {string} type The event type.
+       * @param {boolean} [bubbles=false] The flag to be possible to bubble up.
+       * @param {boolean} [cancelable=false] The flag to be possible to cancel.
+       * @deprecated
+       */
+      initEvent() {
+      }
+    };
+    Object.defineProperty(Event.prototype, "constructor", {
+      value: Event,
+      configurable: true,
+      writable: true
+    });
+    if (typeof window !== "undefined" && typeof window.Event !== "undefined") {
+      Object.setPrototypeOf(Event.prototype, window.Event.prototype);
+      wrappers.set(window.Event.prototype, Event);
+    }
+    function defineRedirectDescriptor(key) {
+      return {
+        get() {
+          return pd(this).event[key];
+        },
+        set(value) {
+          pd(this).event[key] = value;
+        },
+        configurable: true,
+        enumerable: true
+      };
+    }
+    function defineCallDescriptor(key) {
+      return {
+        value() {
+          const event = pd(this).event;
+          return event[key].apply(event, arguments);
+        },
+        configurable: true,
+        enumerable: true
+      };
+    }
+    function defineWrapper(BaseEvent, proto) {
+      const keys = Object.keys(proto);
+      if (keys.length === 0) {
+        return BaseEvent;
+      }
+      function CustomEvent(eventTarget, event) {
+        BaseEvent.call(this, eventTarget, event);
+      }
+      CustomEvent.prototype = Object.create(BaseEvent.prototype, {
+        constructor: { value: CustomEvent, configurable: true, writable: true }
+      });
+      for (let i = 0; i < keys.length; ++i) {
+        const key = keys[i];
+        if (!(key in BaseEvent.prototype)) {
+          const descriptor = Object.getOwnPropertyDescriptor(proto, key);
+          const isFunc = typeof descriptor.value === "function";
+          Object.defineProperty(
+            CustomEvent.prototype,
+            key,
+            isFunc ? defineCallDescriptor(key) : defineRedirectDescriptor(key)
+          );
+        }
+      }
+      return CustomEvent;
+    }
+    function getWrapper(proto) {
+      if (proto == null || proto === Object.prototype) {
+        return Event;
+      }
+      let wrapper = wrappers.get(proto);
+      if (wrapper == null) {
+        wrapper = defineWrapper(getWrapper(Object.getPrototypeOf(proto)), proto);
+        wrappers.set(proto, wrapper);
+      }
+      return wrapper;
+    }
+    function wrapEvent(eventTarget, event) {
+      const Wrapper = getWrapper(Object.getPrototypeOf(event));
+      return new Wrapper(eventTarget, event);
+    }
+    function isStopped(event) {
+      return pd(event).immediateStopped;
+    }
+    function setEventPhase(event, eventPhase) {
+      pd(event).eventPhase = eventPhase;
+    }
+    function setCurrentTarget(event, currentTarget) {
+      pd(event).currentTarget = currentTarget;
+    }
+    function setPassiveListener(event, passiveListener) {
+      pd(event).passiveListener = passiveListener;
+    }
+    var listenersMap = /* @__PURE__ */ new WeakMap();
+    var CAPTURE = 1;
+    var BUBBLE = 2;
+    var ATTRIBUTE = 3;
+    function isObject(x) {
+      return x !== null && typeof x === "object";
+    }
+    function getListeners(eventTarget) {
+      const listeners = listenersMap.get(eventTarget);
+      if (listeners == null) {
+        throw new TypeError(
+          "'this' is expected an EventTarget object, but got another value."
+        );
+      }
+      return listeners;
+    }
+    function defineEventAttributeDescriptor(eventName) {
+      return {
+        get() {
+          const listeners = getListeners(this);
+          let node = listeners.get(eventName);
+          while (node != null) {
+            if (node.listenerType === ATTRIBUTE) {
+              return node.listener;
+            }
+            node = node.next;
+          }
+          return null;
+        },
+        set(listener) {
+          if (typeof listener !== "function" && !isObject(listener)) {
+            listener = null;
+          }
+          const listeners = getListeners(this);
+          let prev = null;
+          let node = listeners.get(eventName);
+          while (node != null) {
+            if (node.listenerType === ATTRIBUTE) {
+              if (prev !== null) {
+                prev.next = node.next;
+              } else if (node.next !== null) {
+                listeners.set(eventName, node.next);
+              } else {
+                listeners.delete(eventName);
+              }
+            } else {
+              prev = node;
+            }
+            node = node.next;
+          }
+          if (listener !== null) {
+            const newNode = {
+              listener,
+              listenerType: ATTRIBUTE,
+              passive: false,
+              once: false,
+              next: null
+            };
+            if (prev === null) {
+              listeners.set(eventName, newNode);
+            } else {
+              prev.next = newNode;
+            }
+          }
+        },
+        configurable: true,
+        enumerable: true
+      };
+    }
+    function defineEventAttribute(eventTargetPrototype, eventName) {
+      Object.defineProperty(
+        eventTargetPrototype,
+        `on${eventName}`,
+        defineEventAttributeDescriptor(eventName)
+      );
+    }
+    function defineCustomEventTarget(eventNames) {
+      function CustomEventTarget() {
+        EventTarget.call(this);
+      }
+      CustomEventTarget.prototype = Object.create(EventTarget.prototype, {
+        constructor: {
+          value: CustomEventTarget,
+          configurable: true,
+          writable: true
+        }
+      });
+      for (let i = 0; i < eventNames.length; ++i) {
+        defineEventAttribute(CustomEventTarget.prototype, eventNames[i]);
+      }
+      return CustomEventTarget;
+    }
+    function EventTarget() {
+      if (this instanceof EventTarget) {
+        listenersMap.set(this, /* @__PURE__ */ new Map());
+        return;
+      }
+      if (arguments.length === 1 && Array.isArray(arguments[0])) {
+        return defineCustomEventTarget(arguments[0]);
+      }
+      if (arguments.length > 0) {
+        const types2 = new Array(arguments.length);
+        for (let i = 0; i < arguments.length; ++i) {
+          types2[i] = arguments[i];
+        }
+        return defineCustomEventTarget(types2);
+      }
+      throw new TypeError("Cannot call a class as a function");
+    }
+    EventTarget.prototype = {
+      /**
+       * Add a given listener to this event target.
+       * @param {string} eventName The event name to add.
+       * @param {Function} listener The listener to add.
+       * @param {boolean|{capture?:boolean,passive?:boolean,once?:boolean}} [options] The options for this listener.
+       * @returns {void}
+       */
+      addEventListener(eventName, listener, options) {
+        if (listener == null) {
+          return;
+        }
+        if (typeof listener !== "function" && !isObject(listener)) {
+          throw new TypeError("'listener' should be a function or an object.");
+        }
+        const listeners = getListeners(this);
+        const optionsIsObj = isObject(options);
+        const capture = optionsIsObj ? Boolean(options.capture) : Boolean(options);
+        const listenerType = capture ? CAPTURE : BUBBLE;
+        const newNode = {
+          listener,
+          listenerType,
+          passive: optionsIsObj && Boolean(options.passive),
+          once: optionsIsObj && Boolean(options.once),
+          next: null
+        };
+        let node = listeners.get(eventName);
+        if (node === void 0) {
+          listeners.set(eventName, newNode);
+          return;
+        }
+        let prev = null;
+        while (node != null) {
+          if (node.listener === listener && node.listenerType === listenerType) {
+            return;
+          }
+          prev = node;
+          node = node.next;
+        }
+        prev.next = newNode;
+      },
+      /**
+       * Remove a given listener from this event target.
+       * @param {string} eventName The event name to remove.
+       * @param {Function} listener The listener to remove.
+       * @param {boolean|{capture?:boolean,passive?:boolean,once?:boolean}} [options] The options for this listener.
+       * @returns {void}
+       */
+      removeEventListener(eventName, listener, options) {
+        if (listener == null) {
+          return;
+        }
+        const listeners = getListeners(this);
+        const capture = isObject(options) ? Boolean(options.capture) : Boolean(options);
+        const listenerType = capture ? CAPTURE : BUBBLE;
+        let prev = null;
+        let node = listeners.get(eventName);
+        while (node != null) {
+          if (node.listener === listener && node.listenerType === listenerType) {
+            if (prev !== null) {
+              prev.next = node.next;
+            } else if (node.next !== null) {
+              listeners.set(eventName, node.next);
+            } else {
+              listeners.delete(eventName);
+            }
+            return;
+          }
+          prev = node;
+          node = node.next;
+        }
+      },
+      /**
+       * Dispatch a given event.
+       * @param {Event|{type:string}} event The event to dispatch.
+       * @returns {boolean} `false` if canceled.
+       */
+      dispatchEvent(event) {
+        if (event == null || typeof event.type !== "string") {
+          throw new TypeError('"event.type" should be a string.');
+        }
+        const listeners = getListeners(this);
+        const eventName = event.type;
+        let node = listeners.get(eventName);
+        if (node == null) {
+          return true;
+        }
+        const wrappedEvent = wrapEvent(this, event);
+        let prev = null;
+        while (node != null) {
+          if (node.once) {
+            if (prev !== null) {
+              prev.next = node.next;
+            } else if (node.next !== null) {
+              listeners.set(eventName, node.next);
+            } else {
+              listeners.delete(eventName);
+            }
+          } else {
+            prev = node;
+          }
+          setPassiveListener(
+            wrappedEvent,
+            node.passive ? node.listener : null
+          );
+          if (typeof node.listener === "function") {
+            try {
+              node.listener.call(this, wrappedEvent);
+            } catch (err) {
+              if (typeof console !== "undefined" && typeof console.error === "function") {
+                console.error(err);
+              }
+            }
+          } else if (node.listenerType !== ATTRIBUTE && typeof node.listener.handleEvent === "function") {
+            node.listener.handleEvent(wrappedEvent);
+          }
+          if (isStopped(wrappedEvent)) {
+            break;
+          }
+          node = node.next;
+        }
+        setPassiveListener(wrappedEvent, null);
+        setEventPhase(wrappedEvent, 0);
+        setCurrentTarget(wrappedEvent, null);
+        return !wrappedEvent.defaultPrevented;
+      }
+    };
+    Object.defineProperty(EventTarget.prototype, "constructor", {
+      value: EventTarget,
+      configurable: true,
+      writable: true
+    });
+    if (typeof window !== "undefined" && typeof window.EventTarget !== "undefined") {
+      Object.setPrototypeOf(EventTarget.prototype, window.EventTarget.prototype);
+    }
+    exports.defineEventAttribute = defineEventAttribute;
+    exports.EventTarget = EventTarget;
+    exports.default = EventTarget;
+    module.exports = EventTarget;
+    module.exports.EventTarget = module.exports["default"] = EventTarget;
+    module.exports.defineEventAttribute = defineEventAttribute;
+  }
+});
+
+// node_modules/abort-controller/dist/abort-controller.js
+var require_abort_controller = __commonJS({
+  "node_modules/abort-controller/dist/abort-controller.js"(exports, module) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    var eventTargetShim = require_event_target_shim();
+    var AbortSignal2 = class extends eventTargetShim.EventTarget {
+      /**
+       * AbortSignal cannot be constructed directly.
+       */
+      constructor() {
+        super();
+        throw new TypeError("AbortSignal cannot be constructed directly");
+      }
+      /**
+       * Returns `true` if this `AbortSignal`'s `AbortController` has signaled to abort, and `false` otherwise.
+       */
+      get aborted() {
+        const aborted = abortedFlags.get(this);
+        if (typeof aborted !== "boolean") {
+          throw new TypeError(`Expected 'this' to be an 'AbortSignal' object, but got ${this === null ? "null" : typeof this}`);
+        }
+        return aborted;
+      }
+    };
+    eventTargetShim.defineEventAttribute(AbortSignal2.prototype, "abort");
+    function createAbortSignal() {
+      const signal = Object.create(AbortSignal2.prototype);
+      eventTargetShim.EventTarget.call(signal);
+      abortedFlags.set(signal, false);
+      return signal;
+    }
+    function abortSignal(signal) {
+      if (abortedFlags.get(signal) !== false) {
+        return;
+      }
+      abortedFlags.set(signal, true);
+      signal.dispatchEvent({ type: "abort" });
+    }
+    var abortedFlags = /* @__PURE__ */ new WeakMap();
+    Object.defineProperties(AbortSignal2.prototype, {
+      aborted: { enumerable: true }
+    });
+    if (typeof Symbol === "function" && typeof Symbol.toStringTag === "symbol") {
+      Object.defineProperty(AbortSignal2.prototype, Symbol.toStringTag, {
+        configurable: true,
+        value: "AbortSignal"
+      });
+    }
+    var AbortController2 = class {
+      /**
+       * Initialize this controller.
+       */
+      constructor() {
+        signals.set(this, createAbortSignal());
+      }
+      /**
+       * Returns the `AbortSignal` object associated with this object.
+       */
+      get signal() {
+        return getSignal(this);
+      }
+      /**
+       * Abort and signal to any observers that the associated activity is to be aborted.
+       */
+      abort() {
+        abortSignal(getSignal(this));
+      }
+    };
+    var signals = /* @__PURE__ */ new WeakMap();
+    function getSignal(controller) {
+      const signal = signals.get(controller);
+      if (signal == null) {
+        throw new TypeError(`Expected 'this' to be an 'AbortController' object, but got ${controller === null ? "null" : typeof controller}`);
+      }
+      return signal;
+    }
+    Object.defineProperties(AbortController2.prototype, {
+      signal: { enumerable: true },
+      abort: { enumerable: true }
+    });
+    if (typeof Symbol === "function" && typeof Symbol.toStringTag === "symbol") {
+      Object.defineProperty(AbortController2.prototype, Symbol.toStringTag, {
+        configurable: true,
+        value: "AbortController"
+      });
+    }
+    exports.AbortController = AbortController2;
+    exports.AbortSignal = AbortSignal2;
+    exports.default = AbortController2;
+    module.exports = AbortController2;
+    module.exports.AbortController = module.exports["default"] = AbortController2;
+    module.exports.AbortSignal = AbortSignal2;
+  }
+});
+
+// node_modules/readable-stream/lib/ours/util.js
+var require_util4 = __commonJS({
+  "node_modules/readable-stream/lib/ours/util.js"(exports, module) {
+    "use strict";
+    var bufferModule = __require("buffer");
+    var { format: format2, inspect } = require_inspect();
+    var {
+      codes: { ERR_INVALID_ARG_TYPE }
+    } = require_errors7();
+    var { kResistStopPropagation, AggregateError, SymbolDispose } = require_primordials();
+    var AbortSignal2 = globalThis.AbortSignal || require_abort_controller().AbortSignal;
+    var AbortController2 = globalThis.AbortController || require_abort_controller().AbortController;
+    var AsyncFunction = Object.getPrototypeOf(async function() {
+    }).constructor;
+    var Blob = globalThis.Blob || bufferModule.Blob;
+    var isBlob = typeof Blob !== "undefined" ? function isBlob2(b) {
+      return b instanceof Blob;
+    } : function isBlob2(b) {
+      return false;
+    };
+    var validateAbortSignal = (signal, name) => {
+      if (signal !== void 0 && (signal === null || typeof signal !== "object" || !("aborted" in signal))) {
+        throw new ERR_INVALID_ARG_TYPE(name, "AbortSignal", signal);
+      }
+    };
+    var validateFunction = (value, name) => {
+      if (typeof value !== "function") {
+        throw new ERR_INVALID_ARG_TYPE(name, "Function", value);
+      }
+    };
+    module.exports = {
+      AggregateError,
+      kEmptyObject: Object.freeze({}),
+      once(callback) {
+        let called = false;
+        return function(...args) {
+          if (called) {
+            return;
+          }
+          called = true;
+          callback.apply(this, args);
+        };
+      },
+      createDeferredPromise: function() {
+        let resolve;
+        let reject;
+        const promise = new Promise((res, rej) => {
+          resolve = res;
+          reject = rej;
+        });
+        return {
+          promise,
+          resolve,
+          reject
+        };
+      },
+      promisify(fn) {
+        return new Promise((resolve, reject) => {
+          fn((err, ...args) => {
+            if (err) {
+              return reject(err);
+            }
+            return resolve(...args);
+          });
+        });
+      },
+      debuglog() {
+        return function() {
+        };
+      },
+      format: format2,
+      inspect,
+      types: {
+        isAsyncFunction(fn) {
+          return fn instanceof AsyncFunction;
+        },
+        isArrayBufferView(arr) {
+          return ArrayBuffer.isView(arr);
+        }
+      },
+      isBlob,
+      deprecate(fn, message) {
+        return fn;
+      },
+      addAbortListener: __require("events").addAbortListener || function addAbortListener(signal, listener) {
+        if (signal === void 0) {
+          throw new ERR_INVALID_ARG_TYPE("signal", "AbortSignal", signal);
+        }
+        validateAbortSignal(signal, "signal");
+        validateFunction(listener, "listener");
+        let removeEventListener;
+        if (signal.aborted) {
+          queueMicrotask(() => listener());
+        } else {
+          signal.addEventListener("abort", listener, {
+            __proto__: null,
+            once: true,
+            [kResistStopPropagation]: true
+          });
+          removeEventListener = () => {
+            signal.removeEventListener("abort", listener);
+          };
+        }
+        return {
+          __proto__: null,
+          [SymbolDispose]() {
+            var _removeEventListener;
+            (_removeEventListener = removeEventListener) === null || _removeEventListener === void 0 ? void 0 : _removeEventListener();
+          }
+        };
+      },
+      AbortSignalAny: AbortSignal2.any || function AbortSignalAny(signals) {
+        if (signals.length === 1) {
+          return signals[0];
+        }
+        const ac = new AbortController2();
+        const abort = () => ac.abort();
+        signals.forEach((signal) => {
+          validateAbortSignal(signal, "signals");
+          signal.addEventListener("abort", abort, {
+            once: true
+          });
+        });
+        ac.signal.addEventListener(
+          "abort",
+          () => {
+            signals.forEach((signal) => signal.removeEventListener("abort", abort));
+          },
+          {
+            once: true
+          }
+        );
+        return ac.signal;
+      }
+    };
+    module.exports.promisify.custom = /* @__PURE__ */ Symbol.for("nodejs.util.promisify.custom");
+  }
+});
+
+// node_modules/readable-stream/lib/internal/validators.js
+var require_validators = __commonJS({
+  "node_modules/readable-stream/lib/internal/validators.js"(exports, module) {
+    "use strict";
+    var {
+      ArrayIsArray,
+      ArrayPrototypeIncludes,
+      ArrayPrototypeJoin,
+      ArrayPrototypeMap,
+      NumberIsInteger,
+      NumberIsNaN,
+      NumberMAX_SAFE_INTEGER,
+      NumberMIN_SAFE_INTEGER,
+      NumberParseInt,
+      ObjectPrototypeHasOwnProperty,
+      RegExpPrototypeExec,
+      String: String2,
+      StringPrototypeToUpperCase,
+      StringPrototypeTrim
+    } = require_primordials();
+    var {
+      hideStackFrames,
+      codes: { ERR_SOCKET_BAD_PORT, ERR_INVALID_ARG_TYPE, ERR_INVALID_ARG_VALUE, ERR_OUT_OF_RANGE, ERR_UNKNOWN_SIGNAL }
+    } = require_errors7();
+    var { normalizeEncoding } = require_util4();
+    var { isAsyncFunction, isArrayBufferView } = require_util4().types;
+    var signals = {};
+    function isInt32(value) {
+      return value === (value | 0);
+    }
+    function isUint32(value) {
+      return value === value >>> 0;
+    }
+    var octalReg = /^[0-7]+$/;
+    var modeDesc = "must be a 32-bit unsigned integer or an octal string";
+    function parseFileMode(value, name, def) {
+      if (typeof value === "undefined") {
+        value = def;
+      }
+      if (typeof value === "string") {
+        if (RegExpPrototypeExec(octalReg, value) === null) {
+          throw new ERR_INVALID_ARG_VALUE(name, value, modeDesc);
+        }
+        value = NumberParseInt(value, 8);
+      }
+      validateUint32(value, name);
+      return value;
+    }
+    var validateInteger = hideStackFrames((value, name, min = NumberMIN_SAFE_INTEGER, max = NumberMAX_SAFE_INTEGER) => {
+      if (typeof value !== "number") throw new ERR_INVALID_ARG_TYPE(name, "number", value);
+      if (!NumberIsInteger(value)) throw new ERR_OUT_OF_RANGE(name, "an integer", value);
+      if (value < min || value > max) throw new ERR_OUT_OF_RANGE(name, `>= ${min} && <= ${max}`, value);
+    });
+    var validateInt32 = hideStackFrames((value, name, min = -2147483648, max = 2147483647) => {
+      if (typeof value !== "number") {
+        throw new ERR_INVALID_ARG_TYPE(name, "number", value);
+      }
+      if (!NumberIsInteger(value)) {
+        throw new ERR_OUT_OF_RANGE(name, "an integer", value);
+      }
+      if (value < min || value > max) {
+        throw new ERR_OUT_OF_RANGE(name, `>= ${min} && <= ${max}`, value);
+      }
+    });
+    var validateUint32 = hideStackFrames((value, name, positive = false) => {
+      if (typeof value !== "number") {
+        throw new ERR_INVALID_ARG_TYPE(name, "number", value);
+      }
+      if (!NumberIsInteger(value)) {
+        throw new ERR_OUT_OF_RANGE(name, "an integer", value);
+      }
+      const min = positive ? 1 : 0;
+      const max = 4294967295;
+      if (value < min || value > max) {
+        throw new ERR_OUT_OF_RANGE(name, `>= ${min} && <= ${max}`, value);
+      }
+    });
+    function validateString(value, name) {
+      if (typeof value !== "string") throw new ERR_INVALID_ARG_TYPE(name, "string", value);
+    }
+    function validateNumber(value, name, min = void 0, max) {
+      if (typeof value !== "number") throw new ERR_INVALID_ARG_TYPE(name, "number", value);
+      if (min != null && value < min || max != null && value > max || (min != null || max != null) && NumberIsNaN(value)) {
+        throw new ERR_OUT_OF_RANGE(
+          name,
+          `${min != null ? `>= ${min}` : ""}${min != null && max != null ? " && " : ""}${max != null ? `<= ${max}` : ""}`,
+          value
+        );
+      }
+    }
+    var validateOneOf = hideStackFrames((value, name, oneOf) => {
+      if (!ArrayPrototypeIncludes(oneOf, value)) {
+        const allowed = ArrayPrototypeJoin(
+          ArrayPrototypeMap(oneOf, (v) => typeof v === "string" ? `'${v}'` : String2(v)),
+          ", "
+        );
+        const reason = "must be one of: " + allowed;
+        throw new ERR_INVALID_ARG_VALUE(name, value, reason);
+      }
+    });
+    function validateBoolean(value, name) {
+      if (typeof value !== "boolean") throw new ERR_INVALID_ARG_TYPE(name, "boolean", value);
+    }
+    function getOwnPropertyValueOrDefault(options, key, defaultValue) {
+      return options == null || !ObjectPrototypeHasOwnProperty(options, key) ? defaultValue : options[key];
+    }
+    var validateObject = hideStackFrames((value, name, options = null) => {
+      const allowArray = getOwnPropertyValueOrDefault(options, "allowArray", false);
+      const allowFunction = getOwnPropertyValueOrDefault(options, "allowFunction", false);
+      const nullable = getOwnPropertyValueOrDefault(options, "nullable", false);
+      if (!nullable && value === null || !allowArray && ArrayIsArray(value) || typeof value !== "object" && (!allowFunction || typeof value !== "function")) {
+        throw new ERR_INVALID_ARG_TYPE(name, "Object", value);
+      }
+    });
+    var validateDictionary = hideStackFrames((value, name) => {
+      if (value != null && typeof value !== "object" && typeof value !== "function") {
+        throw new ERR_INVALID_ARG_TYPE(name, "a dictionary", value);
+      }
+    });
+    var validateArray = hideStackFrames((value, name, minLength = 0) => {
+      if (!ArrayIsArray(value)) {
+        throw new ERR_INVALID_ARG_TYPE(name, "Array", value);
+      }
+      if (value.length < minLength) {
+        const reason = `must be longer than ${minLength}`;
+        throw new ERR_INVALID_ARG_VALUE(name, value, reason);
+      }
+    });
+    function validateStringArray(value, name) {
+      validateArray(value, name);
+      for (let i = 0; i < value.length; i++) {
+        validateString(value[i], `${name}[${i}]`);
+      }
+    }
+    function validateBooleanArray(value, name) {
+      validateArray(value, name);
+      for (let i = 0; i < value.length; i++) {
+        validateBoolean(value[i], `${name}[${i}]`);
+      }
+    }
+    function validateAbortSignalArray(value, name) {
+      validateArray(value, name);
+      for (let i = 0; i < value.length; i++) {
+        const signal = value[i];
+        const indexedName = `${name}[${i}]`;
+        if (signal == null) {
+          throw new ERR_INVALID_ARG_TYPE(indexedName, "AbortSignal", signal);
+        }
+        validateAbortSignal(signal, indexedName);
+      }
+    }
+    function validateSignalName(signal, name = "signal") {
+      validateString(signal, name);
+      if (signals[signal] === void 0) {
+        if (signals[StringPrototypeToUpperCase(signal)] !== void 0) {
+          throw new ERR_UNKNOWN_SIGNAL(signal + " (signals must use all capital letters)");
+        }
+        throw new ERR_UNKNOWN_SIGNAL(signal);
+      }
+    }
+    var validateBuffer = hideStackFrames((buffer, name = "buffer") => {
+      if (!isArrayBufferView(buffer)) {
+        throw new ERR_INVALID_ARG_TYPE(name, ["Buffer", "TypedArray", "DataView"], buffer);
+      }
+    });
+    function validateEncoding(data, encoding) {
+      const normalizedEncoding = normalizeEncoding(encoding);
+      const length = data.length;
+      if (normalizedEncoding === "hex" && length % 2 !== 0) {
+        throw new ERR_INVALID_ARG_VALUE("encoding", encoding, `is invalid for data of length ${length}`);
+      }
+    }
+    function validatePort(port, name = "Port", allowZero = true) {
+      if (typeof port !== "number" && typeof port !== "string" || typeof port === "string" && StringPrototypeTrim(port).length === 0 || +port !== +port >>> 0 || port > 65535 || port === 0 && !allowZero) {
+        throw new ERR_SOCKET_BAD_PORT(name, port, allowZero);
+      }
+      return port | 0;
+    }
+    var validateAbortSignal = hideStackFrames((signal, name) => {
+      if (signal !== void 0 && (signal === null || typeof signal !== "object" || !("aborted" in signal))) {
+        throw new ERR_INVALID_ARG_TYPE(name, "AbortSignal", signal);
+      }
+    });
+    var validateFunction = hideStackFrames((value, name) => {
+      if (typeof value !== "function") throw new ERR_INVALID_ARG_TYPE(name, "Function", value);
+    });
+    var validatePlainFunction = hideStackFrames((value, name) => {
+      if (typeof value !== "function" || isAsyncFunction(value)) throw new ERR_INVALID_ARG_TYPE(name, "Function", value);
+    });
+    var validateUndefined = hideStackFrames((value, name) => {
+      if (value !== void 0) throw new ERR_INVALID_ARG_TYPE(name, "undefined", value);
+    });
+    function validateUnion(value, name, union) {
+      if (!ArrayPrototypeIncludes(union, value)) {
+        throw new ERR_INVALID_ARG_TYPE(name, `('${ArrayPrototypeJoin(union, "|")}')`, value);
+      }
+    }
+    var linkValueRegExp = /^(?:<[^>]*>)(?:\s*;\s*[^;"\s]+(?:=(")?[^;"\s]*\1)?)*$/;
+    function validateLinkHeaderFormat(value, name) {
+      if (typeof value === "undefined" || !RegExpPrototypeExec(linkValueRegExp, value)) {
+        throw new ERR_INVALID_ARG_VALUE(
+          name,
+          value,
+          'must be an array or string of format "</styles.css>; rel=preload; as=style"'
+        );
+      }
+    }
+    function validateLinkHeaderValue(hints) {
+      if (typeof hints === "string") {
+        validateLinkHeaderFormat(hints, "hints");
+        return hints;
+      } else if (ArrayIsArray(hints)) {
+        const hintsLength = hints.length;
+        let result = "";
+        if (hintsLength === 0) {
+          return result;
+        }
+        for (let i = 0; i < hintsLength; i++) {
+          const link = hints[i];
+          validateLinkHeaderFormat(link, "hints");
+          result += link;
+          if (i !== hintsLength - 1) {
+            result += ", ";
+          }
+        }
+        return result;
+      }
+      throw new ERR_INVALID_ARG_VALUE(
+        "hints",
+        hints,
+        'must be an array or string of format "</styles.css>; rel=preload; as=style"'
+      );
+    }
+    module.exports = {
+      isInt32,
+      isUint32,
+      parseFileMode,
+      validateArray,
+      validateStringArray,
+      validateBooleanArray,
+      validateAbortSignalArray,
+      validateBoolean,
+      validateBuffer,
+      validateDictionary,
+      validateEncoding,
+      validateFunction,
+      validateInt32,
+      validateInteger,
+      validateNumber,
+      validateObject,
+      validateOneOf,
+      validatePlainFunction,
+      validatePort,
+      validateSignalName,
+      validateString,
+      validateUint32,
+      validateUndefined,
+      validateUnion,
+      validateAbortSignal,
+      validateLinkHeaderValue
+    };
+  }
+});
+
+// node_modules/process/index.js
+var require_process = __commonJS({
+  "node_modules/process/index.js"(exports, module) {
+    module.exports = global.process;
+  }
+});
+
+// node_modules/readable-stream/lib/internal/shims/process.js
+var require_process2 = __commonJS({
+  "node_modules/readable-stream/lib/internal/shims/process.js"(exports, module) {
+    "use strict";
+    var process2 = ((base, esmKey, keys, isValid) => {
+      if (esmKey in base && base[esmKey] === true) {
+        let candidate;
+        for (const key of keys) {
+          if (!(key in base)) {
+            continue;
+          }
+          candidate = base[key];
+          if (isValid(candidate)) {
+            return candidate;
+          }
+        }
+      }
+      return base;
+    })(require_process(), "__esModule", ["default", "process"], (candidate) => "nextTick" in candidate);
+    module.exports = process2;
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/utils.js
+var require_utils3 = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/utils.js"(exports, module) {
+    "use strict";
+    var { SymbolAsyncIterator, SymbolIterator, SymbolFor } = require_primordials();
+    var kIsDestroyed = SymbolFor("nodejs.stream.destroyed");
+    var kIsErrored = SymbolFor("nodejs.stream.errored");
+    var kIsReadable = SymbolFor("nodejs.stream.readable");
+    var kIsWritable = SymbolFor("nodejs.stream.writable");
+    var kIsDisturbed = SymbolFor("nodejs.stream.disturbed");
+    var kIsClosedPromise = SymbolFor("nodejs.webstream.isClosedPromise");
+    var kControllerErrorFunction = SymbolFor("nodejs.webstream.controllerErrorFunction");
+    function isReadableNodeStream(obj, strict = false) {
+      var _obj$_readableState;
+      return !!(obj && typeof obj.pipe === "function" && typeof obj.on === "function" && (!strict || typeof obj.pause === "function" && typeof obj.resume === "function") && (!obj._writableState || ((_obj$_readableState = obj._readableState) === null || _obj$_readableState === void 0 ? void 0 : _obj$_readableState.readable) !== false) && // Duplex
+      (!obj._writableState || obj._readableState));
+    }
+    function isWritableNodeStream(obj) {
+      var _obj$_writableState;
+      return !!(obj && typeof obj.write === "function" && typeof obj.on === "function" && (!obj._readableState || ((_obj$_writableState = obj._writableState) === null || _obj$_writableState === void 0 ? void 0 : _obj$_writableState.writable) !== false));
+    }
+    function isDuplexNodeStream(obj) {
+      return !!(obj && typeof obj.pipe === "function" && obj._readableState && typeof obj.on === "function" && typeof obj.write === "function");
+    }
+    function isNodeStream(obj) {
+      return obj && (obj._readableState || obj._writableState || typeof obj.write === "function" && typeof obj.on === "function" || typeof obj.pipe === "function" && typeof obj.on === "function");
+    }
+    function isReadableStream(obj) {
+      return !!(obj && !isNodeStream(obj) && typeof obj.pipeThrough === "function" && typeof obj.getReader === "function" && typeof obj.cancel === "function");
+    }
+    function isWritableStream(obj) {
+      return !!(obj && !isNodeStream(obj) && typeof obj.getWriter === "function" && typeof obj.abort === "function");
+    }
+    function isTransformStream(obj) {
+      return !!(obj && !isNodeStream(obj) && typeof obj.readable === "object" && typeof obj.writable === "object");
+    }
+    function isWebStream(obj) {
+      return isReadableStream(obj) || isWritableStream(obj) || isTransformStream(obj);
+    }
+    function isIterable(obj, isAsync) {
+      if (obj == null) return false;
+      if (isAsync === true) return typeof obj[SymbolAsyncIterator] === "function";
+      if (isAsync === false) return typeof obj[SymbolIterator] === "function";
+      return typeof obj[SymbolAsyncIterator] === "function" || typeof obj[SymbolIterator] === "function";
+    }
+    function isDestroyed(stream) {
+      if (!isNodeStream(stream)) return null;
+      const wState = stream._writableState;
+      const rState = stream._readableState;
+      const state = wState || rState;
+      return !!(stream.destroyed || stream[kIsDestroyed] || state !== null && state !== void 0 && state.destroyed);
+    }
+    function isWritableEnded(stream) {
+      if (!isWritableNodeStream(stream)) return null;
+      if (stream.writableEnded === true) return true;
+      const wState = stream._writableState;
+      if (wState !== null && wState !== void 0 && wState.errored) return false;
+      if (typeof (wState === null || wState === void 0 ? void 0 : wState.ended) !== "boolean") return null;
+      return wState.ended;
+    }
+    function isWritableFinished(stream, strict) {
+      if (!isWritableNodeStream(stream)) return null;
+      if (stream.writableFinished === true) return true;
+      const wState = stream._writableState;
+      if (wState !== null && wState !== void 0 && wState.errored) return false;
+      if (typeof (wState === null || wState === void 0 ? void 0 : wState.finished) !== "boolean") return null;
+      return !!(wState.finished || strict === false && wState.ended === true && wState.length === 0);
+    }
+    function isReadableEnded(stream) {
+      if (!isReadableNodeStream(stream)) return null;
+      if (stream.readableEnded === true) return true;
+      const rState = stream._readableState;
+      if (!rState || rState.errored) return false;
+      if (typeof (rState === null || rState === void 0 ? void 0 : rState.ended) !== "boolean") return null;
+      return rState.ended;
+    }
+    function isReadableFinished(stream, strict) {
+      if (!isReadableNodeStream(stream)) return null;
+      const rState = stream._readableState;
+      if (rState !== null && rState !== void 0 && rState.errored) return false;
+      if (typeof (rState === null || rState === void 0 ? void 0 : rState.endEmitted) !== "boolean") return null;
+      return !!(rState.endEmitted || strict === false && rState.ended === true && rState.length === 0);
+    }
+    function isReadable(stream) {
+      if (stream && stream[kIsReadable] != null) return stream[kIsReadable];
+      if (typeof (stream === null || stream === void 0 ? void 0 : stream.readable) !== "boolean") return null;
+      if (isDestroyed(stream)) return false;
+      return isReadableNodeStream(stream) && stream.readable && !isReadableFinished(stream);
+    }
+    function isWritable(stream) {
+      if (stream && stream[kIsWritable] != null) return stream[kIsWritable];
+      if (typeof (stream === null || stream === void 0 ? void 0 : stream.writable) !== "boolean") return null;
+      if (isDestroyed(stream)) return false;
+      return isWritableNodeStream(stream) && stream.writable && !isWritableEnded(stream);
+    }
+    function isFinished(stream, opts) {
+      if (!isNodeStream(stream)) {
+        return null;
+      }
+      if (isDestroyed(stream)) {
+        return true;
+      }
+      if ((opts === null || opts === void 0 ? void 0 : opts.readable) !== false && isReadable(stream)) {
+        return false;
+      }
+      if ((opts === null || opts === void 0 ? void 0 : opts.writable) !== false && isWritable(stream)) {
+        return false;
+      }
+      return true;
+    }
+    function isWritableErrored(stream) {
+      var _stream$_writableStat, _stream$_writableStat2;
+      if (!isNodeStream(stream)) {
+        return null;
+      }
+      if (stream.writableErrored) {
+        return stream.writableErrored;
+      }
+      return (_stream$_writableStat = (_stream$_writableStat2 = stream._writableState) === null || _stream$_writableStat2 === void 0 ? void 0 : _stream$_writableStat2.errored) !== null && _stream$_writableStat !== void 0 ? _stream$_writableStat : null;
+    }
+    function isReadableErrored(stream) {
+      var _stream$_readableStat, _stream$_readableStat2;
+      if (!isNodeStream(stream)) {
+        return null;
+      }
+      if (stream.readableErrored) {
+        return stream.readableErrored;
+      }
+      return (_stream$_readableStat = (_stream$_readableStat2 = stream._readableState) === null || _stream$_readableStat2 === void 0 ? void 0 : _stream$_readableStat2.errored) !== null && _stream$_readableStat !== void 0 ? _stream$_readableStat : null;
+    }
+    function isClosed(stream) {
+      if (!isNodeStream(stream)) {
+        return null;
+      }
+      if (typeof stream.closed === "boolean") {
+        return stream.closed;
+      }
+      const wState = stream._writableState;
+      const rState = stream._readableState;
+      if (typeof (wState === null || wState === void 0 ? void 0 : wState.closed) === "boolean" || typeof (rState === null || rState === void 0 ? void 0 : rState.closed) === "boolean") {
+        return (wState === null || wState === void 0 ? void 0 : wState.closed) || (rState === null || rState === void 0 ? void 0 : rState.closed);
+      }
+      if (typeof stream._closed === "boolean" && isOutgoingMessage(stream)) {
+        return stream._closed;
+      }
+      return null;
+    }
+    function isOutgoingMessage(stream) {
+      return typeof stream._closed === "boolean" && typeof stream._defaultKeepAlive === "boolean" && typeof stream._removedConnection === "boolean" && typeof stream._removedContLen === "boolean";
+    }
+    function isServerResponse(stream) {
+      return typeof stream._sent100 === "boolean" && isOutgoingMessage(stream);
+    }
+    function isServerRequest(stream) {
+      var _stream$req;
+      return typeof stream._consuming === "boolean" && typeof stream._dumped === "boolean" && ((_stream$req = stream.req) === null || _stream$req === void 0 ? void 0 : _stream$req.upgradeOrConnect) === void 0;
+    }
+    function willEmitClose(stream) {
+      if (!isNodeStream(stream)) return null;
+      const wState = stream._writableState;
+      const rState = stream._readableState;
+      const state = wState || rState;
+      return !state && isServerResponse(stream) || !!(state && state.autoDestroy && state.emitClose && state.closed === false);
+    }
+    function isDisturbed(stream) {
+      var _stream$kIsDisturbed;
+      return !!(stream && ((_stream$kIsDisturbed = stream[kIsDisturbed]) !== null && _stream$kIsDisturbed !== void 0 ? _stream$kIsDisturbed : stream.readableDidRead || stream.readableAborted));
+    }
+    function isErrored(stream) {
+      var _ref, _ref2, _ref3, _ref4, _ref5, _stream$kIsErrored, _stream$_readableStat3, _stream$_writableStat3, _stream$_readableStat4, _stream$_writableStat4;
+      return !!(stream && ((_ref = (_ref2 = (_ref3 = (_ref4 = (_ref5 = (_stream$kIsErrored = stream[kIsErrored]) !== null && _stream$kIsErrored !== void 0 ? _stream$kIsErrored : stream.readableErrored) !== null && _ref5 !== void 0 ? _ref5 : stream.writableErrored) !== null && _ref4 !== void 0 ? _ref4 : (_stream$_readableStat3 = stream._readableState) === null || _stream$_readableStat3 === void 0 ? void 0 : _stream$_readableStat3.errorEmitted) !== null && _ref3 !== void 0 ? _ref3 : (_stream$_writableStat3 = stream._writableState) === null || _stream$_writableStat3 === void 0 ? void 0 : _stream$_writableStat3.errorEmitted) !== null && _ref2 !== void 0 ? _ref2 : (_stream$_readableStat4 = stream._readableState) === null || _stream$_readableStat4 === void 0 ? void 0 : _stream$_readableStat4.errored) !== null && _ref !== void 0 ? _ref : (_stream$_writableStat4 = stream._writableState) === null || _stream$_writableStat4 === void 0 ? void 0 : _stream$_writableStat4.errored));
+    }
+    module.exports = {
+      isDestroyed,
+      kIsDestroyed,
+      isDisturbed,
+      kIsDisturbed,
+      isErrored,
+      kIsErrored,
+      isReadable,
+      kIsReadable,
+      kIsClosedPromise,
+      kControllerErrorFunction,
+      kIsWritable,
+      isClosed,
+      isDuplexNodeStream,
+      isFinished,
+      isIterable,
+      isReadableNodeStream,
+      isReadableStream,
+      isReadableEnded,
+      isReadableFinished,
+      isReadableErrored,
+      isNodeStream,
+      isWebStream,
+      isWritable,
+      isWritableNodeStream,
+      isWritableStream,
+      isWritableEnded,
+      isWritableFinished,
+      isWritableErrored,
+      isServerRequest,
+      isServerResponse,
+      willEmitClose,
+      isTransformStream
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/end-of-stream.js
+var require_end_of_stream3 = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/end-of-stream.js"(exports, module) {
+    "use strict";
+    var process2 = require_process2();
+    var { AbortError, codes } = require_errors7();
+    var { ERR_INVALID_ARG_TYPE, ERR_STREAM_PREMATURE_CLOSE } = codes;
+    var { kEmptyObject, once } = require_util4();
+    var { validateAbortSignal, validateFunction, validateObject, validateBoolean } = require_validators();
+    var { Promise: Promise2, PromisePrototypeThen, SymbolDispose } = require_primordials();
+    var {
+      isClosed,
+      isReadable,
+      isReadableNodeStream,
+      isReadableStream,
+      isReadableFinished,
+      isReadableErrored,
+      isWritable,
+      isWritableNodeStream,
+      isWritableStream,
+      isWritableFinished,
+      isWritableErrored,
+      isNodeStream,
+      willEmitClose: _willEmitClose,
+      kIsClosedPromise
+    } = require_utils3();
+    var addAbortListener;
+    function isRequest(stream) {
+      return stream.setHeader && typeof stream.abort === "function";
+    }
+    var nop = () => {
+    };
+    function eos(stream, options, callback) {
+      var _options$readable, _options$writable;
+      if (arguments.length === 2) {
+        callback = options;
+        options = kEmptyObject;
+      } else if (options == null) {
+        options = kEmptyObject;
+      } else {
+        validateObject(options, "options");
+      }
+      validateFunction(callback, "callback");
+      validateAbortSignal(options.signal, "options.signal");
+      callback = once(callback);
+      if (isReadableStream(stream) || isWritableStream(stream)) {
+        return eosWeb(stream, options, callback);
+      }
+      if (!isNodeStream(stream)) {
+        throw new ERR_INVALID_ARG_TYPE("stream", ["ReadableStream", "WritableStream", "Stream"], stream);
+      }
+      const readable = (_options$readable = options.readable) !== null && _options$readable !== void 0 ? _options$readable : isReadableNodeStream(stream);
+      const writable = (_options$writable = options.writable) !== null && _options$writable !== void 0 ? _options$writable : isWritableNodeStream(stream);
+      const wState = stream._writableState;
+      const rState = stream._readableState;
+      const onlegacyfinish = () => {
+        if (!stream.writable) {
+          onfinish();
+        }
+      };
+      let willEmitClose = _willEmitClose(stream) && isReadableNodeStream(stream) === readable && isWritableNodeStream(stream) === writable;
+      let writableFinished = isWritableFinished(stream, false);
+      const onfinish = () => {
+        writableFinished = true;
+        if (stream.destroyed) {
+          willEmitClose = false;
+        }
+        if (willEmitClose && (!stream.readable || readable)) {
+          return;
+        }
+        if (!readable || readableFinished) {
+          callback.call(stream);
+        }
+      };
+      let readableFinished = isReadableFinished(stream, false);
+      const onend = () => {
+        readableFinished = true;
+        if (stream.destroyed) {
+          willEmitClose = false;
+        }
+        if (willEmitClose && (!stream.writable || writable)) {
+          return;
+        }
+        if (!writable || writableFinished) {
+          callback.call(stream);
+        }
+      };
+      const onerror = (err) => {
+        callback.call(stream, err);
+      };
+      let closed = isClosed(stream);
+      const onclose = () => {
+        closed = true;
+        const errored = isWritableErrored(stream) || isReadableErrored(stream);
+        if (errored && typeof errored !== "boolean") {
+          return callback.call(stream, errored);
+        }
+        if (readable && !readableFinished && isReadableNodeStream(stream, true)) {
+          if (!isReadableFinished(stream, false)) return callback.call(stream, new ERR_STREAM_PREMATURE_CLOSE());
+        }
+        if (writable && !writableFinished) {
+          if (!isWritableFinished(stream, false)) return callback.call(stream, new ERR_STREAM_PREMATURE_CLOSE());
+        }
+        callback.call(stream);
+      };
+      const onclosed = () => {
+        closed = true;
+        const errored = isWritableErrored(stream) || isReadableErrored(stream);
+        if (errored && typeof errored !== "boolean") {
+          return callback.call(stream, errored);
+        }
+        callback.call(stream);
+      };
+      const onrequest = () => {
+        stream.req.on("finish", onfinish);
+      };
+      if (isRequest(stream)) {
+        stream.on("complete", onfinish);
+        if (!willEmitClose) {
+          stream.on("abort", onclose);
+        }
+        if (stream.req) {
+          onrequest();
+        } else {
+          stream.on("request", onrequest);
+        }
+      } else if (writable && !wState) {
+        stream.on("end", onlegacyfinish);
+        stream.on("close", onlegacyfinish);
+      }
+      if (!willEmitClose && typeof stream.aborted === "boolean") {
+        stream.on("aborted", onclose);
+      }
+      stream.on("end", onend);
+      stream.on("finish", onfinish);
+      if (options.error !== false) {
+        stream.on("error", onerror);
+      }
+      stream.on("close", onclose);
+      if (closed) {
+        process2.nextTick(onclose);
+      } else if (wState !== null && wState !== void 0 && wState.errorEmitted || rState !== null && rState !== void 0 && rState.errorEmitted) {
+        if (!willEmitClose) {
+          process2.nextTick(onclosed);
+        }
+      } else if (!readable && (!willEmitClose || isReadable(stream)) && (writableFinished || isWritable(stream) === false)) {
+        process2.nextTick(onclosed);
+      } else if (!writable && (!willEmitClose || isWritable(stream)) && (readableFinished || isReadable(stream) === false)) {
+        process2.nextTick(onclosed);
+      } else if (rState && stream.req && stream.aborted) {
+        process2.nextTick(onclosed);
+      }
+      const cleanup = () => {
+        callback = nop;
+        stream.removeListener("aborted", onclose);
+        stream.removeListener("complete", onfinish);
+        stream.removeListener("abort", onclose);
+        stream.removeListener("request", onrequest);
+        if (stream.req) stream.req.removeListener("finish", onfinish);
+        stream.removeListener("end", onlegacyfinish);
+        stream.removeListener("close", onlegacyfinish);
+        stream.removeListener("finish", onfinish);
+        stream.removeListener("end", onend);
+        stream.removeListener("error", onerror);
+        stream.removeListener("close", onclose);
+      };
+      if (options.signal && !closed) {
+        const abort = () => {
+          const endCallback = callback;
+          cleanup();
+          endCallback.call(
+            stream,
+            new AbortError(void 0, {
+              cause: options.signal.reason
+            })
+          );
+        };
+        if (options.signal.aborted) {
+          process2.nextTick(abort);
+        } else {
+          addAbortListener = addAbortListener || require_util4().addAbortListener;
+          const disposable = addAbortListener(options.signal, abort);
+          const originalCallback = callback;
+          callback = once((...args) => {
+            disposable[SymbolDispose]();
+            originalCallback.apply(stream, args);
+          });
+        }
+      }
+      return cleanup;
+    }
+    function eosWeb(stream, options, callback) {
+      let isAborted = false;
+      let abort = nop;
+      if (options.signal) {
+        abort = () => {
+          isAborted = true;
+          callback.call(
+            stream,
+            new AbortError(void 0, {
+              cause: options.signal.reason
+            })
+          );
+        };
+        if (options.signal.aborted) {
+          process2.nextTick(abort);
+        } else {
+          addAbortListener = addAbortListener || require_util4().addAbortListener;
+          const disposable = addAbortListener(options.signal, abort);
+          const originalCallback = callback;
+          callback = once((...args) => {
+            disposable[SymbolDispose]();
+            originalCallback.apply(stream, args);
+          });
+        }
+      }
+      const resolverFn = (...args) => {
+        if (!isAborted) {
+          process2.nextTick(() => callback.apply(stream, args));
+        }
+      };
+      PromisePrototypeThen(stream[kIsClosedPromise].promise, resolverFn, resolverFn);
+      return nop;
+    }
+    function finished(stream, opts) {
+      var _opts;
+      let autoCleanup = false;
+      if (opts === null) {
+        opts = kEmptyObject;
+      }
+      if ((_opts = opts) !== null && _opts !== void 0 && _opts.cleanup) {
+        validateBoolean(opts.cleanup, "cleanup");
+        autoCleanup = opts.cleanup;
+      }
+      return new Promise2((resolve, reject) => {
+        const cleanup = eos(stream, opts, (err) => {
+          if (autoCleanup) {
+            cleanup();
+          }
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
+      });
+    }
+    module.exports = eos;
+    module.exports.finished = finished;
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/destroy.js
+var require_destroy4 = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/destroy.js"(exports, module) {
+    "use strict";
+    var process2 = require_process2();
+    var {
+      aggregateTwoErrors,
+      codes: { ERR_MULTIPLE_CALLBACK },
+      AbortError
+    } = require_errors7();
+    var { Symbol: Symbol2 } = require_primordials();
+    var { kIsDestroyed, isDestroyed, isFinished, isServerRequest } = require_utils3();
+    var kDestroy = Symbol2("kDestroy");
+    var kConstruct = Symbol2("kConstruct");
+    function checkError(err, w, r) {
+      if (err) {
+        err.stack;
+        if (w && !w.errored) {
+          w.errored = err;
+        }
+        if (r && !r.errored) {
+          r.errored = err;
+        }
+      }
+    }
+    function destroy(err, cb) {
+      const r = this._readableState;
+      const w = this._writableState;
+      const s = w || r;
+      if (w !== null && w !== void 0 && w.destroyed || r !== null && r !== void 0 && r.destroyed) {
+        if (typeof cb === "function") {
+          cb();
+        }
+        return this;
+      }
+      checkError(err, w, r);
+      if (w) {
+        w.destroyed = true;
+      }
+      if (r) {
+        r.destroyed = true;
+      }
+      if (!s.constructed) {
+        this.once(kDestroy, function(er) {
+          _destroy(this, aggregateTwoErrors(er, err), cb);
+        });
+      } else {
+        _destroy(this, err, cb);
+      }
+      return this;
+    }
+    function _destroy(self2, err, cb) {
+      let called = false;
+      function onDestroy(err2) {
+        if (called) {
+          return;
+        }
+        called = true;
+        const r = self2._readableState;
+        const w = self2._writableState;
+        checkError(err2, w, r);
+        if (w) {
+          w.closed = true;
+        }
+        if (r) {
+          r.closed = true;
+        }
+        if (typeof cb === "function") {
+          cb(err2);
+        }
+        if (err2) {
+          process2.nextTick(emitErrorCloseNT, self2, err2);
+        } else {
+          process2.nextTick(emitCloseNT, self2);
+        }
+      }
+      try {
+        self2._destroy(err || null, onDestroy);
+      } catch (err2) {
+        onDestroy(err2);
+      }
+    }
+    function emitErrorCloseNT(self2, err) {
+      emitErrorNT(self2, err);
+      emitCloseNT(self2);
+    }
+    function emitCloseNT(self2) {
+      const r = self2._readableState;
+      const w = self2._writableState;
+      if (w) {
+        w.closeEmitted = true;
+      }
+      if (r) {
+        r.closeEmitted = true;
+      }
+      if (w !== null && w !== void 0 && w.emitClose || r !== null && r !== void 0 && r.emitClose) {
+        self2.emit("close");
+      }
+    }
+    function emitErrorNT(self2, err) {
+      const r = self2._readableState;
+      const w = self2._writableState;
+      if (w !== null && w !== void 0 && w.errorEmitted || r !== null && r !== void 0 && r.errorEmitted) {
+        return;
+      }
+      if (w) {
+        w.errorEmitted = true;
+      }
+      if (r) {
+        r.errorEmitted = true;
+      }
+      self2.emit("error", err);
+    }
+    function undestroy() {
+      const r = this._readableState;
+      const w = this._writableState;
+      if (r) {
+        r.constructed = true;
+        r.closed = false;
+        r.closeEmitted = false;
+        r.destroyed = false;
+        r.errored = null;
+        r.errorEmitted = false;
+        r.reading = false;
+        r.ended = r.readable === false;
+        r.endEmitted = r.readable === false;
+      }
+      if (w) {
+        w.constructed = true;
+        w.destroyed = false;
+        w.closed = false;
+        w.closeEmitted = false;
+        w.errored = null;
+        w.errorEmitted = false;
+        w.finalCalled = false;
+        w.prefinished = false;
+        w.ended = w.writable === false;
+        w.ending = w.writable === false;
+        w.finished = w.writable === false;
+      }
+    }
+    function errorOrDestroy(stream, err, sync) {
+      const r = stream._readableState;
+      const w = stream._writableState;
+      if (w !== null && w !== void 0 && w.destroyed || r !== null && r !== void 0 && r.destroyed) {
+        return this;
+      }
+      if (r !== null && r !== void 0 && r.autoDestroy || w !== null && w !== void 0 && w.autoDestroy)
+        stream.destroy(err);
+      else if (err) {
+        err.stack;
+        if (w && !w.errored) {
+          w.errored = err;
+        }
+        if (r && !r.errored) {
+          r.errored = err;
+        }
+        if (sync) {
+          process2.nextTick(emitErrorNT, stream, err);
+        } else {
+          emitErrorNT(stream, err);
+        }
+      }
+    }
+    function construct(stream, cb) {
+      if (typeof stream._construct !== "function") {
+        return;
+      }
+      const r = stream._readableState;
+      const w = stream._writableState;
+      if (r) {
+        r.constructed = false;
+      }
+      if (w) {
+        w.constructed = false;
+      }
+      stream.once(kConstruct, cb);
+      if (stream.listenerCount(kConstruct) > 1) {
+        return;
+      }
+      process2.nextTick(constructNT, stream);
+    }
+    function constructNT(stream) {
+      let called = false;
+      function onConstruct(err) {
+        if (called) {
+          errorOrDestroy(stream, err !== null && err !== void 0 ? err : new ERR_MULTIPLE_CALLBACK());
+          return;
+        }
+        called = true;
+        const r = stream._readableState;
+        const w = stream._writableState;
+        const s = w || r;
+        if (r) {
+          r.constructed = true;
+        }
+        if (w) {
+          w.constructed = true;
+        }
+        if (s.destroyed) {
+          stream.emit(kDestroy, err);
+        } else if (err) {
+          errorOrDestroy(stream, err, true);
+        } else {
+          process2.nextTick(emitConstructNT, stream);
+        }
+      }
+      try {
+        stream._construct((err) => {
+          process2.nextTick(onConstruct, err);
+        });
+      } catch (err) {
+        process2.nextTick(onConstruct, err);
+      }
+    }
+    function emitConstructNT(stream) {
+      stream.emit(kConstruct);
+    }
+    function isRequest(stream) {
+      return (stream === null || stream === void 0 ? void 0 : stream.setHeader) && typeof stream.abort === "function";
+    }
+    function emitCloseLegacy(stream) {
+      stream.emit("close");
+    }
+    function emitErrorCloseLegacy(stream, err) {
+      stream.emit("error", err);
+      process2.nextTick(emitCloseLegacy, stream);
+    }
+    function destroyer(stream, err) {
+      if (!stream || isDestroyed(stream)) {
+        return;
+      }
+      if (!err && !isFinished(stream)) {
+        err = new AbortError();
+      }
+      if (isServerRequest(stream)) {
+        stream.socket = null;
+        stream.destroy(err);
+      } else if (isRequest(stream)) {
+        stream.abort();
+      } else if (isRequest(stream.req)) {
+        stream.req.abort();
+      } else if (typeof stream.destroy === "function") {
+        stream.destroy(err);
+      } else if (typeof stream.close === "function") {
+        stream.close();
+      } else if (err) {
+        process2.nextTick(emitErrorCloseLegacy, stream, err);
+      } else {
+        process2.nextTick(emitCloseLegacy, stream);
+      }
+      if (!stream.destroyed) {
+        stream[kIsDestroyed] = true;
+      }
+    }
+    module.exports = {
+      construct,
+      destroyer,
+      destroy,
+      undestroy,
+      errorOrDestroy
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/legacy.js
+var require_legacy = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/legacy.js"(exports, module) {
+    "use strict";
+    var { ArrayIsArray, ObjectSetPrototypeOf } = require_primordials();
+    var { EventEmitter: EE } = __require("events");
+    function Stream(opts) {
+      EE.call(this, opts);
+    }
+    ObjectSetPrototypeOf(Stream.prototype, EE.prototype);
+    ObjectSetPrototypeOf(Stream, EE);
+    Stream.prototype.pipe = function(dest, options) {
+      const source = this;
+      function ondata(chunk) {
+        if (dest.writable && dest.write(chunk) === false && source.pause) {
+          source.pause();
+        }
+      }
+      source.on("data", ondata);
+      function ondrain() {
+        if (source.readable && source.resume) {
+          source.resume();
+        }
+      }
+      dest.on("drain", ondrain);
+      if (!dest._isStdio && (!options || options.end !== false)) {
+        source.on("end", onend);
+        source.on("close", onclose);
+      }
+      let didOnEnd = false;
+      function onend() {
+        if (didOnEnd) return;
+        didOnEnd = true;
+        dest.end();
+      }
+      function onclose() {
+        if (didOnEnd) return;
+        didOnEnd = true;
+        if (typeof dest.destroy === "function") dest.destroy();
+      }
+      function onerror(er) {
+        var _this$listenerCount;
+        cleanup();
+        if (((_this$listenerCount = this.listenerCount) === null || _this$listenerCount === void 0 ? void 0 : _this$listenerCount.call(this, "error")) === 0) {
+          this.emit("error", er);
+        }
+      }
+      prependListener(source, "error", onerror);
+      prependListener(dest, "error", onerror);
+      function cleanup() {
+        source.removeListener("data", ondata);
+        dest.removeListener("drain", ondrain);
+        source.removeListener("end", onend);
+        source.removeListener("close", onclose);
+        source.removeListener("error", onerror);
+        dest.removeListener("error", onerror);
+        source.removeListener("end", cleanup);
+        source.removeListener("close", cleanup);
+        dest.removeListener("close", cleanup);
+      }
+      source.on("end", cleanup);
+      source.on("close", cleanup);
+      dest.on("close", cleanup);
+      dest.emit("pipe", source);
+      return dest;
+    };
+    function prependListener(emitter, event, fn) {
+      if (typeof emitter.prependListener === "function") return emitter.prependListener(event, fn);
+      if (!emitter._events || !emitter._events[event]) emitter.on(event, fn);
+      else if (ArrayIsArray(emitter._events[event])) emitter._events[event].unshift(fn);
+      else emitter._events[event] = [fn, emitter._events[event]];
+    }
+    module.exports = {
+      Stream,
+      prependListener
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/add-abort-signal.js
+var require_add_abort_signal = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/add-abort-signal.js"(exports, module) {
+    "use strict";
+    var { SymbolDispose } = require_primordials();
+    var { AbortError, codes } = require_errors7();
+    var { isNodeStream, isWebStream, kControllerErrorFunction } = require_utils3();
+    var eos = require_end_of_stream3();
+    var { ERR_INVALID_ARG_TYPE } = codes;
+    var addAbortListener;
+    var validateAbortSignal = (signal, name) => {
+      if (typeof signal !== "object" || !("aborted" in signal)) {
+        throw new ERR_INVALID_ARG_TYPE(name, "AbortSignal", signal);
+      }
+    };
+    module.exports.addAbortSignal = function addAbortSignal(signal, stream) {
+      validateAbortSignal(signal, "signal");
+      if (!isNodeStream(stream) && !isWebStream(stream)) {
+        throw new ERR_INVALID_ARG_TYPE("stream", ["ReadableStream", "WritableStream", "Stream"], stream);
+      }
+      return module.exports.addAbortSignalNoValidate(signal, stream);
+    };
+    module.exports.addAbortSignalNoValidate = function(signal, stream) {
+      if (typeof signal !== "object" || !("aborted" in signal)) {
+        return stream;
+      }
+      const onAbort = isNodeStream(stream) ? () => {
+        stream.destroy(
+          new AbortError(void 0, {
+            cause: signal.reason
+          })
+        );
+      } : () => {
+        stream[kControllerErrorFunction](
+          new AbortError(void 0, {
+            cause: signal.reason
+          })
+        );
+      };
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        addAbortListener = addAbortListener || require_util4().addAbortListener;
+        const disposable = addAbortListener(signal, onAbort);
+        eos(stream, disposable[SymbolDispose]);
+      }
+      return stream;
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/buffer_list.js
+var require_buffer_list2 = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/buffer_list.js"(exports, module) {
+    "use strict";
+    var { StringPrototypeSlice, SymbolIterator, TypedArrayPrototypeSet, Uint8Array: Uint8Array2 } = require_primordials();
+    var { Buffer: Buffer2 } = __require("buffer");
+    var { inspect } = require_util4();
+    module.exports = class BufferList {
+      constructor() {
+        this.head = null;
+        this.tail = null;
+        this.length = 0;
+      }
+      push(v) {
+        const entry = {
+          data: v,
+          next: null
+        };
+        if (this.length > 0) this.tail.next = entry;
+        else this.head = entry;
+        this.tail = entry;
+        ++this.length;
+      }
+      unshift(v) {
+        const entry = {
+          data: v,
+          next: this.head
+        };
+        if (this.length === 0) this.tail = entry;
+        this.head = entry;
+        ++this.length;
+      }
+      shift() {
+        if (this.length === 0) return;
+        const ret = this.head.data;
+        if (this.length === 1) this.head = this.tail = null;
+        else this.head = this.head.next;
+        --this.length;
+        return ret;
+      }
+      clear() {
+        this.head = this.tail = null;
+        this.length = 0;
+      }
+      join(s) {
+        if (this.length === 0) return "";
+        let p = this.head;
+        let ret = "" + p.data;
+        while ((p = p.next) !== null) ret += s + p.data;
+        return ret;
+      }
+      concat(n) {
+        if (this.length === 0) return Buffer2.alloc(0);
+        const ret = Buffer2.allocUnsafe(n >>> 0);
+        let p = this.head;
+        let i = 0;
+        while (p) {
+          TypedArrayPrototypeSet(ret, p.data, i);
+          i += p.data.length;
+          p = p.next;
+        }
+        return ret;
+      }
+      // Consumes a specified amount of bytes or characters from the buffered data.
+      consume(n, hasStrings) {
+        const data = this.head.data;
+        if (n < data.length) {
+          const slice = data.slice(0, n);
+          this.head.data = data.slice(n);
+          return slice;
+        }
+        if (n === data.length) {
+          return this.shift();
+        }
+        return hasStrings ? this._getString(n) : this._getBuffer(n);
+      }
+      first() {
+        return this.head.data;
+      }
+      *[SymbolIterator]() {
+        for (let p = this.head; p; p = p.next) {
+          yield p.data;
+        }
+      }
+      // Consumes a specified amount of characters from the buffered data.
+      _getString(n) {
+        let ret = "";
+        let p = this.head;
+        let c = 0;
+        do {
+          const str = p.data;
+          if (n > str.length) {
+            ret += str;
+            n -= str.length;
+          } else {
+            if (n === str.length) {
+              ret += str;
+              ++c;
+              if (p.next) this.head = p.next;
+              else this.head = this.tail = null;
+            } else {
+              ret += StringPrototypeSlice(str, 0, n);
+              this.head = p;
+              p.data = StringPrototypeSlice(str, n);
+            }
+            break;
+          }
+          ++c;
+        } while ((p = p.next) !== null);
+        this.length -= c;
+        return ret;
+      }
+      // Consumes a specified amount of bytes from the buffered data.
+      _getBuffer(n) {
+        const ret = Buffer2.allocUnsafe(n);
+        const retLen = n;
+        let p = this.head;
+        let c = 0;
+        do {
+          const buf = p.data;
+          if (n > buf.length) {
+            TypedArrayPrototypeSet(ret, buf, retLen - n);
+            n -= buf.length;
+          } else {
+            if (n === buf.length) {
+              TypedArrayPrototypeSet(ret, buf, retLen - n);
+              ++c;
+              if (p.next) this.head = p.next;
+              else this.head = this.tail = null;
+            } else {
+              TypedArrayPrototypeSet(ret, new Uint8Array2(buf.buffer, buf.byteOffset, n), retLen - n);
+              this.head = p;
+              p.data = buf.slice(n);
+            }
+            break;
+          }
+          ++c;
+        } while ((p = p.next) !== null);
+        this.length -= c;
+        return ret;
+      }
+      // Make sure the linked list only shows the minimal necessary information.
+      [/* @__PURE__ */ Symbol.for("nodejs.util.inspect.custom")](_, options) {
+        return inspect(this, {
+          ...options,
+          // Only inspect one level.
+          depth: 0,
+          // It should not recurse.
+          customInspect: false
+        });
+      }
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/state.js
+var require_state2 = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/state.js"(exports, module) {
+    "use strict";
+    var { MathFloor, NumberIsInteger } = require_primordials();
+    var { validateInteger } = require_validators();
+    var { ERR_INVALID_ARG_VALUE } = require_errors7().codes;
+    var defaultHighWaterMarkBytes = 16 * 1024;
+    var defaultHighWaterMarkObjectMode = 16;
+    function highWaterMarkFrom(options, isDuplex, duplexKey) {
+      return options.highWaterMark != null ? options.highWaterMark : isDuplex ? options[duplexKey] : null;
+    }
+    function getDefaultHighWaterMark(objectMode) {
+      return objectMode ? defaultHighWaterMarkObjectMode : defaultHighWaterMarkBytes;
+    }
+    function setDefaultHighWaterMark(objectMode, value) {
+      validateInteger(value, "value", 0);
+      if (objectMode) {
+        defaultHighWaterMarkObjectMode = value;
+      } else {
+        defaultHighWaterMarkBytes = value;
+      }
+    }
+    function getHighWaterMark(state, options, duplexKey, isDuplex) {
+      const hwm = highWaterMarkFrom(options, isDuplex, duplexKey);
+      if (hwm != null) {
+        if (!NumberIsInteger(hwm) || hwm < 0) {
+          const name = isDuplex ? `options.${duplexKey}` : "options.highWaterMark";
+          throw new ERR_INVALID_ARG_VALUE(name, hwm);
+        }
+        return MathFloor(hwm);
+      }
+      return getDefaultHighWaterMark(state.objectMode);
+    }
+    module.exports = {
+      getHighWaterMark,
+      getDefaultHighWaterMark,
+      setDefaultHighWaterMark
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/from.js
+var require_from2 = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/from.js"(exports, module) {
+    "use strict";
+    var process2 = require_process2();
+    var { PromisePrototypeThen, SymbolAsyncIterator, SymbolIterator } = require_primordials();
+    var { Buffer: Buffer2 } = __require("buffer");
+    var { ERR_INVALID_ARG_TYPE, ERR_STREAM_NULL_VALUES } = require_errors7().codes;
+    function from(Readable, iterable, opts) {
+      let iterator;
+      if (typeof iterable === "string" || iterable instanceof Buffer2) {
+        return new Readable({
+          objectMode: true,
+          ...opts,
+          read() {
+            this.push(iterable);
+            this.push(null);
+          }
+        });
+      }
+      let isAsync;
+      if (iterable && iterable[SymbolAsyncIterator]) {
+        isAsync = true;
+        iterator = iterable[SymbolAsyncIterator]();
+      } else if (iterable && iterable[SymbolIterator]) {
+        isAsync = false;
+        iterator = iterable[SymbolIterator]();
+      } else {
+        throw new ERR_INVALID_ARG_TYPE("iterable", ["Iterable"], iterable);
+      }
+      const readable = new Readable({
+        objectMode: true,
+        highWaterMark: 1,
+        // TODO(ronag): What options should be allowed?
+        ...opts
+      });
+      let reading = false;
+      readable._read = function() {
+        if (!reading) {
+          reading = true;
+          next();
+        }
+      };
+      readable._destroy = function(error, cb) {
+        PromisePrototypeThen(
+          close(error),
+          () => process2.nextTick(cb, error),
+          // nextTick is here in case cb throws
+          (e) => process2.nextTick(cb, e || error)
+        );
+      };
+      async function close(error) {
+        const hadError = error !== void 0 && error !== null;
+        const hasThrow = typeof iterator.throw === "function";
+        if (hadError && hasThrow) {
+          const { value, done } = await iterator.throw(error);
+          await value;
+          if (done) {
+            return;
+          }
+        }
+        if (typeof iterator.return === "function") {
+          const { value } = await iterator.return();
+          await value;
+        }
+      }
+      async function next() {
+        for (; ; ) {
+          try {
+            const { value, done } = isAsync ? await iterator.next() : iterator.next();
+            if (done) {
+              readable.push(null);
+            } else {
+              const res = value && typeof value.then === "function" ? await value : value;
+              if (res === null) {
+                reading = false;
+                throw new ERR_STREAM_NULL_VALUES();
+              } else if (readable.push(res)) {
+                continue;
+              } else {
+                reading = false;
+              }
+            }
+          } catch (err) {
+            readable.destroy(err);
+          }
+          break;
+        }
+      }
+      return readable;
+    }
+    module.exports = from;
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/readable.js
+var require_readable4 = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/readable.js"(exports, module) {
+    "use strict";
+    var process2 = require_process2();
+    var {
+      ArrayPrototypeIndexOf,
+      NumberIsInteger,
+      NumberIsNaN,
+      NumberParseInt,
+      ObjectDefineProperties,
+      ObjectKeys,
+      ObjectSetPrototypeOf,
+      Promise: Promise2,
+      SafeSet,
+      SymbolAsyncDispose,
+      SymbolAsyncIterator,
+      Symbol: Symbol2
+    } = require_primordials();
+    module.exports = Readable;
+    Readable.ReadableState = ReadableState;
+    var { EventEmitter: EE } = __require("events");
+    var { Stream, prependListener } = require_legacy();
+    var { Buffer: Buffer2 } = __require("buffer");
+    var { addAbortSignal } = require_add_abort_signal();
+    var eos = require_end_of_stream3();
+    var debug = require_util4().debuglog("stream", (fn) => {
+      debug = fn;
+    });
+    var BufferList = require_buffer_list2();
+    var destroyImpl = require_destroy4();
+    var { getHighWaterMark, getDefaultHighWaterMark } = require_state2();
+    var {
+      aggregateTwoErrors,
+      codes: {
+        ERR_INVALID_ARG_TYPE,
+        ERR_METHOD_NOT_IMPLEMENTED,
+        ERR_OUT_OF_RANGE,
+        ERR_STREAM_PUSH_AFTER_EOF,
+        ERR_STREAM_UNSHIFT_AFTER_END_EVENT
+      },
+      AbortError
+    } = require_errors7();
+    var { validateObject } = require_validators();
+    var kPaused = Symbol2("kPaused");
+    var { StringDecoder } = require_string_decoder3();
+    var from = require_from2();
+    ObjectSetPrototypeOf(Readable.prototype, Stream.prototype);
+    ObjectSetPrototypeOf(Readable, Stream);
+    var nop = () => {
+    };
+    var { errorOrDestroy } = destroyImpl;
+    var kObjectMode = 1 << 0;
+    var kEnded = 1 << 1;
+    var kEndEmitted = 1 << 2;
+    var kReading = 1 << 3;
+    var kConstructed = 1 << 4;
+    var kSync = 1 << 5;
+    var kNeedReadable = 1 << 6;
+    var kEmittedReadable = 1 << 7;
+    var kReadableListening = 1 << 8;
+    var kResumeScheduled = 1 << 9;
+    var kErrorEmitted = 1 << 10;
+    var kEmitClose = 1 << 11;
+    var kAutoDestroy = 1 << 12;
+    var kDestroyed = 1 << 13;
+    var kClosed = 1 << 14;
+    var kCloseEmitted = 1 << 15;
+    var kMultiAwaitDrain = 1 << 16;
+    var kReadingMore = 1 << 17;
+    var kDataEmitted = 1 << 18;
+    function makeBitMapDescriptor(bit) {
+      return {
+        enumerable: false,
+        get() {
+          return (this.state & bit) !== 0;
+        },
+        set(value) {
+          if (value) this.state |= bit;
+          else this.state &= ~bit;
+        }
+      };
+    }
+    ObjectDefineProperties(ReadableState.prototype, {
+      objectMode: makeBitMapDescriptor(kObjectMode),
+      ended: makeBitMapDescriptor(kEnded),
+      endEmitted: makeBitMapDescriptor(kEndEmitted),
+      reading: makeBitMapDescriptor(kReading),
+      // Stream is still being constructed and cannot be
+      // destroyed until construction finished or failed.
+      // Async construction is opt in, therefore we start as
+      // constructed.
+      constructed: makeBitMapDescriptor(kConstructed),
+      // A flag to be able to tell if the event 'readable'/'data' is emitted
+      // immediately, or on a later tick.  We set this to true at first, because
+      // any actions that shouldn't happen until "later" should generally also
+      // not happen before the first read call.
+      sync: makeBitMapDescriptor(kSync),
+      // Whenever we return null, then we set a flag to say
+      // that we're awaiting a 'readable' event emission.
+      needReadable: makeBitMapDescriptor(kNeedReadable),
+      emittedReadable: makeBitMapDescriptor(kEmittedReadable),
+      readableListening: makeBitMapDescriptor(kReadableListening),
+      resumeScheduled: makeBitMapDescriptor(kResumeScheduled),
+      // True if the error was already emitted and should not be thrown again.
+      errorEmitted: makeBitMapDescriptor(kErrorEmitted),
+      emitClose: makeBitMapDescriptor(kEmitClose),
+      autoDestroy: makeBitMapDescriptor(kAutoDestroy),
+      // Has it been destroyed.
+      destroyed: makeBitMapDescriptor(kDestroyed),
+      // Indicates whether the stream has finished destroying.
+      closed: makeBitMapDescriptor(kClosed),
+      // True if close has been emitted or would have been emitted
+      // depending on emitClose.
+      closeEmitted: makeBitMapDescriptor(kCloseEmitted),
+      multiAwaitDrain: makeBitMapDescriptor(kMultiAwaitDrain),
+      // If true, a maybeReadMore has been scheduled.
+      readingMore: makeBitMapDescriptor(kReadingMore),
+      dataEmitted: makeBitMapDescriptor(kDataEmitted)
+    });
+    function ReadableState(options, stream, isDuplex) {
+      if (typeof isDuplex !== "boolean") isDuplex = stream instanceof require_duplex();
+      this.state = kEmitClose | kAutoDestroy | kConstructed | kSync;
+      if (options && options.objectMode) this.state |= kObjectMode;
+      if (isDuplex && options && options.readableObjectMode) this.state |= kObjectMode;
+      this.highWaterMark = options ? getHighWaterMark(this, options, "readableHighWaterMark", isDuplex) : getDefaultHighWaterMark(false);
+      this.buffer = new BufferList();
+      this.length = 0;
+      this.pipes = [];
+      this.flowing = null;
+      this[kPaused] = null;
+      if (options && options.emitClose === false) this.state &= ~kEmitClose;
+      if (options && options.autoDestroy === false) this.state &= ~kAutoDestroy;
+      this.errored = null;
+      this.defaultEncoding = options && options.defaultEncoding || "utf8";
+      this.awaitDrainWriters = null;
+      this.decoder = null;
+      this.encoding = null;
+      if (options && options.encoding) {
+        this.decoder = new StringDecoder(options.encoding);
+        this.encoding = options.encoding;
+      }
+    }
+    function Readable(options) {
+      if (!(this instanceof Readable)) return new Readable(options);
+      const isDuplex = this instanceof require_duplex();
+      this._readableState = new ReadableState(options, this, isDuplex);
+      if (options) {
+        if (typeof options.read === "function") this._read = options.read;
+        if (typeof options.destroy === "function") this._destroy = options.destroy;
+        if (typeof options.construct === "function") this._construct = options.construct;
+        if (options.signal && !isDuplex) addAbortSignal(options.signal, this);
+      }
+      Stream.call(this, options);
+      destroyImpl.construct(this, () => {
+        if (this._readableState.needReadable) {
+          maybeReadMore(this, this._readableState);
+        }
+      });
+    }
+    Readable.prototype.destroy = destroyImpl.destroy;
+    Readable.prototype._undestroy = destroyImpl.undestroy;
+    Readable.prototype._destroy = function(err, cb) {
+      cb(err);
+    };
+    Readable.prototype[EE.captureRejectionSymbol] = function(err) {
+      this.destroy(err);
+    };
+    Readable.prototype[SymbolAsyncDispose] = function() {
+      let error;
+      if (!this.destroyed) {
+        error = this.readableEnded ? null : new AbortError();
+        this.destroy(error);
+      }
+      return new Promise2((resolve, reject) => eos(this, (err) => err && err !== error ? reject(err) : resolve(null)));
+    };
+    Readable.prototype.push = function(chunk, encoding) {
+      return readableAddChunk(this, chunk, encoding, false);
+    };
+    Readable.prototype.unshift = function(chunk, encoding) {
+      return readableAddChunk(this, chunk, encoding, true);
+    };
+    function readableAddChunk(stream, chunk, encoding, addToFront) {
+      debug("readableAddChunk", chunk);
+      const state = stream._readableState;
+      let err;
+      if ((state.state & kObjectMode) === 0) {
+        if (typeof chunk === "string") {
+          encoding = encoding || state.defaultEncoding;
+          if (state.encoding !== encoding) {
+            if (addToFront && state.encoding) {
+              chunk = Buffer2.from(chunk, encoding).toString(state.encoding);
+            } else {
+              chunk = Buffer2.from(chunk, encoding);
+              encoding = "";
+            }
+          }
+        } else if (chunk instanceof Buffer2) {
+          encoding = "";
+        } else if (Stream._isUint8Array(chunk)) {
+          chunk = Stream._uint8ArrayToBuffer(chunk);
+          encoding = "";
+        } else if (chunk != null) {
+          err = new ERR_INVALID_ARG_TYPE("chunk", ["string", "Buffer", "Uint8Array"], chunk);
+        }
+      }
+      if (err) {
+        errorOrDestroy(stream, err);
+      } else if (chunk === null) {
+        state.state &= ~kReading;
+        onEofChunk(stream, state);
+      } else if ((state.state & kObjectMode) !== 0 || chunk && chunk.length > 0) {
+        if (addToFront) {
+          if ((state.state & kEndEmitted) !== 0) errorOrDestroy(stream, new ERR_STREAM_UNSHIFT_AFTER_END_EVENT());
+          else if (state.destroyed || state.errored) return false;
+          else addChunk(stream, state, chunk, true);
+        } else if (state.ended) {
+          errorOrDestroy(stream, new ERR_STREAM_PUSH_AFTER_EOF());
+        } else if (state.destroyed || state.errored) {
+          return false;
+        } else {
+          state.state &= ~kReading;
+          if (state.decoder && !encoding) {
+            chunk = state.decoder.write(chunk);
+            if (state.objectMode || chunk.length !== 0) addChunk(stream, state, chunk, false);
+            else maybeReadMore(stream, state);
+          } else {
+            addChunk(stream, state, chunk, false);
+          }
+        }
+      } else if (!addToFront) {
+        state.state &= ~kReading;
+        maybeReadMore(stream, state);
+      }
+      return !state.ended && (state.length < state.highWaterMark || state.length === 0);
+    }
+    function addChunk(stream, state, chunk, addToFront) {
+      if (state.flowing && state.length === 0 && !state.sync && stream.listenerCount("data") > 0) {
+        if ((state.state & kMultiAwaitDrain) !== 0) {
+          state.awaitDrainWriters.clear();
+        } else {
+          state.awaitDrainWriters = null;
+        }
+        state.dataEmitted = true;
+        stream.emit("data", chunk);
+      } else {
+        state.length += state.objectMode ? 1 : chunk.length;
+        if (addToFront) state.buffer.unshift(chunk);
+        else state.buffer.push(chunk);
+        if ((state.state & kNeedReadable) !== 0) emitReadable(stream);
+      }
+      maybeReadMore(stream, state);
+    }
+    Readable.prototype.isPaused = function() {
+      const state = this._readableState;
+      return state[kPaused] === true || state.flowing === false;
+    };
+    Readable.prototype.setEncoding = function(enc) {
+      const decoder = new StringDecoder(enc);
+      this._readableState.decoder = decoder;
+      this._readableState.encoding = this._readableState.decoder.encoding;
+      const buffer = this._readableState.buffer;
+      let content = "";
+      for (const data of buffer) {
+        content += decoder.write(data);
+      }
+      buffer.clear();
+      if (content !== "") buffer.push(content);
+      this._readableState.length = content.length;
+      return this;
+    };
+    var MAX_HWM = 1073741824;
+    function computeNewHighWaterMark(n) {
+      if (n > MAX_HWM) {
+        throw new ERR_OUT_OF_RANGE("size", "<= 1GiB", n);
+      } else {
+        n--;
+        n |= n >>> 1;
+        n |= n >>> 2;
+        n |= n >>> 4;
+        n |= n >>> 8;
+        n |= n >>> 16;
+        n++;
+      }
+      return n;
+    }
+    function howMuchToRead(n, state) {
+      if (n <= 0 || state.length === 0 && state.ended) return 0;
+      if ((state.state & kObjectMode) !== 0) return 1;
+      if (NumberIsNaN(n)) {
+        if (state.flowing && state.length) return state.buffer.first().length;
+        return state.length;
+      }
+      if (n <= state.length) return n;
+      return state.ended ? state.length : 0;
+    }
+    Readable.prototype.read = function(n) {
+      debug("read", n);
+      if (n === void 0) {
+        n = NaN;
+      } else if (!NumberIsInteger(n)) {
+        n = NumberParseInt(n, 10);
+      }
+      const state = this._readableState;
+      const nOrig = n;
+      if (n > state.highWaterMark) state.highWaterMark = computeNewHighWaterMark(n);
+      if (n !== 0) state.state &= ~kEmittedReadable;
+      if (n === 0 && state.needReadable && ((state.highWaterMark !== 0 ? state.length >= state.highWaterMark : state.length > 0) || state.ended)) {
+        debug("read: emitReadable", state.length, state.ended);
+        if (state.length === 0 && state.ended) endReadable(this);
+        else emitReadable(this);
+        return null;
+      }
+      n = howMuchToRead(n, state);
+      if (n === 0 && state.ended) {
+        if (state.length === 0) endReadable(this);
+        return null;
+      }
+      let doRead = (state.state & kNeedReadable) !== 0;
+      debug("need readable", doRead);
+      if (state.length === 0 || state.length - n < state.highWaterMark) {
+        doRead = true;
+        debug("length less than watermark", doRead);
+      }
+      if (state.ended || state.reading || state.destroyed || state.errored || !state.constructed) {
+        doRead = false;
+        debug("reading, ended or constructing", doRead);
+      } else if (doRead) {
+        debug("do read");
+        state.state |= kReading | kSync;
+        if (state.length === 0) state.state |= kNeedReadable;
+        try {
+          this._read(state.highWaterMark);
+        } catch (err) {
+          errorOrDestroy(this, err);
+        }
+        state.state &= ~kSync;
+        if (!state.reading) n = howMuchToRead(nOrig, state);
+      }
+      let ret;
+      if (n > 0) ret = fromList(n, state);
+      else ret = null;
+      if (ret === null) {
+        state.needReadable = state.length <= state.highWaterMark;
+        n = 0;
+      } else {
+        state.length -= n;
+        if (state.multiAwaitDrain) {
+          state.awaitDrainWriters.clear();
+        } else {
+          state.awaitDrainWriters = null;
+        }
+      }
+      if (state.length === 0) {
+        if (!state.ended) state.needReadable = true;
+        if (nOrig !== n && state.ended) endReadable(this);
+      }
+      if (ret !== null && !state.errorEmitted && !state.closeEmitted) {
+        state.dataEmitted = true;
+        this.emit("data", ret);
+      }
+      return ret;
+    };
+    function onEofChunk(stream, state) {
+      debug("onEofChunk");
+      if (state.ended) return;
+      if (state.decoder) {
+        const chunk = state.decoder.end();
+        if (chunk && chunk.length) {
+          state.buffer.push(chunk);
+          state.length += state.objectMode ? 1 : chunk.length;
+        }
+      }
+      state.ended = true;
+      if (state.sync) {
+        emitReadable(stream);
+      } else {
+        state.needReadable = false;
+        state.emittedReadable = true;
+        emitReadable_(stream);
+      }
+    }
+    function emitReadable(stream) {
+      const state = stream._readableState;
+      debug("emitReadable", state.needReadable, state.emittedReadable);
+      state.needReadable = false;
+      if (!state.emittedReadable) {
+        debug("emitReadable", state.flowing);
+        state.emittedReadable = true;
+        process2.nextTick(emitReadable_, stream);
+      }
+    }
+    function emitReadable_(stream) {
+      const state = stream._readableState;
+      debug("emitReadable_", state.destroyed, state.length, state.ended);
+      if (!state.destroyed && !state.errored && (state.length || state.ended)) {
+        stream.emit("readable");
+        state.emittedReadable = false;
+      }
+      state.needReadable = !state.flowing && !state.ended && state.length <= state.highWaterMark;
+      flow(stream);
+    }
+    function maybeReadMore(stream, state) {
+      if (!state.readingMore && state.constructed) {
+        state.readingMore = true;
+        process2.nextTick(maybeReadMore_, stream, state);
+      }
+    }
+    function maybeReadMore_(stream, state) {
+      while (!state.reading && !state.ended && (state.length < state.highWaterMark || state.flowing && state.length === 0)) {
+        const len = state.length;
+        debug("maybeReadMore read 0");
+        stream.read(0);
+        if (len === state.length)
+          break;
+      }
+      state.readingMore = false;
+    }
+    Readable.prototype._read = function(n) {
+      throw new ERR_METHOD_NOT_IMPLEMENTED("_read()");
+    };
+    Readable.prototype.pipe = function(dest, pipeOpts) {
+      const src = this;
+      const state = this._readableState;
+      if (state.pipes.length === 1) {
+        if (!state.multiAwaitDrain) {
+          state.multiAwaitDrain = true;
+          state.awaitDrainWriters = new SafeSet(state.awaitDrainWriters ? [state.awaitDrainWriters] : []);
+        }
+      }
+      state.pipes.push(dest);
+      debug("pipe count=%d opts=%j", state.pipes.length, pipeOpts);
+      const doEnd = (!pipeOpts || pipeOpts.end !== false) && dest !== process2.stdout && dest !== process2.stderr;
+      const endFn = doEnd ? onend : unpipe;
+      if (state.endEmitted) process2.nextTick(endFn);
+      else src.once("end", endFn);
+      dest.on("unpipe", onunpipe);
+      function onunpipe(readable, unpipeInfo) {
+        debug("onunpipe");
+        if (readable === src) {
+          if (unpipeInfo && unpipeInfo.hasUnpiped === false) {
+            unpipeInfo.hasUnpiped = true;
+            cleanup();
+          }
+        }
+      }
+      function onend() {
+        debug("onend");
+        dest.end();
+      }
+      let ondrain;
+      let cleanedUp = false;
+      function cleanup() {
+        debug("cleanup");
+        dest.removeListener("close", onclose);
+        dest.removeListener("finish", onfinish);
+        if (ondrain) {
+          dest.removeListener("drain", ondrain);
+        }
+        dest.removeListener("error", onerror);
+        dest.removeListener("unpipe", onunpipe);
+        src.removeListener("end", onend);
+        src.removeListener("end", unpipe);
+        src.removeListener("data", ondata);
+        cleanedUp = true;
+        if (ondrain && state.awaitDrainWriters && (!dest._writableState || dest._writableState.needDrain)) ondrain();
+      }
+      function pause() {
+        if (!cleanedUp) {
+          if (state.pipes.length === 1 && state.pipes[0] === dest) {
+            debug("false write response, pause", 0);
+            state.awaitDrainWriters = dest;
+            state.multiAwaitDrain = false;
+          } else if (state.pipes.length > 1 && state.pipes.includes(dest)) {
+            debug("false write response, pause", state.awaitDrainWriters.size);
+            state.awaitDrainWriters.add(dest);
+          }
+          src.pause();
+        }
+        if (!ondrain) {
+          ondrain = pipeOnDrain(src, dest);
+          dest.on("drain", ondrain);
+        }
+      }
+      src.on("data", ondata);
+      function ondata(chunk) {
+        debug("ondata");
+        const ret = dest.write(chunk);
+        debug("dest.write", ret);
+        if (ret === false) {
+          pause();
+        }
+      }
+      function onerror(er) {
+        debug("onerror", er);
+        unpipe();
+        dest.removeListener("error", onerror);
+        if (dest.listenerCount("error") === 0) {
+          const s = dest._writableState || dest._readableState;
+          if (s && !s.errorEmitted) {
+            errorOrDestroy(dest, er);
+          } else {
+            dest.emit("error", er);
+          }
+        }
+      }
+      prependListener(dest, "error", onerror);
+      function onclose() {
+        dest.removeListener("finish", onfinish);
+        unpipe();
+      }
+      dest.once("close", onclose);
+      function onfinish() {
+        debug("onfinish");
+        dest.removeListener("close", onclose);
+        unpipe();
+      }
+      dest.once("finish", onfinish);
+      function unpipe() {
+        debug("unpipe");
+        src.unpipe(dest);
+      }
+      dest.emit("pipe", src);
+      if (dest.writableNeedDrain === true) {
+        pause();
+      } else if (!state.flowing) {
+        debug("pipe resume");
+        src.resume();
+      }
+      return dest;
+    };
+    function pipeOnDrain(src, dest) {
+      return function pipeOnDrainFunctionResult() {
+        const state = src._readableState;
+        if (state.awaitDrainWriters === dest) {
+          debug("pipeOnDrain", 1);
+          state.awaitDrainWriters = null;
+        } else if (state.multiAwaitDrain) {
+          debug("pipeOnDrain", state.awaitDrainWriters.size);
+          state.awaitDrainWriters.delete(dest);
+        }
+        if ((!state.awaitDrainWriters || state.awaitDrainWriters.size === 0) && src.listenerCount("data")) {
+          src.resume();
+        }
+      };
+    }
+    Readable.prototype.unpipe = function(dest) {
+      const state = this._readableState;
+      const unpipeInfo = {
+        hasUnpiped: false
+      };
+      if (state.pipes.length === 0) return this;
+      if (!dest) {
+        const dests = state.pipes;
+        state.pipes = [];
+        this.pause();
+        for (let i = 0; i < dests.length; i++)
+          dests[i].emit("unpipe", this, {
+            hasUnpiped: false
+          });
+        return this;
+      }
+      const index = ArrayPrototypeIndexOf(state.pipes, dest);
+      if (index === -1) return this;
+      state.pipes.splice(index, 1);
+      if (state.pipes.length === 0) this.pause();
+      dest.emit("unpipe", this, unpipeInfo);
+      return this;
+    };
+    Readable.prototype.on = function(ev, fn) {
+      const res = Stream.prototype.on.call(this, ev, fn);
+      const state = this._readableState;
+      if (ev === "data") {
+        state.readableListening = this.listenerCount("readable") > 0;
+        if (state.flowing !== false) this.resume();
+      } else if (ev === "readable") {
+        if (!state.endEmitted && !state.readableListening) {
+          state.readableListening = state.needReadable = true;
+          state.flowing = false;
+          state.emittedReadable = false;
+          debug("on readable", state.length, state.reading);
+          if (state.length) {
+            emitReadable(this);
+          } else if (!state.reading) {
+            process2.nextTick(nReadingNextTick, this);
+          }
+        }
+      }
+      return res;
+    };
+    Readable.prototype.addListener = Readable.prototype.on;
+    Readable.prototype.removeListener = function(ev, fn) {
+      const res = Stream.prototype.removeListener.call(this, ev, fn);
+      if (ev === "readable") {
+        process2.nextTick(updateReadableListening, this);
+      }
+      return res;
+    };
+    Readable.prototype.off = Readable.prototype.removeListener;
+    Readable.prototype.removeAllListeners = function(ev) {
+      const res = Stream.prototype.removeAllListeners.apply(this, arguments);
+      if (ev === "readable" || ev === void 0) {
+        process2.nextTick(updateReadableListening, this);
+      }
+      return res;
+    };
+    function updateReadableListening(self2) {
+      const state = self2._readableState;
+      state.readableListening = self2.listenerCount("readable") > 0;
+      if (state.resumeScheduled && state[kPaused] === false) {
+        state.flowing = true;
+      } else if (self2.listenerCount("data") > 0) {
+        self2.resume();
+      } else if (!state.readableListening) {
+        state.flowing = null;
+      }
+    }
+    function nReadingNextTick(self2) {
+      debug("readable nexttick read 0");
+      self2.read(0);
+    }
+    Readable.prototype.resume = function() {
+      const state = this._readableState;
+      if (!state.flowing) {
+        debug("resume");
+        state.flowing = !state.readableListening;
+        resume(this, state);
+      }
+      state[kPaused] = false;
+      return this;
+    };
+    function resume(stream, state) {
+      if (!state.resumeScheduled) {
+        state.resumeScheduled = true;
+        process2.nextTick(resume_, stream, state);
+      }
+    }
+    function resume_(stream, state) {
+      debug("resume", state.reading);
+      if (!state.reading) {
+        stream.read(0);
+      }
+      state.resumeScheduled = false;
+      stream.emit("resume");
+      flow(stream);
+      if (state.flowing && !state.reading) stream.read(0);
+    }
+    Readable.prototype.pause = function() {
+      debug("call pause flowing=%j", this._readableState.flowing);
+      if (this._readableState.flowing !== false) {
+        debug("pause");
+        this._readableState.flowing = false;
+        this.emit("pause");
+      }
+      this._readableState[kPaused] = true;
+      return this;
+    };
+    function flow(stream) {
+      const state = stream._readableState;
+      debug("flow", state.flowing);
+      while (state.flowing && stream.read() !== null) ;
+    }
+    Readable.prototype.wrap = function(stream) {
+      let paused = false;
+      stream.on("data", (chunk) => {
+        if (!this.push(chunk) && stream.pause) {
+          paused = true;
+          stream.pause();
+        }
+      });
+      stream.on("end", () => {
+        this.push(null);
+      });
+      stream.on("error", (err) => {
+        errorOrDestroy(this, err);
+      });
+      stream.on("close", () => {
+        this.destroy();
+      });
+      stream.on("destroy", () => {
+        this.destroy();
+      });
+      this._read = () => {
+        if (paused && stream.resume) {
+          paused = false;
+          stream.resume();
+        }
+      };
+      const streamKeys = ObjectKeys(stream);
+      for (let j = 1; j < streamKeys.length; j++) {
+        const i = streamKeys[j];
+        if (this[i] === void 0 && typeof stream[i] === "function") {
+          this[i] = stream[i].bind(stream);
+        }
+      }
+      return this;
+    };
+    Readable.prototype[SymbolAsyncIterator] = function() {
+      return streamToAsyncIterator(this);
+    };
+    Readable.prototype.iterator = function(options) {
+      if (options !== void 0) {
+        validateObject(options, "options");
+      }
+      return streamToAsyncIterator(this, options);
+    };
+    function streamToAsyncIterator(stream, options) {
+      if (typeof stream.read !== "function") {
+        stream = Readable.wrap(stream, {
+          objectMode: true
+        });
+      }
+      const iter = createAsyncIterator(stream, options);
+      iter.stream = stream;
+      return iter;
+    }
+    async function* createAsyncIterator(stream, options) {
+      let callback = nop;
+      function next(resolve) {
+        if (this === stream) {
+          callback();
+          callback = nop;
+        } else {
+          callback = resolve;
+        }
+      }
+      stream.on("readable", next);
+      let error;
+      const cleanup = eos(
+        stream,
+        {
+          writable: false
+        },
+        (err) => {
+          error = err ? aggregateTwoErrors(error, err) : null;
+          callback();
+          callback = nop;
+        }
+      );
+      try {
+        while (true) {
+          const chunk = stream.destroyed ? null : stream.read();
+          if (chunk !== null) {
+            yield chunk;
+          } else if (error) {
+            throw error;
+          } else if (error === null) {
+            return;
+          } else {
+            await new Promise2(next);
+          }
+        }
+      } catch (err) {
+        error = aggregateTwoErrors(error, err);
+        throw error;
+      } finally {
+        if ((error || (options === null || options === void 0 ? void 0 : options.destroyOnReturn) !== false) && (error === void 0 || stream._readableState.autoDestroy)) {
+          destroyImpl.destroyer(stream, null);
+        } else {
+          stream.off("readable", next);
+          cleanup();
+        }
+      }
+    }
+    ObjectDefineProperties(Readable.prototype, {
+      readable: {
+        __proto__: null,
+        get() {
+          const r = this._readableState;
+          return !!r && r.readable !== false && !r.destroyed && !r.errorEmitted && !r.endEmitted;
+        },
+        set(val) {
+          if (this._readableState) {
+            this._readableState.readable = !!val;
+          }
+        }
+      },
+      readableDidRead: {
+        __proto__: null,
+        enumerable: false,
+        get: function() {
+          return this._readableState.dataEmitted;
+        }
+      },
+      readableAborted: {
+        __proto__: null,
+        enumerable: false,
+        get: function() {
+          return !!(this._readableState.readable !== false && (this._readableState.destroyed || this._readableState.errored) && !this._readableState.endEmitted);
+        }
+      },
+      readableHighWaterMark: {
+        __proto__: null,
+        enumerable: false,
+        get: function() {
+          return this._readableState.highWaterMark;
+        }
+      },
+      readableBuffer: {
+        __proto__: null,
+        enumerable: false,
+        get: function() {
+          return this._readableState && this._readableState.buffer;
+        }
+      },
+      readableFlowing: {
+        __proto__: null,
+        enumerable: false,
+        get: function() {
+          return this._readableState.flowing;
+        },
+        set: function(state) {
+          if (this._readableState) {
+            this._readableState.flowing = state;
+          }
+        }
+      },
+      readableLength: {
+        __proto__: null,
+        enumerable: false,
+        get() {
+          return this._readableState.length;
+        }
+      },
+      readableObjectMode: {
+        __proto__: null,
+        enumerable: false,
+        get() {
+          return this._readableState ? this._readableState.objectMode : false;
+        }
+      },
+      readableEncoding: {
+        __proto__: null,
+        enumerable: false,
+        get() {
+          return this._readableState ? this._readableState.encoding : null;
+        }
+      },
+      errored: {
+        __proto__: null,
+        enumerable: false,
+        get() {
+          return this._readableState ? this._readableState.errored : null;
+        }
+      },
+      closed: {
+        __proto__: null,
+        get() {
+          return this._readableState ? this._readableState.closed : false;
+        }
+      },
+      destroyed: {
+        __proto__: null,
+        enumerable: false,
+        get() {
+          return this._readableState ? this._readableState.destroyed : false;
+        },
+        set(value) {
+          if (!this._readableState) {
+            return;
+          }
+          this._readableState.destroyed = value;
+        }
+      },
+      readableEnded: {
+        __proto__: null,
+        enumerable: false,
+        get() {
+          return this._readableState ? this._readableState.endEmitted : false;
+        }
+      }
+    });
+    ObjectDefineProperties(ReadableState.prototype, {
+      // Legacy getter for `pipesCount`.
+      pipesCount: {
+        __proto__: null,
+        get() {
+          return this.pipes.length;
+        }
+      },
+      // Legacy property for `paused`.
+      paused: {
+        __proto__: null,
+        get() {
+          return this[kPaused] !== false;
+        },
+        set(value) {
+          this[kPaused] = !!value;
+        }
+      }
+    });
+    Readable._fromList = fromList;
+    function fromList(n, state) {
+      if (state.length === 0) return null;
+      let ret;
+      if (state.objectMode) ret = state.buffer.shift();
+      else if (!n || n >= state.length) {
+        if (state.decoder) ret = state.buffer.join("");
+        else if (state.buffer.length === 1) ret = state.buffer.first();
+        else ret = state.buffer.concat(state.length);
+        state.buffer.clear();
+      } else {
+        ret = state.buffer.consume(n, state.decoder);
+      }
+      return ret;
+    }
+    function endReadable(stream) {
+      const state = stream._readableState;
+      debug("endReadable", state.endEmitted);
+      if (!state.endEmitted) {
+        state.ended = true;
+        process2.nextTick(endReadableNT, state, stream);
+      }
+    }
+    function endReadableNT(state, stream) {
+      debug("endReadableNT", state.endEmitted, state.length);
+      if (!state.errored && !state.closeEmitted && !state.endEmitted && state.length === 0) {
+        state.endEmitted = true;
+        stream.emit("end");
+        if (stream.writable && stream.allowHalfOpen === false) {
+          process2.nextTick(endWritableNT, stream);
+        } else if (state.autoDestroy) {
+          const wState = stream._writableState;
+          const autoDestroy = !wState || wState.autoDestroy && // We don't expect the writable to ever 'finish'
+          // if writable is explicitly set to false.
+          (wState.finished || wState.writable === false);
+          if (autoDestroy) {
+            stream.destroy();
+          }
+        }
+      }
+    }
+    function endWritableNT(stream) {
+      const writable = stream.writable && !stream.writableEnded && !stream.destroyed;
+      if (writable) {
+        stream.end();
+      }
+    }
+    Readable.from = function(iterable, opts) {
+      return from(Readable, iterable, opts);
+    };
+    var webStreamsAdapters;
+    function lazyWebStreams() {
+      if (webStreamsAdapters === void 0) webStreamsAdapters = {};
+      return webStreamsAdapters;
+    }
+    Readable.fromWeb = function(readableStream, options) {
+      return lazyWebStreams().newStreamReadableFromReadableStream(readableStream, options);
+    };
+    Readable.toWeb = function(streamReadable, options) {
+      return lazyWebStreams().newReadableStreamFromStreamReadable(streamReadable, options);
+    };
+    Readable.wrap = function(src, options) {
+      var _ref, _src$readableObjectMo;
+      return new Readable({
+        objectMode: (_ref = (_src$readableObjectMo = src.readableObjectMode) !== null && _src$readableObjectMo !== void 0 ? _src$readableObjectMo : src.objectMode) !== null && _ref !== void 0 ? _ref : true,
+        ...options,
+        destroy(err, callback) {
+          destroyImpl.destroyer(src, err);
+          callback(err);
+        }
+      }).wrap(src);
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/writable.js
+var require_writable = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/writable.js"(exports, module) {
+    "use strict";
+    var process2 = require_process2();
+    var {
+      ArrayPrototypeSlice,
+      Error: Error2,
+      FunctionPrototypeSymbolHasInstance,
+      ObjectDefineProperty,
+      ObjectDefineProperties,
+      ObjectSetPrototypeOf,
+      StringPrototypeToLowerCase,
+      Symbol: Symbol2,
+      SymbolHasInstance
+    } = require_primordials();
+    module.exports = Writable;
+    Writable.WritableState = WritableState;
+    var { EventEmitter: EE } = __require("events");
+    var Stream = require_legacy().Stream;
+    var { Buffer: Buffer2 } = __require("buffer");
+    var destroyImpl = require_destroy4();
+    var { addAbortSignal } = require_add_abort_signal();
+    var { getHighWaterMark, getDefaultHighWaterMark } = require_state2();
+    var {
+      ERR_INVALID_ARG_TYPE,
+      ERR_METHOD_NOT_IMPLEMENTED,
+      ERR_MULTIPLE_CALLBACK,
+      ERR_STREAM_CANNOT_PIPE,
+      ERR_STREAM_DESTROYED,
+      ERR_STREAM_ALREADY_FINISHED,
+      ERR_STREAM_NULL_VALUES,
+      ERR_STREAM_WRITE_AFTER_END,
+      ERR_UNKNOWN_ENCODING
+    } = require_errors7().codes;
+    var { errorOrDestroy } = destroyImpl;
+    ObjectSetPrototypeOf(Writable.prototype, Stream.prototype);
+    ObjectSetPrototypeOf(Writable, Stream);
+    function nop() {
+    }
+    var kOnFinished = Symbol2("kOnFinished");
+    function WritableState(options, stream, isDuplex) {
+      if (typeof isDuplex !== "boolean") isDuplex = stream instanceof require_duplex();
+      this.objectMode = !!(options && options.objectMode);
+      if (isDuplex) this.objectMode = this.objectMode || !!(options && options.writableObjectMode);
+      this.highWaterMark = options ? getHighWaterMark(this, options, "writableHighWaterMark", isDuplex) : getDefaultHighWaterMark(false);
+      this.finalCalled = false;
+      this.needDrain = false;
+      this.ending = false;
+      this.ended = false;
+      this.finished = false;
+      this.destroyed = false;
+      const noDecode = !!(options && options.decodeStrings === false);
+      this.decodeStrings = !noDecode;
+      this.defaultEncoding = options && options.defaultEncoding || "utf8";
+      this.length = 0;
+      this.writing = false;
+      this.corked = 0;
+      this.sync = true;
+      this.bufferProcessing = false;
+      this.onwrite = onwrite.bind(void 0, stream);
+      this.writecb = null;
+      this.writelen = 0;
+      this.afterWriteTickInfo = null;
+      resetBuffer(this);
+      this.pendingcb = 0;
+      this.constructed = true;
+      this.prefinished = false;
+      this.errorEmitted = false;
+      this.emitClose = !options || options.emitClose !== false;
+      this.autoDestroy = !options || options.autoDestroy !== false;
+      this.errored = null;
+      this.closed = false;
+      this.closeEmitted = false;
+      this[kOnFinished] = [];
+    }
+    function resetBuffer(state) {
+      state.buffered = [];
+      state.bufferedIndex = 0;
+      state.allBuffers = true;
+      state.allNoop = true;
+    }
+    WritableState.prototype.getBuffer = function getBuffer() {
+      return ArrayPrototypeSlice(this.buffered, this.bufferedIndex);
+    };
+    ObjectDefineProperty(WritableState.prototype, "bufferedRequestCount", {
+      __proto__: null,
+      get() {
+        return this.buffered.length - this.bufferedIndex;
+      }
+    });
+    function Writable(options) {
+      const isDuplex = this instanceof require_duplex();
+      if (!isDuplex && !FunctionPrototypeSymbolHasInstance(Writable, this)) return new Writable(options);
+      this._writableState = new WritableState(options, this, isDuplex);
+      if (options) {
+        if (typeof options.write === "function") this._write = options.write;
+        if (typeof options.writev === "function") this._writev = options.writev;
+        if (typeof options.destroy === "function") this._destroy = options.destroy;
+        if (typeof options.final === "function") this._final = options.final;
+        if (typeof options.construct === "function") this._construct = options.construct;
+        if (options.signal) addAbortSignal(options.signal, this);
+      }
+      Stream.call(this, options);
+      destroyImpl.construct(this, () => {
+        const state = this._writableState;
+        if (!state.writing) {
+          clearBuffer(this, state);
+        }
+        finishMaybe(this, state);
+      });
+    }
+    ObjectDefineProperty(Writable, SymbolHasInstance, {
+      __proto__: null,
+      value: function(object) {
+        if (FunctionPrototypeSymbolHasInstance(this, object)) return true;
+        if (this !== Writable) return false;
+        return object && object._writableState instanceof WritableState;
+      }
+    });
+    Writable.prototype.pipe = function() {
+      errorOrDestroy(this, new ERR_STREAM_CANNOT_PIPE());
+    };
+    function _write(stream, chunk, encoding, cb) {
+      const state = stream._writableState;
+      if (typeof encoding === "function") {
+        cb = encoding;
+        encoding = state.defaultEncoding;
+      } else {
+        if (!encoding) encoding = state.defaultEncoding;
+        else if (encoding !== "buffer" && !Buffer2.isEncoding(encoding)) throw new ERR_UNKNOWN_ENCODING(encoding);
+        if (typeof cb !== "function") cb = nop;
+      }
+      if (chunk === null) {
+        throw new ERR_STREAM_NULL_VALUES();
+      } else if (!state.objectMode) {
+        if (typeof chunk === "string") {
+          if (state.decodeStrings !== false) {
+            chunk = Buffer2.from(chunk, encoding);
+            encoding = "buffer";
+          }
+        } else if (chunk instanceof Buffer2) {
+          encoding = "buffer";
+        } else if (Stream._isUint8Array(chunk)) {
+          chunk = Stream._uint8ArrayToBuffer(chunk);
+          encoding = "buffer";
+        } else {
+          throw new ERR_INVALID_ARG_TYPE("chunk", ["string", "Buffer", "Uint8Array"], chunk);
+        }
+      }
+      let err;
+      if (state.ending) {
+        err = new ERR_STREAM_WRITE_AFTER_END();
+      } else if (state.destroyed) {
+        err = new ERR_STREAM_DESTROYED("write");
+      }
+      if (err) {
+        process2.nextTick(cb, err);
+        errorOrDestroy(stream, err, true);
+        return err;
+      }
+      state.pendingcb++;
+      return writeOrBuffer(stream, state, chunk, encoding, cb);
+    }
+    Writable.prototype.write = function(chunk, encoding, cb) {
+      return _write(this, chunk, encoding, cb) === true;
+    };
+    Writable.prototype.cork = function() {
+      this._writableState.corked++;
+    };
+    Writable.prototype.uncork = function() {
+      const state = this._writableState;
+      if (state.corked) {
+        state.corked--;
+        if (!state.writing) clearBuffer(this, state);
+      }
+    };
+    Writable.prototype.setDefaultEncoding = function setDefaultEncoding(encoding) {
+      if (typeof encoding === "string") encoding = StringPrototypeToLowerCase(encoding);
+      if (!Buffer2.isEncoding(encoding)) throw new ERR_UNKNOWN_ENCODING(encoding);
+      this._writableState.defaultEncoding = encoding;
+      return this;
+    };
+    function writeOrBuffer(stream, state, chunk, encoding, callback) {
+      const len = state.objectMode ? 1 : chunk.length;
+      state.length += len;
+      const ret = state.length < state.highWaterMark;
+      if (!ret) state.needDrain = true;
+      if (state.writing || state.corked || state.errored || !state.constructed) {
+        state.buffered.push({
+          chunk,
+          encoding,
+          callback
+        });
+        if (state.allBuffers && encoding !== "buffer") {
+          state.allBuffers = false;
+        }
+        if (state.allNoop && callback !== nop) {
+          state.allNoop = false;
+        }
+      } else {
+        state.writelen = len;
+        state.writecb = callback;
+        state.writing = true;
+        state.sync = true;
+        stream._write(chunk, encoding, state.onwrite);
+        state.sync = false;
+      }
+      return ret && !state.errored && !state.destroyed;
+    }
+    function doWrite(stream, state, writev, len, chunk, encoding, cb) {
+      state.writelen = len;
+      state.writecb = cb;
+      state.writing = true;
+      state.sync = true;
+      if (state.destroyed) state.onwrite(new ERR_STREAM_DESTROYED("write"));
+      else if (writev) stream._writev(chunk, state.onwrite);
+      else stream._write(chunk, encoding, state.onwrite);
+      state.sync = false;
+    }
+    function onwriteError(stream, state, er, cb) {
+      --state.pendingcb;
+      cb(er);
+      errorBuffer(state);
+      errorOrDestroy(stream, er);
+    }
+    function onwrite(stream, er) {
+      const state = stream._writableState;
+      const sync = state.sync;
+      const cb = state.writecb;
+      if (typeof cb !== "function") {
+        errorOrDestroy(stream, new ERR_MULTIPLE_CALLBACK());
+        return;
+      }
+      state.writing = false;
+      state.writecb = null;
+      state.length -= state.writelen;
+      state.writelen = 0;
+      if (er) {
+        er.stack;
+        if (!state.errored) {
+          state.errored = er;
+        }
+        if (stream._readableState && !stream._readableState.errored) {
+          stream._readableState.errored = er;
+        }
+        if (sync) {
+          process2.nextTick(onwriteError, stream, state, er, cb);
+        } else {
+          onwriteError(stream, state, er, cb);
+        }
+      } else {
+        if (state.buffered.length > state.bufferedIndex) {
+          clearBuffer(stream, state);
+        }
+        if (sync) {
+          if (state.afterWriteTickInfo !== null && state.afterWriteTickInfo.cb === cb) {
+            state.afterWriteTickInfo.count++;
+          } else {
+            state.afterWriteTickInfo = {
+              count: 1,
+              cb,
+              stream,
+              state
+            };
+            process2.nextTick(afterWriteTick, state.afterWriteTickInfo);
+          }
+        } else {
+          afterWrite(stream, state, 1, cb);
+        }
+      }
+    }
+    function afterWriteTick({ stream, state, count, cb }) {
+      state.afterWriteTickInfo = null;
+      return afterWrite(stream, state, count, cb);
+    }
+    function afterWrite(stream, state, count, cb) {
+      const needDrain = !state.ending && !stream.destroyed && state.length === 0 && state.needDrain;
+      if (needDrain) {
+        state.needDrain = false;
+        stream.emit("drain");
+      }
+      while (count-- > 0) {
+        state.pendingcb--;
+        cb();
+      }
+      if (state.destroyed) {
+        errorBuffer(state);
+      }
+      finishMaybe(stream, state);
+    }
+    function errorBuffer(state) {
+      if (state.writing) {
+        return;
+      }
+      for (let n = state.bufferedIndex; n < state.buffered.length; ++n) {
+        var _state$errored;
+        const { chunk, callback } = state.buffered[n];
+        const len = state.objectMode ? 1 : chunk.length;
+        state.length -= len;
+        callback(
+          (_state$errored = state.errored) !== null && _state$errored !== void 0 ? _state$errored : new ERR_STREAM_DESTROYED("write")
+        );
+      }
+      const onfinishCallbacks = state[kOnFinished].splice(0);
+      for (let i = 0; i < onfinishCallbacks.length; i++) {
+        var _state$errored2;
+        onfinishCallbacks[i](
+          (_state$errored2 = state.errored) !== null && _state$errored2 !== void 0 ? _state$errored2 : new ERR_STREAM_DESTROYED("end")
+        );
+      }
+      resetBuffer(state);
+    }
+    function clearBuffer(stream, state) {
+      if (state.corked || state.bufferProcessing || state.destroyed || !state.constructed) {
+        return;
+      }
+      const { buffered, bufferedIndex, objectMode } = state;
+      const bufferedLength = buffered.length - bufferedIndex;
+      if (!bufferedLength) {
+        return;
+      }
+      let i = bufferedIndex;
+      state.bufferProcessing = true;
+      if (bufferedLength > 1 && stream._writev) {
+        state.pendingcb -= bufferedLength - 1;
+        const callback = state.allNoop ? nop : (err) => {
+          for (let n = i; n < buffered.length; ++n) {
+            buffered[n].callback(err);
+          }
+        };
+        const chunks = state.allNoop && i === 0 ? buffered : ArrayPrototypeSlice(buffered, i);
+        chunks.allBuffers = state.allBuffers;
+        doWrite(stream, state, true, state.length, chunks, "", callback);
+        resetBuffer(state);
+      } else {
+        do {
+          const { chunk, encoding, callback } = buffered[i];
+          buffered[i++] = null;
+          const len = objectMode ? 1 : chunk.length;
+          doWrite(stream, state, false, len, chunk, encoding, callback);
+        } while (i < buffered.length && !state.writing);
+        if (i === buffered.length) {
+          resetBuffer(state);
+        } else if (i > 256) {
+          buffered.splice(0, i);
+          state.bufferedIndex = 0;
+        } else {
+          state.bufferedIndex = i;
+        }
+      }
+      state.bufferProcessing = false;
+    }
+    Writable.prototype._write = function(chunk, encoding, cb) {
+      if (this._writev) {
+        this._writev(
+          [
+            {
+              chunk,
+              encoding
+            }
+          ],
+          cb
+        );
+      } else {
+        throw new ERR_METHOD_NOT_IMPLEMENTED("_write()");
+      }
+    };
+    Writable.prototype._writev = null;
+    Writable.prototype.end = function(chunk, encoding, cb) {
+      const state = this._writableState;
+      if (typeof chunk === "function") {
+        cb = chunk;
+        chunk = null;
+        encoding = null;
+      } else if (typeof encoding === "function") {
+        cb = encoding;
+        encoding = null;
+      }
+      let err;
+      if (chunk !== null && chunk !== void 0) {
+        const ret = _write(this, chunk, encoding);
+        if (ret instanceof Error2) {
+          err = ret;
+        }
+      }
+      if (state.corked) {
+        state.corked = 1;
+        this.uncork();
+      }
+      if (err) {
+      } else if (!state.errored && !state.ending) {
+        state.ending = true;
+        finishMaybe(this, state, true);
+        state.ended = true;
+      } else if (state.finished) {
+        err = new ERR_STREAM_ALREADY_FINISHED("end");
+      } else if (state.destroyed) {
+        err = new ERR_STREAM_DESTROYED("end");
+      }
+      if (typeof cb === "function") {
+        if (err || state.finished) {
+          process2.nextTick(cb, err);
+        } else {
+          state[kOnFinished].push(cb);
+        }
+      }
+      return this;
+    };
+    function needFinish(state) {
+      return state.ending && !state.destroyed && state.constructed && state.length === 0 && !state.errored && state.buffered.length === 0 && !state.finished && !state.writing && !state.errorEmitted && !state.closeEmitted;
+    }
+    function callFinal(stream, state) {
+      let called = false;
+      function onFinish(err) {
+        if (called) {
+          errorOrDestroy(stream, err !== null && err !== void 0 ? err : ERR_MULTIPLE_CALLBACK());
+          return;
+        }
+        called = true;
+        state.pendingcb--;
+        if (err) {
+          const onfinishCallbacks = state[kOnFinished].splice(0);
+          for (let i = 0; i < onfinishCallbacks.length; i++) {
+            onfinishCallbacks[i](err);
+          }
+          errorOrDestroy(stream, err, state.sync);
+        } else if (needFinish(state)) {
+          state.prefinished = true;
+          stream.emit("prefinish");
+          state.pendingcb++;
+          process2.nextTick(finish, stream, state);
+        }
+      }
+      state.sync = true;
+      state.pendingcb++;
+      try {
+        stream._final(onFinish);
+      } catch (err) {
+        onFinish(err);
+      }
+      state.sync = false;
+    }
+    function prefinish(stream, state) {
+      if (!state.prefinished && !state.finalCalled) {
+        if (typeof stream._final === "function" && !state.destroyed) {
+          state.finalCalled = true;
+          callFinal(stream, state);
+        } else {
+          state.prefinished = true;
+          stream.emit("prefinish");
+        }
+      }
+    }
+    function finishMaybe(stream, state, sync) {
+      if (needFinish(state)) {
+        prefinish(stream, state);
+        if (state.pendingcb === 0) {
+          if (sync) {
+            state.pendingcb++;
+            process2.nextTick(
+              (stream2, state2) => {
+                if (needFinish(state2)) {
+                  finish(stream2, state2);
+                } else {
+                  state2.pendingcb--;
+                }
+              },
+              stream,
+              state
+            );
+          } else if (needFinish(state)) {
+            state.pendingcb++;
+            finish(stream, state);
+          }
+        }
+      }
+    }
+    function finish(stream, state) {
+      state.pendingcb--;
+      state.finished = true;
+      const onfinishCallbacks = state[kOnFinished].splice(0);
+      for (let i = 0; i < onfinishCallbacks.length; i++) {
+        onfinishCallbacks[i]();
+      }
+      stream.emit("finish");
+      if (state.autoDestroy) {
+        const rState = stream._readableState;
+        const autoDestroy = !rState || rState.autoDestroy && // We don't expect the readable to ever 'end'
+        // if readable is explicitly set to false.
+        (rState.endEmitted || rState.readable === false);
+        if (autoDestroy) {
+          stream.destroy();
+        }
+      }
+    }
+    ObjectDefineProperties(Writable.prototype, {
+      closed: {
+        __proto__: null,
+        get() {
+          return this._writableState ? this._writableState.closed : false;
+        }
+      },
+      destroyed: {
+        __proto__: null,
+        get() {
+          return this._writableState ? this._writableState.destroyed : false;
+        },
+        set(value) {
+          if (this._writableState) {
+            this._writableState.destroyed = value;
+          }
+        }
+      },
+      writable: {
+        __proto__: null,
+        get() {
+          const w = this._writableState;
+          return !!w && w.writable !== false && !w.destroyed && !w.errored && !w.ending && !w.ended;
+        },
+        set(val) {
+          if (this._writableState) {
+            this._writableState.writable = !!val;
+          }
+        }
+      },
+      writableFinished: {
+        __proto__: null,
+        get() {
+          return this._writableState ? this._writableState.finished : false;
+        }
+      },
+      writableObjectMode: {
+        __proto__: null,
+        get() {
+          return this._writableState ? this._writableState.objectMode : false;
+        }
+      },
+      writableBuffer: {
+        __proto__: null,
+        get() {
+          return this._writableState && this._writableState.getBuffer();
+        }
+      },
+      writableEnded: {
+        __proto__: null,
+        get() {
+          return this._writableState ? this._writableState.ending : false;
+        }
+      },
+      writableNeedDrain: {
+        __proto__: null,
+        get() {
+          const wState = this._writableState;
+          if (!wState) return false;
+          return !wState.destroyed && !wState.ending && wState.needDrain;
+        }
+      },
+      writableHighWaterMark: {
+        __proto__: null,
+        get() {
+          return this._writableState && this._writableState.highWaterMark;
+        }
+      },
+      writableCorked: {
+        __proto__: null,
+        get() {
+          return this._writableState ? this._writableState.corked : 0;
+        }
+      },
+      writableLength: {
+        __proto__: null,
+        get() {
+          return this._writableState && this._writableState.length;
+        }
+      },
+      errored: {
+        __proto__: null,
+        enumerable: false,
+        get() {
+          return this._writableState ? this._writableState.errored : null;
+        }
+      },
+      writableAborted: {
+        __proto__: null,
+        enumerable: false,
+        get: function() {
+          return !!(this._writableState.writable !== false && (this._writableState.destroyed || this._writableState.errored) && !this._writableState.finished);
+        }
+      }
+    });
+    var destroy = destroyImpl.destroy;
+    Writable.prototype.destroy = function(err, cb) {
+      const state = this._writableState;
+      if (!state.destroyed && (state.bufferedIndex < state.buffered.length || state[kOnFinished].length)) {
+        process2.nextTick(errorBuffer, state);
+      }
+      destroy.call(this, err, cb);
+      return this;
+    };
+    Writable.prototype._undestroy = destroyImpl.undestroy;
+    Writable.prototype._destroy = function(err, cb) {
+      cb(err);
+    };
+    Writable.prototype[EE.captureRejectionSymbol] = function(err) {
+      this.destroy(err);
+    };
+    var webStreamsAdapters;
+    function lazyWebStreams() {
+      if (webStreamsAdapters === void 0) webStreamsAdapters = {};
+      return webStreamsAdapters;
+    }
+    Writable.fromWeb = function(writableStream, options) {
+      return lazyWebStreams().newStreamWritableFromWritableStream(writableStream, options);
+    };
+    Writable.toWeb = function(streamWritable) {
+      return lazyWebStreams().newWritableStreamFromStreamWritable(streamWritable);
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/duplexify.js
+var require_duplexify3 = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/duplexify.js"(exports, module) {
+    var process2 = require_process2();
+    var bufferModule = __require("buffer");
+    var {
+      isReadable,
+      isWritable,
+      isIterable,
+      isNodeStream,
+      isReadableNodeStream,
+      isWritableNodeStream,
+      isDuplexNodeStream,
+      isReadableStream,
+      isWritableStream
+    } = require_utils3();
+    var eos = require_end_of_stream3();
+    var {
+      AbortError,
+      codes: { ERR_INVALID_ARG_TYPE, ERR_INVALID_RETURN_VALUE }
+    } = require_errors7();
+    var { destroyer } = require_destroy4();
+    var Duplex = require_duplex();
+    var Readable = require_readable4();
+    var Writable = require_writable();
+    var { createDeferredPromise } = require_util4();
+    var from = require_from2();
+    var Blob = globalThis.Blob || bufferModule.Blob;
+    var isBlob = typeof Blob !== "undefined" ? function isBlob2(b) {
+      return b instanceof Blob;
+    } : function isBlob2(b) {
+      return false;
+    };
+    var AbortController2 = globalThis.AbortController || require_abort_controller().AbortController;
+    var { FunctionPrototypeCall } = require_primordials();
+    var Duplexify = class extends Duplex {
+      constructor(options) {
+        super(options);
+        if ((options === null || options === void 0 ? void 0 : options.readable) === false) {
+          this._readableState.readable = false;
+          this._readableState.ended = true;
+          this._readableState.endEmitted = true;
+        }
+        if ((options === null || options === void 0 ? void 0 : options.writable) === false) {
+          this._writableState.writable = false;
+          this._writableState.ending = true;
+          this._writableState.ended = true;
+          this._writableState.finished = true;
+        }
+      }
+    };
+    module.exports = function duplexify(body, name) {
+      if (isDuplexNodeStream(body)) {
+        return body;
+      }
+      if (isReadableNodeStream(body)) {
+        return _duplexify({
+          readable: body
+        });
+      }
+      if (isWritableNodeStream(body)) {
+        return _duplexify({
+          writable: body
+        });
+      }
+      if (isNodeStream(body)) {
+        return _duplexify({
+          writable: false,
+          readable: false
+        });
+      }
+      if (isReadableStream(body)) {
+        return _duplexify({
+          readable: Readable.fromWeb(body)
+        });
+      }
+      if (isWritableStream(body)) {
+        return _duplexify({
+          writable: Writable.fromWeb(body)
+        });
+      }
+      if (typeof body === "function") {
+        const { value, write, final, destroy } = fromAsyncGen(body);
+        if (isIterable(value)) {
+          return from(Duplexify, value, {
+            // TODO (ronag): highWaterMark?
+            objectMode: true,
+            write,
+            final,
+            destroy
+          });
+        }
+        const then2 = value === null || value === void 0 ? void 0 : value.then;
+        if (typeof then2 === "function") {
+          let d;
+          const promise = FunctionPrototypeCall(
+            then2,
+            value,
+            (val) => {
+              if (val != null) {
+                throw new ERR_INVALID_RETURN_VALUE("nully", "body", val);
+              }
+            },
+            (err) => {
+              destroyer(d, err);
+            }
+          );
+          return d = new Duplexify({
+            // TODO (ronag): highWaterMark?
+            objectMode: true,
+            readable: false,
+            write,
+            final(cb) {
+              final(async () => {
+                try {
+                  await promise;
+                  process2.nextTick(cb, null);
+                } catch (err) {
+                  process2.nextTick(cb, err);
+                }
+              });
+            },
+            destroy
+          });
+        }
+        throw new ERR_INVALID_RETURN_VALUE("Iterable, AsyncIterable or AsyncFunction", name, value);
+      }
+      if (isBlob(body)) {
+        return duplexify(body.arrayBuffer());
+      }
+      if (isIterable(body)) {
+        return from(Duplexify, body, {
+          // TODO (ronag): highWaterMark?
+          objectMode: true,
+          writable: false
+        });
+      }
+      if (isReadableStream(body === null || body === void 0 ? void 0 : body.readable) && isWritableStream(body === null || body === void 0 ? void 0 : body.writable)) {
+        return Duplexify.fromWeb(body);
+      }
+      if (typeof (body === null || body === void 0 ? void 0 : body.writable) === "object" || typeof (body === null || body === void 0 ? void 0 : body.readable) === "object") {
+        const readable = body !== null && body !== void 0 && body.readable ? isReadableNodeStream(body === null || body === void 0 ? void 0 : body.readable) ? body === null || body === void 0 ? void 0 : body.readable : duplexify(body.readable) : void 0;
+        const writable = body !== null && body !== void 0 && body.writable ? isWritableNodeStream(body === null || body === void 0 ? void 0 : body.writable) ? body === null || body === void 0 ? void 0 : body.writable : duplexify(body.writable) : void 0;
+        return _duplexify({
+          readable,
+          writable
+        });
+      }
+      const then = body === null || body === void 0 ? void 0 : body.then;
+      if (typeof then === "function") {
+        let d;
+        FunctionPrototypeCall(
+          then,
+          body,
+          (val) => {
+            if (val != null) {
+              d.push(val);
+            }
+            d.push(null);
+          },
+          (err) => {
+            destroyer(d, err);
+          }
+        );
+        return d = new Duplexify({
+          objectMode: true,
+          writable: false,
+          read() {
+          }
+        });
+      }
+      throw new ERR_INVALID_ARG_TYPE(
+        name,
+        [
+          "Blob",
+          "ReadableStream",
+          "WritableStream",
+          "Stream",
+          "Iterable",
+          "AsyncIterable",
+          "Function",
+          "{ readable, writable } pair",
+          "Promise"
+        ],
+        body
+      );
+    };
+    function fromAsyncGen(fn) {
+      let { promise, resolve } = createDeferredPromise();
+      const ac = new AbortController2();
+      const signal = ac.signal;
+      const value = fn(
+        (async function* () {
+          while (true) {
+            const _promise = promise;
+            promise = null;
+            const { chunk, done, cb } = await _promise;
+            process2.nextTick(cb);
+            if (done) return;
+            if (signal.aborted)
+              throw new AbortError(void 0, {
+                cause: signal.reason
+              });
+            ({ promise, resolve } = createDeferredPromise());
+            yield chunk;
+          }
+        })(),
+        {
+          signal
+        }
+      );
+      return {
+        value,
+        write(chunk, encoding, cb) {
+          const _resolve = resolve;
+          resolve = null;
+          _resolve({
+            chunk,
+            done: false,
+            cb
+          });
+        },
+        final(cb) {
+          const _resolve = resolve;
+          resolve = null;
+          _resolve({
+            done: true,
+            cb
+          });
+        },
+        destroy(err, cb) {
+          ac.abort();
+          cb(err);
+        }
+      };
+    }
+    function _duplexify(pair) {
+      const r = pair.readable && typeof pair.readable.read !== "function" ? Readable.wrap(pair.readable) : pair.readable;
+      const w = pair.writable;
+      let readable = !!isReadable(r);
+      let writable = !!isWritable(w);
+      let ondrain;
+      let onfinish;
+      let onreadable;
+      let onclose;
+      let d;
+      function onfinished(err) {
+        const cb = onclose;
+        onclose = null;
+        if (cb) {
+          cb(err);
+        } else if (err) {
+          d.destroy(err);
+        }
+      }
+      d = new Duplexify({
+        // TODO (ronag): highWaterMark?
+        readableObjectMode: !!(r !== null && r !== void 0 && r.readableObjectMode),
+        writableObjectMode: !!(w !== null && w !== void 0 && w.writableObjectMode),
+        readable,
+        writable
+      });
+      if (writable) {
+        eos(w, (err) => {
+          writable = false;
+          if (err) {
+            destroyer(r, err);
+          }
+          onfinished(err);
+        });
+        d._write = function(chunk, encoding, callback) {
+          if (w.write(chunk, encoding)) {
+            callback();
+          } else {
+            ondrain = callback;
+          }
+        };
+        d._final = function(callback) {
+          w.end();
+          onfinish = callback;
+        };
+        w.on("drain", function() {
+          if (ondrain) {
+            const cb = ondrain;
+            ondrain = null;
+            cb();
+          }
+        });
+        w.on("finish", function() {
+          if (onfinish) {
+            const cb = onfinish;
+            onfinish = null;
+            cb();
+          }
+        });
+      }
+      if (readable) {
+        eos(r, (err) => {
+          readable = false;
+          if (err) {
+            destroyer(r, err);
+          }
+          onfinished(err);
+        });
+        r.on("readable", function() {
+          if (onreadable) {
+            const cb = onreadable;
+            onreadable = null;
+            cb();
+          }
+        });
+        r.on("end", function() {
+          d.push(null);
+        });
+        d._read = function() {
+          while (true) {
+            const buf = r.read();
+            if (buf === null) {
+              onreadable = d._read;
+              return;
+            }
+            if (!d.push(buf)) {
+              return;
+            }
+          }
+        };
+      }
+      d._destroy = function(err, callback) {
+        if (!err && onclose !== null) {
+          err = new AbortError();
+        }
+        onreadable = null;
+        ondrain = null;
+        onfinish = null;
+        if (onclose === null) {
+          callback(err);
+        } else {
+          onclose = callback;
+          destroyer(w, err);
+          destroyer(r, err);
+        }
+      };
+      return d;
+    }
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/duplex.js
+var require_duplex = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/duplex.js"(exports, module) {
+    "use strict";
+    var {
+      ObjectDefineProperties,
+      ObjectGetOwnPropertyDescriptor,
+      ObjectKeys,
+      ObjectSetPrototypeOf
+    } = require_primordials();
+    module.exports = Duplex;
+    var Readable = require_readable4();
+    var Writable = require_writable();
+    ObjectSetPrototypeOf(Duplex.prototype, Readable.prototype);
+    ObjectSetPrototypeOf(Duplex, Readable);
+    {
+      const keys = ObjectKeys(Writable.prototype);
+      for (let i = 0; i < keys.length; i++) {
+        const method = keys[i];
+        if (!Duplex.prototype[method]) Duplex.prototype[method] = Writable.prototype[method];
+      }
+    }
+    function Duplex(options) {
+      if (!(this instanceof Duplex)) return new Duplex(options);
+      Readable.call(this, options);
+      Writable.call(this, options);
+      if (options) {
+        this.allowHalfOpen = options.allowHalfOpen !== false;
+        if (options.readable === false) {
+          this._readableState.readable = false;
+          this._readableState.ended = true;
+          this._readableState.endEmitted = true;
+        }
+        if (options.writable === false) {
+          this._writableState.writable = false;
+          this._writableState.ending = true;
+          this._writableState.ended = true;
+          this._writableState.finished = true;
+        }
+      } else {
+        this.allowHalfOpen = true;
+      }
+    }
+    ObjectDefineProperties(Duplex.prototype, {
+      writable: {
+        __proto__: null,
+        ...ObjectGetOwnPropertyDescriptor(Writable.prototype, "writable")
+      },
+      writableHighWaterMark: {
+        __proto__: null,
+        ...ObjectGetOwnPropertyDescriptor(Writable.prototype, "writableHighWaterMark")
+      },
+      writableObjectMode: {
+        __proto__: null,
+        ...ObjectGetOwnPropertyDescriptor(Writable.prototype, "writableObjectMode")
+      },
+      writableBuffer: {
+        __proto__: null,
+        ...ObjectGetOwnPropertyDescriptor(Writable.prototype, "writableBuffer")
+      },
+      writableLength: {
+        __proto__: null,
+        ...ObjectGetOwnPropertyDescriptor(Writable.prototype, "writableLength")
+      },
+      writableFinished: {
+        __proto__: null,
+        ...ObjectGetOwnPropertyDescriptor(Writable.prototype, "writableFinished")
+      },
+      writableCorked: {
+        __proto__: null,
+        ...ObjectGetOwnPropertyDescriptor(Writable.prototype, "writableCorked")
+      },
+      writableEnded: {
+        __proto__: null,
+        ...ObjectGetOwnPropertyDescriptor(Writable.prototype, "writableEnded")
+      },
+      writableNeedDrain: {
+        __proto__: null,
+        ...ObjectGetOwnPropertyDescriptor(Writable.prototype, "writableNeedDrain")
+      },
+      destroyed: {
+        __proto__: null,
+        get() {
+          if (this._readableState === void 0 || this._writableState === void 0) {
+            return false;
+          }
+          return this._readableState.destroyed && this._writableState.destroyed;
+        },
+        set(value) {
+          if (this._readableState && this._writableState) {
+            this._readableState.destroyed = value;
+            this._writableState.destroyed = value;
+          }
+        }
+      }
+    });
+    var webStreamsAdapters;
+    function lazyWebStreams() {
+      if (webStreamsAdapters === void 0) webStreamsAdapters = {};
+      return webStreamsAdapters;
+    }
+    Duplex.fromWeb = function(pair, options) {
+      return lazyWebStreams().newStreamDuplexFromReadableWritablePair(pair, options);
+    };
+    Duplex.toWeb = function(duplex) {
+      return lazyWebStreams().newReadableWritablePairFromDuplex(duplex);
+    };
+    var duplexify;
+    Duplex.from = function(body) {
+      if (!duplexify) {
+        duplexify = require_duplexify3();
+      }
+      return duplexify(body, "body");
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/transform.js
+var require_transform = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/transform.js"(exports, module) {
+    "use strict";
+    var { ObjectSetPrototypeOf, Symbol: Symbol2 } = require_primordials();
+    module.exports = Transform;
+    var { ERR_METHOD_NOT_IMPLEMENTED } = require_errors7().codes;
+    var Duplex = require_duplex();
+    var { getHighWaterMark } = require_state2();
+    ObjectSetPrototypeOf(Transform.prototype, Duplex.prototype);
+    ObjectSetPrototypeOf(Transform, Duplex);
+    var kCallback = Symbol2("kCallback");
+    function Transform(options) {
+      if (!(this instanceof Transform)) return new Transform(options);
+      const readableHighWaterMark = options ? getHighWaterMark(this, options, "readableHighWaterMark", true) : null;
+      if (readableHighWaterMark === 0) {
+        options = {
+          ...options,
+          highWaterMark: null,
+          readableHighWaterMark,
+          // TODO (ronag): 0 is not optimal since we have
+          // a "bug" where we check needDrain before calling _write and not after.
+          // Refs: https://github.com/nodejs/node/pull/32887
+          // Refs: https://github.com/nodejs/node/pull/35941
+          writableHighWaterMark: options.writableHighWaterMark || 0
+        };
+      }
+      Duplex.call(this, options);
+      this._readableState.sync = false;
+      this[kCallback] = null;
+      if (options) {
+        if (typeof options.transform === "function") this._transform = options.transform;
+        if (typeof options.flush === "function") this._flush = options.flush;
+      }
+      this.on("prefinish", prefinish);
+    }
+    function final(cb) {
+      if (typeof this._flush === "function" && !this.destroyed) {
+        this._flush((er, data) => {
+          if (er) {
+            if (cb) {
+              cb(er);
+            } else {
+              this.destroy(er);
+            }
+            return;
+          }
+          if (data != null) {
+            this.push(data);
+          }
+          this.push(null);
+          if (cb) {
+            cb();
+          }
+        });
+      } else {
+        this.push(null);
+        if (cb) {
+          cb();
+        }
+      }
+    }
+    function prefinish() {
+      if (this._final !== final) {
+        final.call(this);
+      }
+    }
+    Transform.prototype._final = final;
+    Transform.prototype._transform = function(chunk, encoding, callback) {
+      throw new ERR_METHOD_NOT_IMPLEMENTED("_transform()");
+    };
+    Transform.prototype._write = function(chunk, encoding, callback) {
+      const rState = this._readableState;
+      const wState = this._writableState;
+      const length = rState.length;
+      this._transform(chunk, encoding, (err, val) => {
+        if (err) {
+          callback(err);
+          return;
+        }
+        if (val != null) {
+          this.push(val);
+        }
+        if (wState.ended || // Backwards compat.
+        length === rState.length || // Backwards compat.
+        rState.length < rState.highWaterMark) {
+          callback();
+        } else {
+          this[kCallback] = callback;
+        }
+      });
+    };
+    Transform.prototype._read = function() {
+      if (this[kCallback]) {
+        const callback = this[kCallback];
+        this[kCallback] = null;
+        callback();
+      }
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/passthrough.js
+var require_passthrough = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/passthrough.js"(exports, module) {
+    "use strict";
+    var { ObjectSetPrototypeOf } = require_primordials();
+    module.exports = PassThrough;
+    var Transform = require_transform();
+    ObjectSetPrototypeOf(PassThrough.prototype, Transform.prototype);
+    ObjectSetPrototypeOf(PassThrough, Transform);
+    function PassThrough(options) {
+      if (!(this instanceof PassThrough)) return new PassThrough(options);
+      Transform.call(this, options);
+    }
+    PassThrough.prototype._transform = function(chunk, encoding, cb) {
+      cb(null, chunk);
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/pipeline.js
+var require_pipeline2 = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/pipeline.js"(exports, module) {
+    var process2 = require_process2();
+    var { ArrayIsArray, Promise: Promise2, SymbolAsyncIterator, SymbolDispose } = require_primordials();
+    var eos = require_end_of_stream3();
+    var { once } = require_util4();
+    var destroyImpl = require_destroy4();
+    var Duplex = require_duplex();
+    var {
+      aggregateTwoErrors,
+      codes: {
+        ERR_INVALID_ARG_TYPE,
+        ERR_INVALID_RETURN_VALUE,
+        ERR_MISSING_ARGS,
+        ERR_STREAM_DESTROYED,
+        ERR_STREAM_PREMATURE_CLOSE
+      },
+      AbortError
+    } = require_errors7();
+    var { validateFunction, validateAbortSignal } = require_validators();
+    var {
+      isIterable,
+      isReadable,
+      isReadableNodeStream,
+      isNodeStream,
+      isTransformStream,
+      isWebStream,
+      isReadableStream,
+      isReadableFinished
+    } = require_utils3();
+    var AbortController2 = globalThis.AbortController || require_abort_controller().AbortController;
+    var PassThrough;
+    var Readable;
+    var addAbortListener;
+    function destroyer(stream, reading, writing) {
+      let finished = false;
+      stream.on("close", () => {
+        finished = true;
+      });
+      const cleanup = eos(
+        stream,
+        {
+          readable: reading,
+          writable: writing
+        },
+        (err) => {
+          finished = !err;
+        }
+      );
+      return {
+        destroy: (err) => {
+          if (finished) return;
+          finished = true;
+          destroyImpl.destroyer(stream, err || new ERR_STREAM_DESTROYED("pipe"));
+        },
+        cleanup
+      };
+    }
+    function popCallback(streams) {
+      validateFunction(streams[streams.length - 1], "streams[stream.length - 1]");
+      return streams.pop();
+    }
+    function makeAsyncIterable(val) {
+      if (isIterable(val)) {
+        return val;
+      } else if (isReadableNodeStream(val)) {
+        return fromReadable(val);
+      }
+      throw new ERR_INVALID_ARG_TYPE("val", ["Readable", "Iterable", "AsyncIterable"], val);
+    }
+    async function* fromReadable(val) {
+      if (!Readable) {
+        Readable = require_readable4();
+      }
+      yield* Readable.prototype[SymbolAsyncIterator].call(val);
+    }
+    async function pumpToNode(iterable, writable, finish, { end }) {
+      let error;
+      let onresolve = null;
+      const resume = (err) => {
+        if (err) {
+          error = err;
+        }
+        if (onresolve) {
+          const callback = onresolve;
+          onresolve = null;
+          callback();
+        }
+      };
+      const wait = () => new Promise2((resolve, reject) => {
+        if (error) {
+          reject(error);
+        } else {
+          onresolve = () => {
+            if (error) {
+              reject(error);
+            } else {
+              resolve();
+            }
+          };
+        }
+      });
+      writable.on("drain", resume);
+      const cleanup = eos(
+        writable,
+        {
+          readable: false
+        },
+        resume
+      );
+      try {
+        if (writable.writableNeedDrain) {
+          await wait();
+        }
+        for await (const chunk of iterable) {
+          if (!writable.write(chunk)) {
+            await wait();
+          }
+        }
+        if (end) {
+          writable.end();
+          await wait();
+        }
+        finish();
+      } catch (err) {
+        finish(error !== err ? aggregateTwoErrors(error, err) : err);
+      } finally {
+        cleanup();
+        writable.off("drain", resume);
+      }
+    }
+    async function pumpToWeb(readable, writable, finish, { end }) {
+      if (isTransformStream(writable)) {
+        writable = writable.writable;
+      }
+      const writer = writable.getWriter();
+      try {
+        for await (const chunk of readable) {
+          await writer.ready;
+          writer.write(chunk).catch(() => {
+          });
+        }
+        await writer.ready;
+        if (end) {
+          await writer.close();
+        }
+        finish();
+      } catch (err) {
+        try {
+          await writer.abort(err);
+          finish(err);
+        } catch (err2) {
+          finish(err2);
+        }
+      }
+    }
+    function pipeline(...streams) {
+      return pipelineImpl(streams, once(popCallback(streams)));
+    }
+    function pipelineImpl(streams, callback, opts) {
+      if (streams.length === 1 && ArrayIsArray(streams[0])) {
+        streams = streams[0];
+      }
+      if (streams.length < 2) {
+        throw new ERR_MISSING_ARGS("streams");
+      }
+      const ac = new AbortController2();
+      const signal = ac.signal;
+      const outerSignal = opts === null || opts === void 0 ? void 0 : opts.signal;
+      const lastStreamCleanup = [];
+      validateAbortSignal(outerSignal, "options.signal");
+      function abort() {
+        finishImpl(new AbortError());
+      }
+      addAbortListener = addAbortListener || require_util4().addAbortListener;
+      let disposable;
+      if (outerSignal) {
+        disposable = addAbortListener(outerSignal, abort);
+      }
+      let error;
+      let value;
+      const destroys = [];
+      let finishCount = 0;
+      function finish(err) {
+        finishImpl(err, --finishCount === 0);
+      }
+      function finishImpl(err, final) {
+        var _disposable;
+        if (err && (!error || error.code === "ERR_STREAM_PREMATURE_CLOSE")) {
+          error = err;
+        }
+        if (!error && !final) {
+          return;
+        }
+        while (destroys.length) {
+          destroys.shift()(error);
+        }
+        ;
+        (_disposable = disposable) === null || _disposable === void 0 ? void 0 : _disposable[SymbolDispose]();
+        ac.abort();
+        if (final) {
+          if (!error) {
+            lastStreamCleanup.forEach((fn) => fn());
+          }
+          process2.nextTick(callback, error, value);
+        }
+      }
+      let ret;
+      for (let i = 0; i < streams.length; i++) {
+        const stream = streams[i];
+        const reading = i < streams.length - 1;
+        const writing = i > 0;
+        const end = reading || (opts === null || opts === void 0 ? void 0 : opts.end) !== false;
+        const isLastStream = i === streams.length - 1;
+        if (isNodeStream(stream)) {
+          let onError2 = function(err) {
+            if (err && err.name !== "AbortError" && err.code !== "ERR_STREAM_PREMATURE_CLOSE") {
+              finish(err);
+            }
+          };
+          var onError = onError2;
+          if (end) {
+            const { destroy, cleanup } = destroyer(stream, reading, writing);
+            destroys.push(destroy);
+            if (isReadable(stream) && isLastStream) {
+              lastStreamCleanup.push(cleanup);
+            }
+          }
+          stream.on("error", onError2);
+          if (isReadable(stream) && isLastStream) {
+            lastStreamCleanup.push(() => {
+              stream.removeListener("error", onError2);
+            });
+          }
+        }
+        if (i === 0) {
+          if (typeof stream === "function") {
+            ret = stream({
+              signal
+            });
+            if (!isIterable(ret)) {
+              throw new ERR_INVALID_RETURN_VALUE("Iterable, AsyncIterable or Stream", "source", ret);
+            }
+          } else if (isIterable(stream) || isReadableNodeStream(stream) || isTransformStream(stream)) {
+            ret = stream;
+          } else {
+            ret = Duplex.from(stream);
+          }
+        } else if (typeof stream === "function") {
+          if (isTransformStream(ret)) {
+            var _ret;
+            ret = makeAsyncIterable((_ret = ret) === null || _ret === void 0 ? void 0 : _ret.readable);
+          } else {
+            ret = makeAsyncIterable(ret);
+          }
+          ret = stream(ret, {
+            signal
+          });
+          if (reading) {
+            if (!isIterable(ret, true)) {
+              throw new ERR_INVALID_RETURN_VALUE("AsyncIterable", `transform[${i - 1}]`, ret);
+            }
+          } else {
+            var _ret2;
+            if (!PassThrough) {
+              PassThrough = require_passthrough();
+            }
+            const pt = new PassThrough({
+              objectMode: true
+            });
+            const then = (_ret2 = ret) === null || _ret2 === void 0 ? void 0 : _ret2.then;
+            if (typeof then === "function") {
+              finishCount++;
+              then.call(
+                ret,
+                (val) => {
+                  value = val;
+                  if (val != null) {
+                    pt.write(val);
+                  }
+                  if (end) {
+                    pt.end();
+                  }
+                  process2.nextTick(finish);
+                },
+                (err) => {
+                  pt.destroy(err);
+                  process2.nextTick(finish, err);
+                }
+              );
+            } else if (isIterable(ret, true)) {
+              finishCount++;
+              pumpToNode(ret, pt, finish, {
+                end
+              });
+            } else if (isReadableStream(ret) || isTransformStream(ret)) {
+              const toRead = ret.readable || ret;
+              finishCount++;
+              pumpToNode(toRead, pt, finish, {
+                end
+              });
+            } else {
+              throw new ERR_INVALID_RETURN_VALUE("AsyncIterable or Promise", "destination", ret);
+            }
+            ret = pt;
+            const { destroy, cleanup } = destroyer(ret, false, true);
+            destroys.push(destroy);
+            if (isLastStream) {
+              lastStreamCleanup.push(cleanup);
+            }
+          }
+        } else if (isNodeStream(stream)) {
+          if (isReadableNodeStream(ret)) {
+            finishCount += 2;
+            const cleanup = pipe(ret, stream, finish, {
+              end
+            });
+            if (isReadable(stream) && isLastStream) {
+              lastStreamCleanup.push(cleanup);
+            }
+          } else if (isTransformStream(ret) || isReadableStream(ret)) {
+            const toRead = ret.readable || ret;
+            finishCount++;
+            pumpToNode(toRead, stream, finish, {
+              end
+            });
+          } else if (isIterable(ret)) {
+            finishCount++;
+            pumpToNode(ret, stream, finish, {
+              end
+            });
+          } else {
+            throw new ERR_INVALID_ARG_TYPE(
+              "val",
+              ["Readable", "Iterable", "AsyncIterable", "ReadableStream", "TransformStream"],
+              ret
+            );
+          }
+          ret = stream;
+        } else if (isWebStream(stream)) {
+          if (isReadableNodeStream(ret)) {
+            finishCount++;
+            pumpToWeb(makeAsyncIterable(ret), stream, finish, {
+              end
+            });
+          } else if (isReadableStream(ret) || isIterable(ret)) {
+            finishCount++;
+            pumpToWeb(ret, stream, finish, {
+              end
+            });
+          } else if (isTransformStream(ret)) {
+            finishCount++;
+            pumpToWeb(ret.readable, stream, finish, {
+              end
+            });
+          } else {
+            throw new ERR_INVALID_ARG_TYPE(
+              "val",
+              ["Readable", "Iterable", "AsyncIterable", "ReadableStream", "TransformStream"],
+              ret
+            );
+          }
+          ret = stream;
+        } else {
+          ret = Duplex.from(stream);
+        }
+      }
+      if (signal !== null && signal !== void 0 && signal.aborted || outerSignal !== null && outerSignal !== void 0 && outerSignal.aborted) {
+        process2.nextTick(abort);
+      }
+      return ret;
+    }
+    function pipe(src, dst, finish, { end }) {
+      let ended = false;
+      dst.on("close", () => {
+        if (!ended) {
+          finish(new ERR_STREAM_PREMATURE_CLOSE());
+        }
+      });
+      src.pipe(dst, {
+        end: false
+      });
+      if (end) {
+        let endFn2 = function() {
+          ended = true;
+          dst.end();
+        };
+        var endFn = endFn2;
+        if (isReadableFinished(src)) {
+          process2.nextTick(endFn2);
+        } else {
+          src.once("end", endFn2);
+        }
+      } else {
+        finish();
+      }
+      eos(
+        src,
+        {
+          readable: true,
+          writable: false
+        },
+        (err) => {
+          const rState = src._readableState;
+          if (err && err.code === "ERR_STREAM_PREMATURE_CLOSE" && rState && rState.ended && !rState.errored && !rState.errorEmitted) {
+            src.once("end", finish).once("error", finish);
+          } else {
+            finish(err);
+          }
+        }
+      );
+      return eos(
+        dst,
+        {
+          readable: false,
+          writable: true
+        },
+        finish
+      );
+    }
+    module.exports = {
+      pipelineImpl,
+      pipeline
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/compose.js
+var require_compose = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/compose.js"(exports, module) {
+    "use strict";
+    var { pipeline } = require_pipeline2();
+    var Duplex = require_duplex();
+    var { destroyer } = require_destroy4();
+    var {
+      isNodeStream,
+      isReadable,
+      isWritable,
+      isWebStream,
+      isTransformStream,
+      isWritableStream,
+      isReadableStream
+    } = require_utils3();
+    var {
+      AbortError,
+      codes: { ERR_INVALID_ARG_VALUE, ERR_MISSING_ARGS }
+    } = require_errors7();
+    var eos = require_end_of_stream3();
+    module.exports = function compose(...streams) {
+      if (streams.length === 0) {
+        throw new ERR_MISSING_ARGS("streams");
+      }
+      if (streams.length === 1) {
+        return Duplex.from(streams[0]);
+      }
+      const orgStreams = [...streams];
+      if (typeof streams[0] === "function") {
+        streams[0] = Duplex.from(streams[0]);
+      }
+      if (typeof streams[streams.length - 1] === "function") {
+        const idx = streams.length - 1;
+        streams[idx] = Duplex.from(streams[idx]);
+      }
+      for (let n = 0; n < streams.length; ++n) {
+        if (!isNodeStream(streams[n]) && !isWebStream(streams[n])) {
+          continue;
+        }
+        if (n < streams.length - 1 && !(isReadable(streams[n]) || isReadableStream(streams[n]) || isTransformStream(streams[n]))) {
+          throw new ERR_INVALID_ARG_VALUE(`streams[${n}]`, orgStreams[n], "must be readable");
+        }
+        if (n > 0 && !(isWritable(streams[n]) || isWritableStream(streams[n]) || isTransformStream(streams[n]))) {
+          throw new ERR_INVALID_ARG_VALUE(`streams[${n}]`, orgStreams[n], "must be writable");
+        }
+      }
+      let ondrain;
+      let onfinish;
+      let onreadable;
+      let onclose;
+      let d;
+      function onfinished(err) {
+        const cb = onclose;
+        onclose = null;
+        if (cb) {
+          cb(err);
+        } else if (err) {
+          d.destroy(err);
+        } else if (!readable && !writable) {
+          d.destroy();
+        }
+      }
+      const head = streams[0];
+      const tail = pipeline(streams, onfinished);
+      const writable = !!(isWritable(head) || isWritableStream(head) || isTransformStream(head));
+      const readable = !!(isReadable(tail) || isReadableStream(tail) || isTransformStream(tail));
+      d = new Duplex({
+        // TODO (ronag): highWaterMark?
+        writableObjectMode: !!(head !== null && head !== void 0 && head.writableObjectMode),
+        readableObjectMode: !!(tail !== null && tail !== void 0 && tail.readableObjectMode),
+        writable,
+        readable
+      });
+      if (writable) {
+        if (isNodeStream(head)) {
+          d._write = function(chunk, encoding, callback) {
+            if (head.write(chunk, encoding)) {
+              callback();
+            } else {
+              ondrain = callback;
+            }
+          };
+          d._final = function(callback) {
+            head.end();
+            onfinish = callback;
+          };
+          head.on("drain", function() {
+            if (ondrain) {
+              const cb = ondrain;
+              ondrain = null;
+              cb();
+            }
+          });
+        } else if (isWebStream(head)) {
+          const writable2 = isTransformStream(head) ? head.writable : head;
+          const writer = writable2.getWriter();
+          d._write = async function(chunk, encoding, callback) {
+            try {
+              await writer.ready;
+              writer.write(chunk).catch(() => {
+              });
+              callback();
+            } catch (err) {
+              callback(err);
+            }
+          };
+          d._final = async function(callback) {
+            try {
+              await writer.ready;
+              writer.close().catch(() => {
+              });
+              onfinish = callback;
+            } catch (err) {
+              callback(err);
+            }
+          };
+        }
+        const toRead = isTransformStream(tail) ? tail.readable : tail;
+        eos(toRead, () => {
+          if (onfinish) {
+            const cb = onfinish;
+            onfinish = null;
+            cb();
+          }
+        });
+      }
+      if (readable) {
+        if (isNodeStream(tail)) {
+          tail.on("readable", function() {
+            if (onreadable) {
+              const cb = onreadable;
+              onreadable = null;
+              cb();
+            }
+          });
+          tail.on("end", function() {
+            d.push(null);
+          });
+          d._read = function() {
+            while (true) {
+              const buf = tail.read();
+              if (buf === null) {
+                onreadable = d._read;
+                return;
+              }
+              if (!d.push(buf)) {
+                return;
+              }
+            }
+          };
+        } else if (isWebStream(tail)) {
+          const readable2 = isTransformStream(tail) ? tail.readable : tail;
+          const reader = readable2.getReader();
+          d._read = async function() {
+            while (true) {
+              try {
+                const { value, done } = await reader.read();
+                if (!d.push(value)) {
+                  return;
+                }
+                if (done) {
+                  d.push(null);
+                  return;
+                }
+              } catch {
+                return;
+              }
+            }
+          };
+        }
+      }
+      d._destroy = function(err, callback) {
+        if (!err && onclose !== null) {
+          err = new AbortError();
+        }
+        onreadable = null;
+        ondrain = null;
+        onfinish = null;
+        if (onclose === null) {
+          callback(err);
+        } else {
+          onclose = callback;
+          if (isNodeStream(tail)) {
+            destroyer(tail, err);
+          }
+        }
+      };
+      return d;
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/internal/streams/operators.js
+var require_operators = __commonJS({
+  "node_modules/readable-stream/lib/internal/streams/operators.js"(exports, module) {
+    "use strict";
+    var AbortController2 = globalThis.AbortController || require_abort_controller().AbortController;
+    var {
+      codes: { ERR_INVALID_ARG_VALUE, ERR_INVALID_ARG_TYPE, ERR_MISSING_ARGS, ERR_OUT_OF_RANGE },
+      AbortError
+    } = require_errors7();
+    var { validateAbortSignal, validateInteger, validateObject } = require_validators();
+    var kWeakHandler = require_primordials().Symbol("kWeak");
+    var kResistStopPropagation = require_primordials().Symbol("kResistStopPropagation");
+    var { finished } = require_end_of_stream3();
+    var staticCompose = require_compose();
+    var { addAbortSignalNoValidate } = require_add_abort_signal();
+    var { isWritable, isNodeStream } = require_utils3();
+    var { deprecate } = require_util4();
+    var {
+      ArrayPrototypePush,
+      Boolean: Boolean2,
+      MathFloor,
+      Number: Number2,
+      NumberIsNaN,
+      Promise: Promise2,
+      PromiseReject,
+      PromiseResolve,
+      PromisePrototypeThen,
+      Symbol: Symbol2
+    } = require_primordials();
+    var kEmpty = Symbol2("kEmpty");
+    var kEof = Symbol2("kEof");
+    function compose(stream, options) {
+      if (options != null) {
+        validateObject(options, "options");
+      }
+      if ((options === null || options === void 0 ? void 0 : options.signal) != null) {
+        validateAbortSignal(options.signal, "options.signal");
+      }
+      if (isNodeStream(stream) && !isWritable(stream)) {
+        throw new ERR_INVALID_ARG_VALUE("stream", stream, "must be writable");
+      }
+      const composedStream = staticCompose(this, stream);
+      if (options !== null && options !== void 0 && options.signal) {
+        addAbortSignalNoValidate(options.signal, composedStream);
+      }
+      return composedStream;
+    }
+    function map(fn, options) {
+      if (typeof fn !== "function") {
+        throw new ERR_INVALID_ARG_TYPE("fn", ["Function", "AsyncFunction"], fn);
+      }
+      if (options != null) {
+        validateObject(options, "options");
+      }
+      if ((options === null || options === void 0 ? void 0 : options.signal) != null) {
+        validateAbortSignal(options.signal, "options.signal");
+      }
+      let concurrency = 1;
+      if ((options === null || options === void 0 ? void 0 : options.concurrency) != null) {
+        concurrency = MathFloor(options.concurrency);
+      }
+      let highWaterMark = concurrency - 1;
+      if ((options === null || options === void 0 ? void 0 : options.highWaterMark) != null) {
+        highWaterMark = MathFloor(options.highWaterMark);
+      }
+      validateInteger(concurrency, "options.concurrency", 1);
+      validateInteger(highWaterMark, "options.highWaterMark", 0);
+      highWaterMark += concurrency;
+      return async function* map2() {
+        const signal = require_util4().AbortSignalAny(
+          [options === null || options === void 0 ? void 0 : options.signal].filter(Boolean2)
+        );
+        const stream = this;
+        const queue = [];
+        const signalOpt = {
+          signal
+        };
+        let next;
+        let resume;
+        let done = false;
+        let cnt = 0;
+        function onCatch() {
+          done = true;
+          afterItemProcessed();
+        }
+        function afterItemProcessed() {
+          cnt -= 1;
+          maybeResume();
+        }
+        function maybeResume() {
+          if (resume && !done && cnt < concurrency && queue.length < highWaterMark) {
+            resume();
+            resume = null;
+          }
+        }
+        async function pump() {
+          try {
+            for await (let val of stream) {
+              if (done) {
+                return;
+              }
+              if (signal.aborted) {
+                throw new AbortError();
+              }
+              try {
+                val = fn(val, signalOpt);
+                if (val === kEmpty) {
+                  continue;
+                }
+                val = PromiseResolve(val);
+              } catch (err) {
+                val = PromiseReject(err);
+              }
+              cnt += 1;
+              PromisePrototypeThen(val, afterItemProcessed, onCatch);
+              queue.push(val);
+              if (next) {
+                next();
+                next = null;
+              }
+              if (!done && (queue.length >= highWaterMark || cnt >= concurrency)) {
+                await new Promise2((resolve) => {
+                  resume = resolve;
+                });
+              }
+            }
+            queue.push(kEof);
+          } catch (err) {
+            const val = PromiseReject(err);
+            PromisePrototypeThen(val, afterItemProcessed, onCatch);
+            queue.push(val);
+          } finally {
+            done = true;
+            if (next) {
+              next();
+              next = null;
+            }
+          }
+        }
+        pump();
+        try {
+          while (true) {
+            while (queue.length > 0) {
+              const val = await queue[0];
+              if (val === kEof) {
+                return;
+              }
+              if (signal.aborted) {
+                throw new AbortError();
+              }
+              if (val !== kEmpty) {
+                yield val;
+              }
+              queue.shift();
+              maybeResume();
+            }
+            await new Promise2((resolve) => {
+              next = resolve;
+            });
+          }
+        } finally {
+          done = true;
+          if (resume) {
+            resume();
+            resume = null;
+          }
+        }
+      }.call(this);
+    }
+    function asIndexedPairs(options = void 0) {
+      if (options != null) {
+        validateObject(options, "options");
+      }
+      if ((options === null || options === void 0 ? void 0 : options.signal) != null) {
+        validateAbortSignal(options.signal, "options.signal");
+      }
+      return async function* asIndexedPairs2() {
+        let index = 0;
+        for await (const val of this) {
+          var _options$signal;
+          if (options !== null && options !== void 0 && (_options$signal = options.signal) !== null && _options$signal !== void 0 && _options$signal.aborted) {
+            throw new AbortError({
+              cause: options.signal.reason
+            });
+          }
+          yield [index++, val];
+        }
+      }.call(this);
+    }
+    async function some(fn, options = void 0) {
+      for await (const unused of filter.call(this, fn, options)) {
+        return true;
+      }
+      return false;
+    }
+    async function every(fn, options = void 0) {
+      if (typeof fn !== "function") {
+        throw new ERR_INVALID_ARG_TYPE("fn", ["Function", "AsyncFunction"], fn);
+      }
+      return !await some.call(
+        this,
+        async (...args) => {
+          return !await fn(...args);
+        },
+        options
+      );
+    }
+    async function find(fn, options) {
+      for await (const result of filter.call(this, fn, options)) {
+        return result;
+      }
+      return void 0;
+    }
+    async function forEach(fn, options) {
+      if (typeof fn !== "function") {
+        throw new ERR_INVALID_ARG_TYPE("fn", ["Function", "AsyncFunction"], fn);
+      }
+      async function forEachFn(value, options2) {
+        await fn(value, options2);
+        return kEmpty;
+      }
+      for await (const unused of map.call(this, forEachFn, options)) ;
+    }
+    function filter(fn, options) {
+      if (typeof fn !== "function") {
+        throw new ERR_INVALID_ARG_TYPE("fn", ["Function", "AsyncFunction"], fn);
+      }
+      async function filterFn(value, options2) {
+        if (await fn(value, options2)) {
+          return value;
+        }
+        return kEmpty;
+      }
+      return map.call(this, filterFn, options);
+    }
+    var ReduceAwareErrMissingArgs = class extends ERR_MISSING_ARGS {
+      constructor() {
+        super("reduce");
+        this.message = "Reduce of an empty stream requires an initial value";
+      }
+    };
+    async function reduce(reducer, initialValue, options) {
+      var _options$signal2;
+      if (typeof reducer !== "function") {
+        throw new ERR_INVALID_ARG_TYPE("reducer", ["Function", "AsyncFunction"], reducer);
+      }
+      if (options != null) {
+        validateObject(options, "options");
+      }
+      if ((options === null || options === void 0 ? void 0 : options.signal) != null) {
+        validateAbortSignal(options.signal, "options.signal");
+      }
+      let hasInitialValue = arguments.length > 1;
+      if (options !== null && options !== void 0 && (_options$signal2 = options.signal) !== null && _options$signal2 !== void 0 && _options$signal2.aborted) {
+        const err = new AbortError(void 0, {
+          cause: options.signal.reason
+        });
+        this.once("error", () => {
+        });
+        await finished(this.destroy(err));
+        throw err;
+      }
+      const ac = new AbortController2();
+      const signal = ac.signal;
+      if (options !== null && options !== void 0 && options.signal) {
+        const opts = {
+          once: true,
+          [kWeakHandler]: this,
+          [kResistStopPropagation]: true
+        };
+        options.signal.addEventListener("abort", () => ac.abort(), opts);
+      }
+      let gotAnyItemFromStream = false;
+      try {
+        for await (const value of this) {
+          var _options$signal3;
+          gotAnyItemFromStream = true;
+          if (options !== null && options !== void 0 && (_options$signal3 = options.signal) !== null && _options$signal3 !== void 0 && _options$signal3.aborted) {
+            throw new AbortError();
+          }
+          if (!hasInitialValue) {
+            initialValue = value;
+            hasInitialValue = true;
+          } else {
+            initialValue = await reducer(initialValue, value, {
+              signal
+            });
+          }
+        }
+        if (!gotAnyItemFromStream && !hasInitialValue) {
+          throw new ReduceAwareErrMissingArgs();
+        }
+      } finally {
+        ac.abort();
+      }
+      return initialValue;
+    }
+    async function toArray(options) {
+      if (options != null) {
+        validateObject(options, "options");
+      }
+      if ((options === null || options === void 0 ? void 0 : options.signal) != null) {
+        validateAbortSignal(options.signal, "options.signal");
+      }
+      const result = [];
+      for await (const val of this) {
+        var _options$signal4;
+        if (options !== null && options !== void 0 && (_options$signal4 = options.signal) !== null && _options$signal4 !== void 0 && _options$signal4.aborted) {
+          throw new AbortError(void 0, {
+            cause: options.signal.reason
+          });
+        }
+        ArrayPrototypePush(result, val);
+      }
+      return result;
+    }
+    function flatMap(fn, options) {
+      const values = map.call(this, fn, options);
+      return async function* flatMap2() {
+        for await (const val of values) {
+          yield* val;
+        }
+      }.call(this);
+    }
+    function toIntegerOrInfinity(number) {
+      number = Number2(number);
+      if (NumberIsNaN(number)) {
+        return 0;
+      }
+      if (number < 0) {
+        throw new ERR_OUT_OF_RANGE("number", ">= 0", number);
+      }
+      return number;
+    }
+    function drop(number, options = void 0) {
+      if (options != null) {
+        validateObject(options, "options");
+      }
+      if ((options === null || options === void 0 ? void 0 : options.signal) != null) {
+        validateAbortSignal(options.signal, "options.signal");
+      }
+      number = toIntegerOrInfinity(number);
+      return async function* drop2() {
+        var _options$signal5;
+        if (options !== null && options !== void 0 && (_options$signal5 = options.signal) !== null && _options$signal5 !== void 0 && _options$signal5.aborted) {
+          throw new AbortError();
+        }
+        for await (const val of this) {
+          var _options$signal6;
+          if (options !== null && options !== void 0 && (_options$signal6 = options.signal) !== null && _options$signal6 !== void 0 && _options$signal6.aborted) {
+            throw new AbortError();
+          }
+          if (number-- <= 0) {
+            yield val;
+          }
+        }
+      }.call(this);
+    }
+    function take(number, options = void 0) {
+      if (options != null) {
+        validateObject(options, "options");
+      }
+      if ((options === null || options === void 0 ? void 0 : options.signal) != null) {
+        validateAbortSignal(options.signal, "options.signal");
+      }
+      number = toIntegerOrInfinity(number);
+      return async function* take2() {
+        var _options$signal7;
+        if (options !== null && options !== void 0 && (_options$signal7 = options.signal) !== null && _options$signal7 !== void 0 && _options$signal7.aborted) {
+          throw new AbortError();
+        }
+        for await (const val of this) {
+          var _options$signal8;
+          if (options !== null && options !== void 0 && (_options$signal8 = options.signal) !== null && _options$signal8 !== void 0 && _options$signal8.aborted) {
+            throw new AbortError();
+          }
+          if (number-- > 0) {
+            yield val;
+          }
+          if (number <= 0) {
+            return;
+          }
+        }
+      }.call(this);
+    }
+    module.exports.streamReturningOperators = {
+      asIndexedPairs: deprecate(asIndexedPairs, "readable.asIndexedPairs will be removed in a future version."),
+      drop,
+      filter,
+      flatMap,
+      map,
+      take,
+      compose
+    };
+    module.exports.promiseReturningOperators = {
+      every,
+      forEach,
+      reduce,
+      toArray,
+      some,
+      find
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/stream/promises.js
+var require_promises = __commonJS({
+  "node_modules/readable-stream/lib/stream/promises.js"(exports, module) {
+    "use strict";
+    var { ArrayPrototypePop, Promise: Promise2 } = require_primordials();
+    var { isIterable, isNodeStream, isWebStream } = require_utils3();
+    var { pipelineImpl: pl } = require_pipeline2();
+    var { finished } = require_end_of_stream3();
+    require_stream4();
+    function pipeline(...streams) {
+      return new Promise2((resolve, reject) => {
+        let signal;
+        let end;
+        const lastArg = streams[streams.length - 1];
+        if (lastArg && typeof lastArg === "object" && !isNodeStream(lastArg) && !isIterable(lastArg) && !isWebStream(lastArg)) {
+          const options = ArrayPrototypePop(streams);
+          signal = options.signal;
+          end = options.end;
+        }
+        pl(
+          streams,
+          (err, value) => {
+            if (err) {
+              reject(err);
+            } else {
+              resolve(value);
+            }
+          },
+          {
+            signal,
+            end
+          }
+        );
+      });
+    }
+    module.exports = {
+      finished,
+      pipeline
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/stream.js
+var require_stream4 = __commonJS({
+  "node_modules/readable-stream/lib/stream.js"(exports, module) {
+    "use strict";
+    var { Buffer: Buffer2 } = __require("buffer");
+    var { ObjectDefineProperty, ObjectKeys, ReflectApply } = require_primordials();
+    var {
+      promisify: { custom: customPromisify }
+    } = require_util4();
+    var { streamReturningOperators, promiseReturningOperators } = require_operators();
+    var {
+      codes: { ERR_ILLEGAL_CONSTRUCTOR }
+    } = require_errors7();
+    var compose = require_compose();
+    var { setDefaultHighWaterMark, getDefaultHighWaterMark } = require_state2();
+    var { pipeline } = require_pipeline2();
+    var { destroyer } = require_destroy4();
+    var eos = require_end_of_stream3();
+    var promises = require_promises();
+    var utils = require_utils3();
+    var Stream = module.exports = require_legacy().Stream;
+    Stream.isDestroyed = utils.isDestroyed;
+    Stream.isDisturbed = utils.isDisturbed;
+    Stream.isErrored = utils.isErrored;
+    Stream.isReadable = utils.isReadable;
+    Stream.isWritable = utils.isWritable;
+    Stream.Readable = require_readable4();
+    for (const key of ObjectKeys(streamReturningOperators)) {
+      let fn = function(...args) {
+        if (new.target) {
+          throw ERR_ILLEGAL_CONSTRUCTOR();
+        }
+        return Stream.Readable.from(ReflectApply(op, this, args));
+      };
+      const op = streamReturningOperators[key];
+      ObjectDefineProperty(fn, "name", {
+        __proto__: null,
+        value: op.name
+      });
+      ObjectDefineProperty(fn, "length", {
+        __proto__: null,
+        value: op.length
+      });
+      ObjectDefineProperty(Stream.Readable.prototype, key, {
+        __proto__: null,
+        value: fn,
+        enumerable: false,
+        configurable: true,
+        writable: true
+      });
+    }
+    for (const key of ObjectKeys(promiseReturningOperators)) {
+      let fn = function(...args) {
+        if (new.target) {
+          throw ERR_ILLEGAL_CONSTRUCTOR();
+        }
+        return ReflectApply(op, this, args);
+      };
+      const op = promiseReturningOperators[key];
+      ObjectDefineProperty(fn, "name", {
+        __proto__: null,
+        value: op.name
+      });
+      ObjectDefineProperty(fn, "length", {
+        __proto__: null,
+        value: op.length
+      });
+      ObjectDefineProperty(Stream.Readable.prototype, key, {
+        __proto__: null,
+        value: fn,
+        enumerable: false,
+        configurable: true,
+        writable: true
+      });
+    }
+    Stream.Writable = require_writable();
+    Stream.Duplex = require_duplex();
+    Stream.Transform = require_transform();
+    Stream.PassThrough = require_passthrough();
+    Stream.pipeline = pipeline;
+    var { addAbortSignal } = require_add_abort_signal();
+    Stream.addAbortSignal = addAbortSignal;
+    Stream.finished = eos;
+    Stream.destroy = destroyer;
+    Stream.compose = compose;
+    Stream.setDefaultHighWaterMark = setDefaultHighWaterMark;
+    Stream.getDefaultHighWaterMark = getDefaultHighWaterMark;
+    ObjectDefineProperty(Stream, "promises", {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      get() {
+        return promises;
+      }
+    });
+    ObjectDefineProperty(pipeline, customPromisify, {
+      __proto__: null,
+      enumerable: true,
+      get() {
+        return promises.pipeline;
+      }
+    });
+    ObjectDefineProperty(eos, customPromisify, {
+      __proto__: null,
+      enumerable: true,
+      get() {
+        return promises.finished;
+      }
+    });
+    Stream.Stream = Stream;
+    Stream._isUint8Array = function isUint8Array(value) {
+      return value instanceof Uint8Array;
+    };
+    Stream._uint8ArrayToBuffer = function _uint8ArrayToBuffer(chunk) {
+      return Buffer2.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+    };
+  }
+});
+
+// node_modules/readable-stream/lib/ours/index.js
+var require_ours = __commonJS({
+  "node_modules/readable-stream/lib/ours/index.js"(exports, module) {
+    "use strict";
+    var Stream = __require("stream");
+    if (Stream && process.env.READABLE_STREAM === "disable") {
+      const promises = Stream.promises;
+      module.exports._uint8ArrayToBuffer = Stream._uint8ArrayToBuffer;
+      module.exports._isUint8Array = Stream._isUint8Array;
+      module.exports.isDisturbed = Stream.isDisturbed;
+      module.exports.isErrored = Stream.isErrored;
+      module.exports.isReadable = Stream.isReadable;
+      module.exports.Readable = Stream.Readable;
+      module.exports.Writable = Stream.Writable;
+      module.exports.Duplex = Stream.Duplex;
+      module.exports.Transform = Stream.Transform;
+      module.exports.PassThrough = Stream.PassThrough;
+      module.exports.addAbortSignal = Stream.addAbortSignal;
+      module.exports.finished = Stream.finished;
+      module.exports.destroy = Stream.destroy;
+      module.exports.pipeline = Stream.pipeline;
+      module.exports.compose = Stream.compose;
+      Object.defineProperty(Stream, "promises", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          return promises;
+        }
+      });
+      module.exports.Stream = Stream.Stream;
+    } else {
+      const CustomStream = require_stream4();
+      const promises = require_promises();
+      const originalDestroy = CustomStream.Readable.destroy;
+      module.exports = CustomStream.Readable;
+      module.exports._uint8ArrayToBuffer = CustomStream._uint8ArrayToBuffer;
+      module.exports._isUint8Array = CustomStream._isUint8Array;
+      module.exports.isDisturbed = CustomStream.isDisturbed;
+      module.exports.isErrored = CustomStream.isErrored;
+      module.exports.isReadable = CustomStream.isReadable;
+      module.exports.Readable = CustomStream.Readable;
+      module.exports.Writable = CustomStream.Writable;
+      module.exports.Duplex = CustomStream.Duplex;
+      module.exports.Transform = CustomStream.Transform;
+      module.exports.PassThrough = CustomStream.PassThrough;
+      module.exports.addAbortSignal = CustomStream.addAbortSignal;
+      module.exports.finished = CustomStream.finished;
+      module.exports.destroy = CustomStream.destroy;
+      module.exports.destroy = originalDestroy;
+      module.exports.pipeline = CustomStream.pipeline;
+      module.exports.compose = CustomStream.compose;
+      Object.defineProperty(CustomStream, "promises", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          return promises;
+        }
+      });
+      module.exports.Stream = CustomStream.Stream;
+    }
+    module.exports.default = module.exports;
+  }
+});
+
+// node_modules/@fastify/compress/lib/utils.js
+var require_utils4 = __commonJS({
+  "node_modules/@fastify/compress/lib/utils.js"(exports, module) {
+    "use strict";
+    var { Readable: NodeReadable } = __require("node:stream");
+    function isZstd(buffer) {
+      return typeof buffer === "object" && buffer !== null && buffer.length > 3 && // Zstd magic number: 0xFD2FB528 (little-endian)
+      buffer[0] === 40 && buffer[1] === 181 && buffer[2] === 47 && buffer[3] === 253;
+    }
+    function isDeflate(buffer) {
+      return typeof buffer === "object" && buffer !== null && buffer.length > 1 && // CM = 8 denotes the "deflate" compression method
+      (buffer[0] & 15) === 8 && // CINFO Values of above 7 are not allowed by RFC 1950
+      (buffer[0] & 128) === 0 && // The FCHECK value must be such that CMF and FLG, when viewed as
+      // a 16-bit unsigned integer stored in MSB order (CMF*256 + FLG),
+      // is a multiple of 31.
+      ((buffer[0] << 8) + buffer[1]) % 31 === 0;
+    }
+    function isGzip(buffer) {
+      return typeof buffer === "object" && buffer !== null && buffer.length > 2 && // ID1
+      buffer[0] === 31 && // ID2
+      buffer[1] === 139 && buffer[2] === 8;
+    }
+    function isStream(stream) {
+      return stream !== null && typeof stream === "object" && typeof stream.pipe === "function";
+    }
+    function isWebReadableStream(obj) {
+      return obj instanceof ReadableStream;
+    }
+    function isFetchResponse(obj) {
+      return obj instanceof Response;
+    }
+    function webStreamToNodeReadable(webStream) {
+      return NodeReadable.fromWeb(webStream);
+    }
+    async function* intoAsyncIterator(payload) {
+      if (typeof payload === "object") {
+        if (Buffer.isBuffer(payload)) {
+          yield payload;
+          return;
+        }
+        if (
+          // ArrayBuffer
+          payload instanceof ArrayBuffer || // NodeJS.TypedArray
+          ArrayBuffer.isView(payload)
+        ) {
+          yield Buffer.from(payload);
+          return;
+        }
+        if (Symbol.iterator in payload) {
+          for (const chunk of payload) {
+            yield chunk;
+          }
+          return;
+        }
+        if (Symbol.asyncIterator in payload) {
+          for await (const chunk of payload) {
+            yield chunk;
+          }
+          return;
+        }
+      }
+      yield payload;
+    }
+    module.exports = { isZstd, isGzip, isDeflate, isStream, intoAsyncIterator, isWebReadableStream, isFetchResponse, webStreamToNodeReadable };
+  }
+});
+
+// node_modules/@fastify/compress/index.js
+var require_compress = __commonJS({
+  "node_modules/@fastify/compress/index.js"(exports, module) {
+    "use strict";
+    var zlib = __require("node:zlib");
+    var { inherits, format: format2 } = __require("node:util");
+    var fp = require_plugin2();
+    var encodingNegotiator = require_accept_negotiator();
+    var pump = require_pump();
+    var mimedb = require_mime_db();
+    var peek = require_peek_stream();
+    var { Minipass } = require_commonjs();
+    var pumpify = require_pumpify();
+    var { Readable } = require_ours();
+    var { isStream, isGzip, isDeflate, intoAsyncIterator, isWebReadableStream, isFetchResponse, webStreamToNodeReadable } = require_utils4();
+    var InvalidRequestEncodingError = createError("FST_CP_ERR_INVALID_CONTENT_ENCODING", "Unsupported Content-Encoding: %s", 415);
+    var InvalidRequestCompressedPayloadError = createError("FST_CP_ERR_INVALID_CONTENT", "Could not decompress the request payload using the provided encoding", 400);
+    function fastifyCompress2(fastify, opts, next) {
+      const globalCompressParams = processCompressParams(opts);
+      const globalDecompressParams = processDecompressParams(opts);
+      if (opts.encodings && opts.encodings.length < 1) {
+        next(new Error("The `encodings` option array must have at least 1 item."));
+        return;
+      }
+      if (opts.requestEncodings && opts.requestEncodings.length < 1) {
+        next(new Error("The `requestEncodings` option array must have at least 1 item."));
+        return;
+      }
+      if (globalCompressParams.encodings.length < 1) {
+        next(new Error("None of the passed `encodings` were supported \u2014 compression not possible."));
+        return;
+      }
+      if (globalDecompressParams.encodings.length < 1) {
+        next(new Error("None of the passed `requestEncodings` were supported \u2014 request decompression not possible."));
+        return;
+      }
+      if (globalDecompressParams.forceEncoding && !globalDecompressParams.encodings.includes(globalDecompressParams.forceEncoding)) {
+        next(new Error(`Unsupported decompression encoding ${opts.forceRequestEncoding}.`));
+        return;
+      }
+      fastify.decorateReply("compress", null);
+      fastify.addHook("onRoute", (routeOptions) => {
+        if (routeOptions.config?.compress !== void 0) {
+          routeOptions.compress = routeOptions.config.compress;
+        }
+        if (routeOptions.compress !== void 0) {
+          if (typeof routeOptions.compress === "object") {
+            const mergedCompressParams = Object.assign(
+              {},
+              globalCompressParams,
+              processCompressParams(routeOptions.compress)
+            );
+            buildRouteCompress(fastify, mergedCompressParams, routeOptions);
+          } else if (routeOptions.compress === false) {
+          } else {
+            throw new Error("Unknown value for route compress configuration");
+          }
+        } else if (globalCompressParams.global) {
+          buildRouteCompress(fastify, globalCompressParams, routeOptions);
+        } else {
+          buildRouteCompress(fastify, globalCompressParams, routeOptions, true);
+        }
+        if (routeOptions.config?.decompress !== void 0) {
+          routeOptions.decompress = routeOptions.config.decompress;
+        }
+        if (routeOptions.decompress !== void 0) {
+          if (typeof routeOptions.decompress === "object") {
+            const mergedDecompressParams = Object.assign(
+              {},
+              globalDecompressParams,
+              processDecompressParams(routeOptions.decompress)
+            );
+            buildRouteDecompress(fastify, mergedDecompressParams, routeOptions);
+          } else if (routeOptions.decompress === false) {
+          } else {
+            throw new Error("Unknown value for route decompress configuration");
+          }
+        } else if (globalDecompressParams.global) {
+          buildRouteDecompress(fastify, globalDecompressParams, routeOptions);
+        }
+      });
+      next();
+    }
+    var defaultCompressibleTypes = /^text\/(?!event-stream)|(?:\+|\/)json(?:;|$)|(?:\+|\/)text(?:;|$)|(?:\+|\/)xml(?:;|$)|octet-stream(?:;|$)/u;
+    var recommendedDefaultBrotliOptions = {
+      params: {
+        // Default of 4 as 11 has a heavy impact on performance.
+        // https://blog.cloudflare.com/this-is-brotli-from-origin#testing
+        [zlib.constants.BROTLI_PARAM_QUALITY]: 4
+      }
+    };
+    function processCompressParams(opts) {
+      if (!opts) {
+        return;
+      }
+      const params = {
+        global: typeof opts.globalCompression === "boolean" ? opts.globalCompression : typeof opts.global === "boolean" ? opts.global : true
+      };
+      params.removeContentLengthHeader = typeof opts.removeContentLengthHeader === "boolean" ? opts.removeContentLengthHeader : true;
+      params.brotliOptions = params.global ? { ...recommendedDefaultBrotliOptions, ...opts.brotliOptions } : opts.brotliOptions;
+      params.zlibOptions = opts.zlibOptions;
+      params.onUnsupportedEncoding = opts.onUnsupportedEncoding;
+      params.inflateIfDeflated = opts.inflateIfDeflated === true;
+      params.threshold = typeof opts.threshold === "number" ? opts.threshold : 1024;
+      params.compressibleTypes = opts.customTypes instanceof RegExp ? opts.customTypes.test.bind(opts.customTypes) : typeof opts.customTypes === "function" ? opts.customTypes : defaultCompressibleTypes.test.bind(defaultCompressibleTypes);
+      params.compressStream = {
+        br: () => ((opts.zlib || zlib).createBrotliCompress || zlib.createBrotliCompress)(params.brotliOptions),
+        gzip: () => ((opts.zlib || zlib).createGzip || zlib.createGzip)(params.zlibOptions),
+        deflate: () => ((opts.zlib || zlib).createDeflate || zlib.createDeflate)(params.zlibOptions)
+      };
+      if (typeof ((opts.zlib || zlib).createZstdCompress || zlib.createZstdCompress) === "function") {
+        params.compressStream.zstd = () => ((opts.zlib || zlib).createZstdCompress || zlib.createZstdCompress)(params.zlibOptions);
+      }
+      params.uncompressStream = {
+        // Currently params.uncompressStream.br() is never called as we do not have any way to autodetect brotli compression in `fastify-compress`
+        // Brotli documentation reference: [RFC 7932](https://www.rfc-editor.org/rfc/rfc7932)
+        br: (
+          /* c8 ignore next */
+          () => ((opts.zlib || zlib).createBrotliDecompress || zlib.createBrotliDecompress)(params.brotliOptions)
+        ),
+        gzip: () => ((opts.zlib || zlib).createGunzip || zlib.createGunzip)(params.zlibOptions),
+        deflate: () => ((opts.zlib || zlib).createInflate || zlib.createInflate)(params.zlibOptions)
+      };
+      if (typeof ((opts.zlib || zlib).createZstdDecompress || zlib.createZstdDecompress) === "function") {
+        params.uncompressStream.zstd = /* c8 ignore next */
+        () => ((opts.zlib || zlib).createZstdDecompress || zlib.createZstdDecompress)(params.zlibOptions);
+      }
+      const supportedEncodings = ["br", "gzip", "deflate", "identity"];
+      if (typeof zlib.createZstdCompress === "function") {
+        supportedEncodings.unshift("zstd");
+      }
+      params.encodings = Array.isArray(opts.encodings) ? supportedEncodings.filter((encoding) => opts.encodings.includes(encoding)).sort((a, b) => opts.encodings.indexOf(a) - opts.encodings.indexOf(b)) : supportedEncodings;
+      return params;
+    }
+    function processDecompressParams(opts) {
+      if (!opts) {
+        return;
+      }
+      const customZlib = opts.zlib || zlib;
+      const params = {
+        global: typeof opts.globalDecompression === "boolean" ? opts.globalDecompression : typeof opts.global === "boolean" ? opts.global : true,
+        onUnsupportedRequestEncoding: opts.onUnsupportedRequestEncoding,
+        onInvalidRequestPayload: opts.onInvalidRequestPayload,
+        decompressStream: {
+          br: customZlib.createBrotliDecompress || zlib.createBrotliDecompress,
+          gzip: customZlib.createGunzip || zlib.createGunzip,
+          deflate: customZlib.createInflate || zlib.createInflate
+        },
+        encodings: [],
+        forceEncoding: null
+      };
+      if (typeof (customZlib.createZstdDecompress || zlib.createZstdDecompress) === "function") {
+        params.decompressStream.zstd = customZlib.createZstdDecompress || zlib.createZstdDecompress;
+      }
+      const supportedEncodings = ["br", "gzip", "deflate", "identity"];
+      if (typeof zlib.createZstdCompress === "function") {
+        supportedEncodings.unshift("zstd");
+      }
+      params.encodings = Array.isArray(opts.requestEncodings) ? supportedEncodings.filter((encoding) => opts.requestEncodings.includes(encoding)).sort((a, b) => opts.requestEncodings.indexOf(a) - opts.requestEncodings.indexOf(b)) : supportedEncodings;
+      if (opts.forceRequestEncoding) {
+        params.forceEncoding = opts.forceRequestEncoding;
+        if (params.encodings.includes(opts.forceRequestEncoding)) {
+          params.encodings = [opts.forceRequestEncoding];
+        }
+      }
+      return params;
+    }
+    function buildRouteCompress(_fastify, params, routeOptions, decorateOnly) {
+      if (Array.isArray(routeOptions.onRequest)) {
+        routeOptions.onRequest.push(onRequest);
+      } else if (typeof routeOptions.onRequest === "function") {
+        routeOptions.onRequest = [routeOptions.onRequest, onRequest];
+      } else {
+        routeOptions.onRequest = [onRequest];
+      }
+      const compressFn = compress(params);
+      function onRequest(_req, reply, next) {
+        reply.compress = compressFn;
+        next();
+      }
+      if (decorateOnly) {
+        return;
+      }
+      if (Array.isArray(routeOptions.onSend)) {
+        routeOptions.onSend.push(onSend);
+      } else if (typeof routeOptions.onSend === "function") {
+        routeOptions.onSend = [routeOptions.onSend, onSend];
+      } else {
+        routeOptions.onSend = [onSend];
+      }
+      function onSend(req, reply, payload, next) {
+        if (payload == null) {
+          return next();
+        }
+        const responseEncoding = reply.getHeader("Content-Encoding");
+        if (responseEncoding && responseEncoding !== "identity") {
+          return next();
+        }
+        let stream, encoding;
+        const noCompress = (
+          // don't compress on x-no-compression header
+          req.headers["x-no-compression"] !== void 0 || // don't compress if not one of the indicated compressible types
+          shouldCompress(reply.getHeader("Content-Type") || "application/json", params.compressibleTypes) === false || // don't compress on missing or identity `accept-encoding` header
+          ((encoding = getEncodingHeader(params.encodings, req)) == null || encoding === "identity")
+        );
+        if (encoding == null && params.onUnsupportedEncoding != null) {
+          const encodingHeader = req.headers["accept-encoding"];
+          try {
+            const errorPayload = params.onUnsupportedEncoding(encodingHeader, reply.request, reply);
+            return next(null, errorPayload);
+          } catch (err) {
+            return next(err);
+          }
+        }
+        if (noCompress) {
+          if (params.inflateIfDeflated && isStream(stream = maybeUnzip(payload))) {
+            encoding === void 0 ? reply.removeHeader("Content-Encoding") : reply.header("Content-Encoding", "identity");
+            pump(stream, payload = unzipStream(params.uncompressStream), onEnd.bind(reply));
+          }
+          return next(null, payload);
+        }
+        if (typeof payload.pipe !== "function") {
+          if (isFetchResponse(payload)) {
+            payload = payload.body;
+          }
+          if (isWebReadableStream(payload)) {
+            payload = webStreamToNodeReadable(payload);
+          } else {
+            if (Buffer.byteLength(payload) < params.threshold) {
+              return next();
+            }
+            payload = Readable.from(intoAsyncIterator(payload));
+          }
+        }
+        setVaryHeader(reply);
+        reply.header("Content-Encoding", encoding);
+        if (params.removeContentLengthHeader) {
+          reply.removeHeader("content-length");
+        }
+        stream = zipStream(params.compressStream, encoding);
+        pump(payload, stream, onEnd.bind(reply));
+        next(null, stream);
+      }
+    }
+    function buildRouteDecompress(_fastify, params, routeOptions) {
+      if (Array.isArray(routeOptions.preParsing)) {
+        routeOptions.preParsing.unshift(preParsing);
+      } else if (typeof routeOptions.preParsing === "function") {
+        routeOptions.preParsing = [preParsing, routeOptions.preParsing];
+      } else {
+        routeOptions.preParsing = [preParsing];
+      }
+      function preParsing(request2, _reply, raw, next) {
+        let encoding = params.forceEncoding;
+        if (!encoding) {
+          encoding = request2.headers["content-encoding"];
+        }
+        if (!encoding) {
+          return next(null, raw);
+        }
+        if (!params.encodings.includes(encoding)) {
+          let errorPayload;
+          if (params.onUnsupportedRequestEncoding) {
+            try {
+              errorPayload = params.onUnsupportedRequestEncoding(encoding, request2);
+            } catch {
+              errorPayload = void 0;
+            }
+          }
+          if (!errorPayload) {
+            errorPayload = new InvalidRequestEncodingError(encoding);
+          }
+          return next(errorPayload);
+        }
+        if (encoding === "identity") {
+          return next(null, raw);
+        }
+        const decompresser = params.decompressStream[encoding]();
+        decompresser.receivedEncodedLength = 0;
+        decompresser.on("error", onDecompressError.bind(this, request2, params, encoding));
+        decompresser.pause();
+        raw.on("data", trackEncodedLength.bind(decompresser));
+        raw.on("end", removeEncodedLengthTracking);
+        next(null, pump(raw, decompresser));
+      }
+    }
+    function compress(params) {
+      return function(payload) {
+        if (payload == null) {
+          this.send(new Error("Internal server error"));
+          return;
+        }
+        let stream, encoding;
+        const noCompress = (
+          // don't compress on x-no-compression header
+          this.request.headers["x-no-compression"] !== void 0 || // don't compress if not one of the indicated compressible types
+          shouldCompress(this.getHeader("Content-Type") || "application/json", params.compressibleTypes) === false || // don't compress on missing or identity `accept-encoding` header
+          ((encoding = getEncodingHeader(params.encodings, this.request)) == null || encoding === "identity")
+        );
+        if (encoding == null && params.onUnsupportedEncoding != null) {
+          const encodingHeader = this.request.headers["accept-encoding"];
+          let errorPayload;
+          try {
+            errorPayload = params.onUnsupportedEncoding(encodingHeader, this.request, this);
+          } catch (ex) {
+            errorPayload = ex;
+          }
+          return this.send(errorPayload);
+        }
+        if (noCompress) {
+          if (params.inflateIfDeflated && isStream(stream = maybeUnzip(payload, this.serialize.bind(this)))) {
+            encoding === void 0 ? this.removeHeader("Content-Encoding") : this.header("Content-Encoding", "identity");
+            pump(stream, payload = unzipStream(params.uncompressStream), onEnd.bind(this));
+          }
+          return this.send(payload);
+        }
+        if (typeof payload.pipe !== "function") {
+          if (isFetchResponse(payload)) {
+            payload = payload.body;
+          }
+          if (isWebReadableStream(payload)) {
+            payload = webStreamToNodeReadable(payload);
+          } else if (!Buffer.isBuffer(payload) && typeof payload !== "string") {
+            payload = this.serialize(payload);
+          }
+        }
+        if (typeof payload.pipe !== "function") {
+          if (Buffer.byteLength(payload) < params.threshold) {
+            return this.send(payload);
+          }
+          payload = Readable.from(intoAsyncIterator(payload));
+        }
+        setVaryHeader(this);
+        this.header("Content-Encoding", encoding);
+        if (params.removeContentLengthHeader) {
+          this.removeHeader("content-length");
+        }
+        stream = zipStream(params.compressStream, encoding);
+        pump(payload, stream, onEnd.bind(this));
+        return this.send(stream);
+      };
+    }
+    function setVaryHeader(reply) {
+      if (reply.hasHeader("Vary")) {
+        const rawHeaderValue = reply.getHeader("Vary");
+        const headerValueArray = Array.isArray(rawHeaderValue) ? rawHeaderValue : [rawHeaderValue];
+        if (!headerValueArray.some((h) => h.includes("accept-encoding"))) {
+          reply.header("Vary", headerValueArray.concat("accept-encoding").join(", "));
+        }
+      } else {
+        reply.header("Vary", "accept-encoding");
+      }
+    }
+    function onEnd(err) {
+      if (err) this.log.error(err);
+    }
+    function trackEncodedLength(chunk) {
+      this.receivedEncodedLength += chunk.length;
+    }
+    function removeEncodedLengthTracking() {
+      this.removeListener("data", trackEncodedLength);
+      this.removeListener("end", removeEncodedLengthTracking);
+    }
+    function onDecompressError(request2, params, encoding, error) {
+      this.log.debug(`compress: invalid request payload - ${error}`);
+      let errorPayload;
+      if (params.onInvalidRequestPayload) {
+        try {
+          errorPayload = params.onInvalidRequestPayload(encoding, request2, error);
+        } catch {
+          errorPayload = void 0;
+        }
+      }
+      if (!errorPayload) {
+        errorPayload = new InvalidRequestCompressedPayloadError();
+      }
+      error.decompressError = error;
+      Object.assign(error, errorPayload);
+    }
+    var gzipAlias = /\*|x-gzip/gu;
+    function getEncodingHeader(encodings, request2) {
+      let header = request2.headers["accept-encoding"];
+      if (header != null) {
+        header = header.toLowerCase().replace(gzipAlias, "gzip");
+        return encodingNegotiator.negotiate(header, encodings);
+      } else {
+        return void 0;
+      }
+    }
+    function shouldCompress(type, compressibleTypes) {
+      if (compressibleTypes(type)) return true;
+      const data = mimedb[type.split(";", 1)[0].trim().toLowerCase()];
+      if (data === void 0) return false;
+      return data.compressible === true;
+    }
+    function isCompressed(data) {
+      if (isGzip(data)) return 1;
+      if (isDeflate(data)) return 2;
+      return 0;
+    }
+    function maybeUnzip(payload, serialize) {
+      if (isStream(payload)) return payload;
+      let buf = payload;
+      let result = payload;
+      if (ArrayBuffer.isView(payload)) {
+        buf = result = Buffer.from(
+          payload.buffer,
+          payload.byteOffset,
+          payload.byteLength
+        );
+      } else if (serialize && typeof payload !== "string") {
+        buf = result = serialize(payload);
+      }
+      if (!Buffer.isBuffer(buf)) return result;
+      if (isCompressed(buf) === 0) return result;
+      return Readable.from(intoAsyncIterator(result));
+    }
+    function zipStream(deflate, encoding) {
+      return peek({ newline: false, maxBuffer: 10 }, function(data, swap) {
+        switch (isCompressed(data)) {
+          case 1:
+            return swap(null, new Minipass());
+          case 2:
+            return swap(null, new Minipass());
+        }
+        return swap(null, deflate[encoding]());
+      });
+    }
+    function unzipStream(inflate, maxRecursion) {
+      if (!(maxRecursion >= 0)) maxRecursion = 3;
+      return peek({ newline: false, maxBuffer: 10 }, function(data, swap) {
+        if (maxRecursion < 0) return swap(new Error("Maximum recursion reached"));
+        switch (isCompressed(data)) {
+          case 1:
+            return swap(null, pumpify(inflate.gzip(), unzipStream(inflate, maxRecursion - 1)));
+          case 2:
+            return swap(null, pumpify(inflate.deflate(), unzipStream(inflate, maxRecursion - 1)));
+        }
+        return swap(null, new Minipass());
+      });
+    }
+    function createError(code, message, statusCode) {
+      code = code.toUpperCase();
+      function FastifyCompressError(a) {
+        Error.captureStackTrace(this, FastifyCompressError);
+        this.name = "FastifyCompressError";
+        this.code = code;
+        if (a) {
+          this.message = format2(message, a);
+        } else {
+          this.message = message;
+        }
+        this.statusCode = statusCode;
+      }
+      FastifyCompressError.prototype[Symbol.toStringTag] = "Error";
+      FastifyCompressError.prototype.toString = function() {
+        return `${this.name} [${this.code}]: ${this.message}`;
+      };
+      inherits(FastifyCompressError, Error);
+      return FastifyCompressError;
+    }
+    module.exports = fp(fastifyCompress2, {
+      fastify: "5.x",
+      name: "@fastify/compress"
+    });
+    module.exports.default = fastifyCompress2;
+    module.exports.fastifyCompress = fastifyCompress2;
+  }
+});
+
 // node_modules/postgres-array/index.js
 var require_postgres_array = __commonJS({
   "node_modules/postgres-array/index.js"(exports) {
@@ -45548,7 +69876,7 @@ var require_defaults2 = __commonJS({
 });
 
 // node_modules/pg/lib/utils.js
-var require_utils3 = __commonJS({
+var require_utils5 = __commonJS({
   "node_modules/pg/lib/utils.js"(exports, module) {
     "use strict";
     var defaults2 = require_defaults2();
@@ -45712,7 +70040,7 @@ var require_utils3 = __commonJS({
 });
 
 // node_modules/pg/lib/crypto/utils.js
-var require_utils4 = __commonJS({
+var require_utils6 = __commonJS({
   "node_modules/pg/lib/crypto/utils.js"(exports, module) {
     var nodeCrypto = __require("crypto");
     module.exports = {
@@ -45879,7 +70207,7 @@ var require_cert_signatures = __commonJS({
 var require_sasl = __commonJS({
   "node_modules/pg/lib/crypto/sasl.js"(exports, module) {
     "use strict";
-    var crypto = require_utils4();
+    var crypto = require_utils6();
     var { signatureAlgorithmHashFromCertificate } = require_cert_signatures();
     function saslprep(password) {
       const nonAsciiSpace = /[\u00A0\u1680\u2000-\u200B\u202F\u205F\u3000]/g;
@@ -46531,7 +70859,7 @@ var require_query = __commonJS({
     "use strict";
     var { EventEmitter } = __require("events");
     var Result2 = require_result();
-    var utils = require_utils3();
+    var utils = require_utils5();
     var Query2 = class extends EventEmitter {
       constructor(config, values, callback) {
         super();
@@ -47619,7 +71947,7 @@ var require_empty = __commonJS({
 });
 
 // node_modules/pg/lib/stream.js
-var require_stream = __commonJS({
+var require_stream5 = __commonJS({
   "node_modules/pg/lib/stream.js"(exports, module) {
     var { getStream, getSecureStream } = getStreamFuncs();
     module.exports = {
@@ -47690,7 +72018,7 @@ var require_connection = __commonJS({
     "use strict";
     var EventEmitter = __require("events").EventEmitter;
     var { parse: parse3, serialize } = require_dist6();
-    var stream = require_stream();
+    var stream = require_stream5();
     var { getStream } = stream;
     var flushBuffer = serialize.flush();
     var syncBuffer = serialize.sync();
@@ -47711,40 +72039,40 @@ var require_connection = __commonJS({
         this.sslNegotiation = config.sslNegotiation || "postgres";
         this._ending = false;
         this._emitMessage = false;
-        const self = this;
+        const self2 = this;
         this.on("newListener", function(eventName) {
           if (eventName === "message") {
-            self._emitMessage = true;
+            self2._emitMessage = true;
           }
         });
       }
       connect(port, host) {
-        const self = this;
+        const self2 = this;
         this._connecting = true;
         this.stream.setNoDelay(true);
         this.stream.connect(port, host);
         this.stream.once("connect", function() {
-          if (self._keepAlive) {
-            self.stream.setKeepAlive(true, self._keepAliveInitialDelayMillis);
+          if (self2._keepAlive) {
+            self2.stream.setKeepAlive(true, self2._keepAliveInitialDelayMillis);
           }
-          self.emit("connect");
+          self2.emit("connect");
         });
         const reportStreamError = function(error) {
-          if (self._ending && (error.code === "ECONNRESET" || error.code === "EPIPE")) {
+          if (self2._ending && (error.code === "ECONNRESET" || error.code === "EPIPE")) {
             return;
           }
-          self.emit("error", error);
+          self2.emit("error", error);
         };
         this.stream.on("error", reportStreamError);
         this.stream.on("close", function() {
-          self.emit("end");
+          self2.emit("end");
         });
         if (!this.ssl) {
           return this.attachListeners(this.stream);
         }
         if (this.sslNegotiation === "direct") {
           return this.stream.once("connect", function() {
-            self.upgradeToSSL(host, reportStreamError);
+            self2.upgradeToSSL(host, reportStreamError);
           });
         }
         this.stream.once("data", function(buffer) {
@@ -47753,32 +72081,32 @@ var require_connection = __commonJS({
             case "S":
               break;
             case "N":
-              self.stream.end();
-              return self.emit("error", new Error("The server does not support SSL connections"));
+              self2.stream.end();
+              return self2.emit("error", new Error("The server does not support SSL connections"));
             default:
-              self.stream.end();
-              return self.emit("error", new Error("There was an error establishing an SSL connection"));
+              self2.stream.end();
+              return self2.emit("error", new Error("There was an error establishing an SSL connection"));
           }
-          self.upgradeToSSL(host, reportStreamError);
+          self2.upgradeToSSL(host, reportStreamError);
         });
       }
       upgradeToSSL(host, reportStreamError) {
-        const self = this;
+        const self2 = this;
         const options = {
-          socket: self.stream,
+          socket: self2.stream,
           // tls.connect checks the server identity against `servername`, falling
           // back to `host` and then to 'localhost'. `servername` must stay unset
           // for IP addresses (see below), so `host` is needed to keep certificate
           // validation working when connecting to an IP address.
           host
         };
-        if (self.ssl !== true) {
-          Object.assign(options, self.ssl);
-          if ("key" in self.ssl) {
-            options.key = self.ssl.key;
+        if (self2.ssl !== true) {
+          Object.assign(options, self2.ssl);
+          if ("key" in self2.ssl) {
+            options.key = self2.ssl.key;
           }
         }
-        if (self.sslNegotiation === "direct") {
+        if (self2.sslNegotiation === "direct") {
           options.ALPNProtocols = ["postgresql"];
         }
         const net = __require("net");
@@ -47786,13 +72114,13 @@ var require_connection = __commonJS({
           options.servername = host;
         }
         try {
-          self.stream = stream.getSecureStream(options);
+          self2.stream = stream.getSecureStream(options);
         } catch (err) {
-          return self.emit("error", err);
+          return self2.emit("error", err);
         }
-        self.attachListeners(self.stream);
-        self.stream.on("error", reportStreamError);
-        self.emit("sslconnect");
+        self2.attachListeners(self2.stream);
+        self2.stream.on("error", reportStreamError);
+        self2.emit("sslconnect");
       }
       attachListeners(stream2) {
         parse3(stream2, (msg) => {
@@ -47932,9 +72260,9 @@ var require_split2 = __commonJS({
       }
       cb();
     }
-    function push(self, val) {
+    function push(self2, val) {
       if (val !== void 0) {
-        self.push(val);
+        self2.push(val);
       }
     }
     function noop(incoming) {
@@ -48183,7 +72511,7 @@ var require_lib2 = __commonJS({
 var require_client = __commonJS({
   "node_modules/pg/lib/client.js"(exports, module) {
     var EventEmitter = __require("events").EventEmitter;
-    var utils = require_utils3();
+    var utils = require_utils5();
     var nodeUtils = __require("util");
     var sasl = require_sasl();
     var TypeOverrides2 = require_type_overrides();
@@ -48191,7 +72519,7 @@ var require_client = __commonJS({
     var Query2 = require_query();
     var defaults2 = require_defaults2();
     var Connection2 = require_connection();
-    var crypto = require_utils4();
+    var crypto = require_utils6();
     var activeQueryDeprecationNotice = nodeUtils.deprecate(
       () => {
       },
@@ -48309,7 +72637,7 @@ var require_client = __commonJS({
         this._queryQueue.length = 0;
       }
       _connect(callback) {
-        const self = this;
+        const self2 = this;
         const con = this.connection;
         this._connectionCallback = callback;
         if (this._connecting || this._connected) {
@@ -48335,16 +72663,16 @@ var require_client = __commonJS({
           con.connect(this.port, this.host);
         }
         con.on("connect", function() {
-          if (self.ssl) {
-            if (self.sslNegotiation !== "direct") {
+          if (self2.ssl) {
+            if (self2.sslNegotiation !== "direct") {
               con.requestSsl();
             }
           } else {
-            con.startup(self.getStartupConf());
+            con.startup(self2.getStartupConf());
           }
         });
         con.on("sslconnect", function() {
-          con.startup(self.getStartupConf());
+          con.startup(self2.getStartupConf());
         });
         this._attachListeners(con);
         con.once("end", () => {
@@ -49308,7 +73636,7 @@ var require_query2 = __commonJS({
     "use strict";
     var EventEmitter = __require("events").EventEmitter;
     var util = __require("util");
-    var utils = require_utils3();
+    var utils = require_utils5();
     var NativeQuery = module.exports = function(config, values, callback) {
       EventEmitter.call(this);
       config = utils.normalizeQueryConfig(config, values, callback);
@@ -49377,34 +73705,34 @@ var require_query2 = __commonJS({
     };
     NativeQuery.prototype.submit = function(client) {
       this.state = "running";
-      const self = this;
+      const self2 = this;
       this.native = client.native;
       client.native.arrayMode = this._arrayMode;
       let after = function(err, rows, results) {
         client.native.arrayMode = false;
         setImmediate(function() {
-          self.emit("_done");
+          self2.emit("_done");
         });
         if (err) {
-          return self.handleError(err);
+          return self2.handleError(err);
         }
-        if (self._emitRowEvents) {
+        if (self2._emitRowEvents) {
           if (results.length > 1) {
             rows.forEach((rowOfRows, i) => {
               rowOfRows.forEach((row) => {
-                self.emit("row", row, results[i]);
+                self2.emit("row", row, results[i]);
               });
             });
           } else {
             rows.forEach(function(row) {
-              self.emit("row", row, results);
+              self2.emit("row", row, results);
             });
           }
         }
-        self.state = "end";
-        self.emit("end", results);
-        if (self.callback) {
-          self.callback(null, results);
+        self2.state = "end";
+        self2.emit("end", results);
+        if (self2.callback) {
+          self2.callback(null, results);
         }
       };
       if (process.domain) {
@@ -49426,8 +73754,8 @@ var require_query2 = __commonJS({
         }
         return client.native.prepare(this.name, this.text, values.length, function(err) {
           if (err) return after(err);
-          client.namedQueries[self.name] = self.text;
-          return self.native.execute(self.name, values, after);
+          client.namedQueries[self2.name] = self2.text;
+          return self2.native.execute(self2.name, values, after);
         });
       } else if (this.values) {
         if (!Array.isArray(this.values)) {
@@ -49511,34 +73839,34 @@ var require_client2 = __commonJS({
       this._queryQueue.length = 0;
     };
     Client2.prototype._connect = function(cb) {
-      const self = this;
+      const self2 = this;
       if (this._connecting) {
         process.nextTick(() => cb(new Error("Client has already been connected. You cannot reuse a client.")));
         return;
       }
       this._connecting = true;
       this.connectionParameters.getLibpqConnectionString(function(err, conString) {
-        if (self.connectionParameters.nativeConnectionString) conString = self.connectionParameters.nativeConnectionString;
+        if (self2.connectionParameters.nativeConnectionString) conString = self2.connectionParameters.nativeConnectionString;
         if (err) return cb(err);
-        self.native.connect(conString, function(err2) {
+        self2.native.connect(conString, function(err2) {
           if (err2) {
-            self.native.end();
+            self2.native.end();
             return cb(err2);
           }
-          self._connected = true;
-          self.native.on("error", function(err3) {
-            self._queryable = false;
-            self._errorAllQueries(err3);
-            self.emit("error", err3);
+          self2._connected = true;
+          self2.native.on("error", function(err3) {
+            self2._queryable = false;
+            self2._errorAllQueries(err3);
+            self2.emit("error", err3);
           });
-          self.native.on("notification", function(msg) {
-            self.emit("notification", {
+          self2.native.on("notification", function(msg) {
+            self2.emit("notification", {
               channel: msg.relname,
               payload: msg.extra
             });
           });
-          self.emit("connect");
-          self._pulseQueryQueue(true);
+          self2.emit("connect");
+          self2._pulseQueryQueue(true);
           cb(null, this);
         });
       });
@@ -49631,7 +73959,7 @@ var require_client2 = __commonJS({
       return result;
     };
     Client2.prototype.end = function(cb) {
-      const self = this;
+      const self2 = this;
       this._ending = true;
       if (this._connecting && !this._connected) {
         this.once("connect", () => {
@@ -49646,11 +73974,11 @@ var require_client2 = __commonJS({
         });
       }
       const doEnd = function() {
-        self.native.end(function() {
-          self._connected = false;
-          self._errorAllQueries(new Error("Connection terminated"));
+        self2.native.end(function() {
+          self2._connected = false;
+          self2._errorAllQueries(new Error("Connection terminated"));
           process.nextTick(() => {
-            self.emit("end");
+            self2.emit("end");
             if (cb) cb();
           });
         });
@@ -49684,9 +74012,9 @@ var require_client2 = __commonJS({
       }
       this._activeQuery = query;
       query.submit(this);
-      const self = this;
+      const self2 = this;
       query.once("_done", function() {
-        self._pulseQueryQueue();
+        self2._pulseQueryQueue();
       });
     };
     Client2.prototype._pulsePipelinedQueryQueue = function() {
@@ -49700,10 +74028,10 @@ var require_client2 = __commonJS({
         return;
       }
       this._pipelineInFlight = true;
-      const self = this;
+      const self2 = this;
       const queries = [];
       const nativeQueries = [];
-      const utils = require_utils3();
+      const utils = require_utils5();
       while (this._queryQueue.length > 0) {
         const query = this._queryQueue.shift();
         this.hasExecuted = true;
@@ -49719,29 +74047,29 @@ var require_client2 = __commonJS({
         queries.push(pipelineEntry);
       }
       this.native.pipeline(queries, function(err, results) {
-        self._pipelineInFlight = false;
+        self2._pipelineInFlight = false;
         if (err) {
-          self._connected = false;
-          self._queryable = false;
+          self2._connected = false;
+          self2._queryable = false;
           for (let i = 0; i < nativeQueries.length; i++) {
             const q = nativeQueries[i];
-            q.native = self.native;
+            q.native = self2.native;
             q.handleError(err);
           }
-          self._errorAllQueries(err);
-          self.emit("error", err);
-          self.emit("end");
+          self2._errorAllQueries(err);
+          self2.emit("error", err);
+          self2.emit("end");
           return;
         }
         for (let i = 0; i < nativeQueries.length; i++) {
           const q = nativeQueries[i];
           const r = results[i];
-          q.native = self.native;
+          q.native = self2.native;
           if (r.err) {
             q.handleError(r.err);
           } else {
             if (q.name) {
-              self.namedQueries[q.name] = q.text;
+              self2.namedQueries[q.name] = q.text;
             }
             q.state = "end";
             q.emit("end", r.result);
@@ -49753,7 +74081,7 @@ var require_client2 = __commonJS({
             q.emit("_done");
           });
         }
-        self._pulsePipelinedQueryQueue();
+        self2._pulsePipelinedQueryQueue();
       });
     };
     Client2.prototype.cancel = function(query) {
@@ -49799,11 +74127,11 @@ var require_lib3 = __commonJS({
     var defaults2 = require_defaults2();
     var Connection2 = require_connection();
     var Result2 = require_result();
-    var utils = require_utils3();
+    var utils = require_utils5();
     var Pool3 = require_pg_pool();
     var TypeOverrides2 = require_type_overrides();
     var { DatabaseError: DatabaseError2 } = require_dist6();
-    var { escapeIdentifier: escapeIdentifier2, escapeLiteral: escapeLiteral2 } = require_utils3();
+    var { escapeIdentifier: escapeIdentifier2, escapeLiteral: escapeLiteral2 } = require_utils5();
     var poolFactory = (Client3) => {
       return class BoundPool extends Pool3 {
         constructor(options) {
@@ -49860,6 +74188,7 @@ var require_lib3 = __commonJS({
 // apps/dashboard/server/index.ts
 var import_fastify = __toESM(require_fastify(), 1);
 var import_static = __toESM(require_static(), 1);
+var import_compress = __toESM(require_compress(), 1);
 import { randomBytes as randomBytes3, randomUUID as randomUUID5 } from "node:crypto";
 import { join as join3 } from "node:path";
 import { readFile } from "node:fs/promises";
@@ -55800,6 +80129,11 @@ var app = (0, import_fastify.default)({
   },
   bodyLimit: REQUEST_BODY_LIMIT,
   trustProxy: trustProxyOnlyLoopback
+});
+await app.register(import_compress.default, {
+  global: true,
+  encodings: ["br", "gzip", "deflate"],
+  threshold: 1024
 });
 var network = createNetworkManager({
   port: env.port,
