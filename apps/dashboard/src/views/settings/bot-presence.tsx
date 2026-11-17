@@ -183,7 +183,7 @@ export function BotPresenceView({ guild }: { guild: Guild }) {
         <p className="mb-1 font-medium text-muted-foreground">{t("presence.applied")}</p>
         <p className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1.5">
-            <StatusDot status={draft.status} size={9} />
+            <StatusDot status={draft.status} size={11} />
             <span className="font-medium">{statusLabel(draft.status, t)}</span>
             {duration ? <span className="text-muted-foreground">· {duration}</span> : null}
           </span>

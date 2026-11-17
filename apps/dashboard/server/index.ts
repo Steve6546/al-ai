@@ -5,7 +5,9 @@ import fastifyCompress from "@fastify/compress";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import {
+  GUILD_MODULE_KEYS,
   assertDisjointTierRoles,
+  fillHourlySeries,
   assertUniqueChannelAssignment,
   ANTI_NUKE_ACTION_LABELS,
   ANTI_NUKE_ACTIONS,
@@ -73,6 +75,8 @@ import {
   type CommandConfig,
   type CustomizationSettings,
   type GuildMetrics,
+  type GuildModuleKey,
+  type GuildModuleState,
   type InviteSettings,
   type WelcomeMessageSettings,
   type LevelRoleReward,
@@ -3811,13 +3815,34 @@ app.get("/api/guilds/:guildId/metrics", async (request, reply) => {
   }
   const health = healthResult.value;
 
-  const [counts, rows, widget, record] = await Promise.all([
+  // The sparkline window and the window before it. Both are the same query over
+  // adjacent 24-hour spans, so the comparison the card prints is between two
+  // measurements of the same thing rather than against a remembered value.
+  const previousFrom = new Date(since.getTime() - 24 * 60 * 60 * 1000);
+
+  const [counts, rows, widget, record, histograms] = await Promise.all([
     db.countPunishmentsSince(guildId, since).catch(() => []),
     db.listRecentModeration(guildId, 8).catch(() => []),
     // The widget is unauthenticated and independent of our bot token.
     fetchWidgetPresence(guildId).catch(() => ({ online: null, reason: "unavailable" }) as const),
-    db.getGuild(guildId).catch(() => null)
+    db.getGuild(guildId).catch(() => null),
+    Promise.all([
+      db.auditSeries(guildId, since, new Date()),
+      db.auditSeries(guildId, previousFrom, since)
+    ]).catch(() => null)
   ]);
+
+  // A failed histogram read leaves the series out rather than drawing an empty
+  // chart, which would claim "nothing happened today". `null` is reported as
+  // null and the screen says the chart is unavailable.
+  const [thisWindow, lastWindow] = histograms ?? [null, null];
+  const series = thisWindow ? fillHourlySeries(thisWindow, { hours: 24 }) : null;
+  const previous = lastWindow
+    ? {
+        events: lastWindow.reduce((sum, point) => sum + point.events, 0),
+        penalties: lastWindow.reduce((sum, point) => sum + point.penalties, 0)
+      }
+    : null;
 
   const metrics: GuildMetrics = {
     bot: deriveBotStatus(health, Date.now()),
@@ -3839,10 +3864,62 @@ app.get("/api/guilds/:guildId/metrics", async (request, reply) => {
         reason: text(payload?.reason),
         createdAt: row.created_at.toISOString()
       };
-    })
+    }),
+    series: series ?? { events: [], penalties: [] },
+    previous: previous ?? { events: 0, penalties: 0 }
   };
 
   return metrics;
+});
+
+/* ------------------------------------------------------------------ *
+ * Overview: which modules this server actually has switched on
+ *
+ * The overview used to be the only screen with no idea whether the systems it
+ * advertised were running. This endpoint answers that from each module's own
+ * settings row (see `db.getModuleStates`) and lists only the keys in
+ * `GUILD_MODULE_KEYS` — the project's closed set. The instance-wide «حالة
+ * البوت» is included for the platform owner alone, matching the sidebar, which
+ * hides it from everybody else.
+ * ------------------------------------------------------------------ */
+app.get("/api/guilds/:guildId/modules", async (request, reply) => {
+  const { guildId } = request.params as { guildId: string };
+  const access = await requireGuildAccess(request, reply, guildId);
+  if (!access) return;
+
+  const [states, guild, health] = await Promise.all([
+    db.getModuleStates(guildId),
+    db.getGuild(guildId).catch(() => null),
+    db.getGuildHealth(guildId).catch(() => null)
+  ]);
+
+  const botPresent = Boolean(guild?.botPresent);
+  const botLive = deriveBotStatus(health, Date.now()).online;
+
+  const statesByKey: Record<GuildModuleKey, GuildModuleState> = {
+    // Armed by default; the row's own column when it exists.
+    security: { key: "security", enabled: states.security, count: null },
+    logging: { key: "logging", enabled: states.logging, count: null },
+    // The trail is append-only and always recording - it has no off switch, so
+    // the honest state is "on" and the useful number is what it holds.
+    audit: { key: "audit", enabled: true, count: states.auditEntries },
+    // Commands are registered by the bot itself, so the module is live exactly
+    // when the bot is; the tally is the flags an operator turned off.
+    commands: { key: "commands", enabled: botPresent, count: states.disabledCommands },
+    roles: { key: "roles", enabled: states.tiers > 0, count: states.tiers },
+    welcome: { key: "welcome", enabled: states.welcome, count: null },
+    welcomeMessages: { key: "welcomeMessages", enabled: states.welcomeMessages, count: null },
+    customization: { key: "customization", enabled: states.customization, count: null },
+    levels: { key: "levels", enabled: states.levels, count: null },
+    invites: { key: "invites", enabled: states.invites, count: null },
+    presence: { key: "presence", enabled: botLive, count: null }
+  };
+
+  const modules = GUILD_MODULE_KEYS.filter(
+    key => key !== "presence" || isPlatformOwner(env.ownerId, access.session.discordUserId)
+  ).map(key => statesByKey[key]);
+
+  return { modules };
 });
 
 /* ------------------------------------------------------------------ *

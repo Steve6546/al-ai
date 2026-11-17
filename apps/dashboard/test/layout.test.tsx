@@ -147,7 +147,7 @@ const shellHtml = renderToString(
     refreshing: false,
     onRefresh: () => {},
     onLogout: () => {},
-    children: createElement(DashboardView, { guild })
+    children: createElement(DashboardView, { guild, onOpen: () => {} })
   })
 );
 

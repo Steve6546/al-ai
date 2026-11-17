@@ -380,7 +380,7 @@ export function App() {
             <BotPresenceView guild={guild} />
           ) : (
             <>
-              {view === "dashboard" && <DashboardView guild={guild} />}
+              {view === "dashboard" && <DashboardView guild={guild} onOpen={key => navigate(guildPath(guild.id, key))} />}
               {view === "commands" && <CommandsView guild={guild} />}
               {view === "roles" && <RolesView guild={guild} />}
               {view === "customization" && <CustomizationView guild={guild} />}

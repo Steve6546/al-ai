@@ -56,16 +56,28 @@ export const STATUS_COLORS: Record<BotStatus, string> = {
 };
 
 /**
- * Discord's four presence glyphs.
+ * Discord's four presence glyphs, on one grid.
  *
- * `online` and `invisible` are circles that differ only in fill, and `dnd` is a
- * circle with a bar — but `idle` is a *crescent*, which no icon library draws
- * the way Discord does. It is cut with an SVG mask instead of an overlapping
- * CSS disc: a mask is self-contained, so the crescent reads correctly on every
- * surface — the card the trigger sits on, the menu, and the live preview — with
- * no caller having to name the background colour. (The previous maskColor
- * approach is also what painted the bite black once the theme's tokens became
- * oklch: `hsl(var(--background))` stopped being a colour at all.)
+ * All four are drawn in a 16×16 box with the same outer radius, so the picker,
+ * the trigger and the preview cannot show a small dot next to a large one — the
+ * defect that made the menu look hand-assembled. The shapes are Discord's own:
+ *
+ * - **online** — a filled circle;
+ * - **idle** — a crescent, cut with a mask so its bite is a hole rather than a
+ *   disc the colour of whatever surface it sits on (the mask makes it correct on
+ *   the card, the menu *and* the preview with no caller passing a background);
+ * - **dnd** — the same circle with Discord's white bar across the middle;
+ * - **invisible** — a hollow ring of the same outer radius, drawn with a stroke
+ *   instead of a CSS border so its thickness is a fraction of the glyph and
+ *   stays proportional at 9 px and at 32 px.
+ *
+ * The crescent's cut circle is placed by geometry, not by eye: outer r=8, cut
+ * r=6.4, cut centre at (13.6, 2.4). The centres are then d = 5.6·√2 ≈ 7.92
+ * apart, so the cut reaches 7.92 − 6.4 = 1.52 units past the disc's centre and
+ * the body is 8 − 1.52 = 6.48 units thick at its deepest, with the horn tips at
+ * the top and the right.
+ * (Six cut-circle placements were rendered at 9, 14 and 32 px and compared
+ * against Discord's own menu before this one was chosen.)
  */
 export function StatusDot({ status, size = 10, className }: { status: BotStatus; size?: number; className?: string }) {
   const color = STATUS_COLORS[status];
@@ -73,37 +85,38 @@ export function StatusDot({ status, size = 10, className }: { status: BotStatus;
   // two dots on one page would make both crescents read the first mask.
   const maskId = `status-crescent-${useId().replace(/[^a-zA-Z0-9-]/g, "")}`;
 
-  if (status === "invisible") {
-    return (
-      <span
-        aria-hidden
-        className={cn("inline-block shrink-0 rounded-full border-2", className)}
-        style={{ width: size, height: size, borderColor: color }}
-      />
-    );
-  }
-
-  if (status === "idle") {
-    return (
-      <svg aria-hidden viewBox="0 0 16 16" width={size} height={size} className={cn("shrink-0", className)}>
-        <defs>
-          <mask id={maskId}>
-            <rect width="16" height="16" fill="#fff" />
-            {/* The bite, top-right — Discord's crescent opens that way. */}
-            <circle cx="14" cy="2" r="6.5" fill="#000" />
-          </mask>
-        </defs>
-        <circle cx="8" cy="8" r="8" fill={color} mask={`url(#${maskId})`} />
-      </svg>
-    );
-  }
-
   return (
-    <svg aria-hidden viewBox="0 0 16 16" width={size} height={size} className={cn("shrink-0", className)}>
-      <circle cx="8" cy="8" r="8" fill={color} />
-      {status === "dnd" ? (
-        <rect x="3.2" y="6.9" width="9.6" height="2.2" rx="1.1" fill="#ffffff" />
-      ) : null}
+    <svg
+      aria-hidden
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      // `block` rather than `inline-block`: an inline SVG keeps a text baseline
+      // under it, which pushed the dot 1–2 px below the label it sits beside.
+      className={cn("block shrink-0", className)}
+    >
+      {status === "invisible" ? (
+        // Outer edge at r=8 with a 3-unit stroke: the ring is 19% of the radius
+        // at every size, and the inside stays transparent.
+        <circle cx="8" cy="8" r="6.5" fill="none" stroke={color} strokeWidth="3" />
+      ) : status === "idle" ? (
+        <>
+          <defs>
+            <mask id={maskId}>
+              <rect width="16" height="16" fill="#fff" />
+              {/* The bite, toward the top-right — Discord's crescent opens that way. */}
+              <circle cx="13.6" cy="2.4" r="6.4" fill="#000" />
+            </mask>
+          </defs>
+          <circle cx="8" cy="8" r="8" fill={color} mask={`url(#${maskId})`} />
+        </>
+      ) : (
+        <>
+          <circle cx="8" cy="8" r="8" fill={color} />
+          {/* Discord's bar is white on both themes, not the surface colour. */}
+          {status === "dnd" ? <rect x="3" y="6.8" width="10" height="2.4" rx="1.2" fill="#ffffff" /> : null}
+        </>
+      )}
     </svg>
   );
 }
@@ -181,7 +194,7 @@ export function StatusPicker({
             as a hole rather than a pale dot. The theme tokens are plain oklch
             values since Tailwind 4 — wrapping them in hsl() produced an invalid
             colour and a black bite. */}
-        <StatusDot status={status} />
+        <StatusDot status={status} size={10} className="me-0.5" />
         <span>{t(`presence.status.${status}` as TranslationKey)}</span>
         {activeDuration ? (
           <span className="text-xs text-muted-foreground">
@@ -198,8 +211,11 @@ export function StatusPicker({
           // tooltip the operator has to hover to discover.
           const body = (
             <>
-              <span className="mt-1">
-                <StatusDot status={candidate} size={12} />
+              {/* A fixed-height box, so the glyph centres on the first line of
+                  the row rather than on the two-line block; `mt-*` guessed at
+                  that and drifted with the type size. */}
+              <span className="flex h-5 items-center">
+                <StatusDot status={candidate} size={14} />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium leading-tight">{t(`presence.status.${candidate}` as TranslationKey)}</span>
@@ -217,7 +233,7 @@ export function StatusPicker({
                 onSelect={() => pick(candidate)}
               >
                 {body}
-                {status === candidate ? <Check className="mt-1 size-3.5 shrink-0 text-primary" /> : null}
+                {status === candidate ? <Check className="size-3.5 shrink-0 self-center text-primary" /> : null}
               </DropdownMenuItem>
             );
           }
@@ -226,7 +242,7 @@ export function StatusPicker({
             <DropdownMenuSub key={candidate}>
               <DropdownMenuSubTrigger className="items-start justify-start gap-2.5 py-2">
                 {body}
-                {status === candidate ? <Check className="mt-1 size-3.5 shrink-0 text-primary" /> : null}
+                {status === candidate ? <Check className="size-3.5 shrink-0 self-center text-primary" /> : null}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-48 max-w-[calc(100vw-1.5rem)]">
                 {botStatusDurations.map(entry => (

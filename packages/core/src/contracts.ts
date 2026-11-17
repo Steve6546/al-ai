@@ -891,7 +891,56 @@ export type GuildMetrics = {
   };
   punishments24h: PunishmentCounts;
   recentActivity: ActivityEntry[];
+  /**
+   * Audit-trail rows per hour over the last 24 hours, oldest bucket first, with
+   * empty hours present as real zeros (`fillHourlySeries` builds the grid).
+   * The overview draws these as sparklines, so an absent hour must not become a
+   * missing point on the line.
+   */
+  series: { events: number[]; penalties: number[] };
+  /**
+   * The same two tallies over the 24 hours *before* the chart's window. Kept as
+   * totals rather than a second series because the screen compares windows, not
+   * shapes, and a zero here is what turns into «جديد» instead of «Infinity%».
+   */
+  previous: { events: number; penalties: number };
 };
+
+/**
+ * One switchable module of the project, as the overview lists it.
+ *
+ * `enabled` is read from the module's own settings row, never guessed from the
+ * screen's existence — the overview must not claim a system is running because
+ * the code that implements it shipped. `count` is the module's own tally when it
+ * has a meaningful one (audit entries, mapped tiers, disabled commands) and null
+ * when it does not.
+ */
+export type GuildModuleState = {
+  key: GuildModuleKey;
+  enabled: boolean;
+  count: number | null;
+};
+
+/**
+ * The screens this project actually has that can be on or off. The list is
+ * closed on purpose: an overview that enumerated whatever a future table
+ * happened to contain would advertise systems nobody built.
+ */
+export const GUILD_MODULE_KEYS = [
+  "security",
+  "logging",
+  "audit",
+  "commands",
+  "roles",
+  "welcome",
+  "welcomeMessages",
+  "customization",
+  "levels",
+  "invites",
+  "presence"
+] as const;
+
+export type GuildModuleKey = (typeof GUILD_MODULE_KEYS)[number];
 
 /** A ping slower than this is worth flagging to the operator. */
 export const PING_WARN_MS = 300;

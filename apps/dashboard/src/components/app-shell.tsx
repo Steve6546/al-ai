@@ -6,7 +6,7 @@ import {
   Database,
   FileClock,
   Globe,
-  LayoutDashboard,
+  LayoutGrid,
   Link2,
   Menu,
   MessageSquareHeart,
@@ -91,7 +91,7 @@ export function isViewKey(value: unknown): value is ViewKey {
 type NavItem = {
   key: ViewKey;
   label: string;
-  icon: typeof LayoutDashboard;
+  icon: typeof LayoutGrid;
   /** A boolean flag on the selected guild that must be true for access. */
   needs?: keyof Guild;
   /** Hidden entirely while the bot is not a member of the selected guild. */
@@ -123,7 +123,7 @@ const navSections: { id: string; title: TranslationKey | null; items: NavItem[] 
     id: "general",
     title: "nav.section.general",
     items: [
-      { key: "dashboard", label: "لوحة التحكم", icon: LayoutDashboard },
+      { key: "dashboard", label: "نظرة عامة", icon: LayoutGrid },
       { key: "security", label: "الحماية", icon: ShieldAlert },
       { key: "logs", label: "سجلات البوت", icon: ScrollText, needs: "canManageLogging", requiresBot: true },
       { key: "audit", label: "سجل تدقيق اللوحة", icon: FileClock }
@@ -570,7 +570,7 @@ function SidebarNav({
               className={cn(
                 "relative grid size-9 place-items-center rounded-lg transition-ui",
                 view === item.key
-                  ? "bg-sidebar-primary/15 text-sidebar-primary"
+                  ? "bg-sidebar-primary/12 text-sidebar-primary"
                   : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 disabled && "cursor-not-allowed opacity-40 hover:bg-transparent"
               )}
@@ -663,7 +663,7 @@ function NavButton({
   onClick
 }: {
   label: string;
-  icon: typeof LayoutDashboard;
+  icon: typeof LayoutGrid;
   active: boolean;
   reachable: boolean;
   reason?: string | null;
@@ -679,7 +679,11 @@ function NavButton({
       className={cn(
         "group relative flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-start text-sm transition-ui",
         "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-        active && "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
+        // The current screen is marked in the operator's own accent: the theme
+        // sets `--sidebar-primary` from `--primary`, which is what the appearance
+        // screen writes (named accent or custom hex). A neutral grey here made the
+        // active row the one element on the page that ignored the chosen colour.
+        active && "bg-sidebar-primary/12 font-medium text-sidebar-primary",
         disabled && "cursor-not-allowed opacity-40 hover:bg-transparent"
       )}
     >
@@ -781,5 +785,5 @@ function StatusChips({ health }: { health: HealthSnapshot | null }) {
 
 /** Header title for a view, taken from the navigation definition. */
 export function viewTitle(view: ViewKey): string {
-  return navIndex.get(view)?.label ?? "لوحة التحكم";
+  return navIndex.get(view)?.label ?? "نظرة عامة";
 }

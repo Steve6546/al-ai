@@ -42,6 +42,8 @@ if (db) {
 }
 
 const skip = reachable ? false : "no reachable database at DATABASE_URL";
+/** `t.skip` wants a string, and `skip` is `false` when the database is there. */
+const reason = "no reachable database at DATABASE_URL";
 
 /**
  * The presence row exactly as the deployment had it, before any test writes.
@@ -636,4 +638,95 @@ test("the database refuses a bio longer than Discord accepts", { skip }, async (
     /guild_customization_bio_check/,
     "one character over the measured limit is refused"
   );
+});
+
+/* ------------------------------------------------------------------ *
+ * Overview: the module switches and the audit histogram
+ *
+ * These two reads are what the redesigned overview draws, and both are the kind
+ * of query that compiles, type-checks and lies: `LEFT JOIN` on eight tables can
+ * quietly return no row at all (making every module read "off"), and a histogram
+ * bucket can land in the wrong hour without any type noticing.
+ * ------------------------------------------------------------------ */
+
+// A fresh id per run. `audit_trail` is append-only for the application role (the
+// schema revokes UPDATE and DELETE on it, and `schema-rls.test.ts` pins that), so
+// these tests cannot clean up after themselves and must not collide with a
+// previous run's rows. Unique ids are the only honest option: deleting the trail
+// to make a test repeatable would be the bug, not the fix.
+const RUN = Date.now().toString().slice(-9);
+
+test("getModuleStates reads each module's own row, and defaults protection to armed", async t => {
+  if (!db) return t.skip(reason);
+  const id = `91${RUN}1`;
+
+  await db.ensureGuild({ id, name: "Modules", iconUrl: null, botPresent: true });
+
+  // A guild with nothing configured: protection is armed by default (that is
+  // what the schema says and what the engine does on join), everything else is
+  // off because every module ships disarmed.
+  const fresh = await db.getModuleStates(id);
+  assert.equal(fresh.security, true, "protection is on for a server that never opened the screen");
+  assert.equal(fresh.logging, false);
+  assert.equal(fresh.levels, false);
+  assert.equal(fresh.invites, false);
+  assert.equal(fresh.welcome, false);
+  assert.equal(fresh.welcomeMessages, false);
+  assert.equal(fresh.customization, false);
+  assert.equal(fresh.tiers, 0);
+  assert.equal(fresh.auditEntries, 0);
+
+  // An explicit row overrides the default; the query must read the column, not
+  // the schema default. The row has to be INSERTed, not updated: no guild gets a
+  // `guild_security` row until its screen is saved for the first time, and an
+  // UPDATE against a row that does not exist silently affects nothing.
+  await pool!.query(
+    "INSERT INTO guild_security (guild_id, enabled) VALUES ($1, false) ON CONFLICT (guild_id) DO UPDATE SET enabled = false",
+    [id]
+  );
+  const disarmed = await db.getModuleStates(id);
+  assert.equal(disarmed.security, false, "an operator who switched protection off sees it off");
+
+  // Tallies come from the tables that own them.
+  await pool!.query(
+    `INSERT INTO audit_trail (id, guild_id, severity, event_id, correlation_id, actor_hash, source_layer, payload_ciphertext)
+     VALUES (gen_random_uuid(), $1, 'info', 'dashboard.settings.update', 'c1', 'h', 'dashboard', 'x'),
+            (gen_random_uuid(), $1, 'info', 'dashboard.settings.update', 'c2', 'h', 'dashboard', 'x')`,
+    [id]
+  );
+  await pool!.query(
+    `INSERT INTO guild_command_flags (guild_id, command, enabled) VALUES ($1, 'ban', false), ($1, 'kick', true)`,
+    [id]
+  );
+  const withData = await db.getModuleStates(id);
+  assert.equal(withData.auditEntries, 2, "the audit card counts the trail");
+  assert.equal(withData.disabledCommands, 1, "only the command that is off is counted");
+});
+
+test("auditSeries buckets by hour and counts only the requested window", async t => {
+  if (!db) return t.skip(reason);
+  const id = `91${RUN}2`;
+  await db.ensureGuild({ id, name: "Histogram", iconUrl: null, botPresent: true });
+
+  const insert = (eventId: string, agoMinutes: number) =>
+    pool!.query(
+      `INSERT INTO audit_trail (id, guild_id, severity, event_id, correlation_id, actor_hash, source_layer, payload_ciphertext, created_at)
+       VALUES (gen_random_uuid(), $1, 'info', $2, 'c', 'h', 'bot', 'x', now() - ($3 || ' minutes')::interval)`,
+      [id, eventId, String(agoMinutes)]
+    );
+
+  await insert("moderation.ban", 10);
+  await insert("moderation.kick", 20);
+  await insert("dashboard.settings.update", 30);
+  // 30 hours ago: outside a 24-hour window.
+  await insert("moderation.ban", 30 * 60);
+
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const rows = await db.auditSeries(id, since, new Date());
+  const events = rows.reduce((sum, row) => sum + row.events, 0);
+  const penalties = rows.reduce((sum, row) => sum + row.penalties, 0);
+
+  assert.equal(events, 3, "the row outside the window is not counted");
+  assert.equal(penalties, 2, "penalties are the moderation events inside it");
+  assert.ok(rows.every(row => Number.isFinite(Date.parse(row.hour))), "every bucket is a real hour");
 });

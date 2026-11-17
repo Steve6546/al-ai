@@ -191,7 +191,7 @@ test("the phone drawer carries the server rail, the settings nav and one account
 
     // The settings nav is the whole point of the drawer: every screen a phone
     // user came to reach has to be inside it.
-    for (const label of ["لوحة التحكم", "رسائل الترحيب", "الحماية", "سجلات البوت"]) {
+    for (const label of ["نظرة عامة", "رسائل الترحيب", "الحماية", "سجلات البوت"]) {
       assert.ok(
         [...drawer!.querySelectorAll("button")].some(button => (button.textContent ?? "").includes(label)),
         `the drawer offers «${label}»`

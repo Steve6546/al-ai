@@ -28,3 +28,4 @@ export * from "./welcome-messages.js";
 export * from "./welcome-image-geometry.js";
 export * from "./user-agent.js";
 export * from "./appearance.js";
+export * from "./series.js";

@@ -41,6 +41,8 @@ export type {
   CommandFlag,
   CustomizationSettings,
   GuildMetrics,
+  GuildModuleKey,
+  GuildModuleState,
   HealthSnapshot,
   InviteMilestone,
   InviteSettings,

@@ -88,8 +88,8 @@ const screens: [string, () => ReactElement][] = [
         onLogout: () => {}
       })
   ],
-  ["DashboardView", () => createElement(DashboardView, { guild })],
-  ["DashboardView on a guild without the bot", () => createElement(DashboardView, { guild: absentGuild })],
+  ["DashboardView", () => createElement(DashboardView, { guild, onOpen: () => {} })],
+  ["DashboardView on a guild without the bot", () => createElement(DashboardView, { guild: absentGuild, onOpen: () => {} })],
   ["AuditView", () => createElement(AuditView, { guild })],
   ["SecurityView", () => createElement(SecurityView, { guild })],
   ["CommandsView", () => createElement(CommandsView, { guild })],
@@ -112,7 +112,7 @@ const screens: [string, () => ReactElement][] = [
         refreshing: false,
         onRefresh: () => {},
         onLogout: () => {},
-        children: createElement(DashboardView, { guild })
+        children: createElement(DashboardView, { guild, onOpen: () => {} })
       })
   ]
 ];

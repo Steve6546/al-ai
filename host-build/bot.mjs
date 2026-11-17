@@ -84501,6 +84501,9 @@ function normaliseWelcomeMessageSettings(value) {
   };
 }
 
+// packages/core/src/series.ts
+var HOUR_MS = 60 * 60 * 1e3;
+
 // apps/bot/src/lib/retraction.ts
 var RETRACTION_WINDOW_MS = 15 * 60 * 1e3;
 function createRetractionRegistry(options = {}) {

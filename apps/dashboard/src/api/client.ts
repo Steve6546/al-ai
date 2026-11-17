@@ -13,6 +13,7 @@ import type {
   DiscordRole,
   Guild,
   GuildMetrics,
+  GuildModuleState,
   HealthSnapshot,
   InviteSettings,
   WelcomeMessageSettings,
@@ -216,6 +217,18 @@ export const regenerateRecoveryCodes = (code: string) =>
  * ------------------------------------------------------------------ */
 export const channels = (guildId: string) => call<{ channels: ChannelOption[] }>(`/api/guilds/${guildId}/channels`);
 export const metrics = (guildId: string) => call<GuildMetrics>(`/api/guilds/${guildId}/metrics`);
+
+/**
+ * Which modules this server actually has switched on.
+ *
+ * Separate from `metrics` because the two change on different clocks: the
+ * metrics move with every moderation action, the switches move when an operator
+ * flips one. Keeping them apart lets the overview refresh its numbers without
+ * re-reading eleven settings rows, and lets a failed histogram read leave the
+ * module list intact.
+ */
+export const modules = (guildId: string) =>
+  call<{ modules: GuildModuleState[] }>(`/api/guilds/${guildId}/modules`);
 
 /* ------------------------------------------------------------------ *
  * Settings: tiers

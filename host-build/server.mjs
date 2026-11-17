@@ -74923,6 +74923,19 @@ function punishmentKindOf(eventId) {
   }
 }
 var EMPTY_PUNISHMENT_COUNTS = { total: 0, ban: 0, kick: 0, timeout: 0, warn: 0 };
+var GUILD_MODULE_KEYS = [
+  "security",
+  "logging",
+  "audit",
+  "commands",
+  "roles",
+  "welcome",
+  "welcomeMessages",
+  "customization",
+  "levels",
+  "invites",
+  "presence"
+];
 var BOT_HEARTBEAT_STALE_MS = 3 * 60 * 1e3;
 function summarisePunishments(tallies) {
   const counts = { ...EMPTY_PUNISHMENT_COUNTS };
@@ -76356,6 +76369,25 @@ function normaliseAppearance(input) {
 
 // packages/core/src/series.ts
 var HOUR_MS = 60 * 60 * 1e3;
+function fillHourlySeries(rows, { hours = 24, now = Date.now() } = {}) {
+  const size = Math.max(1, Math.trunc(hours));
+  const events = new Array(size).fill(0);
+  const penalties = new Array(size).fill(0);
+  const endHour = Math.floor(now / HOUR_MS);
+  const startHour = endHour - (size - 1);
+  for (const row of rows) {
+    const at = Date.parse(row.hour);
+    if (!Number.isFinite(at)) continue;
+    const index = Math.floor(at / HOUR_MS) - startHour;
+    if (index < 0 || index >= size) continue;
+    events[index] += countOf(row.events);
+    penalties[index] += countOf(row.penalties);
+  }
+  return { events, penalties };
+}
+function countOf(value) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
 
 // apps/dashboard/server/env.ts
 var alwaysRequired = [
@@ -82397,13 +82429,24 @@ app.get("/api/guilds/:guildId/metrics", async (request2, reply) => {
     });
   }
   const health = healthResult.value;
-  const [counts, rows, widget, record] = await Promise.all([
+  const previousFrom = new Date(since.getTime() - 24 * 60 * 60 * 1e3);
+  const [counts, rows, widget, record, histograms] = await Promise.all([
     db.countPunishmentsSince(guildId, since).catch(() => []),
     db.listRecentModeration(guildId, 8).catch(() => []),
     // The widget is unauthenticated and independent of our bot token.
     fetchWidgetPresence(guildId).catch(() => ({ online: null, reason: "unavailable" })),
-    db.getGuild(guildId).catch(() => null)
+    db.getGuild(guildId).catch(() => null),
+    Promise.all([
+      db.auditSeries(guildId, since, /* @__PURE__ */ new Date()),
+      db.auditSeries(guildId, previousFrom, since)
+    ]).catch(() => null)
   ]);
+  const [thisWindow, lastWindow] = histograms ?? [null, null];
+  const series = thisWindow ? fillHourlySeries(thisWindow, { hours: 24 }) : null;
+  const previous = lastWindow ? {
+    events: lastWindow.reduce((sum, point) => sum + point.events, 0),
+    penalties: lastWindow.reduce((sum, point) => sum + point.penalties, 0)
+  } : null;
   const metrics = {
     bot: deriveBotStatus(health, Date.now()),
     members: {
@@ -82424,9 +82467,45 @@ app.get("/api/guilds/:guildId/metrics", async (request2, reply) => {
         reason: text(payload?.reason),
         createdAt: row.created_at.toISOString()
       };
-    })
+    }),
+    series: series ?? { events: [], penalties: [] },
+    previous: previous ?? { events: 0, penalties: 0 }
   };
   return metrics;
+});
+app.get("/api/guilds/:guildId/modules", async (request2, reply) => {
+  const { guildId } = request2.params;
+  const access = await requireGuildAccess(request2, reply, guildId);
+  if (!access) return;
+  const [states, guild, health] = await Promise.all([
+    db.getModuleStates(guildId),
+    db.getGuild(guildId).catch(() => null),
+    db.getGuildHealth(guildId).catch(() => null)
+  ]);
+  const botPresent = Boolean(guild?.botPresent);
+  const botLive = deriveBotStatus(health, Date.now()).online;
+  const statesByKey = {
+    // Armed by default; the row's own column when it exists.
+    security: { key: "security", enabled: states.security, count: null },
+    logging: { key: "logging", enabled: states.logging, count: null },
+    // The trail is append-only and always recording - it has no off switch, so
+    // the honest state is "on" and the useful number is what it holds.
+    audit: { key: "audit", enabled: true, count: states.auditEntries },
+    // Commands are registered by the bot itself, so the module is live exactly
+    // when the bot is; the tally is the flags an operator turned off.
+    commands: { key: "commands", enabled: botPresent, count: states.disabledCommands },
+    roles: { key: "roles", enabled: states.tiers > 0, count: states.tiers },
+    welcome: { key: "welcome", enabled: states.welcome, count: null },
+    welcomeMessages: { key: "welcomeMessages", enabled: states.welcomeMessages, count: null },
+    customization: { key: "customization", enabled: states.customization, count: null },
+    levels: { key: "levels", enabled: states.levels, count: null },
+    invites: { key: "invites", enabled: states.invites, count: null },
+    presence: { key: "presence", enabled: botLive, count: null }
+  };
+  const modules = GUILD_MODULE_KEYS.filter(
+    (key) => key !== "presence" || isPlatformOwner(env.ownerId, access.session.discordUserId)
+  ).map((key) => statesByKey[key]);
+  return { modules };
 });
 function normaliseCategoryChannels(value) {
   if (!value || typeof value !== "object") return {};
