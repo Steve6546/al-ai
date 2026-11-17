@@ -316,6 +316,14 @@ export type SecurityOverview = {
 
 /** What `GET /api/network` answers with — the deployment's current reach. */
 export type NetworkSnapshot = {
+  /**
+   * True when the dashboard is served from a managed host. In that mode the
+   * local-network half of the screen (LAN list, QR, VPN hint, Windows firewall)
+   * has nothing to act on, and the server returns no interface data at all.
+   */
+  hosted: boolean;
+  /** The public origin a hosted deployment is served at, or null locally. */
+  publicUrl: string | null;
   mode: RemoteAccessMode;
   tunnelProvider: "ngrok";
   tunnelUrl: string | null;

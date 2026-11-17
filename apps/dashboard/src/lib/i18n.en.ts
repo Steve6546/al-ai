@@ -644,6 +644,7 @@ export const en = {
   "presence.describe.dnd": "Desktop notifications are muted",
   "presence.describe.invisible": "You will appear offline to everyone",
   "presence.duration.15m": "For 15 minutes",
+  "presence.duration.30m": "For 30 minutes",
   "presence.duration.1h": "For an hour",
   "presence.duration.8h": "For 8 hours",
   "presence.duration.24h": "For 24 hours",
@@ -1666,6 +1667,11 @@ export const en = {
    * Network reach
    * ---------------------------------------------------------------- */
   "network.loadFailed": "The network settings could not be loaded.",
+  "network.hostedTitle": "Hosted environment",
+  "network.hostedBody": "Reach is owned by the hosting provider: one public origin is the only way in.",
+  "network.hostedBadge": "Hosted",
+  "network.hostedPublicUrl": "Public URL",
+  "network.hostedHidden": "Local-network tools are hidden on purpose: internal addresses, the Wi-Fi QR code, the ngrok tunnel and the firewall rule have nothing to act on here — and none of them run.",
   "network.starting": "Starting…",
   "network.running": "Running",
   "network.error": "Error",

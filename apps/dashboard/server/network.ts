@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { closeSync, openSync, readFileSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 import { promisify } from "node:util";
@@ -40,6 +40,17 @@ export type TunnelStatus = "off" | "starting" | "running" | "error";
 export type MachineHostEntry = { host: string; label: string };
 
 export type NetworkSnapshot = {
+  /**
+   * True when this process is serving from a managed host instead of a
+   * workstation. Everything below that describes a *local* network — LAN
+   * addresses, the QR code's address, a VPN adapter, the Windows firewall —
+   * is meaningless there, and the screen uses this flag to skip all of it
+   * rather than showing a list of `localhost` and `172.x` addresses that no
+   * member could ever open.
+   */
+  hosted: boolean;
+  /** The public origin a hosted deployment is served at, or null locally. */
+  publicUrl: string | null;
   mode: RemoteAccessMode;
   tunnelProvider: "ngrok";
   tunnelUrl: string | null;
@@ -76,6 +87,31 @@ export type NetworkSnapshot = {
 /* ------------------------------------------------------------------ *
  * Pure helpers
  * ------------------------------------------------------------------ */
+
+/**
+ * Decide once whether this process runs on a managed host.
+ *
+ * Signals, in order of strength:
+ *
+ *  - the platform's own published hostname (`AL_AI_PLATFORM_HOST`), which the
+ *    hosting panel sets and a workstation never does;
+ *  - a container marker (`/.dockerenv`, `/run/.containerenv`) — a Docker or
+ *    Podman deployment has the same problem: no reachable LAN, no local
+ *    firewall, and internal addresses that must not be handed to a browser.
+ *
+ * `NODE_ENV=production` is deliberately **not** a signal: a self-hosted VPS in
+ * production is exactly a machine whose LAN links still work, and hiding a
+ * working feature because of a label would be worse than showing one that does
+ * not apply.
+ */
+export function isHostedRuntime(signals: {
+  platformHost?: string | null;
+  dockerMarker?: boolean;
+  containerMarker?: boolean;
+}): boolean {
+  if (signals.platformHost) return true;
+  return Boolean(signals.dockerMarker || signals.containerMarker);
+}
 
 /** Real, non-loopback addresses of this machine, as bare hostnames. */
 export function lanHostsFrom(
@@ -775,6 +811,16 @@ export function createNetworkManager(input: {
 }) {
   const retryDelaysMs = input.retryDelaysMs ?? TUNNEL_RETRY_DELAYS_MS;
   const platformHost = input.platformHost ?? null;
+  /**
+   * Decided once, at boot. On a managed host the local-network half of this
+   * manager is not just hidden in the UI — it is not computed, so no interface
+   * table is read and no internal address ever reaches a response body.
+   */
+  const hosted = isHostedRuntime({
+    platformHost,
+    dockerMarker: existsSync("/.dockerenv"),
+    containerMarker: existsSync("/run/.containerenv")
+  });
   let mode: RemoteAccessMode = "off";
   let tunnelUrl: string | null = null;
   let tunnelStatus: TunnelStatus = "off";
@@ -795,7 +841,7 @@ export function createNetworkManager(input: {
   let startAttempts = 0;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const machineHosts = () => lanHostsFrom(networkInterfaces());
+  const machineHosts = () => (hosted ? [] : lanHostsFrom(networkInterfaces()));
 
   const ngrokPath = resolveNgrokPath();
 
@@ -1282,7 +1328,9 @@ export function createNetworkManager(input: {
    * `app.listen`.
    */
   function ensureReachFirewall(): void {
-    if (mode === "off") return;
+    // A hosted container owns no firewall rule: the platform's edge is the only
+    // thing that decides reach, and the Windows path below cannot even run.
+    if (hosted || mode === "off") return;
     void ensureFirewall(input.port)
       .then(report => {
         if (report.status !== "allowed") {
@@ -1298,9 +1346,14 @@ export function createNetworkManager(input: {
   function snapshot(): NetworkSnapshot {
     const stable = Boolean(domain && tunnelUrl && new URL(tunnelUrl).hostname === domain);
     // One read of the interface table per snapshot: the gate list, the VPN hint
-    // and the QR address must all describe the same instant.
-    const interfaces = networkInterfaces();
+    // and the QR address must all describe the same instant. On a managed host
+    // there is no such table to read — skipping it is both cheaper and the only
+    // way an internal address (`172.18.x.x`, a container's `eth0`) can be kept
+    // out of a response by construction rather than by a filter.
+    const interfaces = hosted ? {} : networkInterfaces();
     return {
+      hosted,
+      publicUrl: hosted && platformHost ? `https://${platformHost}` : null,
       mode,
       tunnelProvider: "ngrok",
       tunnelUrl,
@@ -1420,6 +1473,6 @@ export function createNetworkManager(input: {
     return mode === "tunnel" && tunnelUrl ? tunnelUrl : null;
   }
 
-  return { boot, applyReach, snapshot, probe: probeTunnel, markOriginVerified, isHostAllowed: isHostAllowedNow, isOriginAllowed, tunnelOrigin, stop };
+  return { boot, applyReach, snapshot, probe: probeTunnel, markOriginVerified, isHostAllowed: isHostAllowedNow, isOriginAllowed, tunnelOrigin, stop, isHosted: () => hosted };
 }
 

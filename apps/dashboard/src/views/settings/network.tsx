@@ -324,6 +324,45 @@ export function NetworkView() {
     </div>
   );
 
+  /*
+   * A managed host: the public origin is the whole story.
+   *
+   * Everything below this branch — the reach switch, the LAN list, the QR code,
+   * the VPN hint, the Windows firewall card — is a control for a machine with a
+   * router and a desktop OS. On a hosted container none of it can act: the
+   * platform's edge owns reach, the "LAN" is a private bridge (`172.18.x.x`)
+   * and the firewall is not ours. Showing them was noise on a good day and an
+   * internal-address leak on a bad one.
+   */
+  if (snapshot.hosted) {
+    return (
+      <div className="space-y-4">
+        <Card>
+          <CardHeader className="flex-col gap-2 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+                <Globe className="size-5" aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <p className="text-base font-bold">{t("network.hostedTitle")}</p>
+                <p className="text-xs text-muted-foreground">{t("network.hostedBody")}</p>
+              </div>
+            </div>
+            <Badge variant="secondary" className="shrink-0 gap-1.5">
+              <ShieldCheck className="size-3" aria-hidden />
+              {t("network.hostedBadge")}
+            </Badge>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {snapshot.publicUrl ? copyRow(t("network.hostedPublicUrl"), snapshot.publicUrl) : null}
+            <p className="text-xs leading-relaxed text-muted-foreground">{t("network.hostedHidden")}</p>
+          </CardContent>
+        </Card>
+        <Toaster toasts={toasts} onDismiss={dismiss} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <Card>

@@ -543,3 +543,25 @@ test("lastTunnelUrlIn returns the newest URL in the text it is given", () => {
   assert.equal(lastTunnelUrlIn(previous + fresh), "https://new-tunnel-9999.ngrok-free.app");
   assert.equal(lastTunnelUrlIn("ngrok is starting, no URL yet"), null);
 });
+
+/**
+ * Hosted vs local is decided once, from signals that mean something.
+ *
+ * The consequences are not cosmetic: in hosted mode the manager stops reading
+ * the interface table at all, so a container's `172.18.x.x` address cannot be
+ * published even by accident. That is why this is a pure function with an
+ * explicit signal list rather than a check on `NODE_ENV`, which describes a
+ * deployment's intent and not whether a LAN exists.
+ */
+test("isHostedRuntime reads the platform host and container markers, never NODE_ENV", async () => {
+  const { isHostedRuntime } = await import("../server/network.js");
+
+  assert.equal(isHostedRuntime({ platformHost: "abc.apps.bot-hosting.cloud" }), true);
+  assert.equal(isHostedRuntime({ dockerMarker: true }), true);
+  assert.equal(isHostedRuntime({ containerMarker: true }), true);
+  // A workstation: no platform host, no container marker.
+  assert.equal(isHostedRuntime({ platformHost: null }), false);
+  assert.equal(isHostedRuntime({}), false);
+  // An empty string is "not set" — it must not read as a hostname.
+  assert.equal(isHostedRuntime({ platformHost: "" }), false);
+});
