@@ -198,3 +198,45 @@ it.
 the bot avatar was served back from the CDN as 1,030,806 bytes with a different
 SHA-256, under an `a_…` hash (animated, accepted). Byte-identity therefore holds
 up to Discord's edge, not through it.
+
+## The account's appearance: one shape, three consumers
+
+`user_preferences.appearance` is JSONB, nullable, and validated by
+`packages/core/src/appearance.ts` — the same module the browser imports. Three
+consumers read that one definition, which is what keeps them from drifting:
+
+| Consumer | Reads it for |
+| --- | --- |
+| `apps/dashboard/server/index.ts` | `normaliseAppearance` before any write, and again before any read, so nothing unvalidated reaches the column or the client |
+| `public/theme-boot.js` | paints the **cached** copy before the first frame; duplicates only the two arithmetic rules (hex normalising, WCAG luminance) because it runs before any module can load |
+| `src/lib/theme.ts` | applies the account's value after sign-in and writes the cache back |
+
+The cache (`localStorage["al-ai.appearance"]`) is a copy for speed, never a source
+of truth: `App.tsx` overwrites it from the server on every session load. Without
+it the page would paint the default palette and repaint once the session resolved.
+
+**Auto-contrast is measured, not fixed.** `readableOn` compares the accent's
+relative luminance with 0.1791 — the point where white and black score the same
+WCAG contrast. Above it the label is near-black, below it white. A fixed white
+label fails on pale amber; a fixed black label fails on deep violet; four of the
+five shipped accents sit on the near-black side.
+
+**Backgrounds** are a hard-stop gradient for the two split modes (`0 50%` /
+`50% 100%` on the chosen axis) and a smooth interpolation for `gradient`. A solid
+backdrop sets `--app-bg-color` and no image, so switching back leaves nothing
+behind for the next paint to blend with.
+
+## Sessions: what the screen may know
+
+`oauth_sessions.id` is the session token, so it never appears in JSON. The
+overview returns a **handle** — `sha256(id)` truncated to 16 hex characters — and
+`POST /api/me/sessions/:handle/revoke` resolves it by re-listing *this account's*
+sessions and hashing each one. A handle cannot be replayed as a cookie, a guessed
+one matches nothing, and another account's handle is not in the list being
+searched. Signing out the current session is refused there: that is the logout
+button, and it has a different aftermath.
+
+Device kind comes from `describeUserAgent` (core), which is ordered for the cases
+that actually happen: Edge and Opera before Chrome (both advertise `Chrome/`),
+iPad before Mac (iPadOS sends a desktop macOS string plus `Mobile`), Android
+before Linux, and a tablet is an Android UA without `Mobile`.
