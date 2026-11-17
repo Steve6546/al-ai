@@ -143,3 +143,24 @@
 - **`ssl=off`** داخل الحاوية: القاعدة تسمع على `127.0.0.1` فقط ولا تعبر الشبكة؛ TLS على الحافة (Caddy).
 - **`@napi-rs/canvas`**: الترقية تمسّ مسار رسم البطاقات الحيّ؛ تُختبر في جولة منفصلة لا في تمريرة أمنية.
 - **مفتاح MCP للاستضافة** يحمل scopes واسعة (`env:write`, `deployments:power`) ويُخزَّن خارج المستودع: هو مدخل تحكم كامل بالحساب، لا مفتاح قراءة.
+
+### التحقق الحيّ بعد النشر (Bot-Hosting، HEAD `4866079`)
+
+القياسات أدناه من قاعدة الإنتاج نفسها، لا من بيئة محلية:
+
+| القياس | النتيجة |
+|---|---|
+| `pg_roles` | `al_ai` (superuser، للمالك فقط) · `al_ai_app` = `rolsuper:false` · `rolbypassrls:false` · `rolcanlogin:true` |
+| `pg_stat_activity` | **4** اتصالات الخدمات باسم `al_ai_app` (لوحة 3 + بوت …) والمالك اتصال إداري واحد فقط |
+| `pg_tables.rowsecurity` | **29 / 29** |
+| `pg_policies` | **59** سياسة على **29** جدولاً |
+| `pg_policy` على `audit_trail` | `r` (SELECT) · `a` (INSERT) · `*` (المالك) — **لا `w` ولا `d`** |
+| مسبار بدور التطبيق | `UPDATE audit_trail` = **42501** · `CREATE TABLE` = **42501** · `pg_read_file('/etc/passwd')` = **42501** · `COPY … TO PROGRAM` = **42501** |
+| سجل الإقلاع | `[db] application role al_ai_app ready (NOSUPERUSER, NOBYPASSRLS)` ثم `[boot] the services connect as the least-privilege application role` |
+| الخدمة | `/api/health` = **200** (`healthy` · `bot: connected` · `database: reachable`) · `/api/version` = 200 · البوت متصل |
+| الموارد | RAM 162 MB / 256 · CPU 0.003% / 25% · القرص 209 MB / 512 · صفر سطر `level:50` من التطبيق |
+
+**عيبان في النشر اكتُشفا بالقياس وأُصلحا في `4866079`** (يستحقان التسجيل لأنهما من النوع الصامت):
+
+1. `select format('ALTER ROLE … %L', $1, $2)` فشل بـ«could not determine data type of parameter $1» لأن `format()` بلا أنواع ثابتة ⇒ أُنشئ الدور بلا كلمة سر من تمريرة السكيما، وكل دخول تطبيق فشل بـ`password authentication failed`. الحل: `$1::text`.
+2. `--print-app-url` كان يكتب تشخيصه على **stdout** عند الانحدار؛ `boot.sh` التقط المخرجات كما هي ⇒ بدأ `DATABASE_URL` بسطر سجل، ومُحلّل pg لا يرفض ذلك بل يقطّعه ويبلّغ `host: "base"` (كلمة `database` مقسومة) ⇒ `ENOTFOUND base` في اللوحة بدل رسالة تشير إلى URL سيئ. الحل: التشخيص إلى stderr، و`boot.sh` يأخذ **آخر سطر** ويتحقق من `postgres://`/`postgresql://` قبل الاستخدام.
