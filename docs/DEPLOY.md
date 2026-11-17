@@ -193,15 +193,25 @@ indistinguishable until `boot.log` existed:
 | --- | --- | --- |
 | `setup.sh` re-ran both `npm ci` passes on every deploy, because the fingerprint hashed `git rev-parse HEAD` (a docs commit re-installed 100–180 s of dependencies) | 100–180 s | not run at all; the fingerprint is the lockfile + root `package.json` |
 | the platform's own install/pull phase, entered when a restart has to fetch | ~39 s measured | skipped when `deployments_sync` already advanced the volume |
-| our boot: PostgreSQL, then the dashboard, then the bot | 5 s | 5 s (port opens at +5 s: 0→3 s database, 3→5 s dashboard, 5 s bot) |
+| our boot: PostgreSQL, then the dashboard, then the bot | 5 s | 4 s (port opens at +4 s: 0→2 s database, 2→3 s dashboard, 3 s bot) |
 
 Measured from outside the container, 4 probes/second against the public URL:
 
 ```text
-restart after a sync, deps unchanged : 0.9 s of downtime (one failed probe)
-restart on a new commit, deps unchanged : 39.4 s of 502
-restart on a new commit, deps re-installed : 100–180 s of 502 (the old setup.sh)
+restart, same commit, deps unchanged      : 0.9 s – 10 s of 502 (platform swap; see below)
+restart on a new commit, deps unchanged   : 39.4 s of 502
+restart that has to install a dependency  : 44.6 s of 502 (one time only)
+restart before this fix, deps re-installed: 100–180 s of 502
 ```
+
+**The residual window is the platform's container swap, not our boot.** `boot.log`
+records the whole boot in 4 seconds, so a restart that is still 8 seconds
+dark spends the first 4 s before `boot.sh` is even handed the container, and a
+second or two on each side of the swap. It is bounded and it is once per
+deploy; it cannot be removed from inside the container without a process that
+binds the port before the real server can — a proxy or a placeholder — which
+costs RAM this plan does not have and adds a second thing to keep alive.
+What *was* removable is the minutes, and those are gone.
 
 The residual 5 seconds is our boot and is visible in `.al-ai-host/logs/boot.log`,
 which records every phase with a monotonic offset from the first line and
@@ -213,13 +223,27 @@ survives the restart because it lives on the volume:
 [boot +3s] the services connect as the least-privilege application role
 [boot +3s] PostgreSQL ready
 [boot +3s] starting the dashboard on port 25880
-[boot +5s] dashboard ready
-[boot +5s] starting the Discord bot
+[boot +4s] dashboard ready
+[boot +4s] starting the Discord bot
 ```
 
 `+0s` is the moment `boot.sh` was handed the container, not the moment the
 restart was requested; the difference is the platform's, and the gap between
-`+5s` and the first 200 from outside is the container swap.
+`+4s` and the first 200 from outside is the container swap.
+
+### Responses are compressed
+
+The entry bundle is ~747 KB and the platform edge does not compress it, so a
+cold load over a phone connection spent seconds on a body that gzips to 181 KB.
+`@fastify/compress` is registered globally (brotli first, gzip as fallback,
+`threshold: 1024` so small JSON is untouched). Measured over the public URL on
+the same file:
+
+```text
+identity  747,539 B  3.86 s
+gzip      181,157 B  1.63 s
+br        173,092 B  0.96 s
+```
 
 ## Verifying a deployment
 
