@@ -463,13 +463,15 @@ const IMAGE_FETCH_TIMEOUT_MS = 10_000;
 /**
  * The budget for one import, page read and preview included.
  *
- * Measured on the deployment: a `pin.it` link costs ~7 s end to end (short link
- * → Pinterest page → preview file). A per-hop timeout alone allowed four hops
- * plus a preview — forty seconds in the worst case, which a browser or a proxy
- * in front of this process answers with a `502` that names nothing. 15 s keeps
- * the measured case with headroom and still bounds the worst one.
+ * Measured on the deployment, not guessed: a `pin.it` share link costs 5–7 s
+ * end to end (short link → Pinterest page → preview file), and a 1.3 MB GIF
+ * from Wikimedia cost 14.9 s because the container's egress is slow (~90 KB/s).
+ * A budget tight enough to feel snappy would refuse files this deployment
+ * genuinely can fetch, so 25 s is the ceiling — it still bounds the worst case
+ * (four redirects plus a preview used to allow forty seconds) and the platform's
+ * proxy was measured waiting through a 14.9 s response without complaint.
  */
-const IMAGE_IMPORT_DEADLINE_MS = 15_000;
+const IMAGE_IMPORT_DEADLINE_MS = 25_000;
 
 /**
  * The image formats Discord accepts, identified by their first bytes.

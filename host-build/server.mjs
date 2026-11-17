@@ -55457,7 +55457,7 @@ var IMAGE_REQUEST_HEADERS = {
 var REDIRECT_STATUSES = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
 var MAX_REDIRECTS = 3;
 var IMAGE_FETCH_TIMEOUT_MS = 1e4;
-var IMAGE_IMPORT_DEADLINE_MS = 15e3;
+var IMAGE_IMPORT_DEADLINE_MS = 25e3;
 function imageMimeFromHead(head) {
   const bytes = Buffer.from(head.buffer, head.byteOffset, head.byteLength);
   if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
