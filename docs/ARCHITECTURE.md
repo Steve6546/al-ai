@@ -170,3 +170,31 @@ same ids — a set the schema does not know about fails at write time with
 An empty activity text means **no activity** (`activities: []`), not a default:
 the field's own hint promises it, and `applyBotPresence` already sent an empty
 list for it.
+
+## The image import: one path, four ceilings
+
+Every image an operator brings in — a URL, a file, an avatar, a role icon — passes
+through `apps/dashboard/server/appearance.ts`, and the import path is bounded in
+four independent ways, because each one fails differently:
+
+| Bound | Value | What it prevents |
+| --- | --- | --- |
+| Concurrency | **3** imports at once, released in `finally` | ~5 MB per import inside an 80 MB heap; a fourth is a client loop, answered 429 |
+| Byte ceiling | 2 MB, enforced *while streaming* | a huge body is never buffered whole; `Content-Length` is not trusted |
+| Redirects | 3, each re-vetted like the first URL | a public link walking the request into loopback |
+| Time | one 25 s budget for the whole trip | four hops × 10 s of waiting that the operator never asked to spend |
+
+Type is decided by the **bytes** (`imageMimeFromHead`), never by `content-type`:
+a real GIF served as `application/octet-stream` is accepted, and HTML served as
+`image/png` is refused instead of being stored and failing later inside Discord.
+Nothing on this path re-encodes, which is why an animated GIF keeps its frames.
+
+The picker and the save path share one list of types (`lib/image-fit.ts`) so a
+format cannot be storable by the server and greyed out in the dialog — the bug
+that hid GIF from the welcome-messages file dialog while the URL import accepted
+it.
+
+**Discord re-encodes what it stores.** Measured: a 1,001,718-byte GIF uploaded as
+the bot avatar was served back from the CDN as 1,030,806 bytes with a different
+SHA-256, under an `a_…` hash (animated, accepted). Byte-identity therefore holds
+up to Discord's edge, not through it.
