@@ -272,6 +272,47 @@ export function createBotDatabase(databaseUrl: string) {
      * banner, bio, role appearance — is on `guild_customization` and written by
      * the dashboard over REST.
      */
+    /**
+     * Wake the presence sync the instant the dashboard saves a new row.
+     *
+     * The bot is the only process that can call `setPresence`, and it lives in
+     * the same container as the BFF, so the shortest honest path between them is
+     * PostgreSQL's own notification channel: the dashboard runs `NOTIFY
+     * al_ai_presence` after its upsert, and this holds one connection on the
+     * bot's own pool as a listener. That is an event, not a poll, and it costs
+     * one of the pool's four slots while it runs.
+     *
+     * The returned function stops the listener. A dropped connection is not
+     * fatal: the caller keeps its fallback tick, so a status still lands a
+     * minute later rather than never. The notification payload is deliberately
+     * ignored — the row is re-read through `normaliseBotPresence`, so a
+     * notification can never make the bot apply something the database does not
+     * actually hold.
+     */
+    async watchPresence(onChange: () => void): Promise<() => Promise<void>> {
+      const listener = await pool.connect();
+      try {
+        // LISTEN is per-session, so this one connection stays out of the pool's
+        // rotation until the returned stop function releases it.
+        await listener.query("LISTEN al_ai_presence");
+      } catch (error) {
+        listener.release();
+        throw error;
+      }
+      const handler = () => onChange();
+      listener.on("notification", handler);
+      let stopped = false;
+      return async () => {
+        if (stopped) return;
+        stopped = true;
+        listener.removeListener("notification", handler);
+        // UNLISTEN then release: the slot goes back to the pool clean, so a
+        // restart does not leave a session subscribed to a channel nobody reads.
+        await listener.query("UNLISTEN al_ai_presence").catch(() => undefined);
+        listener.release();
+      };
+    },
+
     async loadBotIdentity(): Promise<BotPresenceSettings> {
       const { rows } = await pool.query<{
         status: string | null;

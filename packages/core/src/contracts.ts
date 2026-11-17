@@ -174,6 +174,7 @@ export function isTimedBotStatus(value: unknown): value is TimedBotStatus {
  */
 export const botStatusDurations = [
   { id: "15m", minutes: 15, label: "لمدة 15 دقيقة" },
+  { id: "30m", minutes: 30, label: "لمدة 30 دقيقة" },
   { id: "1h", minutes: 60, label: "لمدة ساعة" },
   { id: "8h", minutes: 480, label: "لمدة 8 ساعات" },
   { id: "24h", minutes: 1440, label: "لمدة 24 ساعة" },

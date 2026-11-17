@@ -34,7 +34,6 @@ import {
   LAYER_SIGNATURE_TTL_MS,
   logDestinations,
   LOG_CATEGORY_NAME,
-  DEFAULT_ACTIVITY_TEXT,
   MAX_ACTIVITY_TEXT_LENGTH,
   MAX_BIO_LENGTH,
   MAX_IMAGE_UPLOAD_BYTES,
@@ -1106,6 +1105,13 @@ function networkSnapshot() {
   const bound = address && typeof address !== "string" ? address : null;
   const port = bound?.port ?? env.port;
   const base = network.snapshot();
+  // A hosted deployment has one way in — the platform's public origin. Building
+  // LAN URLs there would publish container-internal addresses no member could
+  // open, which is why the manager already returns no interface data and this
+  // wrapper returns an empty list rather than mapping an empty array.
+  if (base.hosted) {
+    return { ...base, port, boundHost: bound?.address ?? null, lanEnabled: false, lanUrls: [] };
+  }
   return {
     ...base,
     port,
@@ -1118,6 +1124,20 @@ function networkSnapshot() {
     }))
   };
 }
+
+/**
+ * The one answer a hosted deployment gives to every local-network action.
+ *
+ * The platform's edge owns reach there: there is no ngrok process to start, no
+ * firewall rule to add and no LAN address to advertise. Returning `409` with a
+ * named reason keeps the contract honest for any client — the screen hides the
+ * controls, and a stale tab or a script gets an explanation instead of a
+ * mysterious success.
+ */
+const HOSTED_NETWORK_REFUSAL = {
+  error: "HOSTED_NETWORK",
+  message: "هذا النشر مستضاف: الرابط العام والوصول تديرهما المنصّة، ولا يوجد نفق محلي أو جدار حماية هنا."
+} as const;
 
 /** Read: the current reach, for the «الوصول للشبكة» screen. */
 app.get("/api/network", async (request, reply) => {
@@ -1157,6 +1177,9 @@ app.put("/api/network", async (request, reply) => {
   }
 
   const current = network.snapshot();
+  // Reach is the platform's business on a managed host. Refusing here also stops
+  // a hosted deployment from ever spawning an `ngrok` child it does not need.
+  if (current.hosted) return reply.code(409).send(HOSTED_NETWORK_REFUSAL);
   const next = normaliseRemoteAccessMode(body?.mode);
   // A switch to the mode already active is a no-op and costs nothing, so it is
   // allowed through: a double-clicked confirmation should not read as a flood.
@@ -1209,12 +1232,14 @@ function dashboardPort(): number {
  */
 app.get("/api/network/firewall", async (request, reply) => {
   if (!(await requirePlatformOwner(request, reply))) return;
+  if (network.isHosted()) return reply.code(409).send(HOSTED_NETWORK_REFUSAL);
   return firewallStatus(dashboardPort());
 });
 
 app.post("/api/network/firewall", async (request, reply) => {
   const session = await requirePlatformOwner(request, reply);
   if (!session) return;
+  if (network.isHosted()) return reply.code(409).send(HOSTED_NETWORK_REFUSAL);
   const body = request.body as { elevate?: unknown } | undefined;
   const port = dashboardPort();
   if (body?.elevate === true) {
@@ -3148,11 +3173,11 @@ app.put("/api/bot/presence", async (request, reply) => {
       message: `نص النشاط يجب ألا يتجاوز ${MAX_ACTIVITY_TEXT_LENGTH} حرفاً.`
     });
   }
-  // Product rule: an activity kind without a text is a silent no-op — Discord
-  // renders nothing, and the «نوع النشاط» picker reads as broken. A save with
-  // an empty text therefore lands the project's real default presence instead,
-  // so the picker always produces something members can actually see.
-  const activityText = rawActivity.length > 0 ? rawActivity : DEFAULT_ACTIVITY_TEXT;
+  // An empty text is a real choice, not a missing value: the field's own hint
+  // promises «اتركه فارغاً فلا يظهر أي نشاط» and `applyBotPresence` already
+  // sends `activities: []` for it. Substituting the shipped default here made
+  // that promise false and left the activity impossible to clear.
+  const activityText = rawActivity;
 
   const previous = await db.getBotPresence();
   const next = normaliseBotPresence({
@@ -3176,15 +3201,13 @@ app.put("/api/bot/presence", async (request, reply) => {
   });
 
   /*
-   * Stored, not applied — and the response says exactly that instead of
-   * reporting a write that never happened.
-   *
-   * There is no Discord call this route could make: the presence is set on the
-   * gateway connection by the bot, which re-reads this row every 15 seconds.
-   * `applyAppearance` is therefore not called and no field outcome is invented.
-   * The response carries `{ settings, savedAt }` and no `applied`/`failed` pair,
-   * because an empty `applied` would read to the toast as "nothing was saved"
-   * — the "محفوظ ≠ منفّذ" confusion arriving from the other direction.
+   * Stored, then announced. The presence itself is set on the gateway by the
+   * bot, so this route does not invent an `applied` field it cannot know: it
+   * writes the row and the bot hears a `LISTEN al_ai_presence` notification in
+   * the same millisecond, applies it, and logs the receipt. The 15-second tick
+   * that used to be the only path is now a safety net, and the response keeps
+   * its honest shape — `{ settings, savedAt }` — because a save is not proof
+   * that Discord accepted it.
    */
   await db.saveBotPresence(next);
 

@@ -26,6 +26,12 @@ export type PresenceSyncDeps = {
   loadIdentity: () => Promise<BotPresenceSettings>;
   /** Applies the presence and reports whether it actually reached the gateway. */
   applyPresence: (presence: BotPresence) => Promise<boolean>;
+  /**
+   * Called with the row that was read, whether or not the gateway had to be
+   * told again. The caller uses it to schedule the exact instant a timed status
+   * lapses, so the revert does not wait for the next tick.
+   */
+  onApplied?: (identity: BotPresenceSettings) => void;
   onError?: (error: unknown) => void;
 };
 
@@ -39,12 +45,13 @@ export function createPresenceSync(deps: PresenceSyncDeps) {
 
   return {
     /** Applies whatever changed. Safe to call repeatedly. */
-    async run() {
+    async run(): Promise<BotPresenceSettings | null> {
       let desired: BotPresence;
+      let identity: BotPresenceSettings;
       try {
         // Normalised on the way in with the same rules the BFF applied on the way
         // out, so a stored value can never mean two things on the two sides.
-        const identity = normaliseBotPresence(await deps.loadIdentity());
+        identity = normaliseBotPresence(await deps.loadIdentity());
         desired = {
           // The *effective* status, not the stored one. A timed `dnd` whose
           // window has closed must read as `online` — that is the whole point of
@@ -56,11 +63,16 @@ export function createPresenceSync(deps: PresenceSyncDeps) {
         };
       } catch (error) {
         deps.onError?.(error);
-        return;
+        return null;
       }
 
+      // The identity is handed back before the "unchanged" early return so a
+      // caller that just started (or just reconnected) can schedule the expiry
+      // of a window this process has never applied.
+      deps.onApplied?.(identity);
+
       const key = keyOf(desired);
-      if (applied === key) return;
+      if (applied === key) return identity;
 
       const ok = await deps.applyPresence(desired).catch(error => {
         deps.onError?.(error);
@@ -69,6 +81,7 @@ export function createPresenceSync(deps: PresenceSyncDeps) {
       // Only remember a presence the gateway actually took, so a failed call is
       // retried rather than recorded as applied.
       if (ok) applied = key;
+      return identity;
     },
 
     /** Exposed for tests and for the shutdown path. */

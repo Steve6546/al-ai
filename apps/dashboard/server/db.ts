@@ -277,6 +277,13 @@ export function createDatabase(pool: pg.Pool) {
                updated_at = now()`,
         [settings.status, settings.activityType, settings.activityText, settings.statusDuration, settings.statusExpiresAt]
       );
+      // Wakes the bot's presence listener in the same instant instead of leaving
+      // the change to its fallback tick. The payload stays empty on purpose: a
+      // notification says *that* the row moved, and the bot re-reads it through
+      // the same normaliser as the dashboard, so the two sides cannot disagree
+      // about what was saved. A failed NOTIFY must not fail the save — the
+      // fallback tick would still apply it.
+      await pool.query("NOTIFY al_ai_presence").catch(() => undefined);
     },
 
     async getLogging(guildId: string): Promise<LoggingSettings> {

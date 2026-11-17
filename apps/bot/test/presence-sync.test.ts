@@ -121,3 +121,31 @@ test("a failed apply is retried rather than remembered as done", async () => {
   assert.equal(attempts, 2, "an unapplied presence is attempted again");
   assert.notEqual(sync.applied(), null, "the successful second attempt is remembered");
 });
+
+test("the sync reports the row it read, so the caller can schedule the window", async () => {
+  const seen: { statusDuration: string | null; statusExpiresAt: string | null }[] = [];
+  const expiresAt = new Date(Date.now() + 30 * 60_000).toISOString();
+  const sync = createPresenceSync({
+    loadIdentity: async () => identity({ status: "idle", statusDuration: "30m", statusExpiresAt: expiresAt }),
+    applyPresence: async () => true,
+    onApplied: value => seen.push({ statusDuration: value.statusDuration, statusExpiresAt: value.statusExpiresAt })
+  });
+  await sync.run();
+
+  assert.deepEqual(seen, [{ statusDuration: "30m", statusExpiresAt: expiresAt }]);
+});
+
+test("an unchanged presence is still reported, so a restarted bot still schedules the expiry", async () => {
+  const expiresAt = new Date(Date.now() + 60_000).toISOString();
+  let reports = 0;
+  const sync = createPresenceSync({
+    loadIdentity: async () => identity({ status: "dnd", statusDuration: "15m", statusExpiresAt: expiresAt }),
+    applyPresence: async () => true,
+    onApplied: () => (reports += 1)
+  });
+  await sync.run();
+  await sync.run();
+  await sync.run();
+
+  assert.equal(reports, 3, "every read reports, whether or not the gateway was told again");
+});

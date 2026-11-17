@@ -2702,13 +2702,62 @@ if (adapter) {
  * Everything else — nickname, avatar, banner, role colour, bio — is applied by
  * the dashboard itself so it can report each field's result to the operator.
  * ------------------------------------------------------------------ */
+/**
+ * Presence: instant where possible, bounded where not.
+ *
+ * `createPresenceSync` applies the row the dashboard wrote. Three things wake
+ * it, in order of precision:
+ *
+ *  1. `NOTIFY al_ai_presence` — the dashboard announces its write from the same
+ *     statement that saves it, so a status click reaches the gateway in
+ *     milliseconds instead of waiting for a tick.
+ *  2. A one-shot timer at the exact instant a timed status lapses. Without it a
+ *     `dnd` for 15 minutes would stay up to a tick past its window; the window
+ *     is derived from `statusExpiresAt`, which the dashboard computed from the
+ *     duration it stored.
+ *  3. A 60-second fallback tick. It exists for the cases the two above cannot
+ *     cover — a dropped LISTEN connection, or a row written by something other
+ *     than the dashboard — and it is the reason a failed notification is a
+ *     delay rather than a lost change.
+ */
+let presenceExpiryTimer: NodeJS.Timeout | null = null;
+let presenceExpiryTarget: number | null = null;
+
+function schedulePresenceExpiry(identity: { statusExpiresAt: string | null }) {
+  const expires = identity.statusExpiresAt ? Date.parse(identity.statusExpiresAt) : Number.NaN;
+  // No window at all, an open-ended one (`forever`), or one that has already
+  // lapsed: nothing to schedule. A lapsed window is applied as `online` by the
+  // run that just read it.
+  if (!Number.isFinite(expires) || expires <= Date.now()) return;
+  if (presenceExpiryTarget === expires && presenceExpiryTimer) return;
+  if (presenceExpiryTimer) clearTimeout(presenceExpiryTimer);
+  presenceExpiryTarget = expires;
+  // `setTimeout` stores a 32-bit delay, so clamp: a corrupt row must not turn
+  // into an immediate revert.
+  const delay = Math.min(expires - Date.now() + 500, 2_147_483_000);
+  presenceExpiryTimer = setTimeout(() => {
+    presenceExpiryTimer = null;
+    presenceExpiryTarget = null;
+    void presence.run();
+  }, delay);
+  presenceExpiryTimer.unref?.();
+}
+
 const presence = createPresenceSync({
   loadIdentity: () => database.loadBotIdentity(),
   applyPresence: value => applyBotPresence(client, value),
+  onApplied: schedulePresenceExpiry,
   onError: error => console.error("AL AI could not apply the presence", error)
 });
 
-const presenceTimer = setInterval(() => void presence.run(), 15_000);
+// The instant path. A listener that cannot be established is a warning, not a
+// failed boot: the fallback tick still applies the stored status.
+const stopPresenceWatch = await database.watchPresence(() => void presence.run()).catch(error => {
+  console.warn("AL AI presence listener unavailable; the fallback tick still applies the status", error);
+  return null;
+});
+
+const presenceTimer = setInterval(() => void presence.run(), 60_000);
 presenceTimer.unref?.();
 
 /* ------------------------------------------------------------------ *
@@ -2724,6 +2773,8 @@ async function shutdown(signal: string) {
   clearInterval(securityProbe);
   clearInterval(presenceTimer);
   clearInterval(downSweep);
+  if (presenceExpiryTimer) clearTimeout(presenceExpiryTimer);
+  await stopPresenceWatch?.().catch(() => undefined);
   await adapter?.close().catch(() => undefined);
   const flushed = await pipeline.flush(5_000);
   if (!flushed) console.warn("AL AI shutdown with undelivered log jobs.");
