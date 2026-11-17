@@ -21,6 +21,25 @@
  *   re-encoded PNG is often *larger* than the JPEG it came from.
  */
 
+/**
+ * Every type this product can store as an image, in one list.
+ *
+ * The pickers used to spell their own `accept` string, and the welcome-messages
+ * picker had dropped GIF from it while the validator beside it, the canvas
+ * fitter and the server's data-URL normaliser all accepted `image/gif`. The
+ * result was the worst kind of gap: a GIF could be imported from a URL and
+ * stored, but the file dialog greyed it out — the UI refusing an operation the
+ * rest of the stack performs.
+ *
+ * The list lives next to the module that decides how a picture is fitted, so
+ * adding a type means touching one place, and `image-fit.test.ts` pins it against
+ * what the core data-URL pattern accepts.
+ */
+export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+
+/** The `accept` attribute for a single-image file input. */
+export const IMAGE_ACCEPT = IMAGE_MIME_TYPES.join(",");
+
 export type FittedImage = {
   /** What to store: the original bytes when they fit, otherwise a re-encode. */
   dataUrl: string;
@@ -32,8 +51,7 @@ export type FittedImage = {
   downscaled: boolean;
 };
 
-/** Decodes a picked file into something drawable, without a canvas yet. */
-async function decode(file: File): Promise<{ source: CanvasImageSource; width: number; height: number; release: () => void }> {
+/** Decodes a picked file into something drawable, without a canvas yet. */async function decode(file: File): Promise<{ source: CanvasImageSource; width: number; height: number; release: () => void }> {
   // `createImageBitmap` applies EXIF orientation and is far cheaper than an
   // <img> round trip; the object-URL path is the fallback for older engines.
   if (typeof createImageBitmap === "function") {

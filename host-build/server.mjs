@@ -79900,6 +79900,23 @@ function resolveRoleIconWrite(input) {
   }
   return { value: input.value, deferred: null };
 }
+var MAX_CONCURRENT_IMAGE_IMPORTS = 3;
+var ImageImportBusyError = class extends Error {
+  constructor() {
+    super("\u0647\u0646\u0627\u0643 \u0639\u0645\u0644\u064A\u0627\u062A \u062C\u0644\u0628 \u0635\u0648\u0631 \u0643\u062B\u064A\u0631\u0629 \u0627\u0644\u0622\u0646. \u0627\u0646\u062A\u0638\u0631 \u0644\u062D\u0638\u0629 \u062B\u0645 \u0623\u0639\u062F \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629.");
+    this.name = "ImageImportBusyError";
+  }
+};
+var activeImageImports = 0;
+async function withImageImportSlot(run2) {
+  if (activeImageImports >= MAX_CONCURRENT_IMAGE_IMPORTS) throw new ImageImportBusyError();
+  activeImageImports += 1;
+  try {
+    return await run2();
+  } finally {
+    activeImageImports -= 1;
+  }
+}
 async function fetchImageAsDataUrl(url, maxBytes = MAX_IMAGE_UPLOAD_BYTES, deps = {}) {
   if (!/^https:\/\//i.test(url.trim())) throw new Error("\u0627\u0644\u0631\u0627\u0628\u0637 \u064A\u062C\u0628 \u0623\u0646 \u064A\u0628\u062F\u0623 \u0628\u0640 https://");
   const result = await fetchPublicImage(url.trim(), maxBytes, deps);
@@ -81978,8 +81995,11 @@ app.put("/api/guilds/:guildId/customization", async (request2, reply) => {
   const avatarUrlText = typeof body?.avatarUrl === "string" ? body.avatarUrl.trim() : "";
   if (body && avatarUrlText) {
     try {
-      body.avatarDataUrl = await fetchImageAsDataUrl(avatarUrlText);
+      body.avatarDataUrl = await withImageImportSlot(() => fetchImageAsDataUrl(avatarUrlText));
     } catch (cause) {
+      if (cause instanceof ImageImportBusyError) {
+        return reply.code(429).header("Retry-After", "5").send({ error: "IMAGE_IMPORT_BUSY", message: cause.message });
+      }
       return reply.code(400).send({
         error: "INVALID_AVATAR_URL",
         message: `\u0635\u0648\u0631\u0629 \u0627\u0644\u0633\u064A\u0631\u0641\u0631: ${cause instanceof Error ? cause.message : "\u062A\u0639\u0630\u0651\u0631 \u062C\u0644\u0628 \u0627\u0644\u0635\u0648\u0631\u0629 \u0645\u0646 \u0627\u0644\u0631\u0627\u0628\u0637."}`
@@ -81989,8 +82009,11 @@ app.put("/api/guilds/:guildId/customization", async (request2, reply) => {
   const bannerUrlText = typeof body?.bannerUrl === "string" ? body.bannerUrl.trim() : "";
   if (body && bannerUrlText) {
     try {
-      body.bannerDataUrl = await fetchImageAsDataUrl(bannerUrlText);
+      body.bannerDataUrl = await withImageImportSlot(() => fetchImageAsDataUrl(bannerUrlText));
     } catch (cause) {
+      if (cause instanceof ImageImportBusyError) {
+        return reply.code(429).header("Retry-After", "5").send({ error: "IMAGE_IMPORT_BUSY", message: cause.message });
+      }
       return reply.code(400).send({
         error: "INVALID_BANNER_URL",
         message: `\u063A\u0644\u0627\u0641 \u0627\u0644\u0633\u064A\u0631\u0641\u0631: ${cause instanceof Error ? cause.message : "\u062A\u0639\u0630\u0651\u0631 \u062C\u0644\u0628 \u0627\u0644\u0635\u0648\u0631\u0629 \u0645\u0646 \u0627\u0644\u0631\u0627\u0628\u0637."}`
@@ -82121,12 +82144,15 @@ app.post("/api/image/from-url", async (request2, reply) => {
     return reply.code(400).send({ error: "URL_REQUIRED", message: "\u0623\u062F\u062E\u0644 \u0631\u0627\u0628\u0637 \u0627\u0644\u0635\u0648\u0631\u0629." });
   }
   try {
-    const dataUrl = await fetchImageAsDataUrl(raw.trim());
+    const dataUrl = await withImageImportSlot(() => fetchImageAsDataUrl(raw.trim()));
     const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
     const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
     const bytes = Math.floor(base64.length * 3 / 4) - padding;
     return { dataUrl, bytes };
   } catch (cause) {
+    if (cause instanceof ImageImportBusyError) {
+      return reply.code(429).header("Retry-After", "5").send({ error: "IMAGE_IMPORT_BUSY", message: cause.message });
+    }
     return reply.code(400).send({
       error: "IMAGE_FETCH_FAILED",
       message: cause instanceof Error ? cause.message : "\u062A\u0639\u0630\u0651\u0631 \u062C\u0644\u0628 \u0627\u0644\u0635\u0648\u0631\u0629 \u0645\u0646 \u0647\u0630\u0627 \u0627\u0644\u0631\u0627\u0628\u0637."

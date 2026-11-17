@@ -289,3 +289,39 @@ test("an import that outlives its budget reports a timeout, not a hang", async (
     /وقتاً أطول/
   );
 });
+
+/* ------------------------------------------------------------------ *
+ * Spellings of loopback that a regex over dots never sees
+ *
+ * `isPublicHost` reads literals, but a name that *is* a loopback address in
+ * shorthand reaches `isPublicHost` as a hostname: `127.1`, `2130706433`,
+ * `0x7f000001`, `[::ffff:7f00:1]`. Node's own resolver accepts every one of
+ * them, so the only thing that stops the import is vetting the *resolved*
+ * address rather than the spelling the operator typed. These tests use the real
+ * resolver (numeric forms never touch the network) and a connector that fails
+ * the test if it is ever called.
+ */
+const neverConnected: Connector = async () => {
+  throw new Error("the connector must not run for a refused host");
+};
+
+for (const spelling of [
+  "https://127.0.0.1/a.png",
+  "https://127.1/a.png",
+  "https://2130706433/a.png",
+  "https://0x7f000001/a.png",
+  "https://[::1]/a.png",
+  "https://[::ffff:127.0.0.1]/a.png",
+  "https://[::ffff:7f00:1]/a.png",
+  "https://169.254.169.254/latest/meta-data/",
+  "https://localhost/a.png",
+  "https://127.0.0.1.nip.io/a.png"
+]) {
+  test(`the importer refuses ${spelling} before any connection`, async () => {
+    await assert.rejects(
+      () => fetchImageAsDataUrl(spelling, 2_000_000, { connect: neverConnected }),
+      /غير مسموح/,
+      `${spelling} must be refused as a private target`
+    );
+  });
+}

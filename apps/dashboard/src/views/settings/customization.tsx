@@ -9,6 +9,7 @@ import {
 } from "@al-ai/core/browser";
 import { api } from "@/api";
 import { useI18n, type Translate } from "@/lib/i18n";
+import { IMAGE_ACCEPT } from "@/lib/image-fit";
 import { useDraftForm } from "@/lib/use-draft-form";
 import { fitImageUnder } from "@/lib/image-fit";
 import { cn } from "@/lib/utils";
@@ -38,8 +39,6 @@ import type { CustomizationSettings, Guild, GuildProfileSnapshot, PermissionStat
  * What is NOT here is deliberate: the presence lives on the bot's gateway
  * connection and is identical in every server, so it keeps its own screen.
  */
-
-const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 
 /** Discord's own minimums, used to *warn* rather than to refuse. */
 const AVATAR_MIN_SIDE = 256;

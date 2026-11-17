@@ -345,3 +345,27 @@ test("choosing a channel unblocks the save, and the PUT carries that channel", a
     container.remove();
   }
 });
+
+/**
+ * The picker must offer everything the rest of the stack stores.
+ *
+ * A GIF could already be imported from a URL and saved — the validator in this
+ * file, the canvas fitter and the server's data-URL normaliser all accept
+ * `image/gif` — but the file dialog's `accept` list had never mentioned it, so
+ * the operator could not pick one from disk. Chrome greys those files out; the
+ * only visible symptom is "my GIF is missing from the dialog".
+ */
+test("the image picker offers GIF, because the save path accepts it", async () => {
+  const { container, root } = await mountScreen();
+  try {
+    const input = container.querySelector<HTMLInputElement>("input[type='file']");
+    assert.ok(input, "the screen owns one hidden file input");
+    const accept = (input.getAttribute("accept") ?? "").split(",").map(value => value.trim());
+    for (const type of ["image/png", "image/jpeg", "image/webp", "image/gif"]) {
+      assert.ok(accept.includes(type), `the picker filters out ${type}, which the screen can store`);
+    }
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});

@@ -741,6 +741,54 @@ export function resolveRoleIconWrite(input: {
  * gets the same policy with a different transport, which is how the
  * rebinding case is proved without a network.
  */
+/**
+ * How many imports may be in flight at once.
+ *
+ * Every import holds its chunks plus the base64 it produces — ~2 MB + ~2.7 MB
+ * for a file at the ceiling — inside an 80 MB heap on a 256 MB container. The
+ * route is behind a signed-in session, but a session is not a concurrency
+ * limit: a double-click, a second tab, or a script with a valid cookie could
+ * otherwise start as many as it liked and the OOM would arrive as a container
+ * kill that looks like "the bot restarted by itself".
+ *
+ * Three is measured, not guessed: 3 x ~5 MB is a sixth of the heap, and a
+ * single operator never imports three images at the same moment — a fourth
+ * concurrent request is a client loop, and it is told so.
+ */
+export const MAX_CONCURRENT_IMAGE_IMPORTS = 3;
+
+/** Raised when the import slots are all busy, so the route can answer 429. */
+export class ImageImportBusyError extends Error {
+  constructor() {
+    super("هناك عمليات جلب صور كثيرة الآن. انتظر لحظة ثم أعد المحاولة.");
+    this.name = "ImageImportBusyError";
+  }
+}
+
+let activeImageImports = 0;
+
+/**
+ * Runs one import while holding a slot, and never leaks the slot.
+ *
+ * `finally` is the whole point: an import that throws (a private host, a
+ * timeout, a body over the ceiling) has to give its slot back, or three failed
+ * attempts in a row would wedge the endpoint until the process restarted.
+ */
+export async function withImageImportSlot<T>(run: () => Promise<T>): Promise<T> {
+  if (activeImageImports >= MAX_CONCURRENT_IMAGE_IMPORTS) throw new ImageImportBusyError();
+  activeImageImports += 1;
+  try {
+    return await run();
+  } finally {
+    activeImageImports -= 1;
+  }
+}
+
+/** Slot count, for the test that proves the ceiling and the release path. */
+export function activeImageImportCount(): number {
+  return activeImageImports;
+}
+
 export async function fetchImageAsDataUrl(
   url: string,
   maxBytes = MAX_IMAGE_UPLOAD_BYTES,

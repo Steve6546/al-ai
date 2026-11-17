@@ -176,6 +176,8 @@ import {
   applyAppearance,
   changedAppearanceFields,
   fetchImageAsDataUrl,
+  withImageImportSlot,
+  ImageImportBusyError,
   invalidateBotAccountProfile,
   invalidateGuildMemberProfile,
   readBotAccountProfile,
@@ -3420,8 +3422,11 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
   const avatarUrlText = typeof body?.avatarUrl === "string" ? body.avatarUrl.trim() : "";
   if (body && avatarUrlText) {
     try {
-      body.avatarDataUrl = await fetchImageAsDataUrl(avatarUrlText);
+      body.avatarDataUrl = await withImageImportSlot(() => fetchImageAsDataUrl(avatarUrlText));
     } catch (cause) {
+      if (cause instanceof ImageImportBusyError) {
+        return reply.code(429).header("Retry-After", "5").send({ error: "IMAGE_IMPORT_BUSY", message: cause.message });
+      }
       return reply.code(400).send({
         error: "INVALID_AVATAR_URL",
         message: `صورة السيرفر: ${cause instanceof Error ? cause.message : "تعذّر جلب الصورة من الرابط."}`
@@ -3431,8 +3436,11 @@ app.put("/api/guilds/:guildId/customization", async (request, reply) => {
   const bannerUrlText = typeof body?.bannerUrl === "string" ? body.bannerUrl.trim() : "";
   if (body && bannerUrlText) {
     try {
-      body.bannerDataUrl = await fetchImageAsDataUrl(bannerUrlText);
+      body.bannerDataUrl = await withImageImportSlot(() => fetchImageAsDataUrl(bannerUrlText));
     } catch (cause) {
+      if (cause instanceof ImageImportBusyError) {
+        return reply.code(429).header("Retry-After", "5").send({ error: "IMAGE_IMPORT_BUSY", message: cause.message });
+      }
       return reply.code(400).send({
         error: "INVALID_BANNER_URL",
         message: `غلاف السيرفر: ${cause instanceof Error ? cause.message : "تعذّر جلب الصورة من الرابط."}`
@@ -3680,7 +3688,7 @@ app.post("/api/image/from-url", async (request, reply) => {
     return reply.code(400).send({ error: "URL_REQUIRED", message: "أدخل رابط الصورة." });
   }
   try {
-    const dataUrl = await fetchImageAsDataUrl(raw.trim());
+    const dataUrl = await withImageImportSlot(() => fetchImageAsDataUrl(raw.trim()));
     // The screen shows the imported size next to the preview. Decoded length,
     // not the base64 string's: the padding is not image data.
     const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
@@ -3688,6 +3696,11 @@ app.post("/api/image/from-url", async (request, reply) => {
     const bytes = Math.floor((base64.length * 3) / 4) - padding;
     return { dataUrl, bytes };
   } catch (cause) {
+    // Saturated, not broken: 429 tells the client to wait, where 400 would say
+    // the link itself was wrong and send the operator editing a valid URL.
+    if (cause instanceof ImageImportBusyError) {
+      return reply.code(429).header("Retry-After", "5").send({ error: "IMAGE_IMPORT_BUSY", message: cause.message });
+    }
     return reply.code(400).send({
       error: "IMAGE_FETCH_FAILED",
       message: cause instanceof Error ? cause.message : "تعذّر جلب الصورة من هذا الرابط."

@@ -3,7 +3,7 @@ import { AlertCircle, CheckCircle2, Image as ImageIcon, Info, Plus, Trash2, X } 
 import { api } from "@/api";
 import { useI18n, type Translate, type TranslationKey } from "@/lib/i18n";
 import { useDraftForm } from "@/lib/use-draft-form";
-import { fitImageUnder } from "@/lib/image-fit";
+import { fitImageUnder, IMAGE_ACCEPT } from "@/lib/image-fit";
 import { LoadError, LoadingRow } from "@/components/view-states";
 import { SaveBar } from "@/components/save-bar";
 import { Toaster, useToasts } from "@/components/toaster";
@@ -305,7 +305,7 @@ export function WelcomeMessagesView({ guild, sample }: { guild: Guild; sample: W
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/png,image/jpeg,image/webp"
+        accept={IMAGE_ACCEPT}
         className="hidden"
         aria-hidden
         tabIndex={-1}
