@@ -92,7 +92,7 @@ import {
   SESSION_COOKIE_NAMES
 } from "@al-ai/core";
 import { loadEnv } from "./env.js";
-import { checkRedirectRegistration } from "./oauth-preflight.js";
+import { checkRedirectRegistration, clientIdMismatch, describeMissingRegistration, type RedirectRegistration } from "./oauth-preflight.js";
 import { elevateFirewall, ensureFirewall, firewallStatus } from "./firewall.js";
 import { isPlatformOwner } from "./authorization.js";
 import { createDatabase, createPool } from "./db.js";
@@ -1231,8 +1231,84 @@ app.post("/api/network/firewall", async (request, reply) => {
   return report;
 });
 
+/**
+ * What the boot-time check learned about the OAuth callback, and the page that
+ * says so.
+ *
+ * Held in a module variable rather than re-queried per request: the answer only
+ * changes when the operator edits the portal, and a Discord round-trip on the
+ * sign-in path would add a failure mode to the one route that must not fail.
+ * `unknown` is the initial state, so a request that arrives before the check
+ * finishes behaves exactly as it did before this existed.
+ */
+let redirectRegistration: RedirectRegistration = {
+  status: "unknown",
+  redirectUri: env.redirectUri,
+  registered: [],
+  application: null,
+  reason: "the check has not finished yet"
+};
+
+/**
+ * The page a browser gets instead of Discord's dead end.
+ *
+ * Discord answers an unregistered callback with `Invalid OAuth2 redirect_uri`
+ * and nothing else — no application, no expected value, no place to fix it. The
+ * operator who has just pasted a URI into a portal then has to guess whether it
+ * saved, whether it went to the right application, or whether the deployment is
+ * sending something else. This page answers all three: the application Discord
+ * named, the exact string this deployment sends, and the list Discord holds.
+ */
+function oauthRegistrationPage(state: RedirectRegistration) {
+  const escapeHtml = (value: string) =>
+    value.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
+  const portal = state.application
+    ? `https://discord.com/developers/applications/${encodeURIComponent(state.application.id)}/oauth2`
+    : "https://discord.com/developers/applications";
+  const appLabel = state.application
+    ? `${escapeHtml(state.application.name)} — <code>${escapeHtml(state.application.id)}</code>`
+    : "التطبيق الذي يملك رمز البوت";
+  const registered = state.registered.length
+    ? state.registered.map(uri => `<li><code>${escapeHtml(uri)}</code></li>`).join("")
+    : "<li><em>لا شيء</em></li>";
+  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>AL AI — تسجيل الدخول متوقف</title>
+<meta name="robots" content="noindex"><style>
+body{font-family:system-ui,sans-serif;background:#0b1020;color:#e5e7eb;display:grid;place-items:center;min-height:100vh;margin:0;padding:24px}
+div{max-width:44rem;line-height:1.9}
+h1{font-size:1.35rem;margin:0 0 .5rem}
+code{dir:ltr;color:#6ee7b7;word-break:break-all;font-family:ui-monospace,monospace;font-size:.9em}
+ul{margin:.4rem 0 1rem;padding-inline-start:1.2rem}
+li{margin:.2rem 0}
+p{margin:.6rem 0}
+a{color:#6ee7b7}
+.note{color:#9ca3af;font-size:.9rem}
+</style></head><body><div>
+<h1>تسجيل الدخول متوقف قبل أن يبدأ</h1>
+<p>ديسكورد لا يعرف رابط العودة الذي يرسله هذا النشر، لذلك يرفض الطلب بصفحة
+<code>Invalid OAuth2 redirect_uri</code> بدل أن يعيدك إلى اللوحة.</p>
+<p><strong>التطبيق الذي ردّ عليه ديسكورد:</strong> ${appLabel}</p>
+<p><strong>الرابط الذي يرسله هذا النشر (أضفه حرفياً):</strong></p>
+<p><code>${escapeHtml(state.redirectUri)}</code></p>
+<p><strong>الروابط المسجّلة حالياً على ذلك التطبيق:</strong></p>
+<ul>${registered}</ul>
+<p><a href="${portal}" target="_blank" rel="noreferrer">افتح OAuth2 → Redirects لهذا التطبيق</a>
+ثم أضف الرابط أعلاه واحفظ، وأعد تحميل هذه الصفحة.</p>
+<p class="note">إن كان اسم التطبيق أعلاه ليس التطبيق الذي عدّلته، فالمشكلة أن الإعدادات ذُهبت إلى
+تطبيق آخر: يجب أن يشير <code>DISCORD_CLIENT_ID</code> و<code>BOT_TOKEN</code> إلى التطبيق نفسه.
+الواجهة البرمجية تقرأ هذه القائمة ولا تستطيع كتابتها.</p>
+</div></body></html>`;
+}
+
 app.get("/auth/discord/login", async (request, reply) => {
   const origin = requestOrigin(request);
+
+  // Known-broken beats "walk the operator into Discord's error page". When the
+  // boot check proved the callback is not registered, answer here with the
+  // application Discord named and the exact string to add, instead of a
+  // redirect that cannot possibly come back.
+  if (redirectRegistration.status === "missing") {
+    return reply.code(503).type("text/html; charset=utf-8").send(oauthRegistrationPage(redirectRegistration));
+  }
   const oauthOrigin = oauthOriginFor(origin);
   if (oauthOrigin !== origin) {
     if (oauthOrigin) {
@@ -4204,8 +4280,20 @@ try {
  * a deployment the operator needs to reach in order to fix it. This is the only
  * place the mismatch is visible before a browser hits Discord's error page.
  */
-void checkRedirectRegistration({ botToken: env.botToken, redirectUri: env.redirectUri }).then(warning => {
-  if (warning) app.log.warn({ redirectUri: env.redirectUri }, warning);
+void checkRedirectRegistration({ botToken: env.botToken, redirectUri: env.redirectUri }).then(state => {
+  redirectRegistration = state;
+  if (state.status === "unknown") {
+    app.log.info({ reason: state.reason }, "OAuth callback registration could not be checked");
+    return;
+  }
+  if (state.status === "missing") {
+    app.log.warn({ redirectUri: state.redirectUri, application: state.application }, describeMissingRegistration(state));
+  }
+  // The two-application trap: the callback can be registered on the token's
+  // application while the authorize URL names another one. Both facts are known
+  // here, so the comparison is free.
+  const mismatch = clientIdMismatch(env.clientId, state.application);
+  if (mismatch) app.log.error({ clientId: env.clientId, application: state.application }, mismatch);
 });
 
 /**

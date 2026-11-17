@@ -37,6 +37,14 @@ export type FirewallReport = {
   port: number;
   profiles: string[];
   detail: string;
+  /**
+   * Rules that actually admit this port, whoever created them.
+   *
+   * `status` answers "can a packet reach this port?", which another tool's
+   * rule can make true. Naming them is what lets the screen say *why* it is
+   * reachable instead of silently claiming credit for a rule AL AI never made.
+   */
+  covering?: string[];
   /** Present only on an explicit elevation request. */
   elevation?: { started: boolean; reason: string | null };
 };
@@ -67,7 +75,10 @@ function parse(stdout: string, port: number, detail: string): FirewallReport {
       ruleName: typeof parsed.ruleName === "string" ? parsed.ruleName : `AL AI Dashboard (TCP ${port})`,
       port,
       profiles: Array.isArray(parsed.profiles) ? parsed.profiles.filter((value): value is string => typeof value === "string") : [],
-      detail: typeof parsed.detail === "string" ? parsed.detail : detail
+      detail: typeof parsed.detail === "string" ? parsed.detail : detail,
+      covering: Array.isArray(parsed.covering)
+        ? parsed.covering.filter((value): value is string => typeof value === "string")
+        : undefined
     };
   } catch {
     return fallback(port, detail);
@@ -89,7 +100,12 @@ async function invoke(action: "status" | "ensure", port: number): Promise<Firewa
     String(port)
   ];
   try {
-    const { stdout } = await run("powershell.exe", args, { timeout: 20_000, windowsHide: true });
+    // `status` now enumerates every inbound rule and reads each one's port
+    // filter, because a port is reachable through any rule that admits it, not
+    // only through AL AI's. Measured at ~500 rules on a normal workstation, the
+    // walk takes a few seconds; the old 20 s budget left too little headroom on
+    // a busy machine for a read that must not fail.
+    const { stdout } = await run("powershell.exe", args, { timeout: 30_000, windowsHide: true });
     return parse(stdout, port, `${action} returned no report`);
   } catch (error) {
     // Exit 2 is the script's deliberate "needs elevation" answer, not a crash:

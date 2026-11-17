@@ -99,6 +99,23 @@ async function main() {
   for (const uri of registered) console.log(`   registered: ${uri}`);
   console.log("");
 
+  /*
+   * Which application answered matters as much as the URI list.
+   *
+   * The authorize URL is built from DISCORD_CLIENT_ID, while the redirect list
+   * read here belongs to whoever owns BOT_TOKEN. When those are two different
+   * applications — one created for the bot, another left over from earlier —
+   * the portal looks configured and every sign-in still fails, because the URI
+   * was added to the wrong one. Nothing else compares the pair.
+   */
+  let mismatchedApplication = false;
+  if (process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_ID !== app.id) {
+    console.log(`MISMATCH    DISCORD_CLIENT_ID is ${process.env.DISCORD_CLIENT_ID}, but BOT_TOKEN belongs to ${app.id} (${app.name}).`);
+    console.log("            The callback must be registered on the application named by DISCORD_CLIENT_ID,");
+    console.log("            and both variables must come from the same application.");
+    mismatchedApplication = true;
+  }
+
   const missing = [];
   for (const origin of origins) {
     const uri = `${origin}${path}`;
@@ -108,9 +125,13 @@ async function main() {
   }
 
   console.log("");
-  if (missing.length === 0) {
+  if (missing.length === 0 && !mismatchedApplication) {
     console.log(`every origin can complete sign-in (client id ${clientId})`);
     return 0;
+  }
+  if (mismatchedApplication) {
+    console.log("a redirect URI on the wrong application is still missing: fix the client id/token pair first.");
+    return 1;
   }
   console.log(`${missing.length} URI(s) are not registered. Add them in the Developer Portal → OAuth2 → Redirects;`);
   console.log("the API reads the list but does not write it.");

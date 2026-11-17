@@ -51211,14 +51211,14 @@ function loadEnv() {
 // apps/dashboard/server/oauth-preflight.ts
 var DISCORD_API = "https://discord.com/api/v10";
 var USER_AGENT = "DiscordBot (https://github.com/Steve6546/al-ai, 0.1.0)";
-function redirectRegistrationWarning(registered, redirectUri) {
-  if (!registered) return null;
-  if (registered.includes(redirectUri)) return null;
-  const listed = registered.length ? registered.join(", ") : "(none)";
-  return `Discord has not registered this deployment's OAuth callback: ${redirectUri}. Sign-in fails with \xABInvalid OAuth2 redirect_uri\xBB until it is added in the Developer Portal \u2192 OAuth2 \u2192 Redirects (the API reads the list but cannot write it). Currently registered: ${listed}.`;
+function describeMissingRegistration(state) {
+  const app2 = state.application ? `application ${state.application.id} (${state.application.name})` : "the application";
+  const listed = state.registered.length ? state.registered.join(", ") : "(none)";
+  return `Discord has not registered this deployment's OAuth callback on ${app2}: ${state.redirectUri}. Sign-in fails with \xABInvalid OAuth2 redirect_uri\xBB until it is added in the Developer Portal \u2192 OAuth2 \u2192 Redirects (the API reads the list but cannot write it). Currently registered: ${listed}.`;
 }
 async function checkRedirectRegistration(input) {
-  if (!input.botToken) return null;
+  const blank = { status: "unknown", redirectUri: input.redirectUri, registered: [], application: null };
+  if (!input.botToken) return { ...blank, reason: "BOT_TOKEN is not set" };
   const doFetch = input.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? 5e3);
@@ -51227,15 +51227,29 @@ async function checkRedirectRegistration(input) {
       headers: { Authorization: `Bot ${input.botToken}`, "User-Agent": USER_AGENT },
       signal: controller.signal
     });
-    if (!response.ok) return null;
+    if (!response.ok) return { ...blank, reason: `Discord answered ${response.status}` };
     const application = await response.json();
-    const registered = Array.isArray(application.redirect_uris) ? application.redirect_uris.filter((value) => typeof value === "string") : null;
-    return redirectRegistrationWarning(registered, input.redirectUri);
-  } catch {
-    return null;
+    if (!Array.isArray(application.redirect_uris)) {
+      return { ...blank, reason: "the application payload carried no redirect_uris" };
+    }
+    const registered = application.redirect_uris.filter((value) => typeof value === "string");
+    const identity = typeof application.id === "string" ? { id: application.id, name: typeof application.name === "string" ? application.name : "" } : null;
+    return {
+      status: registered.includes(input.redirectUri) ? "registered" : "missing",
+      redirectUri: input.redirectUri,
+      registered,
+      application: identity
+    };
+  } catch (error) {
+    return { ...blank, reason: error instanceof Error ? error.message : String(error) };
   } finally {
     clearTimeout(timer);
   }
+}
+function clientIdMismatch(clientId, application) {
+  if (!clientId || !application) return null;
+  if (clientId === application.id) return null;
+  return `DISCORD_CLIENT_ID is ${clientId}, but BOT_TOKEN belongs to application ${application.id} (${application.name}). The authorize URL is built from DISCORD_CLIENT_ID while the callback is registered on the token's application, so Discord rejects the pair. Point both at the same application.`;
 }
 
 // apps/dashboard/server/firewall.ts
@@ -51266,7 +51280,8 @@ function parse2(stdout, port, detail) {
       ruleName: typeof parsed.ruleName === "string" ? parsed.ruleName : `AL AI Dashboard (TCP ${port})`,
       port,
       profiles: Array.isArray(parsed.profiles) ? parsed.profiles.filter((value) => typeof value === "string") : [],
-      detail: typeof parsed.detail === "string" ? parsed.detail : detail
+      detail: typeof parsed.detail === "string" ? parsed.detail : detail,
+      covering: Array.isArray(parsed.covering) ? parsed.covering.filter((value) => typeof value === "string") : void 0
     };
   } catch {
     return fallback(port, detail);
@@ -51287,7 +51302,7 @@ async function invoke(action, port) {
     String(port)
   ];
   try {
-    const { stdout } = await run("powershell.exe", args, { timeout: 2e4, windowsHide: true });
+    const { stdout } = await run("powershell.exe", args, { timeout: 3e4, windowsHide: true });
     return parse2(stdout, port, `${action} returned no report`);
   } catch (error) {
     const stdout = String(error.stdout ?? "");
@@ -55429,8 +55444,50 @@ app.post("/api/network/firewall", async (request2, reply) => {
   });
   return report;
 });
+var redirectRegistration = {
+  status: "unknown",
+  redirectUri: env.redirectUri,
+  registered: [],
+  application: null,
+  reason: "the check has not finished yet"
+};
+function oauthRegistrationPage(state) {
+  const escapeHtml = (value) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+  const portal = state.application ? `https://discord.com/developers/applications/${encodeURIComponent(state.application.id)}/oauth2` : "https://discord.com/developers/applications";
+  const appLabel = state.application ? `${escapeHtml(state.application.name)} \u2014 <code>${escapeHtml(state.application.id)}</code>` : "\u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0627\u0644\u0630\u064A \u064A\u0645\u0644\u0643 \u0631\u0645\u0632 \u0627\u0644\u0628\u0648\u062A";
+  const registered = state.registered.length ? state.registered.map((uri) => `<li><code>${escapeHtml(uri)}</code></li>`).join("") : "<li><em>\u0644\u0627 \u0634\u064A\u0621</em></li>";
+  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>AL AI \u2014 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062A\u0648\u0642\u0641</title>
+<meta name="robots" content="noindex"><style>
+body{font-family:system-ui,sans-serif;background:#0b1020;color:#e5e7eb;display:grid;place-items:center;min-height:100vh;margin:0;padding:24px}
+div{max-width:44rem;line-height:1.9}
+h1{font-size:1.35rem;margin:0 0 .5rem}
+code{dir:ltr;color:#6ee7b7;word-break:break-all;font-family:ui-monospace,monospace;font-size:.9em}
+ul{margin:.4rem 0 1rem;padding-inline-start:1.2rem}
+li{margin:.2rem 0}
+p{margin:.6rem 0}
+a{color:#6ee7b7}
+.note{color:#9ca3af;font-size:.9rem}
+</style></head><body><div>
+<h1>\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062A\u0648\u0642\u0641 \u0642\u0628\u0644 \u0623\u0646 \u064A\u0628\u062F\u0623</h1>
+<p>\u062F\u064A\u0633\u0643\u0648\u0631\u062F \u0644\u0627 \u064A\u0639\u0631\u0641 \u0631\u0627\u0628\u0637 \u0627\u0644\u0639\u0648\u062F\u0629 \u0627\u0644\u0630\u064A \u064A\u0631\u0633\u0644\u0647 \u0647\u0630\u0627 \u0627\u0644\u0646\u0634\u0631\u060C \u0644\u0630\u0644\u0643 \u064A\u0631\u0641\u0636 \u0627\u0644\u0637\u0644\u0628 \u0628\u0635\u0641\u062D\u0629
+<code>Invalid OAuth2 redirect_uri</code> \u0628\u062F\u0644 \u0623\u0646 \u064A\u0639\u064A\u062F\u0643 \u0625\u0644\u0649 \u0627\u0644\u0644\u0648\u062D\u0629.</p>
+<p><strong>\u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0627\u0644\u0630\u064A \u0631\u062F\u0651 \u0639\u0644\u064A\u0647 \u062F\u064A\u0633\u0643\u0648\u0631\u062F:</strong> ${appLabel}</p>
+<p><strong>\u0627\u0644\u0631\u0627\u0628\u0637 \u0627\u0644\u0630\u064A \u064A\u0631\u0633\u0644\u0647 \u0647\u0630\u0627 \u0627\u0644\u0646\u0634\u0631 (\u0623\u0636\u0641\u0647 \u062D\u0631\u0641\u064A\u0627\u064B):</strong></p>
+<p><code>${escapeHtml(state.redirectUri)}</code></p>
+<p><strong>\u0627\u0644\u0631\u0648\u0627\u0628\u0637 \u0627\u0644\u0645\u0633\u062C\u0651\u0644\u0629 \u062D\u0627\u0644\u064A\u0627\u064B \u0639\u0644\u0649 \u0630\u0644\u0643 \u0627\u0644\u062A\u0637\u0628\u064A\u0642:</strong></p>
+<ul>${registered}</ul>
+<p><a href="${portal}" target="_blank" rel="noreferrer">\u0627\u0641\u062A\u062D OAuth2 \u2192 Redirects \u0644\u0647\u0630\u0627 \u0627\u0644\u062A\u0637\u0628\u064A\u0642</a>
+\u062B\u0645 \u0623\u0636\u0641 \u0627\u0644\u0631\u0627\u0628\u0637 \u0623\u0639\u0644\u0627\u0647 \u0648\u0627\u062D\u0641\u0638\u060C \u0648\u0623\u0639\u062F \u062A\u062D\u0645\u064A\u0644 \u0647\u0630\u0647 \u0627\u0644\u0635\u0641\u062D\u0629.</p>
+<p class="note">\u0625\u0646 \u0643\u0627\u0646 \u0627\u0633\u0645 \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0623\u0639\u0644\u0627\u0647 \u0644\u064A\u0633 \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0627\u0644\u0630\u064A \u0639\u062F\u0651\u0644\u062A\u0647\u060C \u0641\u0627\u0644\u0645\u0634\u0643\u0644\u0629 \u0623\u0646 \u0627\u0644\u0625\u0639\u062F\u0627\u062F\u0627\u062A \u0630\u064F\u0647\u0628\u062A \u0625\u0644\u0649
+\u062A\u0637\u0628\u064A\u0642 \u0622\u062E\u0631: \u064A\u062C\u0628 \u0623\u0646 \u064A\u0634\u064A\u0631 <code>DISCORD_CLIENT_ID</code> \u0648<code>BOT_TOKEN</code> \u0625\u0644\u0649 \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0646\u0641\u0633\u0647.
+\u0627\u0644\u0648\u0627\u062C\u0647\u0629 \u0627\u0644\u0628\u0631\u0645\u062C\u064A\u0629 \u062A\u0642\u0631\u0623 \u0647\u0630\u0647 \u0627\u0644\u0642\u0627\u0626\u0645\u0629 \u0648\u0644\u0627 \u062A\u0633\u062A\u0637\u064A\u0639 \u0643\u062A\u0627\u0628\u062A\u0647\u0627.</p>
+</div></body></html>`;
+}
 app.get("/auth/discord/login", async (request2, reply) => {
   const origin = requestOrigin(request2);
+  if (redirectRegistration.status === "missing") {
+    return reply.code(503).type("text/html; charset=utf-8").send(oauthRegistrationPage(redirectRegistration));
+  }
   const oauthOrigin = oauthOriginFor(origin);
   if (oauthOrigin !== origin) {
     if (oauthOrigin) {
@@ -57263,8 +57320,17 @@ try {
   await db.close().catch(() => void 0);
   process.exit(1);
 }
-void checkRedirectRegistration({ botToken: env.botToken, redirectUri: env.redirectUri }).then((warning) => {
-  if (warning) app.log.warn({ redirectUri: env.redirectUri }, warning);
+void checkRedirectRegistration({ botToken: env.botToken, redirectUri: env.redirectUri }).then((state) => {
+  redirectRegistration = state;
+  if (state.status === "unknown") {
+    app.log.info({ reason: state.reason }, "OAuth callback registration could not be checked");
+    return;
+  }
+  if (state.status === "missing") {
+    app.log.warn({ redirectUri: state.redirectUri, application: state.application }, describeMissingRegistration(state));
+  }
+  const mismatch = clientIdMismatch(env.clientId, state.application);
+  if (mismatch) app.log.error({ clientId: env.clientId, application: state.application }, mismatch);
 });
 async function shutdown(signal) {
   app.log.info({ signal }, "AL AI dashboard is shutting down");

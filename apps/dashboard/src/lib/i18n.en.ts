@@ -1712,7 +1712,7 @@ export const en = {
   "network.firewallUac": "Windows will ask for permission on this machine (UAC).",
   "network.firewallFailed": "Could not open the port. Run PowerShell as Administrator, then retry.",
   "network.vpnTitle": "VPN detected",
-  "network.vpnBody": "An active VPN adapter ({adapters}) can stop a phone on the same Wi-Fi from reaching {host}. Allow local LAN traffic in the VPN, or turn it off while testing.",
+  "network.vpnBody": "An active VPN adapter ({adapters}) can stop a phone on the same Wi-Fi from reaching {host}. Allow the local subnet {subnet} in the VPN's split-tunnel settings instead of turning it off — or turn it off just for this test.",
   "network.callbackTitle": "One step in Discord",
   "network.callbackBody": "Discord accepts HTTPS only outside this device — register the tunnel address in Developer Portal → OAuth2 → Redirects.",
   "network.openPortal": "Open the portal",

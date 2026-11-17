@@ -262,6 +262,17 @@ export function NetworkView() {
     lanEntries.find(entry => entry.host === snapshot.primaryLanHost)?.url ?? lanUrls[0]?.url ?? null;
   const qrUrl = (primaryLanUrl ?? `http://localhost:${snapshot.port}`).trim();
   const qrPayload = /^https?:\/\/[^\s]+$/.test(qrUrl) ? qrUrl : null;
+  /*
+   * The subnet a VPN has to let through, derived from the address the phone is
+   * told to open. "Turn the VPN off" is advice, not a fix: a full-tunnel client
+   * captures 0.0.0.0/0, so the phone's request reaches the machine and the reply
+   * leaves through the tunnel — the connection dies on the way back. Allowing
+   * this one prefix (split tunnel) keeps the VPN on and the LAN working, which
+   * is what the operator actually wants.
+   */
+  const vpnSubnet = /^\d{1,3}(\.\d{1,3}){3}$/.test(snapshot.primaryLanHost ?? "")
+    ? `${(snapshot.primaryLanHost as string).split(".").slice(0, 3).join(".")}.0/24`
+    : "";
   const tunnelUrl = snapshot.tunnelUrl;
   const status = tunnelStatusCopy[snapshot.tunnelStatus];
 
@@ -478,7 +489,7 @@ export function NetworkView() {
             <div className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
               <p className="font-medium text-warning">{t("network.vpnTitle")}</p>
               <p className="mt-0.5 text-muted-foreground">
-                {t("network.vpnBody", { adapters: (snapshot.vpnAdapters ?? []).join(", "), host: qrUrl })}
+                {t("network.vpnBody", { adapters: (snapshot.vpnAdapters ?? []).join(", "), host: qrUrl, subnet: vpnSubnet })}
               </p>
             </div>
           )}

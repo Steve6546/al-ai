@@ -1611,7 +1611,7 @@ export const de: Record<TranslationKey, string> = {
   "network.firewallUac": "Windows fragt auf diesem Rechner nach einer Bestätigung (UAC).",
   "network.firewallFailed": "Der Port konnte nicht geöffnet werden. PowerShell als Administrator starten und erneut versuchen.",
   "network.vpnTitle": "VPN erkannt",
-  "network.vpnBody": "Ein aktives VPN-Adapter ({adapters}) kann verhindern, dass ein Telefon im selben WLAN {host} erreicht. Lokalen LAN-Verkehr im VPN erlauben oder das VPN beim Testen ausschalten.",
+  "network.vpnBody": "Ein aktives VPN-Adapter ({adapters}) kann verhindern, dass ein Telefon im selben WLAN {host} erreicht. Erlaube das lokale Subnetz {subnet} im Split-Tunnel des VPN, statt es abzuschalten — oder schalte es nur für diesen Test aus.",
   "network.callbackTitle": "Ein Schritt in Discord",
   "network.callbackBody": "Discord akzeptiert HTTPS nur außerhalb dieses Geräts – registrieren Sie die Tunneladresse im Entwicklerportal → OAuth2 → Weiterleitungen.",
   "network.openPortal": "Öffnen Sie das Portal",

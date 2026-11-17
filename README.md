@@ -218,23 +218,49 @@ below are in the order the portal shows them; do them once, top to bottom.
 
 - Enable **User Install** *and* **Guild Install**.
 - **Guild Install → Scopes:** `bot` + `applications.commands`.
-- **Guild Install → Permissions:** `Manage Roles`, `Manage Channels`,
-  `Moderate Members`, `Send Messages`, `View Audit Log`, `Embed Links`,
-  `Read Message History`.
-- **Install Link:** `Discord Provided Link`. Copy it; that is the URL you open to
-  add the bot to a server (there is no need to hand-build an invite URL).
-- `Manage Roles` is the one that matters most: without it the bot cannot create
-  its own role and logs `DiscordAPIError[50013] Missing Permissions` at startup.
-  The bot still runs — it just never gets the role.
+- **Guild Install → Permissions:** `Administrator`.
+  This is not a shortcut: the dashboard's invite URL asks for exactly
+  `BOT_INVITE_PERMISSIONS` (`packages/core/src/discord-permissions.ts`), which is
+  the Administrator bit (`8`), and `apps/bot/test/discord-standards.test.ts`
+  pins it. A hand-picked subset looks safer and is how the bot ends up unable to
+  perform its own commands — an earlier invite asked for `MODERATE_MEMBERS`
+  instead and silently disabled most of them.
+- **Install Link:** open the dashboard and press **«أضف البوت»** (or
+  `GET /api/bot/invite`). That URL carries `permissions=8`, the scopes, and the
+  guild you are configuring.
+  - **Do not use the portal's «Discord Provided Link» to invite.** It carries no
+    `permissions` parameter, so the bot joins with **zero** permissions and then
+    logs `DiscordAPIError[50013] Missing Permissions` when it tries to create its
+    own role. That failure is the invite, not the code.
+- The **Bot Permissions** checkboxes on the *OAuth2 → URL Generator* tab only
+  affect links generated on that page. The dashboard does not use them. Ticking
+  `Administrator` there keeps hand-made links consistent; leaving them empty does
+  not change what the dashboard sends.
 
 ### 3. OAuth2
 
-- **Redirects:** exactly **one** entry, matching `DISCORD_REDIRECT_URI` byte for
-  byte — same scheme, same host, **no trailing slash**, no duplicate rows.
+- **Redirects:** list **every origin this deployment is actually served at**, each
+  entry byte-exact — same scheme, same host, **no trailing slash**.
   - local: `http://localhost:3000/auth/discord/callback`
-  - hosted: `https://<your-domain>/auth/discord/callback`
-  - Any difference is the entire cause of `Invalid OAuth2 redirect_uri`. The
-    portal also rejects `http://` for anything except `localhost`/`127.0.0.1`.
+  - tunnel: `https://<your-ngrok-domain>/auth/discord/callback`
+  - managed host: `https://<your-subdomain>/auth/discord/callback`
+  - Discord accepts several entries; what it will not accept is a request whose
+    URI matches **none** of them. The portal also rejects `http://` for anything
+    except `localhost`/`127.0.0.1`.
+  - **Verify, don't trust the panel:** `npm run check:oauth:preflight` prints
+    `REGISTERED` or `MISSING` per origin and exits non-zero on a miss. The
+    dashboard also checks once at boot and refuses to send you to Discord with a
+    page that names the application and the exact missing URI.
+  - **The list is read-only through the API.** `PATCH /applications/@me` with
+    `redirect_uris` returns 200 and changes nothing, so the portal is the only
+    place to edit it.
+- **Which application?** The redirect list belongs to *one* application. The
+  authorize URL is built from `DISCORD_CLIENT_ID`; the token in `BOT_TOKEN`
+  belongs to another application unless you copied both from the same page.
+  Adding the callback to the wrong application leaves the portal looking correct
+  and the deployment broken — this happened, and it is why the boot check reports
+  the application name. `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` and
+  `BOT_TOKEN` must all come from the **same** application.
 - **Client ID** → `DISCORD_CLIENT_ID`. **Client Secret** → `DISCORD_CLIENT_SECRET`
   (use *Reset Secret* if it is not visible; the old one stops working).
 - **Scopes used by the dashboard login:** `identify` + `guilds`. These are
@@ -247,11 +273,13 @@ below are in the order the portal shows them; do them once, top to bottom.
 - **Privileged Gateway Intents:**
   - `SERVER MEMBERS INTENT` — **ON** (role and member resolution)
   - `MESSAGE CONTENT INTENT` — **ON** (commands and moderation read message text)
-  - `PRESENCE INTENT` — **leave OFF**. The code never subscribes to it
-    (`apps/bot/src/lib/discord.ts` requests `GuildMembers` and `MessageContent`
-    only). Turning it on changes nothing functionally, adds a stream of presence
-    events to a 256 MB container, and drags the app into Discord's verification
-    requirement past 100 guilds.
+  - `PRESENCE INTENT` — **leave OFF**. The code never subscribes to it: the
+    privileged intents in `apps/bot/src/lib/discord.ts` are `GuildMembers` and
+    `MessageContent`; `GuildPresences` is absent. The portal switch on its own
+    sends nothing — Discord streams presence only to a client that asked for the
+    intent — so leaving it on is harmless today, but it buys nothing and becomes
+    a verification liability if a future version subscribes. Turn it off and the
+    deployment behaves identically.
 - **Public Bot** — on. **Requires OAuth2 Code Grant** — off.
 
 ### 5. Server role hierarchy (in the guild, not the portal)
@@ -261,6 +289,42 @@ below are in the order the portal shows them; do them once, top to bottom.
 - A bot can only act on roles strictly **below** its own highest role. This is
   the other half of `50013`: correct permissions with a low position still fail.
 - Keep `Manage Roles` granted on the bot's role itself, not only on the invite.
+
+## Network access — what the switch changes
+
+«الوصول للشبكة» is one instance-wide setting with three modes. What a mode does
+depends on **where the deployment runs**, and that difference is the source of
+most confusion on this screen.
+
+| Mode | Workstation (`npm run dev`) | Managed host (Bot-Hosting) |
+|---|---|---|
+| **off** | loopback only: `http://localhost:3000` works, a phone on the router gets `403 REMOTE_ACCESS_DISABLED` | **no effect on the public URL** — `AL_AI_PLATFORM_HOST` is matched exactly and admits the platform's proxy before the mode is consulted |
+| **lan** | adds this machine's private addresses, so `http://192.168.x.x:3000` works **after** the firewall rule exists | the same LAN behaviour inside the container network; the public URL is unchanged |
+| **tunnel** | starts the ngrok agent and adds its hostname (`https://<domain>`) | nothing to tunnel — the platform already publishes the domain, so the mode is a no-op |
+
+Why `off` still serves the public URL on a managed host: the gate is
+`isHostAllowed(host, …)` in `apps/dashboard/server/network.ts`, and
+`AL_AI_PLATFORM_HOST` is checked first — an exact hostname match returns true
+whatever the mode is. That is deliberate. The mode describes *what this process
+publishes*; on a managed host the platform publishes, not this process.
+
+What actually differs per host:
+
+- **Firewall — workstation only.** Windows drops the packet before the app sees
+  it, so `scripts/firewall.ps1` must own an inbound TCP rule for the port; the
+  screen's «افتح المنفذ» button runs it elevated. The rule is `Profile=Any` on
+  purpose: Windows classifies most home Wi-Fi as **Public**, and a
+  `Private,Domain` rule is created and still admits nobody. On a managed host
+  there is no host firewall to open — the platform's proxy reaches the container
+  port directly.
+- **VPN — workstation only**, and the usual reason a LAN URL fails while the
+  server is healthy. A full-tunnel client captures the default route, so the
+  phone's request arrives and the reply leaves through the tunnel. Allow the local
+  subnet shown on the screen (`192.168.x.0/24`) in the VPN's split-tunnel
+  settings; turning the VPN off is a test, not a fix.
+- **`AL_AI_REMOTE_ACCESS`** is a one-process override used by `scripts/dev.ps1`
+  (`off` / `lan` / `tunnel`). It never writes the saved setting — the switch in
+  the screen is the only thing that persists a mode.
 
 ## Bot-Hosting panel — every surface
 

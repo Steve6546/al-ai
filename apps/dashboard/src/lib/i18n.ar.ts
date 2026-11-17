@@ -1642,7 +1642,7 @@ export const ar: Record<TranslationKey, string> = {
   "network.firewallUac": "سيطلب Windows إذناً على هذا الجهاز (UAC).",
   "network.firewallFailed": "تعذّر فتح المنفذ. شغّل PowerShell كمسؤول ثم أعد المحاولة.",
   "network.vpnTitle": "VPN مكتشفة",
-  "network.vpnBody": "محوّل VPN نشط ({adapters}) قد يمنع جوالاً على نفس Wi-Fi من الوصول إلى {host}. اسمح بحركة الشبكة المحلية داخل VPN أو أوقفه أثناء الاختبار.",
+  "network.vpnBody": "محوّل VPN نشط ({adapters}) قد يمنع جوالاً على نفس Wi-Fi من الوصول إلى {host}. اسمح بالشبكة المحلية {subnet} داخل إعدادات VPN (Split Tunneling) بدل إطفائه، أو أوقفه أثناء الاختبار فقط.",
   "network.callbackTitle": "خطوة واحدة في Discord",
   "network.callbackBody": "ديسكورد يقبل HTTPS فقط خارج هذا الجهاز — سجّل رابط النفق في Developer Portal ← OAuth2 ← Redirects.",
   "network.openPortal": "فتح البورتال",

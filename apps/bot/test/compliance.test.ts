@@ -135,8 +135,22 @@ test("the intent renewal date parses and its due date lands a year out", () => {
 
   const tracker = createIntentUsageTracker({ renewedAt: plane.intents.renewedAt });
   assert.equal(tracker.stats().renewalDue, false, "a freshly renewed instance is not already overdue");
+
+  /*
+   * Derived, not hard-coded. This asserted `days > 300` against a fixture dated
+   * 2026-09-13, so it passed for exactly 65 days and then failed on its own —
+   * a test that measured the calendar instead of the code. The property that
+   * matters is that the due date is `renewalDays` after `renewedAt`, which holds
+   * on every day of the year.
+   */
+  const day = 24 * 60 * 60 * 1000;
+  const expected = Math.ceil((renewedAt + plane.intents.renewalDays * day - Date.now()) / day);
   const days = tracker.stats().daysUntilRenewal;
-  assert.ok(days !== null && days > 300 && days <= plane.intents.renewalDays, "roughly a year remains");
+  assert.ok(days !== null, "daysUntilRenewal is a number");
+  assert.ok(
+    Math.abs(days! - expected) <= 1,
+    `the due date is renewalDays after renewedAt (expected ~${expected}, got ${days})`
+  );
 });
 
 test("each settled section documents the decision behind its value", () => {
