@@ -3043,8 +3043,10 @@ var require_error_status = __commonJS({
     } = require_symbols2();
     function setErrorStatusCode(reply, err) {
       if (!reply[kReplyHasStatusCode] || reply.statusCode === 200) {
-        const statusCode = err && (err.statusCode || err.status);
-        reply.code(statusCode >= 400 ? statusCode : 500);
+        let statusCode = 500;
+        if (err?.statusCode >= 400 && err.statusCode <= 599) statusCode = err.statusCode;
+        else if (err?.status >= 400 && err.status <= 599) statusCode = err.status;
+        reply.code(statusCode);
       }
     }
     module.exports = { setErrorStatusCode };
@@ -4500,7 +4502,7 @@ var require_config_validator = __commonJS({
     "use strict";
     module.exports = validate10;
     module.exports.default = validate10;
-    var schema11 = { "type": "object", "additionalProperties": false, "properties": { "connectionTimeout": { "type": "integer", "default": 0 }, "keepAliveTimeout": { "type": "integer", "default": 72e3 }, "forceCloseConnections": { "oneOf": [{ "type": "string", "pattern": "idle" }, { "type": "boolean" }] }, "maxRequestsPerSocket": { "type": "integer", "default": 0, "nullable": true }, "requestTimeout": { "type": "integer", "default": 0 }, "handlerTimeout": { "type": "integer", "default": 0 }, "bodyLimit": { "type": "integer", "default": 1048576 }, "caseSensitive": { "type": "boolean", "default": true }, "allowUnsafeRegex": { "type": "boolean", "default": false }, "http2": { "type": "boolean" }, "https": { "if": { "not": { "oneOf": [{ "type": "boolean" }, { "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["allowHTTP1"], "properties": { "allowHTTP1": { "type": "boolean" } } }] } }, "then": { "setDefaultValue": true } }, "ignoreTrailingSlash": { "type": "boolean", "default": false }, "ignoreDuplicateSlashes": { "type": "boolean", "default": false }, "disableRequestLogging": { "default": false }, "maxParamLength": { "type": "integer", "default": 100 }, "onProtoPoisoning": { "type": "string", "default": "error" }, "onConstructorPoisoning": { "type": "string", "default": "error" }, "pluginTimeout": { "type": "integer", "default": 1e4 }, "requestIdHeader": { "anyOf": [{ "type": "boolean" }, { "type": "string" }], "default": false }, "requestIdLogLabel": { "type": "string", "default": "reqId" }, "http2SessionTimeout": { "type": "integer", "default": 72e3 }, "exposeHeadRoutes": { "type": "boolean", "default": true }, "useSemicolonDelimiter": { "type": "boolean", "default": false }, "routerOptions": { "type": "object", "additionalProperties": true, "properties": { "ignoreTrailingSlash": { "type": "boolean", "default": false }, "ignoreDuplicateSlashes": { "type": "boolean", "default": false }, "maxParamLength": { "type": "integer", "default": 100 }, "allowUnsafeRegex": { "type": "boolean", "default": false }, "useSemicolonDelimiter": { "type": "boolean", "default": false } } }, "constraints": { "type": "object", "additionalProperties": { "type": "object", "required": ["name", "storage", "validate", "deriveConstraint"], "additionalProperties": true, "properties": { "name": { "type": "string" }, "storage": {}, "validate": {}, "deriveConstraint": {} } } } } };
+    var schema11 = { "type": "object", "additionalProperties": false, "properties": { "connectionTimeout": { "type": "integer", "default": 0 }, "keepAliveTimeout": { "type": "integer", "default": 72e3 }, "forceCloseConnections": { "oneOf": [{ "type": "string", "pattern": "idle" }, { "type": "boolean" }] }, "maxRequestsPerSocket": { "type": "integer", "default": 0, "nullable": true }, "requestTimeout": { "type": "integer", "default": 0 }, "handlerTimeout": { "type": "integer", "default": 0 }, "bodyLimit": { "type": "integer", "default": 1048576 }, "caseSensitive": { "type": "boolean", "default": true }, "allowUnsafeRegex": { "type": "boolean", "default": false }, "http2": { "type": "boolean" }, "https": { "if": { "not": { "oneOf": [{ "type": "boolean" }, { "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["allowHTTP1"], "properties": { "allowHTTP1": { "type": "boolean" } } }] } }, "then": { "setDefaultValue": true } }, "ignoreTrailingSlash": { "type": "boolean", "default": false }, "ignoreDuplicateSlashes": { "type": "boolean", "default": false }, "disableRequestLogging": { "default": false }, "maxParamLength": { "type": "integer", "default": 100 }, "onProtoPoisoning": { "type": "string", "default": "error" }, "onConstructorPoisoning": { "type": "string", "default": "error" }, "pluginTimeout": { "type": "integer", "default": 1e4 }, "requestIdHeader": { "anyOf": [{ "type": "boolean" }, { "type": "string" }], "default": false }, "requestIdLogLabel": { "type": "string", "default": "reqId" }, "http2SessionTimeout": { "type": "integer", "default": 72e3 }, "exposeHeadRoutes": { "type": "boolean", "default": true }, "useSemicolonDelimiter": { "type": "boolean", "default": false }, "routerOptions": { "type": "object", "additionalProperties": true, "properties": { "compile": { "type": "boolean", "default": false }, "ignoreTrailingSlash": { "type": "boolean", "default": false }, "ignoreDuplicateSlashes": { "type": "boolean", "default": false }, "maxParamLength": { "type": "integer", "default": 100 }, "allowUnsafeRegex": { "type": "boolean", "default": false }, "useSemicolonDelimiter": { "type": "boolean", "default": false } } }, "constraints": { "type": "object", "additionalProperties": { "type": "object", "required": ["name", "storage", "validate", "deriveConstraint"], "additionalProperties": true, "properties": { "name": { "type": "string" }, "storage": {}, "validate": {}, "deriveConstraint": {} } } } } };
     var func2 = Object.prototype.hasOwnProperty;
     var pattern0 = new RegExp("idle", "u");
     function validate10(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
@@ -5421,6 +5423,9 @@ var require_config_validator = __commonJS({
                                                           const _errs69 = errors;
                                                           if (errors === _errs69) {
                                                             if (data23 && typeof data23 == "object" && !Array.isArray(data23)) {
+                                                              if (data23.compile === void 0) {
+                                                                data23.compile = false;
+                                                              }
                                                               if (data23.ignoreTrailingSlash === void 0) {
                                                                 data23.ignoreTrailingSlash = false;
                                                               }
@@ -5436,7 +5441,7 @@ var require_config_validator = __commonJS({
                                                               if (data23.useSemicolonDelimiter === void 0) {
                                                                 data23.useSemicolonDelimiter = false;
                                                               }
-                                                              let data24 = data23.ignoreTrailingSlash;
+                                                              let data24 = data23.compile;
                                                               const _errs72 = errors;
                                                               if (typeof data24 !== "boolean") {
                                                                 let coerced26 = void 0;
@@ -5446,20 +5451,20 @@ var require_config_validator = __commonJS({
                                                                   } else if (data24 === "true" || data24 === 1) {
                                                                     coerced26 = true;
                                                                   } else {
-                                                                    validate10.errors = [{ instancePath: instancePath + "/routerOptions/ignoreTrailingSlash", schemaPath: "#/properties/routerOptions/properties/ignoreTrailingSlash/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                                                                    validate10.errors = [{ instancePath: instancePath + "/routerOptions/compile", schemaPath: "#/properties/routerOptions/properties/compile/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                                                                     return false;
                                                                   }
                                                                 }
                                                                 if (coerced26 !== void 0) {
                                                                   data24 = coerced26;
                                                                   if (data23 !== void 0) {
-                                                                    data23["ignoreTrailingSlash"] = coerced26;
+                                                                    data23["compile"] = coerced26;
                                                                   }
                                                                 }
                                                               }
                                                               var valid7 = _errs72 === errors;
                                                               if (valid7) {
-                                                                let data25 = data23.ignoreDuplicateSlashes;
+                                                                let data25 = data23.ignoreTrailingSlash;
                                                                 const _errs74 = errors;
                                                                 if (typeof data25 !== "boolean") {
                                                                   let coerced27 = void 0;
@@ -5469,65 +5474,65 @@ var require_config_validator = __commonJS({
                                                                     } else if (data25 === "true" || data25 === 1) {
                                                                       coerced27 = true;
                                                                     } else {
-                                                                      validate10.errors = [{ instancePath: instancePath + "/routerOptions/ignoreDuplicateSlashes", schemaPath: "#/properties/routerOptions/properties/ignoreDuplicateSlashes/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                                                                      validate10.errors = [{ instancePath: instancePath + "/routerOptions/ignoreTrailingSlash", schemaPath: "#/properties/routerOptions/properties/ignoreTrailingSlash/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                                                                       return false;
                                                                     }
                                                                   }
                                                                   if (coerced27 !== void 0) {
                                                                     data25 = coerced27;
                                                                     if (data23 !== void 0) {
-                                                                      data23["ignoreDuplicateSlashes"] = coerced27;
+                                                                      data23["ignoreTrailingSlash"] = coerced27;
                                                                     }
                                                                   }
                                                                 }
                                                                 var valid7 = _errs74 === errors;
                                                                 if (valid7) {
-                                                                  let data26 = data23.maxParamLength;
+                                                                  let data26 = data23.ignoreDuplicateSlashes;
                                                                   const _errs76 = errors;
-                                                                  if (!(typeof data26 == "number" && (!(data26 % 1) && !isNaN(data26)) && isFinite(data26))) {
-                                                                    let dataType28 = typeof data26;
+                                                                  if (typeof data26 !== "boolean") {
                                                                     let coerced28 = void 0;
                                                                     if (!(coerced28 !== void 0)) {
-                                                                      if (dataType28 === "boolean" || data26 === null || dataType28 === "string" && data26 && data26 == +data26 && !(data26 % 1)) {
-                                                                        coerced28 = +data26;
+                                                                      if (data26 === "false" || data26 === 0 || data26 === null) {
+                                                                        coerced28 = false;
+                                                                      } else if (data26 === "true" || data26 === 1) {
+                                                                        coerced28 = true;
                                                                       } else {
-                                                                        validate10.errors = [{ instancePath: instancePath + "/routerOptions/maxParamLength", schemaPath: "#/properties/routerOptions/properties/maxParamLength/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                                                                        validate10.errors = [{ instancePath: instancePath + "/routerOptions/ignoreDuplicateSlashes", schemaPath: "#/properties/routerOptions/properties/ignoreDuplicateSlashes/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                                                                         return false;
                                                                       }
                                                                     }
                                                                     if (coerced28 !== void 0) {
                                                                       data26 = coerced28;
                                                                       if (data23 !== void 0) {
-                                                                        data23["maxParamLength"] = coerced28;
+                                                                        data23["ignoreDuplicateSlashes"] = coerced28;
                                                                       }
                                                                     }
                                                                   }
                                                                   var valid7 = _errs76 === errors;
                                                                   if (valid7) {
-                                                                    let data27 = data23.allowUnsafeRegex;
+                                                                    let data27 = data23.maxParamLength;
                                                                     const _errs78 = errors;
-                                                                    if (typeof data27 !== "boolean") {
+                                                                    if (!(typeof data27 == "number" && (!(data27 % 1) && !isNaN(data27)) && isFinite(data27))) {
+                                                                      let dataType29 = typeof data27;
                                                                       let coerced29 = void 0;
                                                                       if (!(coerced29 !== void 0)) {
-                                                                        if (data27 === "false" || data27 === 0 || data27 === null) {
-                                                                          coerced29 = false;
-                                                                        } else if (data27 === "true" || data27 === 1) {
-                                                                          coerced29 = true;
+                                                                        if (dataType29 === "boolean" || data27 === null || dataType29 === "string" && data27 && data27 == +data27 && !(data27 % 1)) {
+                                                                          coerced29 = +data27;
                                                                         } else {
-                                                                          validate10.errors = [{ instancePath: instancePath + "/routerOptions/allowUnsafeRegex", schemaPath: "#/properties/routerOptions/properties/allowUnsafeRegex/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                                                                          validate10.errors = [{ instancePath: instancePath + "/routerOptions/maxParamLength", schemaPath: "#/properties/routerOptions/properties/maxParamLength/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
                                                                           return false;
                                                                         }
                                                                       }
                                                                       if (coerced29 !== void 0) {
                                                                         data27 = coerced29;
                                                                         if (data23 !== void 0) {
-                                                                          data23["allowUnsafeRegex"] = coerced29;
+                                                                          data23["maxParamLength"] = coerced29;
                                                                         }
                                                                       }
                                                                     }
                                                                     var valid7 = _errs78 === errors;
                                                                     if (valid7) {
-                                                                      let data28 = data23.useSemicolonDelimiter;
+                                                                      let data28 = data23.allowUnsafeRegex;
                                                                       const _errs80 = errors;
                                                                       if (typeof data28 !== "boolean") {
                                                                         let coerced30 = void 0;
@@ -5537,18 +5542,42 @@ var require_config_validator = __commonJS({
                                                                           } else if (data28 === "true" || data28 === 1) {
                                                                             coerced30 = true;
                                                                           } else {
-                                                                            validate10.errors = [{ instancePath: instancePath + "/routerOptions/useSemicolonDelimiter", schemaPath: "#/properties/routerOptions/properties/useSemicolonDelimiter/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                                                                            validate10.errors = [{ instancePath: instancePath + "/routerOptions/allowUnsafeRegex", schemaPath: "#/properties/routerOptions/properties/allowUnsafeRegex/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                                                                             return false;
                                                                           }
                                                                         }
                                                                         if (coerced30 !== void 0) {
                                                                           data28 = coerced30;
                                                                           if (data23 !== void 0) {
-                                                                            data23["useSemicolonDelimiter"] = coerced30;
+                                                                            data23["allowUnsafeRegex"] = coerced30;
                                                                           }
                                                                         }
                                                                       }
                                                                       var valid7 = _errs80 === errors;
+                                                                      if (valid7) {
+                                                                        let data29 = data23.useSemicolonDelimiter;
+                                                                        const _errs82 = errors;
+                                                                        if (typeof data29 !== "boolean") {
+                                                                          let coerced31 = void 0;
+                                                                          if (!(coerced31 !== void 0)) {
+                                                                            if (data29 === "false" || data29 === 0 || data29 === null) {
+                                                                              coerced31 = false;
+                                                                            } else if (data29 === "true" || data29 === 1) {
+                                                                              coerced31 = true;
+                                                                            } else {
+                                                                              validate10.errors = [{ instancePath: instancePath + "/routerOptions/useSemicolonDelimiter", schemaPath: "#/properties/routerOptions/properties/useSemicolonDelimiter/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                                                                              return false;
+                                                                            }
+                                                                          }
+                                                                          if (coerced31 !== void 0) {
+                                                                            data29 = coerced31;
+                                                                            if (data23 !== void 0) {
+                                                                              data23["useSemicolonDelimiter"] = coerced31;
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                        var valid7 = _errs82 === errors;
+                                                                      }
                                                                     }
                                                                   }
                                                                 }
@@ -5564,39 +5593,39 @@ var require_config_validator = __commonJS({
                                                         }
                                                         if (valid0) {
                                                           if (data.constraints !== void 0) {
-                                                            let data29 = data.constraints;
-                                                            const _errs82 = errors;
-                                                            if (errors === _errs82) {
-                                                              if (data29 && typeof data29 == "object" && !Array.isArray(data29)) {
-                                                                for (const key2 in data29) {
-                                                                  let data30 = data29[key2];
-                                                                  const _errs85 = errors;
-                                                                  if (errors === _errs85) {
-                                                                    if (data30 && typeof data30 == "object" && !Array.isArray(data30)) {
+                                                            let data30 = data.constraints;
+                                                            const _errs84 = errors;
+                                                            if (errors === _errs84) {
+                                                              if (data30 && typeof data30 == "object" && !Array.isArray(data30)) {
+                                                                for (const key2 in data30) {
+                                                                  let data31 = data30[key2];
+                                                                  const _errs87 = errors;
+                                                                  if (errors === _errs87) {
+                                                                    if (data31 && typeof data31 == "object" && !Array.isArray(data31)) {
                                                                       let missing1;
-                                                                      if (data30.name === void 0 && (missing1 = "name") || data30.storage === void 0 && (missing1 = "storage") || data30.validate === void 0 && (missing1 = "validate") || data30.deriveConstraint === void 0 && (missing1 = "deriveConstraint")) {
+                                                                      if (data31.name === void 0 && (missing1 = "name") || data31.storage === void 0 && (missing1 = "storage") || data31.validate === void 0 && (missing1 = "validate") || data31.deriveConstraint === void 0 && (missing1 = "deriveConstraint")) {
                                                                         validate10.errors = [{ instancePath: instancePath + "/constraints/" + key2.replace(/~/g, "~0").replace(/\//g, "~1"), schemaPath: "#/properties/constraints/additionalProperties/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
                                                                         return false;
                                                                       } else {
-                                                                        if (data30.name !== void 0) {
-                                                                          let data31 = data30.name;
-                                                                          if (typeof data31 !== "string") {
-                                                                            let dataType31 = typeof data31;
-                                                                            let coerced31 = void 0;
-                                                                            if (!(coerced31 !== void 0)) {
-                                                                              if (dataType31 == "number" || dataType31 == "boolean") {
-                                                                                coerced31 = "" + data31;
-                                                                              } else if (data31 === null) {
-                                                                                coerced31 = "";
+                                                                        if (data31.name !== void 0) {
+                                                                          let data32 = data31.name;
+                                                                          if (typeof data32 !== "string") {
+                                                                            let dataType32 = typeof data32;
+                                                                            let coerced32 = void 0;
+                                                                            if (!(coerced32 !== void 0)) {
+                                                                              if (dataType32 == "number" || dataType32 == "boolean") {
+                                                                                coerced32 = "" + data32;
+                                                                              } else if (data32 === null) {
+                                                                                coerced32 = "";
                                                                               } else {
                                                                                 validate10.errors = [{ instancePath: instancePath + "/constraints/" + key2.replace(/~/g, "~0").replace(/\//g, "~1") + "/name", schemaPath: "#/properties/constraints/additionalProperties/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                                                                 return false;
                                                                               }
                                                                             }
-                                                                            if (coerced31 !== void 0) {
-                                                                              data31 = coerced31;
-                                                                              if (data30 !== void 0) {
-                                                                                data30["name"] = coerced31;
+                                                                            if (coerced32 !== void 0) {
+                                                                              data32 = coerced32;
+                                                                              if (data31 !== void 0) {
+                                                                                data31["name"] = coerced32;
                                                                               }
                                                                             }
                                                                           }
@@ -5607,7 +5636,7 @@ var require_config_validator = __commonJS({
                                                                       return false;
                                                                     }
                                                                   }
-                                                                  var valid8 = _errs85 === errors;
+                                                                  var valid8 = _errs87 === errors;
                                                                   if (!valid8) {
                                                                     break;
                                                                   }
@@ -5617,7 +5646,7 @@ var require_config_validator = __commonJS({
                                                                 return false;
                                                               }
                                                             }
-                                                            var valid0 = _errs82 === errors;
+                                                            var valid0 = _errs84 === errors;
                                                           } else {
                                                             var valid0 = true;
                                                           }
@@ -5653,7 +5682,7 @@ var require_config_validator = __commonJS({
       validate10.errors = vErrors;
       return errors === 0;
     }
-    module.exports.defaultInitOptions = { "connectionTimeout": 0, "keepAliveTimeout": 72e3, "maxRequestsPerSocket": 0, "requestTimeout": 0, "handlerTimeout": 0, "bodyLimit": 1048576, "caseSensitive": true, "allowUnsafeRegex": false, "disableRequestLogging": false, "ignoreTrailingSlash": false, "ignoreDuplicateSlashes": false, "maxParamLength": 100, "onProtoPoisoning": "error", "onConstructorPoisoning": "error", "pluginTimeout": 1e4, "requestIdHeader": false, "requestIdLogLabel": "reqId", "http2SessionTimeout": 72e3, "exposeHeadRoutes": true, "useSemicolonDelimiter": false, "allowErrorHandlerOverride": true, "routerOptions": { "ignoreTrailingSlash": false, "ignoreDuplicateSlashes": false, "maxParamLength": 100, "allowUnsafeRegex": false, "useSemicolonDelimiter": false } };
+    module.exports.defaultInitOptions = { "connectionTimeout": 0, "keepAliveTimeout": 72e3, "maxRequestsPerSocket": 0, "requestTimeout": 0, "handlerTimeout": 0, "bodyLimit": 1048576, "caseSensitive": true, "allowUnsafeRegex": false, "disableRequestLogging": false, "ignoreTrailingSlash": false, "ignoreDuplicateSlashes": false, "maxParamLength": 100, "onProtoPoisoning": "error", "onConstructorPoisoning": "error", "pluginTimeout": 1e4, "requestIdHeader": false, "requestIdLogLabel": "reqId", "http2SessionTimeout": 72e3, "exposeHeadRoutes": true, "useSemicolonDelimiter": false, "allowErrorHandlerOverride": true, "routerOptions": { "compile": false, "ignoreTrailingSlash": false, "ignoreDuplicateSlashes": false, "maxParamLength": 100, "allowUnsafeRegex": false, "useSemicolonDelimiter": false } };
   }
 });
 
@@ -11128,10 +11157,18 @@ var require_error_handler = __commonJS({
       const context = reply[kRouteContext];
       if (reply[kReplyNextErrorHandler] === false) {
         fallbackErrorHandler(error, reply, function(reply2, payload) {
+          if (reply2.raw.headersSent === true || reply2.raw.destroyed === true) {
+            reply2.raw.destroy(error);
+            return;
+          }
           try {
             reply2.raw.writeHead(reply2.raw.statusCode, reply2[kReplyHeaders]);
           } catch (error2) {
             reply2.server[kLogController].writeHeadError(error2, reply2.request, reply2);
+            if (error2.code === "ERR_HTTP_HEADERS_SENT" || reply2.raw.headersSent === true || reply2.raw.destroyed === true) {
+              reply2.raw.destroy(error2);
+              return;
+            }
             reply2.raw.writeHead(reply2.raw.statusCode);
           }
           reply2.raw.end(payload);
@@ -11211,15 +11248,15 @@ var require_error_handler = __commonJS({
     function setErrorHeaders(error, reply) {
       const res = reply.raw;
       let statusCode = res.statusCode;
-      statusCode = statusCode >= 400 ? statusCode : 500;
+      statusCode = statusCode >= 400 && statusCode <= 599 ? statusCode : 500;
       if (error != null) {
         if (error.headers !== void 0) {
           reply.headers(error.headers);
         }
-        if (error.status >= 400) {
-          statusCode = error.status;
-        } else if (error.statusCode >= 400) {
+        if (error.statusCode >= 400 && error.statusCode <= 599) {
           statusCode = error.statusCode;
+        } else if (error.status >= 400 && error.status <= 599) {
+          statusCode = error.status;
         }
       }
       res.statusCode = statusCode;
@@ -11267,10 +11304,11 @@ var require_decorate = __commonJS({
       if (!checkExistence(this, name)) {
         throw new FST_ERR_DEC_UNDECLARED(name, "instance");
       }
-      if (typeof this[name] === "function") {
-        return this[name].bind(this);
+      const decorator = this[name];
+      if (typeof decorator === "function") {
+        return decorator.bind(this);
       }
-      return this[name];
+      return decorator;
     }
     function decorateConstructor(konstructor, name, fn, dependencies) {
       const instance = konstructor.prototype;
@@ -12036,7 +12074,6 @@ var require_reply = __commonJS({
     function sendStream(payload, res, reply) {
       let sourceOpen = true;
       let errorLogged = false;
-      sendStreamTrailer(payload, res, reply);
       eos(payload, { readable: true, writable: false }, function(err) {
         sourceOpen = false;
         if (err != null) {
@@ -12049,6 +12086,10 @@ var require_reply = __commonJS({
           } else {
             onErrorHook(reply, err);
           }
+          return;
+        }
+        if (reply[kReplyTrailers] !== null) {
+          sendTrailer(null, res, reply);
         }
       });
       eos(res, function(err) {
@@ -12075,7 +12116,11 @@ var require_reply = __commonJS({
       } else {
         reply.log.warn("response will send, but you shouldn't use res.writeHead in stream mode");
       }
-      payload.pipe(res);
+      if (reply[kReplyTrailers] !== null) {
+        payload.pipe(res, { end: false });
+      } else {
+        payload.pipe(res);
+      }
     }
     function sendTrailer(payload, res, reply) {
       if (reply[kReplyTrailers] === null) {
@@ -12113,10 +12158,6 @@ var require_reply = __commonJS({
         }
       }
       if (skipped) res.end(null, null, null);
-    }
-    function sendStreamTrailer(payload, res, reply) {
-      if (reply[kReplyTrailers] === null) return;
-      payload.on("end", () => sendTrailer(null, res, reply));
     }
     function onErrorHook(reply, error, cb) {
       if (reply[kRouteContext].onError !== null && !reply[kReplyNextErrorHandler]) {
@@ -13284,6 +13325,7 @@ var require_request = __commonJS({
     var { FST_ERR_REQ_INVALID_VALIDATION_INVOCATION, FST_ERR_DEC_UNDECLARED } = require_errors2();
     var decorators = require_decorate();
     var ContentType = require_content_type();
+    var PORT_REGEX = /(?<port>:\d+)$/;
     var HTTP_PART_SYMBOL_MAP = {
       body: kSchemaBody,
       headers: kSchemaHeaders,
@@ -13491,8 +13533,7 @@ var require_request = __commonJS({
       },
       port: {
         get() {
-          const portReg = /(?<port>:\d+)$/;
-          const matches = portReg.exec(this.host);
+          const matches = PORT_REGEX.exec(this.host);
           if (matches === null || matches[1] === void 0) {
             return null;
           }
@@ -13976,7 +14017,13 @@ var require_content_type_parser = __commonJS({
         );
         return;
       }
-      const result = parser.fn(request2, request2[kRequestPayloadStream], done);
+      let result;
+      try {
+        result = parser.fn(request2, request2[kRequestPayloadStream], done);
+      } catch (error) {
+        done(error, void 0);
+        return;
+      }
       if (result && typeof result.then === "function") {
         result.then((body) => {
           done(null, body);
@@ -14045,7 +14092,13 @@ var require_content_type_parser = __commonJS({
         } else {
           body = Buffer.concat(chunks, receivedLength);
         }
-        const result = parser.fn(request2, body, done);
+        let result;
+        try {
+          result = parser.fn(request2, body, done);
+        } catch (error) {
+          done(error, void 0);
+          return;
+        }
         if (result && typeof result.then === "function") {
           result.then((body2) => {
             done(null, body2);
@@ -31101,7 +31154,7 @@ var require_types3 = __commonJS({
       types3[types3["REPETITION"] = 5] = "REPETITION";
       types3[types3["REFERENCE"] = 6] = "REFERENCE";
       types3[types3["CHAR"] = 7] = "CHAR";
-    })(types2 = exports.types || (exports.types = {}));
+    })(types2 || (exports.types = types2 = {}));
   }
 });
 
@@ -31119,9 +31172,13 @@ var require_types4 = __commonJS({
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
-      Object.defineProperty(o, k2, { enumerable: true, get: function() {
-        return m[k];
-      } });
+      var desc = Object.getOwnPropertyDescriptor(m, k);
+      if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+        desc = { enumerable: true, get: function() {
+          return m[k];
+        } };
+      }
+      Object.defineProperty(o, k2, desc);
     }) : (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
       o[k2] = m[k];
@@ -31173,13 +31230,20 @@ var require_sets = __commonJS({
       { type: types_1.types.CHAR, value: 8232 },
       { type: types_1.types.CHAR, value: 8233 }
     ];
-    exports.words = () => ({ type: types_1.types.SET, set: WORDS(), not: false });
-    exports.notWords = () => ({ type: types_1.types.SET, set: WORDS(), not: true });
-    exports.ints = () => ({ type: types_1.types.SET, set: INTS(), not: false });
-    exports.notInts = () => ({ type: types_1.types.SET, set: INTS(), not: true });
-    exports.whitespace = () => ({ type: types_1.types.SET, set: WHITESPACE(), not: false });
-    exports.notWhitespace = () => ({ type: types_1.types.SET, set: WHITESPACE(), not: true });
-    exports.anyChar = () => ({ type: types_1.types.SET, set: NOTANYCHAR(), not: true });
+    var words = () => ({ type: types_1.types.SET, set: WORDS(), not: false });
+    exports.words = words;
+    var notWords = () => ({ type: types_1.types.SET, set: WORDS(), not: true });
+    exports.notWords = notWords;
+    var ints = () => ({ type: types_1.types.SET, set: INTS(), not: false });
+    exports.ints = ints;
+    var notInts = () => ({ type: types_1.types.SET, set: INTS(), not: true });
+    exports.notInts = notInts;
+    var whitespace = () => ({ type: types_1.types.SET, set: WHITESPACE(), not: false });
+    exports.whitespace = whitespace;
+    var notWhitespace = () => ({ type: types_1.types.SET, set: WHITESPACE(), not: true });
+    exports.notWhitespace = notWhitespace;
+    var anyChar = () => ({ type: types_1.types.SET, set: NOTANYCHAR(), not: true });
+    exports.anyChar = anyChar;
   }
 });
 
@@ -31189,9 +31253,13 @@ var require_util2 = __commonJS({
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
-      Object.defineProperty(o, k2, { enumerable: true, get: function() {
-        return m[k];
-      } });
+      var desc = Object.getOwnPropertyDescriptor(m, k);
+      if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+        desc = { enumerable: true, get: function() {
+          return m[k];
+        } };
+      }
+      Object.defineProperty(o, k2, desc);
     }) : (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
       o[k2] = m[k];
@@ -31201,21 +31269,31 @@ var require_util2 = __commonJS({
     }) : function(o, v) {
       o["default"] = v;
     });
-    var __importStar = exports && exports.__importStar || function(mod) {
-      if (mod && mod.__esModule) return mod;
-      var result = {};
-      if (mod != null) {
-        for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-      }
-      __setModuleDefault(result, mod);
-      return result;
-    };
+    var __importStar = exports && exports.__importStar || /* @__PURE__ */ (function() {
+      var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function(o2) {
+          var ar = [];
+          for (var k in o2) if (Object.prototype.hasOwnProperty.call(o2, k)) ar[ar.length] = k;
+          return ar;
+        };
+        return ownKeys(o);
+      };
+      return function(mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) {
+          for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        }
+        __setModuleDefault(result, mod);
+        return result;
+      };
+    })();
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.tokenizeClass = exports.strToChars = void 0;
     var types_1 = require_types4();
     var sets = __importStar(require_sets());
     var CTRL = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^ ?";
-    exports.strToChars = (str) => {
+    var strToChars = (str) => {
       const charsRegex = /(\[\\b\])|(\\)?\\(?:u([A-F0-9]{4})|x([A-F0-9]{2})|c([@A-Z[\\\]^?])|([0tnvfr]))/g;
       return str.replace(charsRegex, (s, b, lbs, a16, b16, dctrl, eslsh) => {
         if (lbs) {
@@ -31233,7 +31311,8 @@ var require_util2 = __commonJS({
         return /[[\]{}^$.|?*+()]/.test(c) ? `\\${c}` : c;
       });
     };
-    exports.tokenizeClass = (str, regexpStr) => {
+    exports.strToChars = strToChars;
+    var tokenizeClass = (str, regexpStr = "") => {
       var _a, _b, _c, _d, _e, _f, _g;
       let tokens = [], rs, c;
       const regexp = /\\(?:(w)|(d)|(s)|(W)|(D)|(S))|((?:(?:\\)(.)|([^\]\\]))-(((?:\\)])|(((?:\\)?([^\]])))))|(\])|(?:\\)?([^])/g;
@@ -31251,6 +31330,7 @@ var require_util2 = __commonJS({
       }
       throw new SyntaxError(`Invalid regular expression: /${regexpStr}/: Unterminated character class`);
     };
+    exports.tokenizeClass = tokenizeClass;
   }
 });
 
@@ -31260,9 +31340,13 @@ var require_tokenizer = __commonJS({
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
-      Object.defineProperty(o, k2, { enumerable: true, get: function() {
-        return m[k];
-      } });
+      var desc = Object.getOwnPropertyDescriptor(m, k);
+      if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+        desc = { enumerable: true, get: function() {
+          return m[k];
+        } };
+      }
+      Object.defineProperty(o, k2, desc);
     }) : (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
       o[k2] = m[k];
@@ -31272,15 +31356,25 @@ var require_tokenizer = __commonJS({
     }) : function(o, v) {
       o["default"] = v;
     });
-    var __importStar = exports && exports.__importStar || function(mod) {
-      if (mod && mod.__esModule) return mod;
-      var result = {};
-      if (mod != null) {
-        for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-      }
-      __setModuleDefault(result, mod);
-      return result;
-    };
+    var __importStar = exports && exports.__importStar || /* @__PURE__ */ (function() {
+      var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function(o2) {
+          var ar = [];
+          for (var k in o2) if (Object.prototype.hasOwnProperty.call(o2, k)) ar[ar.length] = k;
+          return ar;
+        };
+        return ownKeys(o);
+      };
+      return function(mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) {
+          for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        }
+        __setModuleDefault(result, mod);
+        return result;
+      };
+    })();
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.tokenizer = void 0;
     var util = __importStar(require_util2());
@@ -31289,7 +31383,7 @@ var require_tokenizer = __commonJS({
     var captureGroupFirstChar = /^[a-zA-Z_$]$/i;
     var captureGroupChars = /^[a-zA-Z0-9_$]$/i;
     var digit = /\d/;
-    exports.tokenizer = (regexpStr) => {
+    var tokenizer = (regexpStr) => {
       let i = 0, c;
       let start = { type: types_1.types.ROOT, stack: [] };
       let lastGroup = start;
@@ -31405,9 +31499,6 @@ var require_tokenizer = __commonJS({
                   name += str[i];
                   i++;
                 }
-                if (!name) {
-                  throw new SyntaxError(`Invalid regular expression: /${regexpStr}/: Invalid capture group name, character '${str[i]}' after '<' at column ${i + 1}`);
-                }
                 if (str[i] !== ">") {
                   throw new SyntaxError(`Invalid regular expression: /${regexpStr}/: Unclosed capture group name, expected '>', found '${str[i]}' at column ${i + 1}`);
                 }
@@ -31521,6 +31612,7 @@ var require_tokenizer = __commonJS({
       updateReferences(referenceQueue, groupCount);
       return start;
     };
+    exports.tokenizer = tokenizer;
     function updateReferences(referenceQueue, groupCount) {
       for (const elem of referenceQueue.reverse()) {
         if (groupCount < elem.reference.value) {
@@ -31561,9 +31653,13 @@ var require_sets_lookup = __commonJS({
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
-      Object.defineProperty(o, k2, { enumerable: true, get: function() {
-        return m[k];
-      } });
+      var desc = Object.getOwnPropertyDescriptor(m, k);
+      if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+        desc = { enumerable: true, get: function() {
+          return m[k];
+        } };
+      }
+      Object.defineProperty(o, k2, desc);
     }) : (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
       o[k2] = m[k];
@@ -31573,15 +31669,25 @@ var require_sets_lookup = __commonJS({
     }) : function(o, v) {
       o["default"] = v;
     });
-    var __importStar = exports && exports.__importStar || function(mod) {
-      if (mod && mod.__esModule) return mod;
-      var result = {};
-      if (mod != null) {
-        for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-      }
-      __setModuleDefault(result, mod);
-      return result;
-    };
+    var __importStar = exports && exports.__importStar || /* @__PURE__ */ (function() {
+      var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function(o2) {
+          var ar = [];
+          for (var k in o2) if (Object.prototype.hasOwnProperty.call(o2, k)) ar[ar.length] = k;
+          return ar;
+        };
+        return ownKeys(o);
+      };
+      return function(mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) {
+          for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        }
+        __setModuleDefault(result, mod);
+        return result;
+      };
+    })();
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.NOTANYCHAR = exports.WHITESPACE = exports.WORDS = exports.INTS = void 0;
     var Sets = __importStar(require_sets());
@@ -31616,9 +31722,13 @@ var require_write_set_tokens = __commonJS({
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
-      Object.defineProperty(o, k2, { enumerable: true, get: function() {
-        return m[k];
-      } });
+      var desc = Object.getOwnPropertyDescriptor(m, k);
+      if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+        desc = { enumerable: true, get: function() {
+          return m[k];
+        } };
+      }
+      Object.defineProperty(o, k2, desc);
     }) : (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
       o[k2] = m[k];
@@ -31628,23 +31738,33 @@ var require_write_set_tokens = __commonJS({
     }) : function(o, v) {
       o["default"] = v;
     });
-    var __importStar = exports && exports.__importStar || function(mod) {
-      if (mod && mod.__esModule) return mod;
-      var result = {};
-      if (mod != null) {
-        for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-      }
-      __setModuleDefault(result, mod);
-      return result;
-    };
+    var __importStar = exports && exports.__importStar || /* @__PURE__ */ (function() {
+      var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function(o2) {
+          var ar = [];
+          for (var k in o2) if (Object.prototype.hasOwnProperty.call(o2, k)) ar[ar.length] = k;
+          return ar;
+        };
+        return ownKeys(o);
+      };
+      return function(mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) {
+          for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        }
+        __setModuleDefault(result, mod);
+        return result;
+      };
+    })();
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.writeSetTokens = exports.setChar = void 0;
+    exports.setChar = setChar;
+    exports.writeSetTokens = writeSetTokens;
     var types_1 = require_types4();
     var sets = __importStar(require_sets_lookup());
     function setChar(charCode) {
       return charCode === 94 ? "\\^" : charCode === 92 ? "\\\\" : charCode === 93 ? "\\]" : charCode === 45 ? "\\-" : String.fromCharCode(charCode);
     }
-    exports.setChar = setChar;
     function isSameSet(set, { lookup: lookup2, len }) {
       if (len !== set.length) {
         return false;
@@ -31684,7 +31804,6 @@ var require_write_set_tokens = __commonJS({
       const contents = `${set.not ? "^" : ""}${tokenString}`;
       return isNested ? contents : `[${contents}]`;
     }
-    exports.writeSetTokens = writeSetTokens;
     function writeSetToken(set) {
       if (set.type === types_1.types.CHAR) {
         return setChar(set.value);
@@ -31714,7 +31833,7 @@ var require_reconstruct = __commonJS({
         throw new Error(`options or stack must be Root or Group token`);
       }
     };
-    exports.reconstruct = (token) => {
+    var reconstruct = (token) => {
       switch (token.type) {
         case types_1.types.ROOT:
           return createAlternate(token);
@@ -31731,7 +31850,7 @@ var require_reconstruct = __commonJS({
         case types_1.types.REFERENCE:
           return `\\${token.value}`;
         case types_1.types.SET:
-          return write_set_tokens_1.writeSetTokens(token);
+          return (0, write_set_tokens_1.writeSetTokens)(token);
         case types_1.types.GROUP: {
           const prefix = token.name ? `?<${token.name}>` : token.remember ? "" : token.followedBy ? "?=" : token.notFollowedBy ? "?!" : "?:";
           return `(${prefix}${createAlternate(token)})`;
@@ -31752,14 +31871,15 @@ var require_reconstruct = __commonJS({
           } else {
             endWith = `{${min},${max}}`;
           }
-          return `${exports.reconstruct(token.value)}${endWith}`;
+          return `${(0, exports.reconstruct)(token.value)}${endWith}`;
         }
         case types_1.types.RANGE:
-          return `${write_set_tokens_1.setChar(token.from)}-${write_set_tokens_1.setChar(token.to)}`;
+          return `${(0, write_set_tokens_1.setChar)(token.from)}-${(0, write_set_tokens_1.setChar)(token.to)}`;
         default:
           throw new Error(`Invalid token type ${token}`);
       }
     };
+    exports.reconstruct = reconstruct;
   }
 });
 
@@ -31769,9 +31889,13 @@ var require_dist3 = __commonJS({
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
-      Object.defineProperty(o, k2, { enumerable: true, get: function() {
-        return m[k];
-      } });
+      var desc = Object.getOwnPropertyDescriptor(m, k);
+      if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+        desc = { enumerable: true, get: function() {
+          return m[k];
+        } };
+      }
+      Object.defineProperty(o, k2, desc);
     }) : (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
       o[k2] = m[k];
@@ -32085,11 +32209,12 @@ var require_handler_storage = __commonJS({
         }
       }
       _compileCreateParamsObject(params) {
-        const fnBody = [];
-        fnBody.push("const fn = function _createParamsObject (paramsArray) {");
+        const fnBody = ["'use strict'"];
+        fnBody.push("const fn = function _createParamsObject (param0, param1, param2, param3, extraParams) {");
         fnBody.push("const params = new NullObject()");
         for (let i = 0; i < params.length; i++) {
-          fnBody.push(`params['${params[i]}'] = paramsArray[${i}]`);
+          const value = i < 4 ? `param${i}` : `extraParams[${i - 4}]`;
+          fnBody.push(`params[${JSON.stringify(params[i])}] = ${value}`);
         }
         fnBody.push("return params");
         fnBody.push("}");
@@ -32138,10 +32263,10 @@ var require_handler_storage = __commonJS({
           this.constrainedHandlerStores[constraint] = store;
           this._buildConstraintStore(store, constraint);
         }
-        const lines = [];
+        const lines = ["'use strict'"];
         lines.push(`
     let candidates = ${(1 << this.handlers.length) - 1}
-    let mask, matches
+    let mask, matches, value
     `);
         for (const constraint of this.constraints) {
           lines.push(`
@@ -32185,11 +32310,45 @@ var require_node = __commonJS({
       PARAMETRIC: 1,
       WILDCARD: 2
     };
+    var LONG_PREFIX_MIN_LENGTH = 16;
+    function matchSingleCharPrefix() {
+      return true;
+    }
+    function compilePrefixMatch(prefix) {
+      if (prefix.length === 1) {
+        return matchSingleCharPrefix;
+      }
+      if (prefix.length >= LONG_PREFIX_MIN_LENGTH) {
+        return function matchLongPrefix(path, i) {
+          return path.indexOf(prefix, i) === i;
+        };
+      }
+      const lines = [];
+      for (let i = 1; i < prefix.length; i++) {
+        const charCode = prefix.charCodeAt(i);
+        lines.push(`path.charCodeAt(i + ${i}) === ${charCode}`);
+      }
+      return new Function("path", "i", `'use strict'
+return ${lines.join(" && ")}`);
+    }
     var Node = class {
-      constructor() {
+      constructor(kind, prefix, regex, staticSuffix, nodePath) {
+        this.kind = kind;
+        this.prefix = prefix;
         this.isLeafNode = false;
         this.routes = null;
         this.handlerStorage = null;
+        this.staticChildrenCharCodes = [];
+        this.staticChildrenNodes = [];
+        this.parametricChildren = [];
+        this.wildcardChild = null;
+        this.matchPrefix = kind === NODE_TYPES.STATIC ? compilePrefixMatch(prefix) : null;
+        this.isRegex = regex != null;
+        this.regex = regex || null;
+        this.staticSuffix = staticSuffix || null;
+        this.nodePaths = kind === NODE_TYPES.PARAMETRIC ? /* @__PURE__ */ new Set([nodePath]) : null;
+        this.regexParamCount = 0;
+        this.regexStaticLength = 0;
       }
       addRoute(route, constrainer) {
         if (this.routes === null) {
@@ -32201,13 +32360,6 @@ var require_node = __commonJS({
         this.isLeafNode = true;
         this.routes.push(route);
         this.handlerStorage.addHandler(constrainer, route);
-      }
-    };
-    var ParentNode = class extends Node {
-      constructor() {
-        super();
-        this.staticChildrenCharCodes = [];
-        this.staticChildrenNodes = [];
       }
       setStaticChild(label, node) {
         const charCode = label.charCodeAt(0);
@@ -32259,19 +32411,9 @@ var require_node = __commonJS({
           }
           return staticChild.createStaticChild(path.slice(i));
         }
-        const node = new StaticNode(path);
+        const node = createStaticNode(path);
         this.setStaticChild(path.charAt(0), node);
         return node;
-      }
-    };
-    var StaticNode = class _StaticNode extends ParentNode {
-      constructor(prefix) {
-        super();
-        this.prefix = prefix;
-        this.wildcardChild = null;
-        this.parametricChildren = [];
-        this.kind = NODE_TYPES.STATIC;
-        this._compilePrefixMatch();
       }
       getParametricChild(regex) {
         const regexpSource = regex && regex.source;
@@ -32284,13 +32426,17 @@ var require_node = __commonJS({
         }
         return null;
       }
-      createParametricChild(regex, staticSuffix, nodePath) {
+      createParametricChild(regex, staticSuffix, nodePath, regexParamCount, regexStaticLength) {
         let parametricChild = this.getParametricChild(regex);
         if (parametricChild) {
           parametricChild.nodePaths.add(nodePath);
+          parametricChild.regexParamCount = Math.max(parametricChild.regexParamCount, regexParamCount);
+          parametricChild.regexStaticLength = Math.max(parametricChild.regexStaticLength, regexStaticLength);
           return parametricChild;
         }
-        parametricChild = new ParametricNode(regex, staticSuffix, nodePath);
+        parametricChild = createParametricNode(regex, staticSuffix, nodePath);
+        parametricChild.regexParamCount = regexParamCount;
+        parametricChild.regexStaticLength = regexStaticLength;
         this.parametricChildren.push(parametricChild);
         this.parametricChildren.sort((child1, child2) => {
           if (!child1.isRegex) return 1;
@@ -32307,19 +32453,13 @@ var require_node = __commonJS({
         return this.wildcardChild;
       }
       createWildcardChild() {
-        this.wildcardChild = this.getWildcardChild() || new WildcardNode();
+        this.wildcardChild = this.getWildcardChild() || createWildcardNode();
         return this.wildcardChild;
       }
-      split(parentNode, length) {
-        const parentPrefix = this.prefix.slice(0, length);
-        const childPrefix = this.prefix.slice(length);
-        this.prefix = childPrefix;
-        this._compilePrefixMatch();
-        const staticNode = new _StaticNode(parentPrefix);
-        staticNode.setStaticChild(childPrefix.charAt(0), this);
-        parentNode.setStaticChild(parentPrefix.charAt(0), staticNode);
-        return staticNode;
-      }
+      // Returns the next node to visit for the path at pathIndex, preferring a
+      // static child, then the first parametric child, then the wildcard. Every
+      // sibling that is skipped over is pushed on nodeStack as a flat triple
+      // (node, pathIndex, paramsCount) so lookup can backtrack to it later.
       getNextNode(path, pathIndex, nodeStack, paramsCount) {
         let node = this.findStaticMatchingChild(path, pathIndex);
         let parametricBrotherNodeIndex = 0;
@@ -32331,355 +32471,34 @@ var require_node = __commonJS({
           parametricBrotherNodeIndex = 1;
         }
         if (this.wildcardChild !== null) {
-          nodeStack.push({
-            paramsCount,
-            brotherPathIndex: pathIndex,
-            brotherNode: this.wildcardChild
-          });
+          nodeStack.push(this.wildcardChild, pathIndex, paramsCount);
         }
         for (let i = this.parametricChildren.length - 1; i >= parametricBrotherNodeIndex; i--) {
-          nodeStack.push({
-            paramsCount,
-            brotherPathIndex: pathIndex,
-            brotherNode: this.parametricChildren[i]
-          });
+          nodeStack.push(this.parametricChildren[i], pathIndex, paramsCount);
         }
         return node;
       }
-      _compilePrefixMatch() {
-        if (this.prefix.length === 1) {
-          this.matchPrefix = () => true;
-          return;
-        }
-        const lines = [];
-        for (let i = 1; i < this.prefix.length; i++) {
-          const charCode = this.prefix.charCodeAt(i);
-          lines.push(`path.charCodeAt(i + ${i}) === ${charCode}`);
-        }
-        this.matchPrefix = new Function("path", "i", `return ${lines.join(" && ")}`);
+      split(parentNode, length) {
+        const parentPrefix = this.prefix.slice(0, length);
+        const childPrefix = this.prefix.slice(length);
+        this.prefix = childPrefix;
+        this.matchPrefix = compilePrefixMatch(childPrefix);
+        const staticNode = createStaticNode(parentPrefix);
+        staticNode.setStaticChild(childPrefix.charAt(0), this);
+        parentNode.setStaticChild(parentPrefix.charAt(0), staticNode);
+        return staticNode;
       }
     };
-    var ParametricNode = class extends ParentNode {
-      constructor(regex, staticSuffix, nodePath) {
-        super();
-        this.isRegex = !!regex;
-        this.regex = regex || null;
-        this.staticSuffix = staticSuffix || null;
-        this.kind = NODE_TYPES.PARAMETRIC;
-        this.nodePaths = /* @__PURE__ */ new Set([nodePath]);
-      }
-      getNextNode(path, pathIndex) {
-        return this.findStaticMatchingChild(path, pathIndex);
-      }
-    };
-    var WildcardNode = class extends Node {
-      constructor() {
-        super();
-        this.kind = NODE_TYPES.WILDCARD;
-      }
-      getNextNode() {
-        return null;
-      }
-    };
-    module.exports = { StaticNode, ParametricNode, WildcardNode, NODE_TYPES };
-  }
-});
-
-// node_modules/find-my-way/lib/strategies/accept-version.js
-var require_accept_version = __commonJS({
-  "node_modules/find-my-way/lib/strategies/accept-version.js"(exports, module) {
-    "use strict";
-    var assert = __require("node:assert");
-    function SemVerStore() {
-      if (!(this instanceof SemVerStore)) {
-        return new SemVerStore();
-      }
-      this.store = /* @__PURE__ */ new Map();
-      this.maxMajor = 0;
-      this.maxMinors = {};
-      this.maxPatches = {};
+    function createStaticNode(prefix) {
+      return new Node(NODE_TYPES.STATIC, prefix, null, null, null);
     }
-    SemVerStore.prototype.set = function(version, store) {
-      if (typeof version !== "string") {
-        throw new TypeError("Version should be a string");
-      }
-      let [major, minor, patch] = version.split(".", 3);
-      if (isNaN(major)) {
-        throw new TypeError("Major version must be a numeric value");
-      }
-      major = Number(major);
-      minor = Number(minor) || 0;
-      patch = Number(patch) || 0;
-      if (major >= this.maxMajor) {
-        this.maxMajor = major;
-        this.store.set("x", store);
-        this.store.set("*", store);
-        this.store.set("x.x", store);
-        this.store.set("x.x.x", store);
-      }
-      if (minor >= (this.maxMinors[major] || 0)) {
-        this.maxMinors[major] = minor;
-        this.store.set(`${major}.x`, store);
-        this.store.set(`${major}.x.x`, store);
-      }
-      if (patch >= (this.maxPatches[`${major}.${minor}`] || 0)) {
-        this.maxPatches[`${major}.${minor}`] = patch;
-        this.store.set(`${major}.${minor}.x`, store);
-      }
-      this.store.set(`${major}.${minor}.${patch}`, store);
-      return this;
-    };
-    SemVerStore.prototype.get = function(version) {
-      return this.store.get(version);
-    };
-    module.exports = {
-      name: "version",
-      mustMatchWhenDerived: true,
-      storage: SemVerStore,
-      validate(value) {
-        assert(typeof value === "string", "Version should be a string");
-      }
-    };
-  }
-});
-
-// node_modules/find-my-way/lib/strategies/accept-host.js
-var require_accept_host = __commonJS({
-  "node_modules/find-my-way/lib/strategies/accept-host.js"(exports, module) {
-    "use strict";
-    var assert = __require("node:assert");
-    function HostStorage() {
-      const hosts = /* @__PURE__ */ new Map();
-      const regexHosts = [];
-      const regexCache = /* @__PURE__ */ new Map();
-      return {
-        get: (host) => {
-          const exact = hosts.get(host);
-          if (exact) {
-            return exact;
-          }
-          if (regexHosts.length === 0) return void 0;
-          if (regexCache.has(host)) return regexCache.get(host);
-          for (const regex of regexHosts) {
-            if (regex.host.test(host)) {
-              regexCache.set(host, regex.value);
-              return regex.value;
-            }
-          }
-          regexCache.set(host, void 0);
-        },
-        set: (host, value) => {
-          if (host instanceof RegExp) {
-            const safeRegex = new RegExp(host.source, host.flags.replace(/[gy]/g, ""));
-            regexHosts.push({ host: safeRegex, value });
-            regexCache.clear();
-          } else {
-            hosts.set(host, value);
-          }
-        }
-      };
+    function createParametricNode(regex, staticSuffix, nodePath) {
+      return new Node(NODE_TYPES.PARAMETRIC, "", regex, staticSuffix, nodePath);
     }
-    module.exports = {
-      name: "host",
-      mustMatchWhenDerived: false,
-      storage: HostStorage,
-      validate(value) {
-        assert(typeof value === "string" || Object.prototype.toString.call(value) === "[object RegExp]", "Host should be a string or a RegExp");
-      }
-    };
-  }
-});
-
-// node_modules/find-my-way/lib/constrainer.js
-var require_constrainer = __commonJS({
-  "node_modules/find-my-way/lib/constrainer.js"(exports, module) {
-    "use strict";
-    var acceptVersionStrategy = require_accept_version();
-    var acceptHostStrategy = require_accept_host();
-    var assert = __require("node:assert");
-    var Constrainer = class {
-      constructor(customStrategies) {
-        this.strategies = {
-          version: acceptVersionStrategy,
-          host: acceptHostStrategy
-        };
-        this.strategiesInUse = /* @__PURE__ */ new Set();
-        this.asyncStrategiesInUse = /* @__PURE__ */ new Set();
-        if (customStrategies) {
-          for (const strategy of Object.values(customStrategies)) {
-            this.addConstraintStrategy(strategy);
-          }
-        }
-      }
-      isStrategyUsed(strategyName) {
-        return this.strategiesInUse.has(strategyName) || this.asyncStrategiesInUse.has(strategyName);
-      }
-      hasConstraintStrategy(strategyName) {
-        const customConstraintStrategy = this.strategies[strategyName];
-        if (customConstraintStrategy !== void 0) {
-          return customConstraintStrategy.isCustom || this.isStrategyUsed(strategyName);
-        }
-        return false;
-      }
-      addConstraintStrategy(strategy) {
-        assert(typeof strategy.name === "string" && strategy.name !== "", "strategy.name is required.");
-        assert(strategy.storage && typeof strategy.storage === "function", "strategy.storage function is required.");
-        assert(strategy.deriveConstraint && typeof strategy.deriveConstraint === "function", "strategy.deriveConstraint function is required.");
-        if (this.strategies[strategy.name] && this.strategies[strategy.name].isCustom) {
-          throw new Error(`There already exists a custom constraint with the name ${strategy.name}.`);
-        }
-        if (this.isStrategyUsed(strategy.name)) {
-          throw new Error(`There already exists a route with ${strategy.name} constraint.`);
-        }
-        strategy.isCustom = true;
-        strategy.isAsync = strategy.deriveConstraint.length === 3;
-        this.strategies[strategy.name] = strategy;
-        if (strategy.mustMatchWhenDerived) {
-          this.noteUsage({ [strategy.name]: strategy });
-        }
-      }
-      deriveConstraints(req, ctx, done) {
-        const constraints = this.deriveSyncConstraints(req, ctx);
-        if (done === void 0) {
-          return constraints;
-        }
-        this.deriveAsyncConstraints(constraints, req, ctx, done);
-      }
-      deriveSyncConstraints(req, ctx) {
-        return void 0;
-      }
-      // When new constraints start getting used, we need to rebuild the deriver to derive them. Do so if we see novel constraints used.
-      noteUsage(constraints) {
-        if (constraints) {
-          const beforeSize = this.strategiesInUse.size;
-          for (const key in constraints) {
-            if (!Object.hasOwn(constraints, key)) continue;
-            const strategy = this.strategies[key];
-            if (strategy.isAsync) {
-              this.asyncStrategiesInUse.add(key);
-            } else {
-              this.strategiesInUse.add(key);
-            }
-          }
-          if (beforeSize !== this.strategiesInUse.size) {
-            this._buildDeriveConstraints();
-          }
-        }
-      }
-      newStoreForConstraint(constraint) {
-        if (!this.strategies[constraint]) {
-          throw new Error(`No strategy registered for constraint key ${constraint}`);
-        }
-        return this.strategies[constraint].storage();
-      }
-      validateConstraints(constraints) {
-        for (const key in constraints) {
-          if (!Object.hasOwn(constraints, key)) continue;
-          const value = constraints[key];
-          if (typeof value === "undefined") {
-            throw new Error("Can't pass an undefined constraint value, must pass null or no key at all");
-          }
-          const strategy = this.strategies[key];
-          if (!strategy) {
-            throw new Error(`No strategy registered for constraint key ${key}`);
-          }
-          if (strategy.validate) {
-            strategy.validate(value);
-          }
-        }
-      }
-      deriveAsyncConstraints(constraints, req, ctx, done) {
-        let asyncConstraintsCount = this.asyncStrategiesInUse.size;
-        if (asyncConstraintsCount === 0) {
-          done(null, constraints);
-          return;
-        }
-        let errored = false;
-        constraints = constraints || {};
-        for (const key of this.asyncStrategiesInUse) {
-          const strategy = this.strategies[key];
-          strategy.deriveConstraint(req, ctx, (err, constraintValue) => {
-            if (errored) return;
-            if (err !== null) {
-              errored = true;
-              done(err);
-              return;
-            }
-            constraints[key] = constraintValue;
-            if (--asyncConstraintsCount === 0) {
-              done(null, constraints);
-            }
-          });
-        }
-      }
-      // Optimization: build a fast function for deriving the constraints for all the strategies at once. We inline the definitions of the version constraint and the host constraint for performance.
-      // If no constraining strategies are in use (no routes constrain on host, or version, or any custom strategies) then we don't need to derive constraints for each route match, so don't do anything special, and just return undefined
-      // This allows us to not allocate an object to hold constraint values if no constraints are defined.
-      _buildDeriveConstraints() {
-        if (this.strategiesInUse.size === 0) return;
-        const lines = ["return {"];
-        for (const key of this.strategiesInUse) {
-          const strategy = this.strategies[key];
-          if (!strategy.isCustom) {
-            if (key === "version") {
-              lines.push("   version: req.headers['accept-version'],");
-            } else {
-              lines.push("   host: req.headers.host || req.headers[':authority'],");
-            }
-          } else {
-            lines.push(`  ${strategy.name}: this.strategies.${key}.deriveConstraint(req, ctx),`);
-          }
-        }
-        lines.push("}");
-        this.deriveSyncConstraints = new Function("req", "ctx", lines.join("\n")).bind(this);
-      }
-    };
-    module.exports = Constrainer;
-  }
-});
-
-// node_modules/find-my-way/lib/http-methods.js
-var require_http_methods = __commonJS({
-  "node_modules/find-my-way/lib/http-methods.js"(exports, module) {
-    "use strict";
-    var httpMethods = [
-      "ACL",
-      "BIND",
-      "CHECKOUT",
-      "CONNECT",
-      "COPY",
-      "DELETE",
-      "GET",
-      "HEAD",
-      "LINK",
-      "LOCK",
-      "M-SEARCH",
-      "MERGE",
-      "MKACTIVITY",
-      "MKCALENDAR",
-      "MKCOL",
-      "MOVE",
-      "NOTIFY",
-      "OPTIONS",
-      "PATCH",
-      "POST",
-      "PROPFIND",
-      "PROPPATCH",
-      "PURGE",
-      "PUT",
-      "QUERY",
-      "REBIND",
-      "REPORT",
-      "SEARCH",
-      "SOURCE",
-      "SUBSCRIBE",
-      "TRACE",
-      "UNBIND",
-      "UNLINK",
-      "UNLOCK",
-      "UNSUBSCRIBE"
-    ];
-    module.exports = httpMethods;
+    function createWildcardNode() {
+      return new Node(NODE_TYPES.WILDCARD, "", null, null, null);
+    }
+    module.exports = { Node, createStaticNode, createParametricNode, createWildcardNode, NODE_TYPES };
   }
 });
 
@@ -32771,13 +32590,12 @@ var require_url_sanitizer = __commonJS({
       }
       return { path, querystring: "", shouldDecodeParam: false };
     }
-    function reencodePercentChar(path, index) {
-      return path.slice(0, index + 1) + "25" + path.slice(index + 1);
-    }
     function safeDecodeURIPercentScan(path, useSemicolonDelimiter, startIndex) {
       let shouldDecode = false;
       let shouldDecodeParam = false;
       let querystring = "";
+      let percentIndexes = null;
+      let pathEnd = -1;
       for (let i = startIndex; i < path.length; i++) {
         const charCode = path.charCodeAt(i);
         if (charCode === 37) {
@@ -32788,18 +32606,31 @@ var require_url_sanitizer = __commonJS({
             shouldDecodeParam = true;
             if (componentCharCode === 37) {
               shouldDecode = true;
-              path = reencodePercentChar(path, i);
-              i += 2;
+              if (percentIndexes === null) percentIndexes = [];
+              percentIndexes.push(i);
             }
             i += 2;
           }
         } else if (charCode === 63 || charCode === 35 || charCode === 59 && useSemicolonDelimiter) {
           querystring = path.slice(i + 1);
-          path = path.slice(0, i);
+          pathEnd = i;
           break;
         }
       }
-      const decodedPath = shouldDecode ? decodeURI(path) : path;
+      let decodedPath;
+      if (percentIndexes === null) {
+        decodedPath = pathEnd === -1 ? path : path.slice(0, pathEnd);
+      } else {
+        const parts = [];
+        let last = 0;
+        for (const index of percentIndexes) {
+          parts.push(path.slice(last, index), "%2525");
+          last = index + 3;
+        }
+        parts.push(path.slice(last, pathEnd === -1 ? path.length : pathEnd));
+        decodedPath = parts.join("");
+      }
+      if (shouldDecode) decodedPath = decodeURI(decodedPath);
       return { path: decodedPath, querystring, shouldDecodeParam };
     }
     function safeDecodeURIComponent(uriComponent) {
@@ -32822,6 +32653,828 @@ var require_url_sanitizer = __commonJS({
   }
 });
 
+// node_modules/find-my-way/lib/compiler.js
+var require_compiler = __commonJS({
+  "node_modules/find-my-way/lib/compiler.js"(exports, module) {
+    "use strict";
+    var { NODE_TYPES } = require_node();
+    var { NullObject: NullObject2 } = require_null_object();
+    var { safeDecodeURIComponent } = require_url_sanitizer();
+    var LONG_PREFIX_MIN_LENGTH = 16;
+    var SCAN_LOOP_MAX_LENGTH = 12;
+    var SPLIT_LINES = 250;
+    var FUNCTION_LINES = 400;
+    var FLAG = /* @__PURE__ */ Symbol("find-my-way.compiled.flag");
+    var NO_MATCH = /* @__PURE__ */ Symbol("find-my-way.compiled.no-match");
+    var POSITION_PLACEHOLDER = "POS";
+    var RETRY_PLACEHOLDER = "RETRY";
+    var POSITION_PATTERN = new RegExp(`${POSITION_PLACEHOLDER}(?: \\+ (\\d+))?`, "g");
+    var SUM_PATTERN = /^(\S+) \+ (\d+)$/;
+    function substitutePosition(line, position) {
+      return line.replace(POSITION_PATTERN, (match, offset) => {
+        if (offset === void 0) return position;
+        const sum = SUM_PATTERN.exec(position);
+        if (sum !== null) return `${sum[1]} + ${Number(sum[2]) + Number(offset)}`;
+        if (/^\d+$/.test(position)) return String(Number(position) + Number(offset));
+        return `${position} + ${offset}`;
+      });
+    }
+    var TreeCompiler = class {
+      constructor(router, raw, target = "find") {
+        this.router = router;
+        this.raw = raw;
+        this.lookup = target === "lookup";
+        this.constNames = [];
+        this.constValues = [];
+        this.functions = [];
+        this.lines = [];
+        this.indent = 1;
+        this.maxParams = 0;
+        this.uid = 0;
+        this.tracksMaxParamLength = router.onMaxParamLength !== null;
+        this.useSemicolonDelimiter = router.useSemicolonDelimiter;
+        this.routerConst = this.addConst(router, "router");
+      }
+      addConst(value, hint) {
+        const name = `${hint}_${this.constNames.length}`;
+        this.constNames.push(name);
+        this.constValues.push(value);
+        return name;
+      }
+      emit(line) {
+        this.lines.push("  ".repeat(this.indent) + line);
+      }
+      compile(root, slow) {
+        if (this.raw) this.indent = 2;
+        this.emitNodeBody(root, null, root.prefix.length, 0, root.prefix);
+        if (this.raw) {
+          if (this.tracksMaxParamLength) {
+            this.emit("if (maxParamLengthExceeded) break raw");
+          }
+          this.emit(`if (path.indexOf('%', 1) === -1) return ${this.lookup ? `${this.routerConst}._defaultRoute(req, res, ctx)` : "null"}`);
+        } else {
+          if (this.tracksMaxParamLength) {
+            this.emit(`if (maxParamLengthExceeded) return ${this.routerConst}._onMaxParamLength(originPath)`);
+          }
+          this.emit("return null");
+        }
+        const source = ["'use strict'"];
+        for (const fn2 of this.functions) {
+          source.push(`function ${fn2.name} (${this.subtreeArguments(fn2.paramsCount, "i")}) {`);
+          source.push(`  let ${this.paramLocals(fn2.paramsCount)}`);
+          if (this.raw) {
+            source.push("  let c");
+          }
+          if (this.tracksMaxParamLength) {
+            source.push("  let maxParamLengthExceeded = false");
+          }
+          source.push(...fn2.lines);
+          if (this.tracksMaxParamLength) {
+            source.push("  return maxParamLengthExceeded ? FLAG : NO_MATCH");
+          } else {
+            source.push("  return NO_MATCH");
+          }
+          source.push("}");
+        }
+        if (this.raw) {
+          const delimiters = this.delimiterCharCodes();
+          source.push(
+            this.scanFunction("scanSegment", [47].concat(delimiters), false),
+            this.scanFunction("scanRest", delimiters, true),
+            this.lookup ? "return function compiledLookup (path, derivedConstraints, req, res, ctx) {" : "return function compiledFind (path, derivedConstraints) {",
+            "  raw: {",
+            "    if (path.charCodeAt(0) !== 47) break raw",
+            "    const pathLen = path.length",
+            "    let c",
+            `    let ${this.paramLocals(0)}`
+          );
+          if (this.tracksMaxParamLength) {
+            source.push("    let maxParamLengthExceeded = false");
+          }
+          source.push(
+            ...this.lines.map((line) => line.replaceAll(RETRY_PLACEHOLDER, "break raw")),
+            "  }",
+            this.lookup ? `  return ${this.routerConst}.callHandler(slow(path, derivedConstraints), req, res, ctx)` : "  return slow(path, derivedConstraints)",
+            "}"
+          );
+        } else {
+          source.push(
+            "return function compiledFindSanitized (path, originPath, shouldDecodeParam, derivedConstraints, querystring) {",
+            "  const pathLen = path.length",
+            `  let ${this.paramLocals(0)}`
+          );
+          if (this.tracksMaxParamLength) {
+            source.push("  let maxParamLengthExceeded = false");
+          }
+          source.push(...this.lines, "}");
+        }
+        const code = source.join("\n");
+        const factory = new Function("NullObject", "decodeParam", "slow", "FLAG", "NO_MATCH", ...this.constNames, code);
+        const fn = factory(NullObject2, safeDecodeURIComponent, slow, FLAG, NO_MATCH, ...this.constValues);
+        fn.source = code;
+        return fn;
+      }
+      // Locals for the parameter values collected from slot `from` on. Four are
+      // always declared so the per-handler params constructor can be called.
+      paramLocals(from) {
+        const locals = [];
+        for (let i = from; i < Math.max(this.maxParams, 4); i++) {
+          locals.push(`p${i}`);
+        }
+        return locals.length === 0 ? "unused" : locals.join(", ");
+      }
+      // Arguments of a subtree function; `position` is what the caller passes
+      // for the path position argument `i`.
+      subtreeArguments(paramsCount, position) {
+        const args = this.raw ? ["path", "pathLen", position, "derivedConstraints"] : ["path", "originPath", "pathLen", "shouldDecodeParam", "derivedConstraints", "querystring", position];
+        if (this.lookup) args.push("req", "res", "ctx");
+        for (let i = 0; i < paramsCount; i++) args.push(`p${i}`);
+        return args.join(", ");
+      }
+      delimiterCharCodes() {
+        const delimiters = [63, 35];
+        if (this.useSemicolonDelimiter) delimiters.push(59);
+        return delimiters;
+      }
+      // Emits a scanner returning the index of the first char among `stops` (or
+      // the end of the path), or -1 as soon as a '%' is seen: the slice before a
+      // '%' may decode differently and must go through the sanitized matcher.
+      // A char loop is cheapest for the short segments that make up most paths,
+      // a native regex search wins on long ones, so the scanner starts with a
+      // bounded loop and hands anything longer over to the regex. A wildcard
+      // consumes the rest of the path, so its scanner knows the length up front
+      // and can pick the strategy before looping.
+      scanFunction(name, stops, knowsLength) {
+        const checks = stops.concat(37).map((code) => `c === ${code}`).join(" || ");
+        const charClass = stops.concat(37).map((code) => "\\x" + code.toString(16).padStart(2, "0")).join("");
+        const lines = [
+          // A global regex with lastIndex finds the first stop char in one
+          // native call, without allocating a match result.
+          `const ${name}Regex = /[${charClass}]/g`,
+          `function ${name}Long (path, i, len) {`,
+          `  ${name}Regex.lastIndex = i`,
+          `  if (!${name}Regex.test(path)) return len`,
+          `  i = ${name}Regex.lastIndex - 1`,
+          "  return path.charCodeAt(i) === 37 ? -1 : i",
+          "}",
+          `function ${name} (path, i, len) {`
+        ];
+        if (knowsLength) {
+          lines.push(`  if (len - i > ${SCAN_LOOP_MAX_LENGTH}) return ${name}Long(path, i, len)`);
+          lines.push("  for (; i < len; i++) {");
+        } else {
+          lines.push(`  const limit = len - i > ${SCAN_LOOP_MAX_LENGTH} ? i + ${SCAN_LOOP_MAX_LENGTH} : len`);
+          lines.push("  for (; i < limit; i++) {");
+        }
+        lines.push(
+          "    const c = path.charCodeAt(i)",
+          `    if (${checks}) return c === 37 ? -1 : i`,
+          "  }"
+        );
+        if (knowsLength) {
+          lines.push("  return len");
+        } else {
+          lines.push(`  return i === len ? len : ${name}Long(path, i, len)`);
+        }
+        lines.push("}");
+        return lines.join("\n");
+      }
+      // Position of `offset` chars past `base`, where base is null for the
+      // constant position after the root (no parameter consumed yet) or the
+      // name of a local holding the end of the last consumed parameter.
+      position(base, offset) {
+        if (base === null) return String(offset);
+        if (offset === 0) return base;
+        return `${base} + ${offset}`;
+      }
+      // Statement handing the lookup over to the sanitized matcher (raw mode):
+      // a jump out of the raw block, or a FLAG return from a subtree function.
+      retry() {
+        return RETRY_PLACEHOLDER;
+      }
+      // Condition for the path to end at `pos`. The raw matcher also accepts a
+      // query delimiter there, since the sanitized path stops at it.
+      endCondition(pos) {
+        if (!this.raw) return `pathLen === ${pos}`;
+        const delimiters = this.delimiterCharCodes();
+        const checks = [`pathLen === ${pos}`, `(c = path.charCodeAt(${pos})) === ${delimiters[0]}`];
+        for (let i = 1; i < delimiters.length; i++) checks.push(`c === ${delimiters[i]}`);
+        return checks.join(" || ");
+      }
+      querystringExpression(pos) {
+        if (!this.raw) return "querystring";
+        return `pathLen === ${pos} ? '' : path.slice(${pos} + 1)`;
+      }
+      // Emits the code run once a node's prefix has matched and the path
+      // position is at `offset` past `base`: the leaf check, then the children.
+      // `staticPath` is the full static path from the root to this node, or null
+      // once a parameter has been consumed on the way.
+      emitNodeBody(node, base, offset, paramsCount, staticPath) {
+        if (node.isLeafNode) {
+          const pos = this.position(base, offset);
+          if (node.kind === NODE_TYPES.WILDCARD && !this.raw) {
+            this.emitLeaf(node, paramsCount, pos);
+          } else {
+            this.emit(`if (${this.endCondition(pos)}) {`);
+            this.indent++;
+            this.emitLeaf(node, paramsCount, pos);
+            this.indent--;
+            this.emit("}");
+          }
+        }
+        this.emitStaticChildren(node, base, offset, paramsCount, staticPath);
+        this.emitParametricChildren(node, base, offset, paramsCount);
+        this.emitWildcardChild(node, base, offset, paramsCount);
+      }
+      // Like emitNodeBody, but a body too large to stay in the current function
+      // is moved to a function of its own and replaced by a call. The body is
+      // generated once against a position placeholder, which is then replaced
+      // by the real position expression or by the function's own argument.
+      emitSubtree(node, base, offset, paramsCount, staticPath) {
+        const outerLines = this.lines;
+        const outerIndent = this.indent;
+        this.lines = [];
+        this.indent = 0;
+        this.emitNodeBody(node, POSITION_PLACEHOLDER, 0, paramsCount, staticPath);
+        const bodyLines = this.lines;
+        this.lines = outerLines;
+        this.indent = outerIndent;
+        if (bodyLines.length <= SPLIT_LINES && this.lines.length + bodyLines.length <= FUNCTION_LINES) {
+          const position = this.position(base, offset);
+          const prefix = "  ".repeat(this.indent);
+          for (const line of bodyLines) {
+            this.lines.push(prefix + substitutePosition(line, position));
+          }
+          return;
+        }
+        const name = `subtree_${this.functions.length}`;
+        this.functions.push({
+          name,
+          paramsCount,
+          lines: bodyLines.map((line) => "  " + substitutePosition(line, "i").replaceAll(RETRY_PLACEHOLDER, "return FLAG"))
+        });
+        const result = `r${this.uid++}`;
+        this.emit(`const ${result} = ${name}(${this.subtreeArguments(paramsCount, this.position(base, offset))})`);
+        this.emit(`if (${result} !== NO_MATCH) {`);
+        this.emit(`  if (${result} !== FLAG) return ${result}`);
+        if (this.raw) {
+          this.emit(`  ${this.retry()}`);
+        } else if (this.tracksMaxParamLength) {
+          this.emit("  maxParamLengthExceeded = true");
+        }
+        this.emit("}");
+      }
+      emitLeaf(node, paramsCount, pos) {
+        const storage = node.handlerStorage;
+        const storageConst = this.addConst(storage, "handlers");
+        const handle = `h${this.uid++}`;
+        this.emit(`const ${handle} = ${storageConst}.getMatchingHandler(derivedConstraints)`);
+        this.emit(`if (${handle} !== null) {`);
+        this.indent++;
+        let paramsExpr;
+        if (storage.handlers.length === 1) {
+          const params = storage.handlers[0].params;
+          this.maxParams = Math.max(this.maxParams, paramsCount, params.length);
+          const paramsObject = `o${this.uid++}`;
+          this.emit(`const ${paramsObject} = new NullObject()`);
+          for (let i = 0; i < params.length; i++) {
+            this.emit(`${paramsObject}[${JSON.stringify(params[i])}] = p${i}`);
+          }
+          paramsExpr = paramsObject;
+        } else {
+          this.maxParams = Math.max(this.maxParams, paramsCount);
+          const extra = [];
+          for (let i = 4; i < paramsCount; i++) extra.push(`p${i}`);
+          const extraExpr = extra.length === 0 ? "null" : `[${extra.join(", ")}]`;
+          paramsExpr = `${handle}._createParamsObject(p0, p1, p2, p3, ${extraExpr})`;
+        }
+        const searchParams = `${this.routerConst}.querystringParser(${this.querystringExpression(pos)})`;
+        if (this.lookup) {
+          this.emit(`const q${this.uid} = ${searchParams}`);
+          this.emit("return ctx === undefined");
+          this.emit(`  ? ${handle}.handler(req, res, ${paramsExpr}, ${handle}.store, q${this.uid})`);
+          this.emit(`  : ${handle}.handler.call(ctx, req, res, ${paramsExpr}, ${handle}.store, q${this.uid})`);
+          this.uid++;
+        } else {
+          this.emit("return {");
+          this.emit(`  handler: ${handle}.handler,`);
+          this.emit(`  store: ${handle}.store,`);
+          this.emit(`  params: ${paramsExpr},`);
+          this.emit(`  searchParams: ${searchParams}`);
+          this.emit("}");
+        }
+        this.indent--;
+        this.emit("}");
+      }
+      // Condition matching a static child's prefix at the given position. The
+      // first char can be skipped when a surrounding switch already checked it.
+      prefixCondition(child, base, offset, skipFirstChar) {
+        const prefix = child.prefix;
+        if (prefix.length >= LONG_PREFIX_MIN_LENGTH) {
+          const pos = this.position(base, offset);
+          return `path.indexOf(${JSON.stringify(prefix)}, ${pos}) === ${pos}`;
+        }
+        const checks = [];
+        for (let i = skipFirstChar ? 1 : 0; i < prefix.length; i++) {
+          checks.push(`path.charCodeAt(${this.position(base, offset + i)}) === ${prefix.charCodeAt(i)}`);
+        }
+        return checks.length === 0 ? null : checks.join(" && ");
+      }
+      emitStaticChildren(node, base, offset, paramsCount, staticPath) {
+        const children = node.staticChildrenNodes;
+        if (children.length === 0) return;
+        if (children.length === 1) {
+          this.emitStaticChild(children[0], base, offset, paramsCount, staticPath, false);
+          return;
+        }
+        this.emit(`switch (path.charCodeAt(${this.position(base, offset)})) {`);
+        this.indent++;
+        for (let i = 0; i < children.length; i++) {
+          this.emit(`case ${node.staticChildrenCharCodes[i]}: {`);
+          this.indent++;
+          this.emitStaticChild(children[i], base, offset, paramsCount, staticPath, true);
+          this.emit("break");
+          this.indent--;
+          this.emit("}");
+        }
+        this.indent--;
+        this.emit("}");
+      }
+      emitStaticChild(child, base, offset, paramsCount, staticPath, skipFirstChar) {
+        const childStaticPath = staticPath === null ? null : staticPath + child.prefix;
+        const condition = this.prefixCondition(child, base, offset, skipFirstChar);
+        const end = offset + child.prefix.length;
+        const isWholePathLeaf = this.raw && childStaticPath !== null && child.isLeafNode && child.staticChildrenNodes.length === 0 && child.parametricChildren.length === 0 && child.wildcardChild === null;
+        if (isWholePathLeaf) {
+          const pos = this.position(base, end);
+          const suffix = condition === null ? this.endCondition(pos) : `${condition} && (${this.endCondition(pos)})`;
+          this.emit(`if (path === ${JSON.stringify(childStaticPath)} || (${suffix})) {`);
+          this.indent++;
+          this.emitLeaf(child, paramsCount, pos);
+          this.indent--;
+          this.emit("}");
+          return;
+        }
+        if (condition !== null) {
+          this.emit(`if (${condition}) {`);
+          this.indent++;
+        }
+        this.emitSubtree(child, base, end, paramsCount, childStaticPath);
+        if (condition !== null) {
+          this.indent--;
+          this.emit("}");
+        }
+      }
+      emitParametricChildren(node, base, offset, paramsCount) {
+        const children = node.parametricChildren;
+        if (children.length === 0) return;
+        const pos = this.position(base, offset);
+        const id = this.uid++;
+        const end = `e${id}`;
+        const value = `v${id}`;
+        if (this.raw) {
+          this.emit(`const ${end} = scanSegment(path, ${pos}, pathLen)`);
+          this.emit(`if (${end} === -1) ${this.retry()}`);
+          this.emit(`const ${value} = path.slice(${pos}, ${end})`);
+        } else {
+          this.emit(`let ${end} = originPath.indexOf('/', ${pos})`);
+          this.emit(`if (${end} === -1) ${end} = pathLen`);
+          this.emit(`let ${value} = originPath.slice(${pos}, ${end})`);
+          this.emit(`if (shouldDecodeParam) ${value} = decodeParam(${value})`);
+        }
+        for (const child of children) {
+          if (child.isRegex) {
+            this.emitRegexChild(child, end, value, paramsCount);
+          } else {
+            this.emit(`if (${value}.length <= ${this.routerConst}.maxParamLength) {`);
+            this.indent++;
+            this.emit(`p${paramsCount} = ${value}`);
+            this.emitSubtree(child, end, 0, paramsCount + 1, null);
+            this.indent--;
+            if (this.tracksMaxParamLength) {
+              this.emit("} else {");
+              this.emit("  maxParamLengthExceeded = true");
+            }
+            this.emit("}");
+          }
+        }
+      }
+      emitRegexChild(child, end, value, paramsCount) {
+        const regexConst = this.addConst(child.regex, "regex");
+        const groupCount = countCaptureGroups(child.regex);
+        const match = `m${this.uid++}`;
+        const maxLength = `${child.regexParamCount} * ${this.routerConst}.maxParamLength + ${child.regexStaticLength}`;
+        this.emit(`if (${value}.length > ${maxLength}) {`);
+        if (this.tracksMaxParamLength) {
+          this.emit("  maxParamLengthExceeded = true");
+        }
+        this.emit("} else {");
+        this.indent++;
+        this.emit(`const ${match} = ${regexConst}.exec(${value})`);
+        this.emit(`if (${match} !== null) {`);
+        this.indent++;
+        const groups = [];
+        for (let i = 1; i <= groupCount; i++) {
+          const group = `${match}g${i}`;
+          groups.push(group);
+          this.emit(`const ${group} = ${match}[${i}] ?? ''`);
+        }
+        const tooLong = groups.map((group) => `${group}.length > ${this.routerConst}.maxParamLength`).join(" || ");
+        if (groups.length > 0) {
+          this.emit(`if (${tooLong}) {`);
+          if (this.tracksMaxParamLength) {
+            this.emit("  maxParamLengthExceeded = true");
+          }
+          this.emit("} else {");
+          this.indent++;
+        }
+        for (let i = 0; i < groups.length; i++) {
+          this.emit(`p${paramsCount + i} = ${groups[i]}`);
+        }
+        this.emitSubtree(child, end, 0, paramsCount + groups.length, null);
+        if (groups.length > 0) {
+          this.indent--;
+          this.emit("}");
+        }
+        this.indent--;
+        this.emit("}");
+        this.indent--;
+        this.emit("}");
+      }
+      emitWildcardChild(node, base, offset, paramsCount) {
+        const child = node.wildcardChild;
+        if (child === null) return;
+        const pos = this.position(base, offset);
+        const id = this.uid++;
+        const value = `w${id}`;
+        this.emit("{");
+        this.indent++;
+        if (this.raw) {
+          const end = `e${id}`;
+          this.emit(`const ${end} = scanRest(path, ${pos}, pathLen)`);
+          this.emit(`if (${end} === -1) ${this.retry()}`);
+          this.emit(`const ${value} = path.slice(${pos}, ${end})`);
+          this.emit(`p${paramsCount} = ${value}`);
+          this.emitNodeBody(child, end, 0, paramsCount + 1, null);
+        } else {
+          this.emit(`let ${value} = originPath.slice(${pos})`);
+          this.emit(`if (shouldDecodeParam) ${value} = decodeParam(${value})`);
+          this.emit(`p${paramsCount} = ${value}`);
+          this.emitNodeBody(child, "pathLen", 0, paramsCount + 1, null);
+        }
+        this.indent--;
+        this.emit("}");
+      }
+    };
+    function countCaptureGroups(regex) {
+      return new RegExp(regex.source + "|").exec("").length - 1;
+    }
+    function supportsRawMatching(router, root) {
+      if (router.ignoreTrailingSlash || router.ignoreDuplicateSlashes || router.caseSensitive === false) {
+        return false;
+      }
+      const forbidden = router.useSemicolonDelimiter ? /[%?#;]/ : /[%?#]/;
+      const stack = [root];
+      while (stack.length > 0) {
+        const node = stack.pop();
+        if (forbidden.test(node.prefix)) return false;
+        stack.push(...node.staticChildrenNodes, ...node.parametricChildren);
+        if (node.wildcardChild !== null) stack.push(node.wildcardChild);
+      }
+      return true;
+    }
+    function compileTree(router, root) {
+      const sanitized = new TreeCompiler(router, false).compile(root, null);
+      const slow = function findSanitized(path, derivedConstraints) {
+        return router._findSanitized(sanitized, path, derivedConstraints);
+      };
+      if (!supportsRawMatching(router, root)) {
+        return {
+          find: slow,
+          lookup: function lookupSanitized(path, derivedConstraints, req, res, ctx) {
+            return router.callHandler(slow(path, derivedConstraints), req, res, ctx);
+          }
+        };
+      }
+      return {
+        find: new TreeCompiler(router, true, "find").compile(root, slow),
+        lookup: new TreeCompiler(router, true, "lookup").compile(root, slow)
+      };
+    }
+    module.exports = { compileTree };
+  }
+});
+
+// node_modules/find-my-way/lib/strategies/accept-version.js
+var require_accept_version = __commonJS({
+  "node_modules/find-my-way/lib/strategies/accept-version.js"(exports, module) {
+    "use strict";
+    var assert = __require("node:assert");
+    function SemVerStore() {
+      if (!(this instanceof SemVerStore)) {
+        return new SemVerStore();
+      }
+      this.store = /* @__PURE__ */ new Map();
+      this.maxMajor = 0;
+      this.maxMinors = {};
+      this.maxPatches = {};
+    }
+    SemVerStore.prototype.set = function(version, store) {
+      if (typeof version !== "string") {
+        throw new TypeError("Version should be a string");
+      }
+      let [major, minor, patch] = version.split(".", 3);
+      if (isNaN(major)) {
+        throw new TypeError("Major version must be a numeric value");
+      }
+      major = Number(major);
+      minor = Number(minor) || 0;
+      patch = Number(patch) || 0;
+      if (major >= this.maxMajor) {
+        this.maxMajor = major;
+        this.store.set("x", store);
+        this.store.set("*", store);
+        this.store.set("x.x", store);
+        this.store.set("x.x.x", store);
+      }
+      if (minor >= (this.maxMinors[major] || 0)) {
+        this.maxMinors[major] = minor;
+        this.store.set(`${major}.x`, store);
+        this.store.set(`${major}.x.x`, store);
+      }
+      if (patch >= (this.maxPatches[`${major}.${minor}`] || 0)) {
+        this.maxPatches[`${major}.${minor}`] = patch;
+        this.store.set(`${major}.${minor}.x`, store);
+      }
+      this.store.set(`${major}.${minor}.${patch}`, store);
+      return this;
+    };
+    SemVerStore.prototype.get = function(version) {
+      return this.store.get(version);
+    };
+    module.exports = {
+      name: "version",
+      mustMatchWhenDerived: true,
+      storage: SemVerStore,
+      validate(value) {
+        assert(typeof value === "string", "Version should be a string");
+      }
+    };
+  }
+});
+
+// node_modules/find-my-way/lib/strategies/accept-host.js
+var require_accept_host = __commonJS({
+  "node_modules/find-my-way/lib/strategies/accept-host.js"(exports, module) {
+    "use strict";
+    var assert = __require("node:assert");
+    var REGEX_CACHE_MAX_SIZE = 1e3;
+    var REGEX_CACHE_EVICTION_SIZE = REGEX_CACHE_MAX_SIZE / 2;
+    function HostStorage() {
+      const hosts = /* @__PURE__ */ new Map();
+      const regexHosts = [];
+      const regexCache = /* @__PURE__ */ new Map();
+      function cacheRegexResult(host, value) {
+        if (regexCache.size >= REGEX_CACHE_MAX_SIZE) {
+          const keys = regexCache.keys();
+          for (let i = 0; i < REGEX_CACHE_EVICTION_SIZE; i++) {
+            regexCache.delete(keys.next().value);
+          }
+        }
+        regexCache.set(host, value);
+      }
+      return {
+        get: (host) => {
+          const exact = hosts.get(host);
+          if (exact) {
+            return exact;
+          }
+          if (regexHosts.length === 0) return void 0;
+          if (regexCache.has(host)) return regexCache.get(host);
+          for (const regex of regexHosts) {
+            if (regex.host.test(host)) {
+              cacheRegexResult(host, regex.value);
+              return regex.value;
+            }
+          }
+          cacheRegexResult(host, void 0);
+        },
+        set: (host, value) => {
+          if (host instanceof RegExp) {
+            const safeRegex = new RegExp(host.source, host.flags.replace(/[gy]/g, ""));
+            regexHosts.push({ host: safeRegex, value });
+            regexCache.clear();
+          } else {
+            hosts.set(host, value);
+          }
+        }
+      };
+    }
+    module.exports = {
+      name: "host",
+      mustMatchWhenDerived: false,
+      storage: HostStorage,
+      validate(value) {
+        assert(typeof value === "string" || Object.prototype.toString.call(value) === "[object RegExp]", "Host should be a string or a RegExp");
+      }
+    };
+  }
+});
+
+// node_modules/find-my-way/lib/constrainer.js
+var require_constrainer = __commonJS({
+  "node_modules/find-my-way/lib/constrainer.js"(exports, module) {
+    "use strict";
+    var acceptVersionStrategy = require_accept_version();
+    var acceptHostStrategy = require_accept_host();
+    var assert = __require("node:assert");
+    var Constrainer = class {
+      constructor(customStrategies) {
+        this.strategies = {
+          version: acceptVersionStrategy,
+          host: acceptHostStrategy
+        };
+        this.strategiesInUse = /* @__PURE__ */ new Set();
+        this.asyncStrategiesInUse = /* @__PURE__ */ new Set();
+        if (customStrategies) {
+          for (const strategy of Object.values(customStrategies)) {
+            this.addConstraintStrategy(strategy);
+          }
+        }
+      }
+      isStrategyUsed(strategyName) {
+        return this.strategiesInUse.has(strategyName) || this.asyncStrategiesInUse.has(strategyName);
+      }
+      hasConstraintStrategy(strategyName) {
+        if (!Object.hasOwn(this.strategies, strategyName)) return false;
+        const customConstraintStrategy = this.strategies[strategyName];
+        if (customConstraintStrategy !== void 0) {
+          return customConstraintStrategy.isCustom || this.isStrategyUsed(strategyName);
+        }
+        return false;
+      }
+      addConstraintStrategy(strategy) {
+        assert(typeof strategy.name === "string" && strategy.name !== "", "strategy.name is required.");
+        assert(strategy.storage && typeof strategy.storage === "function", "strategy.storage function is required.");
+        assert(strategy.deriveConstraint && typeof strategy.deriveConstraint === "function", "strategy.deriveConstraint function is required.");
+        if (Object.hasOwn(this.strategies, strategy.name) && this.strategies[strategy.name].isCustom) {
+          throw new Error(`There already exists a custom constraint with the name ${strategy.name}.`);
+        }
+        if (this.isStrategyUsed(strategy.name)) {
+          throw new Error(`There already exists a route with ${strategy.name} constraint.`);
+        }
+        strategy.isCustom = true;
+        strategy.isAsync = strategy.deriveConstraint.length === 3;
+        this.strategies[strategy.name] = strategy;
+        if (strategy.mustMatchWhenDerived) {
+          this.noteUsage({ [strategy.name]: strategy });
+        }
+      }
+      deriveConstraints(req, ctx, done) {
+        const constraints = this.deriveSyncConstraints(req, ctx);
+        if (done === void 0) {
+          return constraints;
+        }
+        this.deriveAsyncConstraints(constraints, req, ctx, done);
+      }
+      deriveSyncConstraints(req, ctx) {
+        return void 0;
+      }
+      // When new constraints start getting used, we need to rebuild the deriver to derive them. Do so if we see novel constraints used.
+      noteUsage(constraints) {
+        if (constraints) {
+          const beforeSize = this.strategiesInUse.size;
+          for (const key in constraints) {
+            if (!Object.hasOwn(constraints, key) || !Object.hasOwn(this.strategies, key)) continue;
+            const strategy = this.strategies[key];
+            if (strategy.isAsync) {
+              this.asyncStrategiesInUse.add(key);
+            } else {
+              this.strategiesInUse.add(key);
+            }
+          }
+          if (beforeSize !== this.strategiesInUse.size) {
+            this._buildDeriveConstraints();
+          }
+        }
+      }
+      newStoreForConstraint(constraint) {
+        if (!Object.hasOwn(this.strategies, constraint) || !this.strategies[constraint]) {
+          throw new Error(`No strategy registered for constraint key ${constraint}`);
+        }
+        return this.strategies[constraint].storage();
+      }
+      validateConstraints(constraints) {
+        for (const key in constraints) {
+          if (!Object.hasOwn(constraints, key)) continue;
+          const value = constraints[key];
+          if (typeof value === "undefined") {
+            throw new Error("Can't pass an undefined constraint value, must pass null or no key at all");
+          }
+          const strategy = Object.hasOwn(this.strategies, key) ? this.strategies[key] : void 0;
+          if (!strategy) {
+            throw new Error(`No strategy registered for constraint key ${key}`);
+          }
+          if (strategy.validate) {
+            strategy.validate(value);
+          }
+        }
+      }
+      deriveAsyncConstraints(constraints, req, ctx, done) {
+        let asyncConstraintsCount = this.asyncStrategiesInUse.size;
+        if (asyncConstraintsCount === 0) {
+          done(null, constraints);
+          return;
+        }
+        let errored = false;
+        constraints = constraints || {};
+        for (const key of this.asyncStrategiesInUse) {
+          const strategy = this.strategies[key];
+          strategy.deriveConstraint(req, ctx, (err, constraintValue) => {
+            if (errored) return;
+            if (err !== null) {
+              errored = true;
+              done(err);
+              return;
+            }
+            constraints[key] = constraintValue;
+            if (--asyncConstraintsCount === 0) {
+              done(null, constraints);
+            }
+          });
+        }
+      }
+      // Optimization: build a fast function for deriving the constraints for all the strategies at once. We inline the definitions of the version constraint and the host constraint for performance.
+      // If no constraining strategies are in use (no routes constrain on host, or version, or any custom strategies) then we don't need to derive constraints for each route match, so don't do anything special, and just return undefined
+      // This allows us to not allocate an object to hold constraint values if no constraints are defined.
+      _buildDeriveConstraints() {
+        if (this.strategiesInUse.size === 0) return;
+        const lines = ["'use strict'", "return {"];
+        for (const key of this.strategiesInUse) {
+          const strategy = this.strategies[key];
+          if (!strategy.isCustom) {
+            if (key === "version") {
+              lines.push("   version: req.headers['accept-version'],");
+            } else {
+              lines.push("   host: req.headers.host || req.headers[':authority'],");
+            }
+          } else {
+            lines.push(`  ${strategy.name}: this.strategies.${key}.deriveConstraint(req, ctx),`);
+          }
+        }
+        lines.push("}");
+        this.deriveSyncConstraints = new Function("req", "ctx", lines.join("\n")).bind(this);
+      }
+    };
+    module.exports = Constrainer;
+  }
+});
+
+// node_modules/find-my-way/lib/http-methods.js
+var require_http_methods = __commonJS({
+  "node_modules/find-my-way/lib/http-methods.js"(exports, module) {
+    "use strict";
+    var httpMethods = [
+      "ACL",
+      "BIND",
+      "CHECKOUT",
+      "CONNECT",
+      "COPY",
+      "DELETE",
+      "GET",
+      "HEAD",
+      "LINK",
+      "LOCK",
+      "M-SEARCH",
+      "MERGE",
+      "MKACTIVITY",
+      "MKCALENDAR",
+      "MKCOL",
+      "MOVE",
+      "NOTIFY",
+      "OPTIONS",
+      "PATCH",
+      "POST",
+      "PROPFIND",
+      "PROPPATCH",
+      "PURGE",
+      "PUT",
+      "QUERY",
+      "REBIND",
+      "REPORT",
+      "SEARCH",
+      "SOURCE",
+      "SUBSCRIBE",
+      "TRACE",
+      "UNBIND",
+      "UNLINK",
+      "UNLOCK",
+      "UNSUBSCRIBE"
+    ];
+    module.exports = httpMethods;
+  }
+});
+
 // node_modules/find-my-way/index.js
 var require_find_my_way = __commonJS({
   "node_modules/find-my-way/index.js"(exports, module) {
@@ -32831,7 +33484,8 @@ var require_find_my_way = __commonJS({
     var isRegexSafe = require_safe_regex2();
     var deepEqual = require_fast_deep_equal();
     var { prettyPrintTree } = require_pretty_print();
-    var { StaticNode, NODE_TYPES } = require_node();
+    var { createStaticNode, NODE_TYPES } = require_node();
+    var { compileTree } = require_compiler();
     var Constrainer = require_constrainer();
     var httpMethods = require_http_methods();
     var httpMethodStrategy = require_http_method();
@@ -32839,6 +33493,7 @@ var require_find_my_way = __commonJS({
     var OPTIONAL_PARAM_REGEXP = /(\/:[^/()]*?)\?(\/?)/;
     var ESCAPE_REGEXP = /[.*+?^${}()|[\]\\]/g;
     var REMOVE_DUPLICATE_SLASHES_REGEXP = /\/\/+/g;
+    var parseUrl = typeof URL.parse === "function" ? URL.parse : (url) => URL.canParse(url) ? new URL(url) : null;
     if (!isRegexSafe(OPTIONAL_PARAM_REGEXP)) {
       throw new Error("the OPTIONAL_PARAM_REGEXP is not safe, update this module");
     }
@@ -32887,8 +33542,15 @@ var require_find_my_way = __commonJS({
       this.constrainer = new Constrainer(opts.constraints);
       this.useSemicolonDelimiter = opts.useSemicolonDelimiter || false;
       this.routes = [];
+      this._routesByMethodAndPattern = /* @__PURE__ */ new Map();
       this.trees = /* @__PURE__ */ Object.create(null);
       this._treeGET = null;
+      this._compiledGET = null;
+      this._compiledTrees = /* @__PURE__ */ Object.create(null);
+    }
+    function routesWithMethodAndPattern(router, method, pattern) {
+      const byPattern = router._routesByMethodAndPattern.get(method);
+      return byPattern === void 0 ? void 0 : byPattern.get(pattern);
     }
     Router.prototype.on = function on(method, path, opts, handler, store) {
       if (typeof opts === "function") {
@@ -32935,13 +33597,15 @@ var require_find_my_way = __commonJS({
       }
       this.constrainer.validateConstraints(constraints);
       this.constrainer.noteUsage(constraints);
+      this._compiledGET = null;
+      this._compiledTrees = /* @__PURE__ */ Object.create(null);
       if (this.trees[method] === void 0) {
-        this.trees[method] = new StaticNode("/");
+        this.trees[method] = createStaticNode("/");
       }
       let pattern = path;
       if (pattern === "*" && this.trees[method].prefix.length !== 0) {
         const currentRoot = this.trees[method];
-        this.trees[method] = new StaticNode("");
+        this.trees[method] = createStaticNode("");
         this.trees[method].setStaticChild("/", currentRoot);
       }
       let currentNode = this.trees[method];
@@ -32972,6 +33636,8 @@ var require_find_my_way = __commonJS({
           let backtrack = "";
           const regexps = [];
           let nodePatternParts = "";
+          let nodeParamCount = 0;
+          let nodeStaticLength = 0;
           let lastParamStartIndex = i + 1;
           for (let j = lastParamStartIndex; ; j++) {
             const charCode = pattern.charCodeAt(j);
@@ -32981,6 +33647,7 @@ var require_find_my_way = __commonJS({
             if (isRegexParam || isStaticPart || isEndOfNode) {
               const paramName = pattern.slice(lastParamStartIndex, j);
               params.push(paramName);
+              nodeParamCount++;
               isRegexNode = isRegexNode || isRegexParam || isStaticPart;
               if (isRegexParam) {
                 const endOfRegexIndex = getClosingParenthensePosition(pattern, j);
@@ -33010,6 +33677,7 @@ var require_find_my_way = __commonJS({
                 staticPart = staticPart.replaceAll("::", ":");
                 staticPart = staticPart.replaceAll("%", "%25");
                 regexps.push(backtrack = escapeRegExp(staticPart));
+                nodeStaticLength += staticPart.length;
               }
               lastParamStartIndex = j + 1;
               nodePatternParts += "()" + staticPart;
@@ -33019,7 +33687,7 @@ var require_find_my_way = __commonJS({
                 pattern = pattern.slice(0, i + 1) + nodePattern + pattern.slice(j);
                 i += nodePattern.length;
                 const regex = isRegexNode ? new RegExp("^" + regexps.join("") + "$") : null;
-                currentNode = currentNode.createParametricChild(regex, staticPart || null, nodePath);
+                currentNode = currentNode.createParametricChild(regex, staticPart || null, nodePath, nodeParamCount, nodeStaticLength);
                 parentNodePathIndex = i + 1;
                 break;
               }
@@ -33040,14 +33708,27 @@ var require_find_my_way = __commonJS({
       if (pattern === "*") {
         pattern = "/*";
       }
-      for (const existRoute of this.routes) {
-        const routeConstraints = existRoute.opts.constraints || {};
-        if (existRoute.method === method && existRoute.pattern === pattern && deepEqual(routeConstraints, constraints)) {
-          throw new Error(`Method '${method}' already declared for route '${pattern}' with constraints '${JSON.stringify(constraints)}'`);
+      const sameRoutes = routesWithMethodAndPattern(this, method, pattern);
+      if (sameRoutes !== void 0) {
+        for (const existRoute of sameRoutes) {
+          const routeConstraints = existRoute.opts.constraints || {};
+          if (deepEqual(routeConstraints, constraints)) {
+            throw new Error(`Method '${method}' already declared for route '${pattern}' with constraints '${JSON.stringify(constraints)}'`);
+          }
         }
       }
       const route = { method, path, pattern, params, opts, handler, store };
       this.routes.push(route);
+      if (sameRoutes !== void 0) {
+        sameRoutes.push(route);
+      } else {
+        let byPattern = this._routesByMethodAndPattern.get(method);
+        if (byPattern === void 0) {
+          byPattern = /* @__PURE__ */ new Map();
+          this._routesByMethodAndPattern.set(method, byPattern);
+        }
+        byPattern.set(pattern, [route]);
+      }
       currentNode.addRoute(route, this.constrainer);
     };
     Router.prototype.hasRoute = function hasRoute(method, path, constraints) {
@@ -33155,9 +33836,13 @@ var require_find_my_way = __commonJS({
       if (!this.caseSensitive) {
         pattern = pattern.toLowerCase();
       }
-      for (const existRoute of this.routes) {
+      const sameRoutes = routesWithMethodAndPattern(this, method, pattern);
+      if (sameRoutes === void 0) {
+        return null;
+      }
+      for (const existRoute of sameRoutes) {
         const routeConstraints = existRoute.opts.constraints || {};
-        if (existRoute.method === method && existRoute.pattern === pattern && deepEqual(routeConstraints, constraints)) {
+        if (deepEqual(routeConstraints, constraints)) {
           return {
             handler: existRoute.handler,
             store: existRoute.store,
@@ -33175,9 +33860,12 @@ var require_find_my_way = __commonJS({
       this._rebuild(this.routes);
     };
     Router.prototype.reset = function reset() {
+      this._compiledGET = null;
+      this._compiledTrees = /* @__PURE__ */ Object.create(null);
       this.trees = /* @__PURE__ */ Object.create(null);
       this._treeGET = null;
       this.routes = [];
+      this._routesByMethodAndPattern = /* @__PURE__ */ new Map();
     };
     Router.prototype.off = function off(method, path, constraints) {
       assert(typeof path === "string", "Path should be a string");
@@ -33258,8 +33946,189 @@ var require_find_my_way = __commonJS({
         }
         path = absolutePath;
       }
+      let sanitizedUrl;
+      let querystring2;
+      let shouldDecodeParam;
+      try {
+        sanitizedUrl = path.length >= MIN_NATIVE_SCAN_LENGTH ? safeDecodeURINativeScan(path, this.useSemicolonDelimiter) : safeDecodeURICharScan(path, this.useSemicolonDelimiter, 1);
+        path = sanitizedUrl.path;
+        querystring2 = sanitizedUrl.querystring;
+        shouldDecodeParam = sanitizedUrl.shouldDecodeParam;
+      } catch (error) {
+        return this._onBadUrl(path);
+      }
       if (this.ignoreDuplicateSlashes) {
         path = removeDuplicateSlashes(path);
+      }
+      if (this.ignoreTrailingSlash) {
+        path = trimLastSlash(path);
+      }
+      const originPath = path;
+      if (this.caseSensitive === false) {
+        path = path.toLowerCase();
+      }
+      const maxParamLength = this.maxParamLength;
+      let pathIndex = currentNode.prefix.length;
+      const pathLen = path.length;
+      let paramsCount = 0;
+      let param0, param1, param2, param3;
+      let extraParams = null;
+      const brothersNodesStack = [];
+      let maxParamLengthExceeded = false;
+      while (true) {
+        if (pathIndex === pathLen && currentNode.isLeafNode) {
+          const handle = currentNode.handlerStorage.getMatchingHandler(derivedConstraints);
+          if (handle !== null) {
+            return {
+              handler: handle.handler,
+              store: handle.store,
+              params: handle._createParamsObject(param0, param1, param2, param3, extraParams),
+              searchParams: this.querystringParser(querystring2)
+            };
+          }
+        }
+        let node = currentNode.getNextNode(path, pathIndex, brothersNodesStack, paramsCount);
+        if (node === null) {
+          if (brothersNodesStack.length === 0) {
+            if (maxParamLengthExceeded && this.onMaxParamLength) {
+              return this._onMaxParamLength(originPath);
+            }
+            return null;
+          }
+          const stackLength = brothersNodesStack.length;
+          paramsCount = brothersNodesStack[stackLength - 1];
+          pathIndex = brothersNodesStack[stackLength - 2];
+          node = brothersNodesStack[stackLength - 3];
+          brothersNodesStack.length = stackLength - 3;
+        }
+        currentNode = node;
+        while (true) {
+          if (currentNode.kind === NODE_TYPES.STATIC) {
+            pathIndex += currentNode.prefix.length;
+            break;
+          }
+          let paramEndIndex = pathLen;
+          if (currentNode.kind === NODE_TYPES.PARAMETRIC) {
+            paramEndIndex = originPath.indexOf("/", pathIndex);
+            if (paramEndIndex === -1) {
+              paramEndIndex = pathLen;
+            }
+          }
+          let param = originPath.slice(pathIndex, paramEndIndex);
+          if (shouldDecodeParam) {
+            param = safeDecodeURIComponent(param);
+          }
+          let matched = true;
+          let regexMatches = null;
+          if (currentNode.isRegex) {
+            if (param.length > currentNode.regexParamCount * maxParamLength + currentNode.regexStaticLength) {
+              maxParamLengthExceeded = true;
+              matched = false;
+            } else if ((regexMatches = currentNode.regex.exec(param)) === null) {
+              matched = false;
+            } else {
+              for (let i = 1; i < regexMatches.length; i++) {
+                const matchedParam = regexMatches[i] ?? "";
+                if (matchedParam.length > maxParamLength) {
+                  maxParamLengthExceeded = true;
+                  matched = false;
+                  break;
+                }
+              }
+            }
+          } else if (currentNode.kind === NODE_TYPES.PARAMETRIC && param.length > maxParamLength) {
+            maxParamLengthExceeded = true;
+            matched = false;
+          }
+          if (matched) {
+            if (regexMatches === null) {
+              if (paramsCount === 0) param0 = param;
+              else if (paramsCount === 1) param1 = param;
+              else if (paramsCount === 2) param2 = param;
+              else if (paramsCount === 3) param3 = param;
+              else {
+                if (extraParams === null) extraParams = [];
+                extraParams[paramsCount - 4] = param;
+              }
+              paramsCount++;
+            } else {
+              for (let i = 1; i < regexMatches.length; i++) {
+                const value = regexMatches[i] ?? "";
+                if (paramsCount === 0) param0 = value;
+                else if (paramsCount === 1) param1 = value;
+                else if (paramsCount === 2) param2 = value;
+                else if (paramsCount === 3) param3 = value;
+                else {
+                  if (extraParams === null) extraParams = [];
+                  extraParams[paramsCount - 4] = value;
+                }
+                paramsCount++;
+              }
+            }
+            pathIndex = paramEndIndex;
+            break;
+          }
+          if (brothersNodesStack.length === 0) {
+            if (maxParamLengthExceeded && this.onMaxParamLength) {
+              return this._onMaxParamLength(originPath);
+            }
+            return null;
+          }
+          const stackLength = brothersNodesStack.length;
+          paramsCount = brothersNodesStack[stackLength - 1];
+          pathIndex = brothersNodesStack[stackLength - 2];
+          currentNode = brothersNodesStack[stackLength - 3];
+          brothersNodesStack.length = stackLength - 3;
+        }
+      }
+    };
+    Router.prototype.compile = function compile() {
+      this.find = Router.prototype._findCompiled;
+      this.lookup = Router.prototype._lookupCompiled;
+      for (const method in this.trees) {
+        this._compileTree(method);
+      }
+      return this;
+    };
+    Router.prototype._compileTree = function _compileTree(method) {
+      const tree = this.trees[method];
+      if (tree === void 0) return null;
+      const compiled = compileTree(this, tree);
+      if (method === "GET") {
+        this._compiledGET = compiled;
+      } else {
+        this._compiledTrees[method] = compiled;
+      }
+      return compiled;
+    };
+    Router.prototype._findCompiled = function _findCompiled(method, path, derivedConstraints) {
+      let compiled = method === "GET" ? this._compiledGET : this._compiledTrees[method];
+      if (compiled == null) {
+        compiled = this._compileTree(method);
+        if (compiled === null) return null;
+      }
+      return compiled.find(path, derivedConstraints);
+    };
+    Router.prototype._lookupCompiled = function _lookupCompiled(req, res, ctx, done) {
+      if (typeof ctx === "function" || done !== void 0) {
+        return Router.prototype.lookup.call(this, req, res, ctx, done);
+      }
+      const derivedConstraints = this.constrainer.deriveConstraints(req, ctx);
+      const method = req.method;
+      let compiled = method === "GET" ? this._compiledGET : this._compiledTrees[method];
+      if (compiled == null) {
+        compiled = this._compileTree(method);
+        if (compiled === null) return this._defaultRoute(req, res, ctx);
+      }
+      return compiled.lookup(req.url, derivedConstraints, req, res, ctx);
+    };
+    Router.prototype._findSanitized = function _findSanitized(matcher, path, derivedConstraints) {
+      if (path.charCodeAt(0) !== 47) {
+        const absolutePath = getPathFromAbsoluteUrl(path);
+        if (absolutePath === null) {
+          return this._onBadUrl(path);
+        }
+        path = absolutePath;
       }
       let sanitizedUrl;
       let querystring2;
@@ -33272,6 +34141,9 @@ var require_find_my_way = __commonJS({
       } catch (error) {
         return this._onBadUrl(path);
       }
+      if (this.ignoreDuplicateSlashes) {
+        path = removeDuplicateSlashes(path);
+      }
       if (this.ignoreTrailingSlash) {
         path = trimLastSlash(path);
       }
@@ -33279,121 +34151,7 @@ var require_find_my_way = __commonJS({
       if (this.caseSensitive === false) {
         path = path.toLowerCase();
       }
-      const maxParamLength = this.maxParamLength;
-      let pathIndex = currentNode.prefix.length;
-      const params = [];
-      const pathLen = path.length;
-      const brothersNodesStack = [];
-      let maxParamLengthExceeded = false;
-      while (true) {
-        if (pathIndex === pathLen && currentNode.isLeafNode) {
-          const handle = currentNode.handlerStorage.getMatchingHandler(derivedConstraints);
-          if (handle !== null) {
-            return {
-              handler: handle.handler,
-              store: handle.store,
-              params: handle._createParamsObject(params),
-              searchParams: this.querystringParser(querystring2)
-            };
-          }
-        }
-        let node = currentNode.getNextNode(path, pathIndex, brothersNodesStack, params.length);
-        if (node === null) {
-          if (brothersNodesStack.length === 0) {
-            if (maxParamLengthExceeded && this.onMaxParamLength) {
-              return this._onMaxParamLength(originPath);
-            }
-            return null;
-          }
-          const brotherNodeState = brothersNodesStack.pop();
-          pathIndex = brotherNodeState.brotherPathIndex;
-          params.splice(brotherNodeState.paramsCount);
-          node = brotherNodeState.brotherNode;
-        }
-        currentNode = node;
-        while (true) {
-          if (currentNode.kind === NODE_TYPES.STATIC) {
-            pathIndex += currentNode.prefix.length;
-            break;
-          }
-          if (currentNode.kind === NODE_TYPES.WILDCARD) {
-            let param2 = originPath.slice(pathIndex);
-            if (shouldDecodeParam) {
-              param2 = safeDecodeURIComponent(param2);
-            }
-            params.push(param2);
-            pathIndex = pathLen;
-            break;
-          }
-          let paramEndIndex = originPath.indexOf("/", pathIndex);
-          if (paramEndIndex === -1) {
-            paramEndIndex = pathLen;
-          }
-          let param = originPath.slice(pathIndex, paramEndIndex);
-          if (shouldDecodeParam) {
-            param = safeDecodeURIComponent(param);
-          }
-          if (currentNode.isRegex) {
-            const matchedParameters = currentNode.regex.exec(param);
-            if (matchedParameters === null) {
-              if (brothersNodesStack.length === 0) {
-                if (maxParamLengthExceeded && this.onMaxParamLength) {
-                  return this._onMaxParamLength(originPath);
-                }
-                return null;
-              }
-              const brotherNodeState = brothersNodesStack.pop();
-              pathIndex = brotherNodeState.brotherPathIndex;
-              params.splice(brotherNodeState.paramsCount);
-              currentNode = brotherNodeState.brotherNode;
-              continue;
-            }
-            let regexMaxParamLengthExceeded = false;
-            for (let i = 1; i < matchedParameters.length; i++) {
-              const matchedParam = matchedParameters[i] ?? "";
-              if (matchedParam.length > maxParamLength) {
-                regexMaxParamLengthExceeded = true;
-                break;
-              }
-            }
-            if (regexMaxParamLengthExceeded) {
-              maxParamLengthExceeded = true;
-              if (brothersNodesStack.length === 0) {
-                if (this.onMaxParamLength) {
-                  return this._onMaxParamLength(originPath);
-                }
-                return null;
-              }
-              const brotherNodeState = brothersNodesStack.pop();
-              pathIndex = brotherNodeState.brotherPathIndex;
-              params.splice(brotherNodeState.paramsCount);
-              currentNode = brotherNodeState.brotherNode;
-              continue;
-            }
-            for (let i = 1; i < matchedParameters.length; i++) {
-              params.push(matchedParameters[i] ?? "");
-            }
-          } else {
-            if (param.length > maxParamLength) {
-              maxParamLengthExceeded = true;
-              if (brothersNodesStack.length === 0) {
-                if (this.onMaxParamLength) {
-                  return this._onMaxParamLength(originPath);
-                }
-                return null;
-              }
-              const brotherNodeState = brothersNodesStack.pop();
-              pathIndex = brotherNodeState.brotherPathIndex;
-              params.splice(brotherNodeState.paramsCount);
-              currentNode = brotherNodeState.brotherNode;
-              continue;
-            }
-            params.push(param);
-          }
-          pathIndex = paramEndIndex;
-          break;
-        }
-      }
+      return matcher(path, originPath, shouldDecodeParam, derivedConstraints, querystring2);
     };
     Router.prototype._rebuild = function(routes) {
       this.reset();
@@ -33501,12 +34259,8 @@ var require_find_my_way = __commonJS({
       if (url.indexOf("#", authorityStart) !== -1 || authorityEnd === authorityStart) {
         return null;
       }
-      try {
-        const parsed = new URL(url);
-        if (parsed.protocol !== `${scheme}:` || parsed.host.length === 0) {
-          return null;
-        }
-      } catch (error) {
+      const parsed = parseUrl(url);
+      if (parsed === null || parsed.protocol !== `${scheme}:` || parsed.host.length === 0) {
         return null;
       }
       if (authorityEnd === url.length) {
@@ -33609,6 +34363,7 @@ var require_route = __commonJS({
     var { onRequestAbortHookRunner, lifecycleHooks, preParsingHookRunner, onTimeoutHookRunner, onRequestHookRunner } = require_hooks();
     var { normalizeSchema } = require_schemas();
     var { parseHeadOnSendHandlers } = require_head_route();
+    var { defaultInitOptions } = require_initial_config_validation();
     var {
       compileSchemasForValidation,
       compileSchemasForSerialization
@@ -33704,8 +34459,10 @@ var require_route = __commonJS({
           return503OnClosing = Object.hasOwn(options2, "return503OnClosing") ? options2.return503OnClosing : true;
           keepAliveConnections = fastifyArgs.keepAliveConnections;
         },
-        routing: router.lookup.bind(router),
-        // router func to find the right handler to call
+        // router func to find the right handler to call, not bound because
+        // router.compile() replaces router.lookup
+        routing: (req, res, done) => router.lookup(req, res, done),
+        compileRoutes: () => router.compile(),
         route,
         // configure a route in the fastify instance
         hasRoute,
@@ -34021,12 +34778,21 @@ var require_route = __commonJS({
           const ac = new AbortController();
           request2[kRequestSignal] = ac;
           request2[kTimeoutTimer] = setTimeout(() => {
-            if (!reply.sent) {
-              const err = new FST_ERR_HANDLER_TIMEOUT(handlerTimeout, context.config?.url);
-              ac.abort(err);
-              reply[kReplyIsError] = true;
-              reply.send(err);
+            if (reply.sent === true) {
+              return;
             }
+            const err = new FST_ERR_HANDLER_TIMEOUT(handlerTimeout, context.config?.url);
+            ac.abort(err);
+            if (reply.sent === true) {
+              return;
+            }
+            if (reply.raw.headersSent === true) {
+              reply[kReplyIsError] = true;
+              reply.raw.destroy(err);
+              return;
+            }
+            reply[kReplyIsError] = true;
+            reply.send(err);
           }, handlerTimeout);
           const onAbort = () => {
             if (!ac.signal.aborted) {
@@ -34142,6 +34908,7 @@ var require_route = __commonJS({
           routerOptions[key] = options[key] ?? defaultOptions[key];
         }
       }
+      routerOptions.compile ??= defaultInitOptions.routerOptions.compile;
       return routerOptions;
     }
     function removeTrackedSocket() {
@@ -36317,7 +37084,7 @@ var require_light_my_request = __commonJS({
 var require_fastify = __commonJS({
   "node_modules/fastify/fastify.js"(exports, module) {
     "use strict";
-    var VERSION = "5.12.7";
+    var VERSION = "5.12.8";
     var Avvio = require_avvio();
     var http = __require("node:http");
     var diagnostics = __require("node:diagnostics_channel");
@@ -36393,6 +37160,21 @@ var require_fastify = __commonJS({
     var { buildErrorHandler } = require_error_handler();
     var { FSTWRN004, FSTDEP023, FSTDEP024, FSTDEP025 } = require_warnings();
     var initChannel = diagnostics.channel("fastify.initialization");
+    function asyncDisposableHook(disposable) {
+      return function(instance, done) {
+        disposable[Symbol.asyncDispose]().then(() => done(), done);
+      };
+    }
+    function disposableHook(disposable) {
+      return function(instance, done) {
+        try {
+          disposable[Symbol.dispose]();
+          done();
+        } catch (err) {
+          done(err);
+        }
+      };
+    }
     function fastify(serverOptions) {
       const {
         options,
@@ -36671,6 +37453,10 @@ var require_fastify = __commonJS({
       fastify2.ready = ready;
       fastify2.printPlugins = avvio.prettyPrint.bind(avvio);
       avvio.once("preReady", () => {
+        if (options.routerOptions.compile === true) {
+          router.compileRoutes();
+          fourOhFour.router.compile();
+        }
         fastify2.onClose((instance, done) => {
           fastify2[kState].closing = true;
           router.closeRoutes();
@@ -36824,6 +37610,15 @@ var require_fastify = __commonJS({
         } else {
           if (fn.constructor.name === "AsyncFunction" && fn.length === 3) {
             throw new errorCodes.FST_ERR_HOOK_INVALID_ASYNC_HANDLER();
+          }
+        }
+        if (name === "onClose" && typeof fn !== "function") {
+          if (typeof fn[Symbol.asyncDispose] === "function") {
+            fn = asyncDisposableHook(fn);
+          } else if (typeof fn[Symbol.dispose] === "function") {
+            fn = disposableHook(fn);
+          } else {
+            throw new errorCodes.FST_ERR_HOOK_INVALID_HANDLER(name, Object.prototype.toString.call(fn));
           }
         }
         if (name === "onClose") {
@@ -43189,8 +43984,9 @@ var require_static = __commonJS({
               routes.add(route);
               setUpHeadAndGet(routeOpts, route, `/${file}`, rootPath);
               const key = path.posix.basename(route);
-              if (indexes.has(key) && !indexDirs.has(key)) {
-                indexDirs.set(path.posix.dirname(route), rootPath);
+              const dir = path.posix.dirname(route);
+              if (indexes.has(key) && !indexDirs.has(dir)) {
+                indexDirs.set(dir, rootPath);
               }
             }
           }
@@ -44756,7 +45552,14 @@ var require_utils3 = __commonJS({
   "node_modules/pg/lib/utils.js"(exports, module) {
     "use strict";
     var defaults2 = require_defaults2();
+    var nodeUtils = __require("util");
     var { isDate } = __require("util/types");
+    var invalidDateDeprecationNotice = nodeUtils.deprecate(
+      () => {
+      },
+      "Sending an invalid date to Postgres is deprecated and will throw an error in the next major version of pg. Ensure any Date object passed as a query parameter is valid.",
+      "PG_INVALID_DATE"
+    );
     function escapeElement(elementRepresentation) {
       const escaped = elementRepresentation.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       return '"' + escaped + '"';
@@ -44796,6 +45599,9 @@ var require_utils3 = __commonJS({
           return Buffer.from(val.buffer, val.byteOffset, val.byteLength);
         }
         if (isDate(val)) {
+          if (isNaN(val.getTime())) {
+            invalidDateDeprecationNotice();
+          }
           if (defaults2.parseInputDatesAsUTC) {
             return dateToStringUTC(val);
           } else {
@@ -44846,7 +45652,7 @@ var require_utils3 = __commonJS({
       return ret;
     }
     function normalizeQueryConfig(config, values, callback) {
-      config = typeof config === "string" ? { text: config } : config;
+      config = typeof config === "string" ? { text: config } : cloneQueryConfig(config);
       if (values) {
         if (typeof values === "function") {
           config.callback = values;
@@ -44858,6 +45664,12 @@ var require_utils3 = __commonJS({
         config.callback = callback;
       }
       return config;
+    }
+    function cloneQueryConfig(config) {
+      if (config == null) {
+        return config;
+      }
+      return Object.defineProperties(Object.create(Object.getPrototypeOf(config)), Object.getOwnPropertyDescriptors(config));
     }
     var escapeIdentifier2 = function(str) {
       return '"' + str.replace(/"/g, '""') + '"';
@@ -45048,7 +45860,7 @@ var require_cert_signatures = __commonJS({
           }
           throw x509Error("unknown hash OID " + hashOID, data);
         }
-        // Ed25519 -- see https: return//github.com/openssl/openssl/issues/15477
+        // Ed25519 -- see https://github.com/openssl/openssl/issues/15477
         case "1.3.101.110":
         case "1.3.101.112":
           return "SHA-512";
@@ -45320,7 +46132,7 @@ var require_pg_connection_string = __commonJS({
         config.client_encoding = result.searchParams.get("encoding");
         return config;
       }
-      const hostname = dummyHost ? "" : result.hostname;
+      const hostname = (dummyHost ? "" : result.hostname).replace(/^\[(.+)\]$/, "$1");
       if (!config.host) {
         config.host = decodeURIComponent(hostname);
       } else if (hostname && /^%2f/i.test(hostname)) {
@@ -45857,7 +46669,7 @@ var require_query = __commonJS({
         return null;
       }
       hasBeenParsed(connection) {
-        return this.name && (connection.parsedStatements[this.name] || connection.submittedNamedStatements[this.name]);
+        return this.name && (connection.parsedStatements[this.name] !== void 0 || connection.submittedNamedStatements[this.name] !== void 0);
       }
       handlePortalSuspended(connection) {
         this._getRows(connection, this.rows);
@@ -46099,7 +46911,7 @@ var require_buffer_writer = __commonJS({
           const oldBuffer = this.buffer;
           const newSize = oldBuffer.length + (oldBuffer.length >> 1) + size;
           this.buffer = Buffer.allocUnsafe(newSize);
-          oldBuffer.copy(this.buffer);
+          oldBuffer.copy(this.buffer, 0, 0, this.offset);
         }
       }
       addInt32(num) {
@@ -46159,6 +46971,15 @@ var require_buffer_writer = __commonJS({
         otherBuffer.copy(this.buffer, this.offset);
         this.offset += otherBuffer.length;
         return this;
+      }
+      /**
+       * Appends an uninitialized block of {@link size} bytes to the buffer and returns its offset.
+       */
+      reserveUnsafe(size) {
+        const offset = this.offset;
+        this.ensure(size);
+        this.offset += size;
+        return offset;
       }
       join(code) {
         if (code) {
@@ -46252,30 +47073,23 @@ var require_serializer2 = __commonJS({
         /* code.parse */
       );
     };
-    var paramWriter = new buffer_writer_1.Writer();
-    var writeValues = function(values, valueMapper) {
-      for (let i = 0; i < values.length; i++) {
+    var writeValues = function(values, valueMapper, formatsOffset) {
+      const len = values.length;
+      for (let i = 0; i < len; i++) {
         const mappedVal = valueMapper ? valueMapper(values[i], i) : values[i];
+        let formatByte = 0;
         if (mappedVal == null) {
-          writer.addInt16(
-            0
-            /* ParamType.STRING */
-          );
-          paramWriter.addInt32(-1);
+          writer.addInt32(-1);
         } else if (mappedVal instanceof Buffer) {
-          writer.addInt16(
-            1
-            /* ParamType.BINARY */
-          );
-          paramWriter.addInt32(mappedVal.length);
-          paramWriter.add(mappedVal);
+          formatByte = 1;
+          writer.addInt32(mappedVal.length);
+          writer.add(mappedVal);
         } else {
-          writer.addInt16(
-            0
-            /* ParamType.STRING */
-          );
-          paramWriter.addInt32PrefixedString(mappedVal);
+          writer.addInt32PrefixedString(mappedVal);
         }
+        const buf = writer.buffer;
+        buf[formatsOffset++] = 0;
+        buf[formatsOffset++] = formatByte;
       }
     };
     var bind = (config = {}) => {
@@ -46286,15 +47100,14 @@ var require_serializer2 = __commonJS({
       const len = values.length;
       writer.addCString(portal).addCString(statement);
       writer.addInt16(len);
+      const formatsOffset = writer.reserveUnsafe(len * 2);
+      writer.addInt16(len);
       try {
-        writeValues(values, config.valueMapper);
+        writeValues(values, config.valueMapper, formatsOffset);
       } catch (err) {
         writer.clear();
-        paramWriter.clear();
         throw err;
       }
-      writer.addInt16(len);
-      writer.add(paramWriter.flush());
       writer.addInt16(1);
       writer.addInt16(
         binary ? 1 : 0
@@ -46952,7 +47765,12 @@ var require_connection = __commonJS({
       upgradeToSSL(host, reportStreamError) {
         const self = this;
         const options = {
-          socket: self.stream
+          socket: self.stream,
+          // tls.connect checks the server identity against `servername`, falling
+          // back to `host` and then to 'localhost'. `servername` must stay unset
+          // for IP addresses (see below), so `host` is needed to keep certificate
+          // validation working when connecting to an IP address.
+          host
         };
         if (self.ssl !== true) {
           Object.assign(options, self.ssl);
@@ -47030,7 +47848,6 @@ var require_connection = __commonJS({
         }
       }
       sync() {
-        this._ending = true;
         this._send(syncBuffer);
       }
       ref() {
@@ -47985,6 +48802,15 @@ var require_client = __commonJS({
         if (query._result && !query._result._types) {
           query._result._types = this._types;
         }
+        if (this.pipeline) {
+          const portalQuery = typeof config.submit === "function" && !(query instanceof Query2) ? "Custom query classes such as pg-cursor and pg-query-stream are" : query.rows ? "The `rows` option is" : null;
+          if (portalQuery) {
+            process.nextTick(() => {
+              query.handleError(new Error(`${portalQuery} not supported in pipeline mode`), this.connection);
+            });
+            return result;
+          }
+        }
         if (!this._queryable) {
           process.nextTick(() => {
             query.handleError(new Error("Client has encountered a connection error and is not queryable"), this.connection);
@@ -48506,6 +49332,8 @@ var require_query2 = __commonJS({
       sqlState: "code",
       statementPosition: "position",
       messagePrimary: "message",
+      messageDetail: "detail",
+      messageHint: "hint",
       context: "where",
       schemaName: "schema",
       tableName: "table",
@@ -48589,7 +49417,7 @@ var require_query2 = __commonJS({
           console.error("This can cause conflicts and silent errors executing queries");
         }
         const values = (this.values || []).map(utils.prepareValue);
-        if (client.namedQueries[this.name]) {
+        if (client.namedQueries[this.name] !== void 0) {
           if (this.text && client.namedQueries[this.name] !== this.text) {
             const err = new Error(`Prepared statements must be unique - '${this.name}' was used for a different statement`);
             return after(err);
@@ -48881,7 +49709,7 @@ var require_client2 = __commonJS({
         this.hasExecuted = true;
         nativeQueries.push(query);
         const values = query.values ? query.values.map(utils.prepareValue) : null;
-        const pipelineEntry = { text: query.text, name: query.name };
+        const pipelineEntry = { text: query.text, name: query.name, arrayMode: query._arrayMode };
         if (values) {
           pipelineEntry.values = values;
         }
@@ -48893,12 +49721,16 @@ var require_client2 = __commonJS({
       this.native.pipeline(queries, function(err, results) {
         self._pipelineInFlight = false;
         if (err) {
+          self._connected = false;
+          self._queryable = false;
           for (let i = 0; i < nativeQueries.length; i++) {
             const q = nativeQueries[i];
             q.native = self.native;
             q.handleError(err);
           }
-          self._pulsePipelinedQueryQueue();
+          self._errorAllQueries(err);
+          self.emit("error", err);
+          self.emit("end");
           return;
         }
         for (let i = 0; i < nativeQueries.length; i++) {
@@ -52983,6 +53815,7 @@ function createDatabase(pool2) {
       );
     },
     async upsertHealth(guildId, state, botPresent, gatewayEvents, uniqueUsers = 0) {
+      await pool2.query(`INSERT INTO guilds (id, name) VALUES ($1, $1) ON CONFLICT (id) DO NOTHING`, [guildId]);
       await pool2.query(
         `INSERT INTO guild_health (guild_id, bot_present, gateway_events_last_minute, unique_users, state, checked_at)
          VALUES ($1, $2, $3, $4, $5, now())
@@ -54964,10 +55797,21 @@ var API_THROTTLE_MAX = 120;
 var throttle = new RequestThrottle(API_THROTTLE_WINDOW_MS, API_THROTTLE_MAX);
 var IP_THROTTLE_MAX = 600;
 var ipThrottle = new RequestThrottle(API_THROTTLE_WINDOW_MS, IP_THROTTLE_MAX);
+var alertedThrottleKeys = /* @__PURE__ */ new Set();
+function alertThrottle(request2, key) {
+  if (alertedThrottleKeys.has(key)) return;
+  if (alertedThrottleKeys.size > 500) alertedThrottleKeys.clear();
+  alertedThrottleKeys.add(key);
+  request2.log.warn(
+    { throttleKey: key, path: request2.url.split("?")[0], method: request2.method },
+    "request throttled: the rate limit refused this client"
+  );
+}
 var throttleSweep = setInterval(() => {
   const now = Date.now();
   throttle.sweep(now);
   ipThrottle.sweep(now);
+  alertedThrottleKeys.clear();
 }, API_THROTTLE_WINDOW_MS);
 throttleSweep.unref();
 app.addHook("onRequest", async (request2) => {
@@ -55053,8 +55897,10 @@ app.addHook("onRequest", async (request2, reply) => {
   const url = request2.url;
   if (!url.startsWith("/api/") && !url.startsWith("/auth/") && !url.startsWith("/internal/")) return;
   const now = Date.now();
-  const ipVerdict = ipThrottle.check(clientKey(request2.socket.remoteAddress), now);
+  const peer = clientKey(request2.socket.remoteAddress);
+  const ipVerdict = ipThrottle.check(peer, now);
   if (!ipVerdict.allowed) {
+    alertThrottle(request2, `ip:${peer}`);
     return reply.code(429).header("retry-after", String(ipVerdict.retryAfterSeconds)).send({
       error: "TOO_MANY_REQUESTS",
       message: `\u0639\u062F\u062F \u0643\u0628\u064A\u0631 \u0645\u0646 \u0627\u0644\u0637\u0644\u0628\u0627\u062A. \u0623\u0639\u062F \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0628\u0639\u062F ${ipVerdict.retryAfterSeconds} \u062B\u0627\u0646\u064A\u0629.`
@@ -55065,6 +55911,7 @@ app.addHook("onRequest", async (request2, reply) => {
   if (!sessionKey || !/^[0-9a-f-]{36}$/i.test(sessionKey)) return;
   const verdict = throttle.check(`sess:${sessionKey}`, now);
   if (verdict.allowed) return;
+  alertThrottle(request2, `sess:${sessionKey}`);
   return reply.code(429).header("retry-after", String(verdict.retryAfterSeconds)).send({
     error: "TOO_MANY_REQUESTS",
     message: `\u0639\u062F\u062F \u0643\u0628\u064A\u0631 \u0645\u0646 \u0627\u0644\u0637\u0644\u0628\u0627\u062A. \u0623\u0639\u062F \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0628\u0639\u062F ${verdict.retryAfterSeconds} \u062B\u0627\u0646\u064A\u0629.`

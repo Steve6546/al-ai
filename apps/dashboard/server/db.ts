@@ -1200,6 +1200,13 @@ export function createDatabase(pool: pg.Pool) {
     },
 
     async upsertHealth(guildId: string, state: string, botPresent: boolean, gatewayEvents: number, uniqueUsers = 0) {
+      // A heartbeat for a guild the dashboard has not seen yet used to fail the
+      // `guild_health_guild_id_fkey` and drop the whole beat: the bot was in the
+      // server, the dashboard said "unknown", and the only trace was an ERROR in
+      // PostgreSQL's log. The guild row is the dashboard's to seed (the bot owns
+      // `member_count`/`ping_ms` and must not invent them), so the parent is
+      // created first and nothing else on the row is touched.
+      await pool.query(`INSERT INTO guilds (id, name) VALUES ($1, $1) ON CONFLICT (id) DO NOTHING`, [guildId]);
       await pool.query(
         `INSERT INTO guild_health (guild_id, bot_present, gateway_events_last_minute, unique_users, state, checked_at)
          VALUES ($1, $2, $3, $4, $5, now())
