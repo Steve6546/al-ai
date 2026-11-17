@@ -240,3 +240,56 @@ Device kind comes from `describeUserAgent` (core), which is ordered for the case
 that actually happen: Edge and Opera before Chrome (both advertise `Chrome/`),
 iPad before Mac (iPadOS sends a desktop macOS string plus `Mobile`), Android
 before Linux, and a tablet is an Android UA without `Mobile`.
+
+## The overview: two halves, both checkable
+
+The first screen a signed-in operator sees answers two questions with the same
+rule — nothing is drawn that a query did not return.
+
+**Live numbers.** `GET /api/guilds/:id/metrics` adds `series` (24 hourly buckets
+of `audit_trail`, oldest first) and `previous` (the totals of the 24 hours before
+that window). The buckets come from one `date_trunc('hour') … GROUP BY`; the gaps
+are filled by `fillHourlySeries` in `packages/core/src/series.ts`, because
+"nothing happened at 04:00" and "04:00 is missing from the result" are different
+facts and only one of them belongs on a line chart. Each card takes its number
+from the same window as its chart, so a card cannot print `0` beside a line with
+four events in it.
+
+**The comparison is named, not divided.** `changeSince(now, previous)` returns
+`new` when the baseline is zero and `flat` when both are, and only returns a
+percentage when a percentage exists. Production on 2026-11-17 was exactly that
+case — three events in the window, none in the one before — which is where the
+reference design printed `Infinity%` beside a green arrow. Percentages are
+clamped to ±999 so a one-event baseline cannot claim `+4900%`.
+
+**Modules.** `GET /api/guilds/:id/modules` answers from each module's own row in
+one query (`db.getModuleStates`): `guild_security.enabled` (default **true** —
+the engine arms on join), `guild_logging`, `guild_welcome`,
+`guild_welcome_messages`, `guild_customization`, `guild_levels`,
+`guild_invites`, plus three tallies (`guild_role_tiers`, `audit_trail`,
+disabled `guild_command_flags`). `GUILD_MODULE_KEYS` in `packages/core/src/
+contracts.ts` is the closed list: a card cannot be added for a system that has no
+table to read, which is what keeps a reference design's tickets, backups and
+"plus" tiers from appearing on a screen that never implemented them. The
+instance-wide «حالة البوت» is omitted for callers who are not the deployment's
+owner, and a group whose cards are all withheld renders nothing rather than a
+heading over empty space.
+
+## Presence glyphs on one grid
+
+`StatusDot` draws all four of Discord's states in a 16 × 16 box with the same
+outer radius, so the picker, the trigger and the preview cannot show a small dot
+next to a large one:
+
+| State | Geometry |
+| --- | --- |
+| online | filled circle, `#23a55a` |
+| idle | crescent: circle masked by a cut circle at (13.6, 2.4) r = 6.4 — centres 7.92 apart, body 6.48 thick at its deepest |
+| dnd | circle `#f23f43` with a white bar 10 × 2.4, radius 1.2 |
+| invisible | ring `#80848e`, r 6.5 with a 3-unit stroke (19% of the glyph at every size) |
+
+The crescent keeps a mask rather than an overlapping disc of the surface colour:
+the mask is a hole, so the glyph is correct on the card, in the menu and in the
+preview without any caller passing a background. Six cut-circle placements were
+rendered at 9, 14 and 32 px and compared against Discord's own menu before the
+current one was chosen.
