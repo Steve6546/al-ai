@@ -110,7 +110,17 @@ export function NetworkView() {
   // entry and refreshed only after the operator asks to open the port. A
   // failure here is not a screen failure: the LAN links stay usable and the
   // status simply stays unknown.
+  //
+  // It waits for `/api/network` to answer first, and does not run at all when
+  // that answer says hosted. The effect used to fire on mount, so every visit to
+  // this screen on the platform sent `POST /api/network/firewall` before the
+  // component knew where it was running — and the server's HOSTED_NETWORK guard
+  // answered 409, which is a visible console error for a control that the hosted
+  // branch never renders. `null` is "not known yet", so a local deployment waits
+  // for the snapshot and a hosted one never asks.
+  const hosted = snapshot ? snapshot.hosted : null;
   useEffect(() => {
+    if (hosted !== false) return;
     let cancelled = false;
     api
       .networkFirewall()
@@ -119,7 +129,7 @@ export function NetworkView() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [hosted]);
 
   /**
    * Keeps the screen honest while a tunnel is being created — and afterwards.

@@ -168,6 +168,59 @@ command to `bash scripts/host/boot.sh` and let auto-pull bring new commits in.
 disk is 512 MB, shared with a ~200 MB PostgreSQL build. Everything needed after
 the client build (`tsx`, `fastify`, `pg`) is a runtime dependency.
 
+## Deploying: sync, then restart (and why the 502 happened)
+
+The platform reports `autoPull: true`, but a restart does **not** run the pull: on
+2026-11-17 a restart on `59fbc5b` with `7575fbb` already on `origin/main` came
+back on `59fbc5b`, and `git fetch` from the panel shell then fast-forwarded to
+`7575fbb` without complaint. A restart is therefore a restart of *the checkout on
+the volume*, and a deploy is two steps, in this order:
+
+```text
+deployments_sync   ->  deployments_power restart  ->  external smoke test
+```
+
+Skipping the sync is how an "applied" fix silently stayed local: the code, the
+`host-build/*.mjs` bundle and the container's HEAD all disagreed with GitHub.
+
+### The 502 window, measured
+
+`502 App is unreachable` is the proxy saying nothing is bound to the
+platform's port. Three separate things produce that window, and they were
+indistinguishable until `boot.log` existed:
+
+| cause | before | after |
+| --- | --- | --- |
+| `setup.sh` re-ran both `npm ci` passes on every deploy, because the fingerprint hashed `git rev-parse HEAD` (a docs commit re-installed 100–180 s of dependencies) | 100–180 s | not run at all; the fingerprint is the lockfile + root `package.json` |
+| the platform's own install/pull phase, entered when a restart has to fetch | ~39 s measured | skipped when `deployments_sync` already advanced the volume |
+| our boot: PostgreSQL, then the dashboard, then the bot | 5 s | 5 s (port opens at +5 s: 0→3 s database, 3→5 s dashboard, 5 s bot) |
+
+Measured from outside the container, 4 probes/second against the public URL:
+
+```text
+restart after a sync, deps unchanged : 0.9 s of downtime (one failed probe)
+restart on a new commit, deps unchanged : 39.4 s of 502
+restart on a new commit, deps re-installed : 100–180 s of 502 (the old setup.sh)
+```
+
+The residual 5 seconds is our boot and is visible in `.al-ai-host/logs/boot.log`,
+which records every phase with a monotonic offset from the first line and
+survives the restart because it lives on the volume:
+
+```text
+[boot +0s] start: pid 15, HEAD 7575fbb, port 25880, compiled=1
+[boot +0s] starting PostgreSQL (embedded, 5432)
+[boot +3s] the services connect as the least-privilege application role
+[boot +3s] PostgreSQL ready
+[boot +3s] starting the dashboard on port 25880
+[boot +5s] dashboard ready
+[boot +5s] starting the Discord bot
+```
+
+`+0s` is the moment `boot.sh` was handed the container, not the moment the
+restart was requested; the difference is the platform's, and the gap between
+`+5s` and the first 200 from outside is the container swap.
+
 ## Verifying a deployment
 
 1. `deployments_check` → `/api/health` over the public URL.
@@ -191,7 +244,11 @@ the client build (`tsx`, `fastify`, `pg`) is a runtime dependency.
      origin (`DISCORD_REDIRECT_URI`), not to `localhost`.
 6. Bot: one slash command round-trip, and `deployments_logs` for the gateway's
    ready line.
-7. Auto-pull: push a no-op commit, restart, confirm `git log -1` matches.
+7. Deploy state: `deployments_sync` → restart → `git rev-parse --short HEAD` in
+the panel shell equals `git rev-parse HEAD` locally. Confirm it *after* the
+restart, not before: a restart does not pull on its own (see the deploy section).
+8. Boot timeline: `.al-ai-host/logs/boot.log` ends with `dashboard ready` and
+`starting the Discord bot` no more than a few seconds after `start:`.
 
 ## Renewal (every four days)
 
