@@ -65,7 +65,23 @@ HEAP_PG="${AL_AI_HEAP_PG:-24}"
 : "${NODE_ENV:=production}"
 export NODE_ENV
 
-log() { echo "[boot] $*"; }
+# Every phase line goes to stdout (the platform's log view) *and* to
+# `.al-ai-host/logs/boot.log` with a monotonic offset from the first line. The
+# 502 this deployment showed for ~40 s per restart could not be attributed: the
+# platform's own log stream is a rolling buffer of request lines, so "was the
+# port closed for 6 s or for 40 s, and was that us or the pull?" had no answer.
+# One number per phase makes the next incident a measurement instead of a guess.
+BOOT_T0=$(date +%s%3N)
+log() {
+  local now offset line
+  now=$(date +%s%3N)
+  offset=$(( (now - BOOT_T0) / 1000 ))
+  line="[boot +${offset}s] $*"
+  echo "$line"
+  printf '%s %s\n' "$(date -u +%FT%T.%3NZ)" "$line" >>"$LOG_DIR/boot.log" 2>/dev/null || true
+}
+
+log "start: pid $$, HEAD $(git rev-parse --short HEAD 2>/dev/null || echo no-git), port $PORT, compiled=$COMPILED"
 
 # --- bounded logs ----------------------------------------------------------
 # Every service is launched through `tee -a`, so a log file grows until the
