@@ -76354,6 +76354,9 @@ function normaliseAppearance(input) {
   };
 }
 
+// packages/core/src/series.ts
+var HOUR_MS = 60 * 60 * 1e3;
+
 // apps/dashboard/server/env.ts
 var alwaysRequired = [
   "DISCORD_CLIENT_ID",
@@ -77233,6 +77236,23 @@ function mapSyncJob(row) {
   };
 }
 function createDatabase(pool2) {
+  async function asIdentity(settings, text, values) {
+    const client = await pool2.connect();
+    try {
+      await client.query("BEGIN");
+      for (const [key, value] of Object.entries(settings)) {
+        await client.query("SELECT set_config($1, $2, true)", [key, value]);
+      }
+      const result = await client.query(text, values);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => void 0);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
   return {
     async ping() {
       await pool2.query("SELECT 1");
@@ -78069,7 +78089,8 @@ function createDatabase(pool2) {
     },
     async createSession(input) {
       const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1e3);
-      await pool2.query(
+      await asIdentity(
+        { "al_ai.actor": input.discordUserId },
         `INSERT INTO oauth_sessions (id, discord_user_id, discord_username, discord_handle, discord_avatar, access_token_ciphertext, scopes, user_agent, expires_at, second_factor_satisfied)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [
@@ -78088,7 +78109,8 @@ function createDatabase(pool2) {
       return expiresAt;
     },
     async getSession(id) {
-      const { rows } = await pool2.query(
+      const { rows } = await asIdentity(
+        { "al_ai.session_id": id },
         `SELECT s.id, s.discord_user_id, s.discord_username, s.discord_handle, s.discord_avatar,
                 s.access_token_ciphertext, s.scopes, s.expires_at, s.second_factor_satisfied,
                 EXISTS (SELECT 1 FROM admin_two_factor a WHERE a.discord_user_id = s.discord_user_id) AS second_factor_required
@@ -78112,17 +78134,18 @@ function createDatabase(pool2) {
     },
     /** The session that just proved a fresh code survives the new credential. */
     async markSessionSecondFactorSatisfied(id) {
-      await pool2.query(`UPDATE oauth_sessions SET second_factor_satisfied = TRUE WHERE id = $1`, [id]);
+      await asIdentity({ "al_ai.session_id": id }, `UPDATE oauth_sessions SET second_factor_satisfied = TRUE WHERE id = $1`, [id]);
     },
     async touchSession(id) {
-      await pool2.query(
+      await asIdentity(
+        { "al_ai.session_id": id },
         `UPDATE oauth_sessions SET last_seen_at = now()
           WHERE id = $1 AND last_seen_at < now() - interval '1 minute'`,
         [id]
       );
     },
     async deleteSession(id) {
-      await pool2.query(`DELETE FROM oauth_sessions WHERE id = $1`, [id]);
+      await asIdentity({ "al_ai.session_id": id }, `DELETE FROM oauth_sessions WHERE id = $1`, [id]);
     },
     async purgeExpiredSessions() {
       const { rowCount } = await pool2.query(`DELETE FROM oauth_sessions WHERE expires_at <= now()`);
@@ -78138,6 +78161,7 @@ function createDatabase(pool2) {
      */
     async listSessions(discordUserId) {
       const { rows } = await pool2.query(
+        { "al_ai.actor": discordUserId },
         `SELECT id, user_agent, created_at, last_seen_at, expires_at
          FROM oauth_sessions
          WHERE discord_user_id = $1 AND expires_at > now()
@@ -78154,7 +78178,8 @@ function createDatabase(pool2) {
     },
     /** Signs out every other browser for this account, keeping the caller's. */
     async deleteOtherSessions(discordUserId, keepSessionId) {
-      const { rowCount } = await pool2.query(
+      const { rowCount } = await asIdentity(
+        { "al_ai.actor": discordUserId },
         `DELETE FROM oauth_sessions WHERE discord_user_id = $1 AND id <> $2`,
         [discordUserId, keepSessionId]
       );
@@ -78169,7 +78194,8 @@ function createDatabase(pool2) {
      * once instead of being frozen into this query.
      */
     async getPreferences(discordUserId) {
-      const { rows } = await pool2.query(
+      const { rows } = await asIdentity(
+        { "al_ai.actor": discordUserId },
         `SELECT language, appearance FROM user_preferences WHERE discord_user_id = $1`,
         [discordUserId]
       );
@@ -78188,7 +78214,8 @@ function createDatabase(pool2) {
      * which is why both are checked rather than coalesced.
      */
     async savePreferences(discordUserId, changes) {
-      await pool2.query(
+      await asIdentity(
+        { "al_ai.actor": discordUserId },
         `INSERT INTO user_preferences (discord_user_id, language, appearance)
          VALUES ($1, COALESCE($2, 'ar'), $3)
          ON CONFLICT (discord_user_id)
@@ -78420,6 +78447,86 @@ function createDatabase(pool2) {
         [guildId, since, [...PUNISHMENT_EVENT_IDS]]
       );
       return rows.map((row) => ({ eventId: row.event_id, count: Number(row.count) }));
+    },
+    /**
+     * Audit rows per hour in a window: the data behind the overview sparklines.
+     *
+     * `date_trunc` and the grouping happen in SQL because the alternative —
+     * reading the window's rows into JavaScript and bucketing them — would put
+     * a busy server's whole day of audit rows through the process to draw 24
+     * numbers. Empty hours are absent from the result on purpose: the caller
+     * fills them with `fillHourlySeries`, which owns the "an empty hour is a
+     * real zero" rule.
+     */
+    async auditSeries(guildId, from, to) {
+      const { rows } = await pool2.query(
+        `SELECT date_trunc('hour', created_at) AS hour,
+                count(*)::int AS events,
+                count(*) FILTER (WHERE event_id LIKE 'moderation.%')::int AS penalties
+         FROM audit_trail
+         WHERE guild_id = $1 AND created_at >= $2 AND created_at < $3
+         GROUP BY 1
+         ORDER BY 1`,
+        [guildId, from, to]
+      );
+      return rows.map((row) => ({ hour: row.hour.toISOString(), events: row.events, penalties: row.penalties }));
+    },
+    /**
+     * Whether each module is actually on, read from that module's own table.
+     *
+     * One query rather than eleven round-trips, and every value is a column the
+     * module's own screen writes — there is no "the screen exists, so it must be
+     * running" anywhere in this. A module with no row falls back to the default
+     * its schema declares:
+     *
+     * - protection is **armed by default** (`guild_security.enabled` defaults to
+     *   true, and the engine arms on join), so a server that never opened the
+     *   screen is protected, and the overview must not tell the operator it is
+     *   not;
+     * - every other module ships **off** (`DEFAULT false`), which is also what a
+     *   missing row means.
+     *
+     * `tiers` counts mapped roles, `auditEntries` counts the trail, and
+     * `disabledCommands` counts the per-command flags an operator switched off —
+     * three tallies the cards report as facts rather than as switches.
+     */
+    async getModuleStates(guildId) {
+      const { rows } = await pool2.query(
+        `SELECT
+           COALESCE(sec.enabled, true)  AS security,
+           COALESCE(log.enabled, false) AS logging,
+           COALESCE(w.enabled, false)   AS welcome,
+           COALESCE(wm.enabled, false)  AS welcome_messages,
+           COALESCE(c.enabled, false)   AS customization,
+           COALESCE(l.enabled, false)   AS levels,
+           COALESCE(i.enabled, false)   AS invites,
+           (SELECT count(*)::int FROM guild_role_tiers t WHERE t.guild_id = $1) AS tiers,
+           (SELECT count(*)::int FROM audit_trail a WHERE a.guild_id = $1) AS audit_entries,
+           (SELECT count(*)::int FROM guild_command_flags f
+             WHERE f.guild_id = $1 AND f.enabled = false) AS disabled_commands
+         FROM (SELECT 1) AS one
+         LEFT JOIN guild_security         sec ON sec.guild_id = $1
+         LEFT JOIN guild_logging          log ON log.guild_id = $1
+         LEFT JOIN guild_welcome          w   ON w.guild_id = $1
+         LEFT JOIN guild_welcome_messages wm  ON wm.guild_id = $1
+         LEFT JOIN guild_customization    c   ON c.guild_id = $1
+         LEFT JOIN guild_levels           l   ON l.guild_id = $1
+         LEFT JOIN guild_invites          i   ON i.guild_id = $1`,
+        [guildId]
+      );
+      const row = rows[0];
+      return {
+        security: row?.security ?? true,
+        logging: row?.logging ?? false,
+        welcome: row?.welcome ?? false,
+        welcomeMessages: row?.welcome_messages ?? false,
+        customization: row?.customization ?? false,
+        levels: row?.levels ?? false,
+        invites: row?.invites ?? false,
+        tiers: row?.tiers ?? 0,
+        auditEntries: row?.audit_entries ?? 0,
+        disabledCommands: row?.disabled_commands ?? 0
+      };
     },
     /** The most recent moderation rows, for the activity feed. */
     async listRecentModeration(guildId, limit = 8) {
