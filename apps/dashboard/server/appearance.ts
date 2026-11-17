@@ -223,7 +223,18 @@ export type ImageResponse = {
   body: AsyncIterable<Uint8Array>;
 };
 export type Connector = (url: URL, pinned: PinnedAddress, timeoutMs: number) => Promise<ImageResponse>;
-export type ImageDeps = { resolve?: Resolver; connect?: Connector };
+export type ImageDeps = {
+  resolve?: Resolver;
+  connect?: Connector;
+  /**
+   * The whole import's budget, in milliseconds — every hop, the page read and
+   * its preview included. A managed host puts its own proxy in front of this
+   * process; a request that outlives that proxy is answered with a 502 that
+   * names nothing, so the ceiling here is deliberately below it and running out
+   * of budget is reported as a timeout the operator can act on.
+   */
+  deadlineMs?: number;
+};
 
 function headerValue(headers: ImageResponse["headers"], name: string): string | undefined {
   const value = headers[name];
@@ -344,16 +355,14 @@ async function approvedUrl(raw: string, resolve: Resolver): Promise<ApprovedTarg
 }
 
 type ImageFetch =
-  | { ok: true; dataUrl: string; resolvedFromPage?: boolean }
+  | { ok: true; dataUrl: string }
   | {
       ok: false;
-      reason: "forbidden" | "unreachable" | "not-image" | "too-large";
+      reason: "forbidden" | "unreachable" | "not-image" | "too-large" | "timeout";
       /** What the host actually answered with, when it answered at all. */
       contentType?: string;
       status?: number;
     };
-
-const IMAGE_MIME = /^image\/(png|jpeg|jpg|webp|gif)$/;
 
 /** A page, not a file — the shape a share link answers with. */
 const PAGE_MIME = /^text\/html|^application\/xhtml\+xml$/;
@@ -451,6 +460,40 @@ const IMAGE_REQUEST_HEADERS = {
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 3;
 const IMAGE_FETCH_TIMEOUT_MS = 10_000;
+/**
+ * The budget for one import, page read and preview included.
+ *
+ * Measured on the deployment: a `pin.it` link costs ~7 s end to end (short link
+ * → Pinterest page → preview file). A per-hop timeout alone allowed four hops
+ * plus a preview — forty seconds in the worst case, which a browser or a proxy
+ * in front of this process answers with a `502` that names nothing. 15 s keeps
+ * the measured case with headroom and still bounds the worst one.
+ */
+const IMAGE_IMPORT_DEADLINE_MS = 15_000;
+
+/**
+ * The image formats Discord accepts, identified by their first bytes.
+ *
+ * The declared `content-type` is a hint from a host we do not control: an
+ * object store that serves a real GIF as `application/octet-stream` was refused
+ * as "not an image", while a page serving HTML as `image/png` was accepted and
+ * failed later inside Discord. The signature is the part the host cannot lie
+ * about without producing a file that is not an image at all. GIF (animated or
+ * not) and RIFF/WEBP (animated or not) are both recognised by their container
+ * header, so animation is preserved: the bytes are never re-encoded.
+ */
+export function imageMimeFromHead(head: Uint8Array): string | null {
+  const bytes = Buffer.from(head.buffer, head.byteOffset, head.byteLength);
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return "image/png";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 6 && bytes.toString("latin1", 0, 3) === "GIF") return "image/gif";
+  if (bytes.length >= 12 && bytes.toString("latin1", 0, 4) === "RIFF" && bytes.toString("latin1", 8, 12) === "WEBP") {
+    return "image/webp";
+  }
+  return null;
+}
 
 /**
  * Downloads an image from a URL the operator supplied.
@@ -470,17 +513,20 @@ const IMAGE_FETCH_TIMEOUT_MS = 10_000;
 async function fetchPublicImage(url: string, maxBytes: number, deps: ImageDeps = {}): Promise<ImageFetch> {
   const resolve = deps.resolve ?? resolveAddresses;
   const connect = deps.connect ?? connectPinned;
+  const deadlineMs = deps.deadlineMs ?? IMAGE_IMPORT_DEADLINE_MS;
+  const startedAt = Date.now();
 
   let current = await approvedUrl(url, resolve);
   if (!current) return { ok: false, reason: "forbidden" };
   // One page may name one preview. A page whose preview is another page is not
   // followed: that is a crawl, not an image import.
   let usedPreview = false;
-  let resolvedFromPage = false;
 
   try {
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-      const response = await connect(current.url, current.addresses[0], IMAGE_FETCH_TIMEOUT_MS);
+      const remaining = deadlineMs - (Date.now() - startedAt);
+      if (remaining <= 0) return { ok: false, reason: "timeout" };
+      const response = await connect(current.url, current.addresses[0], Math.min(IMAGE_FETCH_TIMEOUT_MS, remaining));
       if (REDIRECT_STATUSES.has(response.status)) {
         const location = headerValue(response.headers, "location");
         if (!location) return { ok: false, reason: "unreachable" };
@@ -494,22 +540,24 @@ async function fetchPublicImage(url: string, maxBytes: number, deps: ImageDeps =
       }
 
       const mime = (headerValue(response.headers, "content-type") ?? "").split(";")[0].trim().toLowerCase();
-      if (!IMAGE_MIME.test(mime)) {
-        // A share link (pin.it, a post URL, an album) answers with HTML. Ask the
-        // page which image stands for it and fetch that one, through the same
-        // vetting — the preview is treated as an operator-supplied URL, never as
-        // a trusted hop.
-        if (!usedPreview && PAGE_MIME.test(mime)) {
-          usedPreview = true;
-          const found = previewImageFrom(await readHead(response.body));
-          const next: ApprovedTarget | null = found
-            ? await approvedUrl(new URL(found, current.url).toString(), resolve)
-            : null;
-          if (next) {
-            current = next;
-            resolvedFromPage = true;
-            continue;
-          }
+      // A share link (pin.it, a post URL, an album) answers with HTML. Ask the
+      // page which image stands for it and fetch that one, through the same
+      // vetting — the preview is treated as an operator-supplied URL, never as
+      // a trusted hop.
+      //
+      // Any other type falls through to the body: a host that serves a real GIF
+      // as `application/octet-stream` is common enough that refusing it on the
+      // header alone lost valid images, and the signature check below is
+      // stricter than the header anyway.
+      if (PAGE_MIME.test(mime) && !usedPreview) {
+        usedPreview = true;
+        const found = previewImageFrom(await readHead(response.body));
+        const next: ApprovedTarget | null = found
+          ? await approvedUrl(new URL(found, current.url).toString(), resolve)
+          : null;
+        if (next) {
+          current = next;
+          continue;
         }
         return { ok: false, reason: "not-image", contentType: mime };
       }
@@ -519,13 +567,16 @@ async function fetchPublicImage(url: string, maxBytes: number, deps: ImageDeps =
       for await (const chunk of response.body) {
         total += chunk.byteLength;
         if (total > maxBytes) return { ok: false, reason: "too-large" };
+        if (Date.now() - startedAt > deadlineMs) return { ok: false, reason: "timeout" };
         chunks.push(Buffer.from(chunk));
       }
       if (total === 0) return { ok: false, reason: "unreachable" };
-      const safeMime = mime === "image/jpg" ? "image/jpeg" : mime;
+      // The bytes decide the type, not the header. GIF and WEBP keep their
+      // animation because nothing here re-encodes them.
+      const safeMime = imageMimeFromHead(Buffer.concat(chunks));
+      if (!safeMime) return { ok: false, reason: "not-image", contentType: mime };
       return {
         ok: true,
-        resolvedFromPage,
         dataUrl: `data:${safeMime};base64,${Buffer.concat(chunks).toString("base64")}`
       };
     }
@@ -702,6 +753,10 @@ export async function fetchImageAsDataUrl(
       throw new Error("الرابط غير مسموح: يجب أن يكون رابطاً عاماً عبر https، وليس عنواناً محلياً أو خاصاً.");
     case "too-large":
       throw new Error(`حجم الصورة على الرابط يتجاوز الحد المسموح (${Math.round(maxBytes / 1000)} كيلوبايت).`);
+    case "timeout":
+      throw new Error(
+        "استغرق جلب الصورة وقتاً أطول من المسموح. جرّب رابطاً مباشراً ينتهي بـ .png أو .jpg أو .webp أو .gif بدل صفحة مشاركة."
+      );
     case "not-image":
       // A share link is followed to the image the page declares (og:image /
       // twitter:image). Reaching this line means either the page declared none —

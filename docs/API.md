@@ -42,7 +42,7 @@ the current session (which just proved a fresh code) and revokes the others.
 | Presence (owner only) | `GET/PUT /api/bot/presence` | `PUT` without `guildId` returns `400 GUILD_ID_REQUIRED` on purpose |
 | Guild read/write | `GET /api/guilds`, `/api/guilds/:guildId/{invite,channels,tiers,commands,members,audit,metrics,customization,logging,welcome,security}` and their `PUT`/`POST` counterparts | every guild-scoped route re-checks access on the server |
 | Levels | `/api/guilds/:guildId/levels/*` (settings, rewards, sync, members, leaderboard, status) | reward CRUD uses `POST/PATCH/DELETE` |
-| Images | `POST /api/image/from-url` | SSRF guard: private hosts, redirects, pinned addresses, size/type ceilings |
+| Images | `POST /api/image/from-url` | SSRF guard: private hosts, redirects, pinned addresses; PNG/JPEG/GIF/WEBP identified by magic bytes (so animated files are kept byte-for-byte and a host that lies about `content-type` is handled); 2 MB ceiling; one 15 s budget for the whole import (share link → page → preview) so a slow host gets a named timeout instead of a proxy `502`; returns `{ dataUrl, bytes }` |
 | Internal | `POST /internal/layer/health` (loopback only, HMAC-signed), adapter `127.0.0.1:3400` | never exposed publicly |
 
 ## Error semantics

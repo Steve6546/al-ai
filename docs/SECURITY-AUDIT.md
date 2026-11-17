@@ -151,7 +151,7 @@
 | القياس | النتيجة |
 |---|---|
 | `pg_roles` | `al_ai` (superuser، للمالك فقط) · `al_ai_app` = `rolsuper:false` · `rolbypassrls:false` · `rolcanlogin:true` |
-| `pg_stat_activity` | **4** اتصالات الخدمات باسم `al_ai_app` (لوحة 3 + بوت …) والمالك اتصال إداري واحد فقط |
+| `pg_stat_activity` | **4** اتصالات الخدمات (لوحة + بوت) باسم `al_ai_app`، والمالك اتصال إداري واحد فقط |
 | `pg_tables.rowsecurity` | **29 / 29** |
 | `pg_policies` | **59** سياسة على **29** جدولاً |
 | `pg_policy` على `audit_trail` | `r` (SELECT) · `a` (INSERT) · `*` (المالك) — **لا `w` ولا `d`** |

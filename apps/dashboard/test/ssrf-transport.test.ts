@@ -234,3 +234,58 @@ test("a page preview is followed once, not chained", async () => {
   await assert.rejects(fetchImageAsDataUrl("https://a.example.com/1", 1024, { resolve, connect }), /ما أعلن صورة/);
   assert.equal(pages, 2, "one page, one declared preview attempt, then stop");
 });
+
+test("a real GIF is accepted even when the host calls it octet-stream", async () => {
+  const resolve: Resolver = async () => [{ address: "93.184.216.34", family: 4 }];
+  const gif = Buffer.concat([Buffer.from("GIF89a", "latin1"), Buffer.alloc(16, 0)]);
+  const connect: Connector = async () =>
+    imageResponse({
+      headers: { "content-type": "application/octet-stream" },
+      body: (async function* () {
+        yield gif;
+      })()
+    });
+
+  const dataUrl = await fetchImageAsDataUrl("https://cdn.example.com/a.gif", 1024, { resolve, connect });
+  assert.ok(dataUrl.startsWith("data:image/gif;base64,"), `got ${dataUrl.slice(0, 30)}`);
+  // Animation is preserved because nothing re-encodes the bytes.
+  assert.equal(Buffer.from(dataUrl.split(",")[1]!, "base64").subarray(0, 3).toString("latin1"), "GIF");
+});
+
+test("an animated WEBP is identified by its container header", async () => {
+  const resolve: Resolver = async () => [{ address: "93.184.216.34", family: 4 }];
+  const webp = Buffer.concat([Buffer.from("RIFF", "latin1"), Buffer.from([0x1a, 0, 0, 0]), Buffer.from("WEBPVP8X", "latin1"), Buffer.alloc(8, 0)]);
+  const connect: Connector = async () =>
+    imageResponse({
+      headers: { "content-type": "image/webp" },
+      body: (async function* () {
+        yield webp;
+      })()
+    });
+
+  const dataUrl = await fetchImageAsDataUrl("https://cdn.example.com/a.webp", 1024, { resolve, connect });
+  assert.ok(dataUrl.startsWith("data:image/webp;base64,"), `got ${dataUrl.slice(0, 30)}`);
+});
+
+test("HTML served as image/png is refused instead of being stored as an image", async () => {
+  const resolve: Resolver = async () => [{ address: "93.184.216.34", family: 4 }];
+  const connect: Connector = async () =>
+    imageResponse({
+      headers: { "content-type": "image/png" },
+      body: (async function* () {
+        yield Buffer.from("<!doctype html><title>not a png</title>");
+      })()
+    });
+
+  await assert.rejects(fetchImageAsDataUrl("https://lying.example.com/x.png", 1024, { resolve, connect }), /ما أعلن صورة/);
+});
+
+test("an import that outlives its budget reports a timeout, not a hang", async () => {
+  const resolve: Resolver = async () => [{ address: "93.184.216.34", family: 4 }];
+  const connect: Connector = async () => imageResponse();
+
+  await assert.rejects(
+    fetchImageAsDataUrl("https://slow.example.com/a.png", 1024, { resolve, connect, deadlineMs: 0 }),
+    /وقتاً أطول/
+  );
+});

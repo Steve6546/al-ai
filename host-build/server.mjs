@@ -55405,7 +55405,6 @@ async function approvedUrl(raw, resolve) {
   if (addresses.length === 0) return null;
   return { url: parsed, addresses };
 }
-var IMAGE_MIME = /^image\/(png|jpeg|jpg|webp|gif)$/;
 var PAGE_MIME = /^text\/html|^application\/xhtml\+xml$/;
 var PAGE_SNIFF_BYTES = 64e3;
 function previewImageFrom(html) {
@@ -55458,16 +55457,32 @@ var IMAGE_REQUEST_HEADERS = {
 var REDIRECT_STATUSES = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
 var MAX_REDIRECTS = 3;
 var IMAGE_FETCH_TIMEOUT_MS = 1e4;
+var IMAGE_IMPORT_DEADLINE_MS = 15e3;
+function imageMimeFromHead(head) {
+  const bytes = Buffer.from(head.buffer, head.byteOffset, head.byteLength);
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    return "image/png";
+  }
+  if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return "image/jpeg";
+  if (bytes.length >= 6 && bytes.toString("latin1", 0, 3) === "GIF") return "image/gif";
+  if (bytes.length >= 12 && bytes.toString("latin1", 0, 4) === "RIFF" && bytes.toString("latin1", 8, 12) === "WEBP") {
+    return "image/webp";
+  }
+  return null;
+}
 async function fetchPublicImage(url, maxBytes, deps = {}) {
   const resolve = deps.resolve ?? resolveAddresses;
   const connect = deps.connect ?? connectPinned;
+  const deadlineMs = deps.deadlineMs ?? IMAGE_IMPORT_DEADLINE_MS;
+  const startedAt = Date.now();
   let current = await approvedUrl(url, resolve);
   if (!current) return { ok: false, reason: "forbidden" };
   let usedPreview = false;
-  let resolvedFromPage = false;
   try {
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-      const response = await connect(current.url, current.addresses[0], IMAGE_FETCH_TIMEOUT_MS);
+      const remaining = deadlineMs - (Date.now() - startedAt);
+      if (remaining <= 0) return { ok: false, reason: "timeout" };
+      const response = await connect(current.url, current.addresses[0], Math.min(IMAGE_FETCH_TIMEOUT_MS, remaining));
       if (REDIRECT_STATUSES.has(response.status)) {
         const location = headerValue(response.headers, "location");
         if (!location) return { ok: false, reason: "unreachable" };
@@ -55480,16 +55495,13 @@ async function fetchPublicImage(url, maxBytes, deps = {}) {
         return { ok: false, reason: "unreachable", status: response.status };
       }
       const mime = (headerValue(response.headers, "content-type") ?? "").split(";")[0].trim().toLowerCase();
-      if (!IMAGE_MIME.test(mime)) {
-        if (!usedPreview && PAGE_MIME.test(mime)) {
-          usedPreview = true;
-          const found = previewImageFrom(await readHead(response.body));
-          const next = found ? await approvedUrl(new URL(found, current.url).toString(), resolve) : null;
-          if (next) {
-            current = next;
-            resolvedFromPage = true;
-            continue;
-          }
+      if (PAGE_MIME.test(mime) && !usedPreview) {
+        usedPreview = true;
+        const found = previewImageFrom(await readHead(response.body));
+        const next = found ? await approvedUrl(new URL(found, current.url).toString(), resolve) : null;
+        if (next) {
+          current = next;
+          continue;
         }
         return { ok: false, reason: "not-image", contentType: mime };
       }
@@ -55498,13 +55510,14 @@ async function fetchPublicImage(url, maxBytes, deps = {}) {
       for await (const chunk of response.body) {
         total += chunk.byteLength;
         if (total > maxBytes) return { ok: false, reason: "too-large" };
+        if (Date.now() - startedAt > deadlineMs) return { ok: false, reason: "timeout" };
         chunks.push(Buffer.from(chunk));
       }
       if (total === 0) return { ok: false, reason: "unreachable" };
-      const safeMime = mime === "image/jpg" ? "image/jpeg" : mime;
+      const safeMime = imageMimeFromHead(Buffer.concat(chunks));
+      if (!safeMime) return { ok: false, reason: "not-image", contentType: mime };
       return {
         ok: true,
-        resolvedFromPage,
         dataUrl: `data:${safeMime};base64,${Buffer.concat(chunks).toString("base64")}`
       };
     }
@@ -55567,6 +55580,10 @@ async function fetchImageAsDataUrl(url, maxBytes = MAX_IMAGE_UPLOAD_BYTES, deps 
       throw new Error("\u0627\u0644\u0631\u0627\u0628\u0637 \u063A\u064A\u0631 \u0645\u0633\u0645\u0648\u062D: \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 \u0631\u0627\u0628\u0637\u0627\u064B \u0639\u0627\u0645\u0627\u064B \u0639\u0628\u0631 https\u060C \u0648\u0644\u064A\u0633 \u0639\u0646\u0648\u0627\u0646\u0627\u064B \u0645\u062D\u0644\u064A\u0627\u064B \u0623\u0648 \u062E\u0627\u0635\u0627\u064B.");
     case "too-large":
       throw new Error(`\u062D\u062C\u0645 \u0627\u0644\u0635\u0648\u0631\u0629 \u0639\u0644\u0649 \u0627\u0644\u0631\u0627\u0628\u0637 \u064A\u062A\u062C\u0627\u0648\u0632 \u0627\u0644\u062D\u062F \u0627\u0644\u0645\u0633\u0645\u0648\u062D (${Math.round(maxBytes / 1e3)} \u0643\u064A\u0644\u0648\u0628\u0627\u064A\u062A).`);
+    case "timeout":
+      throw new Error(
+        "\u0627\u0633\u062A\u063A\u0631\u0642 \u062C\u0644\u0628 \u0627\u0644\u0635\u0648\u0631\u0629 \u0648\u0642\u062A\u0627\u064B \u0623\u0637\u0648\u0644 \u0645\u0646 \u0627\u0644\u0645\u0633\u0645\u0648\u062D. \u062C\u0631\u0651\u0628 \u0631\u0627\u0628\u0637\u0627\u064B \u0645\u0628\u0627\u0634\u0631\u0627\u064B \u064A\u0646\u062A\u0647\u064A \u0628\u0640 .png \u0623\u0648 .jpg \u0623\u0648 .webp \u0623\u0648 .gif \u0628\u062F\u0644 \u0635\u0641\u062D\u0629 \u0645\u0634\u0627\u0631\u0643\u0629."
+      );
     case "not-image":
       throw new Error(
         `\u0627\u0644\u0631\u0627\u0628\u0637 \u0623\u0639\u0627\u062F ${result.contentType || "\u0645\u062D\u062A\u0648\u0649 \u063A\u064A\u0631 \u0635\u0648\u0631\u0629"} \u0648\u0645\u0627 \u0623\u0639\u0644\u0646 \u0635\u0648\u0631\u0629 \u064A\u0645\u0643\u0646 \u0627\u0633\u062A\u062E\u062F\u0627\u0645\u0647\u0627. \u0625\u0646 \u0643\u0627\u0646 \u0631\u0627\u0628\u0637 \u0645\u0634\u0627\u0631\u0643\u0629 \u0641\u0642\u062F \u064A\u0643\u0648\u0646 \u0645\u0646\u062A\u0647\u064A\u064B\u0627: \u062C\u0631\u0651\u0628 \u0631\u0627\u0628\u0637 \u0627\u0644\u0635\u0648\u0631\u0629 \u0627\u0644\u0645\u0628\u0627\u0634\u0631 \u0627\u0644\u0630\u064A \u064A\u0646\u062A\u0647\u064A \u0628\u0640 .png \u0623\u0648 .jpg \u0623\u0648 .webp \u0623\u0648 .gif.`
@@ -57771,7 +57788,10 @@ app.post("/api/image/from-url", async (request2, reply) => {
   }
   try {
     const dataUrl = await fetchImageAsDataUrl(raw.trim());
-    return { dataUrl };
+    const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+    const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+    const bytes = Math.floor(base64.length * 3 / 4) - padding;
+    return { dataUrl, bytes };
   } catch (cause) {
     return reply.code(400).send({
       error: "IMAGE_FETCH_FAILED",

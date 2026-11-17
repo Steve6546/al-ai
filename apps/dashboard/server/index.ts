@@ -3655,7 +3655,12 @@ app.post("/api/image/from-url", async (request, reply) => {
   }
   try {
     const dataUrl = await fetchImageAsDataUrl(raw.trim());
-    return { dataUrl };
+    // The screen shows the imported size next to the preview. Decoded length,
+    // not the base64 string's: the padding is not image data.
+    const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+    const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+    const bytes = Math.floor((base64.length * 3) / 4) - padding;
+    return { dataUrl, bytes };
   } catch (cause) {
     return reply.code(400).send({
       error: "IMAGE_FETCH_FAILED",
