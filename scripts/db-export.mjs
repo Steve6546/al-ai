@@ -47,6 +47,13 @@ const QUIET = process.argv.includes("--quiet");
 const CHUNK = 2_000;
 
 function databaseUrl() {
+  // A backup must see every row. `oauth_sessions` and `user_preferences` now
+  // carry row policies keyed on the identity the statement declares, so the
+  // scoped application role would export those tables empty and say nothing —
+  // a silent data loss on the next restore. The owner URL is the one identity
+  // that is meant to read the whole database, which is why the boot script
+  // hands it over under its own name.
+  if (process.env.AL_AI_ADMIN_DATABASE_URL) return process.env.AL_AI_ADMIN_DATABASE_URL;
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
   // The embedded bootstrapper mints/stores the password and prints the URL
   // without starting a server (`--print-url` returns before any spawn).

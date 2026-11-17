@@ -98,6 +98,38 @@ function mapSyncJob(row: LevelSyncJobRow): LevelSyncJob {
 }
 
 export function createDatabase(pool: pg.Pool) {
+  /**
+   * One statement, one identity.
+   *
+   * `oauth_sessions` and `user_preferences` are protected by row policies that
+   * compare the row against the identity the statement declares. The identity
+   * is set with `SET LOCAL`, so it is transaction-scoped: it dies at COMMIT and
+   * a pooled connection can never carry one caller's identity into the next
+   * caller's statement. A method that declares nothing reads nothing — the
+   * default is deny, not "any row for anyone holding the database password".
+   */
+  async function asIdentity<T extends pg.QueryResultRow>(
+    settings: Record<string, string>,
+    text: string,
+    values: unknown[]
+  ): Promise<pg.QueryResult<T>> {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const [key, value] of Object.entries(settings)) {
+        await client.query("SELECT set_config($1, $2, true)", [key, value]);
+      }
+      const result = await client.query<T>(text, values);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   return {
     async ping() {
       await pool.query("SELECT 1");
@@ -1064,7 +1096,7 @@ export function createDatabase(pool: pg.Pool) {
       secondFactorSatisfied?: boolean;
     }) {
       const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000);
-      await pool.query(
+      await asIdentity({ "al_ai.actor": input.discordUserId },
         `INSERT INTO oauth_sessions (id, discord_user_id, discord_username, discord_handle, discord_avatar, access_token_ciphertext, scopes, user_agent, expires_at, second_factor_satisfied)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [
@@ -1086,7 +1118,8 @@ export function createDatabase(pool: pg.Pool) {
     async getSession(id: string): Promise<SessionRecord | null> {
       // The EXISTS travels with the session read, so deciding whether a
       // credential exists costs no extra round trip on an authenticated route.
-      const { rows } = await pool.query(
+      const { rows } = await asIdentity(
+        { "al_ai.session_id": id },
         `SELECT s.id, s.discord_user_id, s.discord_username, s.discord_handle, s.discord_avatar,
                 s.access_token_ciphertext, s.scopes, s.expires_at, s.second_factor_satisfied,
                 EXISTS (SELECT 1 FROM admin_two_factor a WHERE a.discord_user_id = s.discord_user_id) AS second_factor_required
@@ -1111,7 +1144,7 @@ export function createDatabase(pool: pg.Pool) {
 
     /** The session that just proved a fresh code survives the new credential. */
     async markSessionSecondFactorSatisfied(id: string) {
-      await pool.query(`UPDATE oauth_sessions SET second_factor_satisfied = TRUE WHERE id = $1`, [id]);
+      await asIdentity({ "al_ai.session_id": id }, `UPDATE oauth_sessions SET second_factor_satisfied = TRUE WHERE id = $1`, [id]);
     },
 
     async touchSession(id: string) {
@@ -1120,7 +1153,7 @@ export function createDatabase(pool: pg.Pool) {
       // authenticated request made each one a SELECT *and* an UPDATE, so it is
       // refreshed at most once a minute per session — one statement either way,
       // no extra round trip, and a request inside the window writes nothing.
-      await pool.query(
+      await asIdentity({ "al_ai.session_id": id },
         `UPDATE oauth_sessions SET last_seen_at = now()
           WHERE id = $1 AND last_seen_at < now() - interval '1 minute'`,
         [id]
@@ -1128,7 +1161,7 @@ export function createDatabase(pool: pg.Pool) {
     },
 
     async deleteSession(id: string) {
-      await pool.query(`DELETE FROM oauth_sessions WHERE id = $1`, [id]);
+      await asIdentity({ "al_ai.session_id": id }, `DELETE FROM oauth_sessions WHERE id = $1`, [id]);
     },
 
     async purgeExpiredSessions() {
@@ -1152,6 +1185,7 @@ export function createDatabase(pool: pg.Pool) {
         last_seen_at: Date;
         expires_at: Date;
       }>(
+        { "al_ai.actor": discordUserId },
         `SELECT id, user_agent, created_at, last_seen_at, expires_at
          FROM oauth_sessions
          WHERE discord_user_id = $1 AND expires_at > now()
@@ -1169,7 +1203,7 @@ export function createDatabase(pool: pg.Pool) {
 
     /** Signs out every other browser for this account, keeping the caller's. */
     async deleteOtherSessions(discordUserId: string, keepSessionId: string) {
-      const { rowCount } = await pool.query(
+      const { rowCount } = await asIdentity({ "al_ai.actor": discordUserId },
         `DELETE FROM oauth_sessions WHERE discord_user_id = $1 AND id <> $2`,
         [discordUserId, keepSessionId]
       );
@@ -1185,7 +1219,7 @@ export function createDatabase(pool: pg.Pool) {
      * once instead of being frozen into this query.
      */
     async getPreferences(discordUserId: string): Promise<{ language: "ar" | "en" | "de"; appearance: unknown }> {
-      const { rows } = await pool.query<{ language: string; appearance: unknown }>(
+      const { rows } = await asIdentity<{ language: string; appearance: unknown }>({ "al_ai.actor": discordUserId },
         `SELECT language, appearance FROM user_preferences WHERE discord_user_id = $1`,
         [discordUserId]
       );
@@ -1208,7 +1242,7 @@ export function createDatabase(pool: pg.Pool) {
       discordUserId: string,
       changes: { language?: "ar" | "en" | "de"; appearance?: unknown }
     ): Promise<void> {
-      await pool.query(
+      await asIdentity({ "al_ai.actor": discordUserId },
         `INSERT INTO user_preferences (discord_user_id, language, appearance)
          VALUES ($1, COALESCE($2, 'ar'), $3)
          ON CONFLICT (discord_user_id)
@@ -1496,6 +1530,99 @@ export function createDatabase(pool: pg.Pool) {
         [guildId, since, [...PUNISHMENT_EVENT_IDS]]
       );
       return rows.map(row => ({ eventId: row.event_id, count: Number(row.count) }));
+    },
+
+    /**
+     * Audit rows per hour in a window: the data behind the overview sparklines.
+     *
+     * `date_trunc` and the grouping happen in SQL because the alternative —
+     * reading the window's rows into JavaScript and bucketing them — would put
+     * a busy server's whole day of audit rows through the process to draw 24
+     * numbers. Empty hours are absent from the result on purpose: the caller
+     * fills them with `fillHourlySeries`, which owns the "an empty hour is a
+     * real zero" rule.
+     */
+    async auditSeries(guildId: string, from: Date, to: Date) {
+      const { rows } = await pool.query<{ hour: Date; events: number; penalties: number }>(
+        `SELECT date_trunc('hour', created_at) AS hour,
+                count(*)::int AS events,
+                count(*) FILTER (WHERE event_id LIKE 'moderation.%')::int AS penalties
+         FROM audit_trail
+         WHERE guild_id = $1 AND created_at >= $2 AND created_at < $3
+         GROUP BY 1
+         ORDER BY 1`,
+        [guildId, from, to]
+      );
+      return rows.map(row => ({ hour: row.hour.toISOString(), events: row.events, penalties: row.penalties }));
+    },
+
+    /**
+     * Whether each module is actually on, read from that module's own table.
+     *
+     * One query rather than eleven round-trips, and every value is a column the
+     * module's own screen writes — there is no "the screen exists, so it must be
+     * running" anywhere in this. A module with no row falls back to the default
+     * its schema declares:
+     *
+     * - protection is **armed by default** (`guild_security.enabled` defaults to
+     *   true, and the engine arms on join), so a server that never opened the
+     *   screen is protected, and the overview must not tell the operator it is
+     *   not;
+     * - every other module ships **off** (`DEFAULT false`), which is also what a
+     *   missing row means.
+     *
+     * `tiers` counts mapped roles, `auditEntries` counts the trail, and
+     * `disabledCommands` counts the per-command flags an operator switched off —
+     * three tallies the cards report as facts rather than as switches.
+     */
+    async getModuleStates(guildId: string) {
+      const { rows } = await pool.query<{
+        security: boolean;
+        logging: boolean;
+        welcome: boolean;
+        welcome_messages: boolean;
+        customization: boolean;
+        levels: boolean;
+        invites: boolean;
+        tiers: number;
+        audit_entries: number;
+        disabled_commands: number;
+      }>(
+        `SELECT
+           COALESCE(sec.enabled, true)  AS security,
+           COALESCE(log.enabled, false) AS logging,
+           COALESCE(w.enabled, false)   AS welcome,
+           COALESCE(wm.enabled, false)  AS welcome_messages,
+           COALESCE(c.enabled, false)   AS customization,
+           COALESCE(l.enabled, false)   AS levels,
+           COALESCE(i.enabled, false)   AS invites,
+           (SELECT count(*)::int FROM guild_role_tiers t WHERE t.guild_id = $1) AS tiers,
+           (SELECT count(*)::int FROM audit_trail a WHERE a.guild_id = $1) AS audit_entries,
+           (SELECT count(*)::int FROM guild_command_flags f
+             WHERE f.guild_id = $1 AND f.enabled = false) AS disabled_commands
+         FROM (SELECT 1) AS one
+         LEFT JOIN guild_security         sec ON sec.guild_id = $1
+         LEFT JOIN guild_logging          log ON log.guild_id = $1
+         LEFT JOIN guild_welcome          w   ON w.guild_id = $1
+         LEFT JOIN guild_welcome_messages wm  ON wm.guild_id = $1
+         LEFT JOIN guild_customization    c   ON c.guild_id = $1
+         LEFT JOIN guild_levels           l   ON l.guild_id = $1
+         LEFT JOIN guild_invites          i   ON i.guild_id = $1`,
+        [guildId]
+      );
+      const row = rows[0];
+      return {
+        security: row?.security ?? true,
+        logging: row?.logging ?? false,
+        welcome: row?.welcome ?? false,
+        welcomeMessages: row?.welcome_messages ?? false,
+        customization: row?.customization ?? false,
+        levels: row?.levels ?? false,
+        invites: row?.invites ?? false,
+        tiers: row?.tiers ?? 0,
+        auditEntries: row?.audit_entries ?? 0,
+        disabledCommands: row?.disabled_commands ?? 0
+      };
     },
 
     /** The most recent moderation rows, for the activity feed. */

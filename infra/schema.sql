@@ -1212,6 +1212,32 @@ BEGIN
         'CREATE POLICY %I ON public.%I FOR INSERT TO %I WITH CHECK (true)',
         t.tablename || '_app_append', t.tablename, app_role
       );
+    ELSIF t.tablename = 'oauth_sessions' THEN
+      -- The encrypted Discord access token lives in this row, so "the app role
+      -- may read every session" was the sharpest edge of the old permissive
+      -- policy: any bug that sent a wrong id anywhere could return another
+      -- account's token. Now a statement must declare who is asking, and both
+      -- identities are transaction-scoped `SET LOCAL` values the application
+      -- sets from state it already trusts:
+      --   al_ai.session_id — the id in the cookie being resumed or revoked;
+      --   al_ai.actor      — the account id a method was called with.
+      -- Neither is set: no rows. `expires_at <= now()` stays reachable so the
+      -- housekeeping delete keeps working without an identity.
+      EXECUTE format(
+        'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (%s) WITH CHECK (%s)',
+        t.tablename || '_app', t.tablename, app_role,
+        $p$id::text = current_setting('al_ai.session_id', true) OR discord_user_id = current_setting('al_ai.actor', true) OR expires_at <= now()$p$,
+        $p$id::text = current_setting('al_ai.session_id', true) OR discord_user_id = current_setting('al_ai.actor', true) OR expires_at <= now()$p$
+      );
+    ELSIF t.tablename = 'user_preferences' THEN
+      -- One row per account: the row's owner is the only identity that may
+      -- touch it, and the identity must be declared per statement.
+      EXECUTE format(
+        'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (%s) WITH CHECK (%s)',
+        t.tablename || '_app', t.tablename, app_role,
+        $p$discord_user_id = current_setting('al_ai.actor', true)$p$,
+        $p$discord_user_id = current_setting('al_ai.actor', true)$p$
+      );
     ELSE
       EXECUTE format(
         'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (true) WITH CHECK (true)',

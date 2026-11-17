@@ -140,6 +140,10 @@ if [ -z "${DATABASE_URL:-}" ]; then
   # URL once PostgreSQL is ready (below), so the application never runs as the
   # cluster superuser it was initialised with.
   ADMIN_DATABASE_URL="$(node scripts/host/pg.mjs --print-url)"
+  # The backup script reads this instead of `DATABASE_URL`: a scoped role would
+  # otherwise export the row-policied tables empty and lose the account rows
+  # silently on the next restore.
+  export AL_AI_ADMIN_DATABASE_URL="$ADMIN_DATABASE_URL"
 
   rm -f "$PG_HOME/ready"
   log "starting PostgreSQL (embedded, $PGPORT)"
