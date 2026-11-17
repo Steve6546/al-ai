@@ -114,12 +114,32 @@ export function createDatabase(pool: pg.Pool) {
      * which is why the overview showed "0 members" for a populated server.
      * `DO NOTHING` creates the row only when it is genuinely absent.
      */
-    async ensureGuild(guild: { id: string; name: string; iconUrl: string | null }) {
+    /**
+     * The row for a guild the bot is in, created if the bot has not written it.
+     *
+     * Two defects lived in the `DO NOTHING` this replaces:
+     *
+     * 1. It inserted `bot_present = false`, but it is only ever called for a
+     *    guild the bot *is* in — so the first read after a restart said the bot
+     *    was absent until the next heartbeat overwrote it.
+     * 2. It never repaired a placeholder name. `upsertHealth` seeds
+     *    `(id, name = id)` so a heartbeat has a parent row to point at, and a
+     *    guild row created that way kept the raw snowflake as its display name
+     *    for as long as `DO NOTHING` ran.
+     *
+     * `member_count` is deliberately not written: only the bot can see it, and a
+     * number invented here would be indistinguishable from a real one.
+     */
+    async ensureGuild(guild: { id: string; name: string; iconUrl: string | null; botPresent?: boolean }) {
       await pool.query(
         `INSERT INTO guilds (id, name, icon_url, member_count, bot_present, updated_at)
-         VALUES ($1, $2, $3, 0, false, now())
-         ON CONFLICT (id) DO NOTHING`,
-        [guild.id, guild.name, guild.iconUrl]
+         VALUES ($1, $2, $3, 0, $4, now())
+         ON CONFLICT (id) DO UPDATE
+           SET name = CASE WHEN guilds.name = guilds.id OR guilds.name = '' THEN EXCLUDED.name ELSE guilds.name END,
+               icon_url = COALESCE(guilds.icon_url, EXCLUDED.icon_url),
+               bot_present = guilds.bot_present OR EXCLUDED.bot_present,
+               updated_at = now()`,
+        [guild.id, guild.name, guild.iconUrl, guild.botPresent ?? true]
       );
     },
 
@@ -1156,21 +1176,47 @@ export function createDatabase(pool: pg.Pool) {
       return rowCount ?? 0;
     },
 
-    async getPreferences(discordUserId: string): Promise<{ language: "ar" | "en" | "de" }> {
-      const { rows } = await pool.query(`SELECT language FROM user_preferences WHERE discord_user_id = $1`, [
-        discordUserId
-      ]);
+    /**
+     * The account's language and appearance.
+     *
+     * `appearance` is stored as JSONB and returned **as stored** (null when the
+     * row never chose): normalising happens in one place — the route, with the
+     * same function the client imports — so a shape change reaches both ends at
+     * once instead of being frozen into this query.
+     */
+    async getPreferences(discordUserId: string): Promise<{ language: "ar" | "en" | "de"; appearance: unknown }> {
+      const { rows } = await pool.query<{ language: string; appearance: unknown }>(
+        `SELECT language, appearance FROM user_preferences WHERE discord_user_id = $1`,
+        [discordUserId]
+      );
       const stored = rows[0]?.language;
-      return { language: stored === "en" ? "en" : stored === "de" ? "de" : "ar" };
+      return {
+        language: stored === "en" ? "en" : stored === "de" ? "de" : "ar",
+        appearance: rows[0]?.appearance ?? null
+      };
     },
 
-    async savePreferences(discordUserId: string, language: "ar" | "en" | "de"): Promise<void> {
+    /**
+     * Writes the account's preferences.
+     *
+     * The two halves are written independently: a screen that saves a language
+     * must not clear a palette, and a screen that saves a palette must not reset
+     * the language to its default. `undefined` means "leave this column alone",
+     * which is why both are checked rather than coalesced.
+     */
+    async savePreferences(
+      discordUserId: string,
+      changes: { language?: "ar" | "en" | "de"; appearance?: unknown }
+    ): Promise<void> {
       await pool.query(
-        `INSERT INTO user_preferences (discord_user_id, language)
-         VALUES ($1, $2)
+        `INSERT INTO user_preferences (discord_user_id, language, appearance)
+         VALUES ($1, COALESCE($2, 'ar'), $3)
          ON CONFLICT (discord_user_id)
-         DO UPDATE SET language = EXCLUDED.language, updated_at = now()`,
-        [discordUserId, language]
+         DO UPDATE SET
+           language = COALESCE($2, user_preferences.language),
+           appearance = COALESCE($3, user_preferences.appearance),
+           updated_at = now()`,
+        [discordUserId, changes.language ?? null, changes.appearance === undefined ? null : JSON.stringify(changes.appearance)]
       );
     },
 

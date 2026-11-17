@@ -396,7 +396,16 @@ export type SupervisorDeps = {
 export function startSupervisor(deps: SupervisorDeps) {
   const intervalMs = deps.intervalMs ?? 30_000;
 
-  const tick = async () => {
+  /**
+   * One health snapshot, for every guild or for a single one.
+   *
+   * `only` exists for the moment a guild is joined: the dashboard resolved the
+   * bot's presence from the *last* snapshot, so a server added between two ticks
+   * showed a red "not connected" badge and no member count for up to 30 seconds
+   * — the operator had just added the bot and the screen disagreed. Pushing that
+   * guild's state immediately makes the join and the badge the same event.
+   */
+  const tick = async (only?: string) => {
     const stats = deps.pipeline.stats();
     let database: HealthReport["database"] = "reachable";
     try {
@@ -405,7 +414,7 @@ export function startSupervisor(deps: SupervisorDeps) {
       database = "unreachable";
     }
 
-    const guildIds = deps.guildIds();
+    const guildIds = only ? [only] : deps.guildIds();
     const state = database === "reachable" ? "online" : "degraded";
     const uniqueUsers = Math.max(0, Math.trunc(deps.uniqueUsers?.() ?? 0) || 0);
     const pingMs = normalisePing(deps.gatewayPingMs?.() ?? null);
@@ -431,6 +440,15 @@ export function startSupervisor(deps: SupervisorDeps) {
   void tick();
 
   return {
+    /**
+     * Report one guild now, without waiting for the next 30 s tick.
+     *
+     * Fire-and-forget by design: it is called from an event handler that must
+     * not block, and a failure is already swallowed per guild inside `tick`.
+     */
+    pushNow(guildId: string) {
+      return tick(guildId);
+    },
     stop() {
       clearInterval(timer);
     }

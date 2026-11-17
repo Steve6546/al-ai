@@ -21,7 +21,7 @@
  *    exactly once and require an explicit "I saved these codes" confirmation
  *    before the dialog can close.
  */
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
   Check,
@@ -30,7 +30,12 @@ import {
   KeyRound,
   Languages,
   Loader2,
+  Plus,
+  RotateCcw,
+  Monitor,
   MonitorSmartphone,
+  Smartphone,
+  Tablet,
   Moon,
   Palette,
   Power,
@@ -65,12 +70,13 @@ import {
   useTotpSeconds
 } from "@/components/two-factor-parts";
 import { formatDateTime, initials } from "@/lib/format";
-import { LANGUAGES, useI18n, type Language } from "@/lib/i18n";
+import { LANGUAGES, Translate, type Language, useI18n } from "@/lib/i18n";
 import { Flag } from "@/components/flag";
-import { ACCENTS, useThemePrefs, type AccentName, type ThemeMode } from "@/lib/theme";
+import { ACCENTS, APPEARANCE_PRESETS, useThemePrefs, type AccentName, type ThemeMode } from "@/lib/theme";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import type { Guild, SecurityOverview, SecuritySession, SessionInfo, TwoFactorSetup } from "@/types";
+import { ACCENT_SWATCHES, appearanceEquals, readableOn, describeUserAgent, type UserAgentDescription } from "@al-ai/core/browser";
 
 type Section = "account" | "appearance" | "language" | "security" | "sessions";
 type VerifyIntent = "change" | "disable" | "regenerate";
@@ -88,32 +94,57 @@ function formatCountdown(ms: number): string {
 }
 
 /** A readable device line from a user-agent string, without claiming more than it says. */
+/**
+ * The device a session is on, in the words the screen already uses.
+ *
+ * The parsing lives in `@al-ai/core` and is pinned by tests; this only maps its
+ * ids onto an icon and onto the three device words the translation files carry.
+ * Browser and OS names are proper nouns — "Chrome", "Windows", "iPadOS" are not
+ * translated in any of the three languages — so they are shown as the parser
+ * reports them rather than through the catalogue.
+ */
+const OS_NAMES: Record<UserAgentDescription["os"], string> = {
+  windows: "Windows",
+  macos: "macOS",
+  linux: "Linux",
+  chromeos: "ChromeOS",
+  android: "Android",
+  ios: "iOS",
+  ipados: "iPadOS",
+  unknown: ""
+};
+
+const BROWSER_NAMES: Record<UserAgentDescription["browser"], string> = {
+  edge: "Edge",
+  opera: "Opera",
+  samsung: "Samsung Internet",
+  firefox: "Firefox",
+  chrome: "Chrome",
+  safari: "Safari",
+  unknown: ""
+};
+
+/** "Chrome · Windows", the part that tells two sessions apart. */
 function describeDevice(userAgent: string | null, fallback: string): string {
-  if (!userAgent) return fallback;
-  const browser = /Edg\//.test(userAgent)
-    ? "Edge"
-    : /OPR\//.test(userAgent)
-      ? "Opera"
-      : /Firefox\//.test(userAgent)
-        ? "Firefox"
-        : /Chrome\//.test(userAgent)
-          ? "Chrome"
-          : /Safari\//.test(userAgent)
-            ? "Safari"
-            : null;
-  const system = /Windows/.test(userAgent)
-    ? "Windows"
-    : /Android/.test(userAgent)
-      ? "Android"
-      : /iPhone|iPad|iPod/.test(userAgent)
-        ? "iOS"
-        : /Mac OS X/.test(userAgent)
-          ? "macOS"
-          : /Linux/.test(userAgent)
-            ? "Linux"
-            : null;
-  const label = [browser, system].filter(Boolean).join(" · ");
-  return label || userAgent.slice(0, 80);
+  const described = describeUserAgent(userAgent);
+  const parts = [BROWSER_NAMES[described.browser], OS_NAMES[described.os]].filter(Boolean);
+  return parts.length ? parts.join(" · ") : fallback;
+}
+
+/** The device word the translation files carry, for the row's headline. */
+function deviceKindLabel(device: UserAgentDescription["device"], t: Translate): string {
+  if (device === "phone") return t("settings.sessions.devicePhone");
+  if (device === "tablet") return t("settings.sessions.deviceTablet");
+  if (device === "unknown") return t("settings.sessions.unknownDevice");
+  return t("settings.sessions.deviceDesktop");
+}
+
+/** The shape's own icon: a phone is not a computer. */
+function DeviceIcon({ device, className }: { device: UserAgentDescription["device"]; className?: string }) {
+  if (device === "phone") return <Smartphone className={className} aria-hidden />;
+  if (device === "tablet") return <Tablet className={className} aria-hidden />;
+  if (device === "unknown") return <MonitorSmartphone className={className} aria-hidden />;
+  return <Monitor className={className} aria-hidden />;
 }
 
 /** Maps the server's stable error codes onto copy in the active language. */
@@ -145,7 +176,7 @@ export function SettingsView({
   guild: Guild;
 }) {
   const { t, language, setLanguage } = useI18n();
-  const { prefs, setMode, setAccent } = useThemePrefs();
+  const { prefs, setMode, setAccent, setAccentColor, setBackground, applyPreset, resetTheme } = useThemePrefs();
   const { copied, copy } = useCopy();
 
   const [section, setSection] = useState<Section>("account");
@@ -175,6 +206,7 @@ export function SettingsView({
 
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [revoking, setRevoking] = useState(false);
+  const [signingOut, setSigningOut] = useState<string | null>(null);
 
   const totpSeconds = useTotpSeconds();
 
@@ -224,11 +256,53 @@ export function SettingsView({
   const sessions = overview?.sessions ?? [];
   const others = sessions.filter(item => !item.current).length;
 
+  /**
+   * The handle, unless the line above already *is* the handle.
+   *
+   * Discord returns `global_name: null` for accounts that never set a display
+   * name, and the session stores the handle as the display name in that case —
+   * so the card printed ".shwc" and then "@.shwc", the same string twice. A
+   * leading "@" is stripped from whatever arrives, because Discord is not
+   * consistent about including it.
+   */
+  const handleLine = useMemo(() => {
+    const raw = (user?.handle ?? "").replace(/^@+/, "").trim();
+    if (!raw) return null;
+    const display = (user?.username ?? "").replace(/^@+/, "").trim().toLowerCase();
+    return display && display.includes(raw.toLowerCase()) ? null : raw;
+  }, [user?.handle, user?.username]);
+
   function openVerify(intent: VerifyIntent) {
     setVerifyIntent(intent);
     setVerifyCode("");
     setVerifyError(null);
   }
+
+  /**
+   * The palette is applied the instant it is chosen and saved to the account in
+   * the background.
+   *
+   * Two reasons for that order: a colour picker that waited for a round trip
+   * would feel broken while the operator drags, and the localStorage cache means
+   * the *next* load paints correctly even if this request is still in flight. A
+   * failure is reported rather than swallowed — a preference that silently did
+   * not save is exactly the kind of thing noticed a week later on another device.
+   */
+  const appearanceSaved = useRef(prefs);
+  const [appearanceState, setAppearanceState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  useEffect(() => {
+    if (appearanceState === "idle" && appearanceSaved.current === prefs) return;
+    if (appearanceSaved.current === prefs) return;
+    appearanceSaved.current = prefs;
+    setAppearanceState("saving");
+    const timer = setTimeout(() => {
+      void api
+        .savePreferences({ appearance: prefs })
+        .then(() => setAppearanceState("saved"))
+        .catch(() => setAppearanceState("error"));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [prefs, appearanceState]);
 
   async function confirmLanguage(next: Language) {
     if (next === language) return;
@@ -236,7 +310,7 @@ export function SettingsView({
     setLanguage(next);
     setLanguageState("saving");
     try {
-      await api.savePreferences(next);
+      await api.savePreferences({ language: next });
       setLanguageState("saved");
     } catch {
       // The account is the source of truth across devices. If the write did
@@ -334,6 +408,28 @@ export function SettingsView({
       setSetupError(actionError(cause, t));
     } finally {
       setSetupBusy(false);
+    }
+  }
+
+  /**
+   * Signs one device out.
+   *
+   * The list is re-read from the server afterwards rather than filtered
+   * locally: the server is the authority on what is still live, and a row that
+   * vanished from the response must vanish from the screen for the same reason.
+   */
+  async function signOutSession(handle: string) {
+    if (signingOut) return;
+    setSigningOut(handle);
+    try {
+      await api.revokeSession(handle);
+      setNotice({ kind: "success", text: t("settings.sessions.signedOutOne") });
+      await loadSecurity();
+    } catch (cause) {
+      setNotice({ kind: "error", text: actionError(cause, t) });
+      await loadSecurity();
+    } finally {
+      setSigningOut(null);
     }
   }
 
@@ -442,9 +538,9 @@ export function SettingsView({
                     <p className="truncate text-lg font-semibold leading-tight">
                       <bdi>{user?.username ?? "—"}</bdi>
                     </p>
-                    {user?.handle ? (
+                    {handleLine ? (
                       <p className="truncate text-xs text-muted-foreground" dir="ltr">
-                        @{user.handle}
+                        @{handleLine}
                       </p>
                     ) : null}
                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -582,7 +678,152 @@ export function SettingsView({
                         </button>
                       );
                     })}
+                    {/* The custom accent: a real colour input, so any colour is
+                        reachable. Choosing one clears the named swatch inside
+                        `setAccentColor` — two "active" marks would be a lie about
+                        which colour is actually in force. */}
+                    <label
+                      className={cn(
+                        "grid size-9 cursor-pointer place-items-center rounded-full border-2 transition-ui",
+                        prefs.accentColor
+                          ? "border-foreground"
+                          : "border-dashed border-muted-foreground/50 hover:border-muted-foreground"
+                      )}
+                      title={t("appearance.customAccent")}
+                      style={prefs.accentColor ? { backgroundColor: prefs.accentColor } : undefined}
+                    >
+                      <input
+                        type="color"
+                        value={prefs.accentColor ?? ACCENT_SWATCHES[prefs.accent]}
+                        onChange={event => setAccentColor(event.target.value)}
+                        aria-label={t("appearance.customAccent")}
+                        className="size-0 opacity-0"
+                      />
+                      {prefs.accentColor ? (
+                        <Check className="size-4" style={{ color: readableOn(prefs.accentColor) }} aria-hidden />
+                      ) : (
+                        <Plus className="size-4 text-muted-foreground" aria-hidden />
+                      )}
+                    </label>
                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">{t("appearance.presets")}</p>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    {APPEARANCE_PRESETS.map(preset => {
+                      const active = appearanceEquals(prefs, preset.appearance);
+                      const from = preset.appearance.background.from;
+                      const to = preset.appearance.background.to;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => applyPreset(preset.appearance)}
+                          aria-pressed={active}
+                          className={cn(
+                            "flex items-center gap-2 rounded-xl border px-2.5 py-2 text-sm transition-ui",
+                            active ? "border-primary bg-primary/10 font-medium" : "border-border hover:bg-muted/50"
+                          )}
+                        >
+                          <span
+                            aria-hidden
+                            className="size-7 shrink-0 rounded-lg ring-1 ring-black/20"
+                            style={{
+                              background: from
+                                ? to
+                                  ? `linear-gradient(to bottom, ${from}, ${to})`
+                                  : from
+                                : "var(--background)"
+                            }}
+                          />
+                          <span className="min-w-0 flex-1 truncate text-start">
+                            {t(`appearance.preset.${preset.id}` as "appearance.preset.oled")}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">{t("appearance.background")}</p>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4" role="group" aria-label={t("appearance.background")}>
+                    {([
+                      { style: "solid" as const, key: "appearance.bg.solid" as const },
+                      { style: "split-v" as const, key: "appearance.bg.splitV" as const },
+                      { style: "split-h" as const, key: "appearance.bg.splitH" as const },
+                      { style: "gradient" as const, key: "appearance.bg.gradient" as const }
+                    ]).map(option => {
+                      const active = prefs.background.style === option.style;
+                      return (
+                        <button
+                          key={option.style}
+                          type="button"
+                          onClick={() => setBackground({ style: option.style })}
+                          aria-pressed={active}
+                          className={cn(
+                            "rounded-xl border px-3 py-2 text-sm transition-ui",
+                            active
+                              ? "border-primary bg-primary/10 font-medium"
+                              : "border-border text-muted-foreground hover:bg-muted/50"
+                          )}
+                        >
+                          {t(option.key)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <label className="space-y-1 text-xs text-muted-foreground">
+                      <span className="block">
+                        {prefs.background.style === "solid" ? t("appearance.colour") : t("appearance.colourFrom")}
+                      </span>
+                      <input
+                        type="color"
+                        value={prefs.background.from ?? (prefs.mode === "light" ? "#ffffff" : "#0b0d12")}
+                        onChange={event => setBackground({ from: event.target.value })}
+                        className="h-9 w-16 cursor-pointer rounded-lg border border-border bg-transparent"
+                      />
+                    </label>
+                    {prefs.background.style !== "solid" ? (
+                      <label className="space-y-1 text-xs text-muted-foreground">
+                        <span className="block">{t("appearance.colourTo")}</span>
+                        <input
+                          type="color"
+                          value={prefs.background.to ?? "#1a2030"}
+                          onChange={event => setBackground({ to: event.target.value })}
+                          className="h-9 w-16 cursor-pointer rounded-lg border border-border bg-transparent"
+                        />
+                      </label>
+                    ) : null}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-9 gap-1"
+                      onClick={() => setBackground({ style: "solid", from: null, to: null })}
+                    >
+                      <RotateCcw className="size-3.5" aria-hidden />
+                      {t("appearance.clearBackground")}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button variant="outline" size="sm" className="gap-1" onClick={resetTheme}>
+                    <RotateCcw className="size-3.5" aria-hidden />
+                    {t("appearance.reset")}
+                  </Button>
+                  {appearanceState === "saving" ? (
+                    <span className="text-mini text-muted-foreground">{t("appearance.saving")}</span>
+                  ) : appearanceState === "saved" ? (
+                    <span className="flex items-center gap-1 text-mini text-success">
+                      <Check className="size-3" aria-hidden />
+                      {t("appearance.saved")}
+                    </span>
+                  ) : appearanceState === "error" ? (
+                    <span className="text-mini text-destructive">{t("appearance.saveFailed")}</span>
+                  ) : null}
                 </div>
 
                 <p className="text-mini leading-relaxed text-muted-foreground">{t("settings.appearance.note")}</p>
@@ -630,7 +871,7 @@ export function SettingsView({
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2">
-                            <Flag value={item.value} className="h-4 w-6 shrink-0 rounded-[2px] shadow-sm ring-1 ring-black/10" />
+                            <Flag value={item.value} className="size-5 shadow-sm" />
                             <span className="block text-sm font-medium">{t(`settings.language.${item.value === "ar" ? "arabic" : item.value === "en" ? "english" : "german"}` as "settings.language.arabic")}</span>
                           </span>
                           <span className="mt-0.5 block text-mini text-muted-foreground">
@@ -878,9 +1119,11 @@ export function SettingsView({
                     <ul className="space-y-2">
                       {sessions.map((item, index) => (
                         <SessionRow
-                          key={`${item.createdAt}-${index}`}
+                          key={item.handle}
                           session={item}
                           language={language}
+                          onSignOut={handle => void signOutSession(handle)}
+                          signingOut={signingOut}
                         />
                       ))}
                     </ul>
@@ -1216,10 +1459,14 @@ export function SettingsView({
 /** One live session, as a readable row rather than a table of timestamps. */
 function SessionRow({
   session,
-  language
+  language,
+  onSignOut,
+  signingOut
 }: {
   session: SecuritySession;
   language: Language;
+  onSignOut: (handle: string) => void;
+  signingOut: string | null;
 }) {
   const { t } = useI18n();
   return (
@@ -1236,11 +1483,14 @@ function SessionRow({
             session.current ? "bg-primary/12 text-primary" : "bg-muted text-muted-foreground"
           )}
         >
-          <MonitorSmartphone className="size-4" aria-hidden />
+          <DeviceIcon device={describeUserAgent(session.userAgent).device} className="size-4" />
         </span>
         <div className="min-w-0">
           <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium leading-snug">
-            <span className="truncate">{describeDevice(session.userAgent, t("settings.sessions.unknownDevice"))}</span>
+            <span className="truncate">{deviceKindLabel(describeUserAgent(session.userAgent).device, t)}</span>
+            <span className="truncate text-mini font-normal text-muted-foreground">
+              {describeDevice(session.userAgent, t("settings.sessions.unknownDevice"))}
+            </span>
             {session.current ? (
               <Badge variant="secondary" className="shrink-0 text-micro">
                 {t("settings.sessions.current")}
@@ -1254,9 +1504,23 @@ function SessionRow({
           </p>
         </div>
       </div>
-      <p className="shrink-0 text-mini text-muted-foreground sm:text-end">
-        {t("settings.sessions.expires", { time: formatDateTime(session.expiresAt, language) })}
-      </p>
+      <div className="flex shrink-0 items-center justify-between gap-2 sm:flex-col sm:items-end">
+        <p className="text-mini text-muted-foreground sm:text-end">
+          {t("settings.sessions.expires", { time: formatDateTime(session.expiresAt, language) })}
+        </p>
+        {session.current ? null : (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1 px-2 text-mini"
+            onClick={() => onSignOut(session.handle)}
+            loading={signingOut === session.handle}
+          >
+            <Power className="size-3" aria-hidden />
+            {t("settings.sessions.signOut")}
+          </Button>
+        )}
+      </div>
     </li>
   );
 }

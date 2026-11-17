@@ -287,6 +287,9 @@ const runtime: LogRuntime = {
   resolveMemberRoles: (guildId, userId) => readMemberRoleIds(client, guildId, userId)
 };
 
+/** Assigned when the supervisor is created below; joins always come later. */
+let pushJoinedGuildHealth: ((guildId: string) => void) | null = null;
+
 const dispatch = createDispatcher({
   pipeline,
   runtime,
@@ -315,7 +318,35 @@ const dispatch = createDispatcher({
    * Runs before the operator is offered any settings screen: the bot must own a
    * visible role in the guild so it can position the moderation roles it manages.
    */
+  /**
+   * Set once the health supervisor exists (it is created after the dispatcher).
+   * A guild can only be joined after both, so the indirection costs nothing and
+   * avoids moving the supervisor's construction ahead of everything it reads.
+   */
   onGuildJoined: (guildId, name) => {
+    /**
+     * Record the guild the moment it is joined, and report it healthy at once.
+     *
+     * `ClientReady` syncs every guild the bot was *already* in, so a guild added
+     * later had no `guilds` row with a real member count and no health snapshot
+     * until the next 30 s tick — the dashboard drew 0 members and a red "bot not
+     * connected" badge for a bot that had just joined. The row and the health
+     * push therefore happen here, in that order, and the settings screen can be
+     * opened immediately after the invite finishes.
+     */
+    const joined = client.guilds.cache.get(guildId);
+    if (joined) {
+      void database
+        .upsertGuild({
+          id: joined.id,
+          name: joined.name,
+          iconUrl: joined.iconURL(),
+          memberCount: joined.memberCount,
+          botPresent: true
+        })
+        .then(() => pushJoinedGuildHealth?.(guildId))
+        .catch(error => console.warn(`AL AI could not record the guild ${name}`, error));
+    }
     void ensureBotRole(client, guildId)
       .then(result =>
         console.log(
@@ -2620,6 +2651,8 @@ const supervisor = startSupervisor({
   // heartbeat lands; the supervisor normalises that to null.
   gatewayPingMs: () => client.ws.ping
 });
+pushJoinedGuildHealth = guildId => void supervisor.pushNow(guildId).catch(() => undefined);
+
 
 /* ------------------------------------------------------------------ *
  * GOVERNANCE rule 16 — the integration adapter binds to 127.0.0.1 only.

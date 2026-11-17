@@ -173,12 +173,22 @@ export const cancelSecondFactor = () => call<{ ok: true }>("/api/2fa/cancel", { 
  * re-verifies and consumes it, which is the re-authentication step.
  * ------------------------------------------------------------------ */
 export const preferences = () => call<UserPreferences>("/api/me/preferences");
-export const savePreferences = (language: Language) =>
-  call<UserPreferences>("/api/me/preferences", { method: "PUT", body: JSON.stringify({ language }) });
+/**
+ * Saves either half of the account's preferences.
+ *
+ * A partial body is the point: the language screen sends `language` alone and
+ * the appearance screen sends `appearance` alone, and the server leaves the
+ * absent half untouched. `appearance` is the shared shape from `@al-ai/core`.
+ */
+export const savePreferences = (changes: { language?: Language; appearance?: unknown }) =>
+  call<UserPreferences>("/api/me/preferences", { method: "PUT", body: JSON.stringify(changes) });
 
 export const securityOverview = () => call<SecurityOverview>("/api/me/security");
 export const revokeOtherSessions = () =>
   call<{ ok: true; revoked: number }>("/api/me/sessions/revoke-others", { method: "POST" });
+/** Signs out one device. `handle` is the non-secret row id the overview returns. */
+export const revokeSession = (handle: string) =>
+  call<{ ok: true }>(`/api/me/sessions/${encodeURIComponent(handle)}/revoke`, { method: "POST" });
 
 export const beginTwoFactorSetup = (code?: string) =>
   call<TwoFactorSetup>("/api/me/2fa/setup", {

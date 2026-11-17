@@ -24,6 +24,16 @@ import {
   type ThemePrefs
 } from "../src/lib/theme";
 
+/** A stand-in for the element's inline style, recording what was written. */
+function styleStub() {
+  const written = new Map<string, string>();
+  return {
+    setProperty: (name: string, value: string) => written.set(name, value),
+    removeProperty: (name: string) => written.delete(name),
+    getPropertyValue: (name: string) => written.get(name) ?? ""
+  };
+}
+
 /** A minimal `Storage`, so the tests need no browser. */
 function fakeStorage(value: string | null): Pick<Storage, "getItem"> {
   return { getItem: () => value };
@@ -37,13 +47,25 @@ test("nothing stored means the defaults", () => {
 
 test("a stored preference is read back", () => {
   const stored = JSON.stringify({ mode: "light", accent: "emerald" });
-  assert.deepEqual(readThemePrefs(fakeStorage(stored)), { mode: "light", accent: "emerald" });
+  // Read back through the shared normaliser, so the absent fields arrive as
+  // explicit defaults rather than as `undefined` the UI would have to guard.
+  assert.deepEqual(readThemePrefs(fakeStorage(stored)), {
+    mode: "light",
+    accent: "emerald",
+    accentColor: null,
+    background: { style: "solid", from: null, to: null }
+  });
 });
 
 test("a corrupt or unknown value falls back to the defaults", () => {
   assert.deepEqual(readThemePrefs(fakeStorage("not json")), DEFAULT_THEME_PREFS);
   assert.deepEqual(readThemePrefs(fakeStorage(JSON.stringify({ mode: "neon", accent: "chartreuse" }))), DEFAULT_THEME_PREFS);
-  assert.deepEqual(readThemePrefs(fakeStorage(JSON.stringify({ mode: "dark" }))), { mode: "dark", accent: "blue" });
+  assert.deepEqual(readThemePrefs(fakeStorage(JSON.stringify({ mode: "dark" }))), {
+    mode: "dark",
+    accent: "blue",
+    accentColor: null,
+    background: { style: "solid", from: null, to: null }
+  });
 });
 
 test("the mode resolves against the system, and an explicit choice wins", () => {
@@ -64,10 +86,11 @@ test("applying a preference sets the class, the theme and the accent", () => {
         else classes.delete(name);
       }
     },
-    dataset
+    dataset,
+    style: styleStub()
   } as unknown as HTMLElement;
 
-  const theme = applyThemePrefs({ mode: "dark", accent: "rose" }, root);
+  const theme = applyThemePrefs({ mode: "dark", accent: "rose", accentColor: null, background: { style: "solid", from: null, to: null } }, root);
 
   assert.equal(theme, "dark");
   assert.ok(classes.has("dark"));
@@ -87,14 +110,15 @@ test("the system mode follows the system when it is applied", () => {
         else classes.delete(name);
       }
     },
-    dataset
+    dataset,
+    style: styleStub()
   } as unknown as HTMLElement;
 
   // The engine reads the system's preference from `window.matchMedia`, which
   // does not exist in the test environment, so the fallback is the light
   // palette - the point of the assertion is that "system" never leaves the
   // document without a palette.
-  const theme = applyThemePrefs({ mode: "system", accent: "blue" }, root);
+  const theme = applyThemePrefs({ mode: "system", accent: "blue", accentColor: null, background: { style: "solid", from: null, to: null } }, root);
   assert.ok(theme === "light" || theme === "dark");
   assert.equal(dataset.theme, theme);
   assert.ok(classes.has(theme));
@@ -105,7 +129,7 @@ test("the storage key is stable, so a reload keeps the choice", () => {
 });
 
 test("a preference round-trips through storage", () => {
-  const prefs: ThemePrefs = { mode: "dark", accent: "amber" };
+  const prefs: ThemePrefs = { mode: "dark", accent: "amber", accentColor: "#123456", background: { style: "split-h", from: "#000000", to: "#ffffff" } };
   const stored = JSON.stringify(prefs);
   assert.deepEqual(readThemePrefs(fakeStorage(stored)), prefs);
 });

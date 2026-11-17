@@ -129,7 +129,12 @@ function RailItem({ guild, selected, onSelect }: { guild: Guild; selected: boole
   );
 
   return (
-    <Tooltip>
+    /* `delayDuration={0}`: the rail is a column of identical icons, so the name
+       is the only thing that tells them apart. Waiting 200 ms to find out which
+       server a dot belongs to is a delay with nothing to protect — there is no
+       accidental-hover cost when the answer is one short line. A nested provider
+       is how the shared Tooltip wrapper exposes it. */
+    <Tooltip delayDuration={0}>
       <TooltipTrigger asChild>
         {present ? (
           <button
@@ -150,27 +155,13 @@ function RailItem({ guild, selected, onSelect }: { guild: Guild; selected: boole
           </a>
         )}
       </TooltipTrigger>
-      <TooltipContent
-        side="left"
-        sideOffset={14}
-        className="w-60 rounded-xl border border-border bg-card p-3 text-card-foreground shadow-xl"
-      >
-        <div className="flex items-center gap-3">
-          <Avatar className="size-10 rounded-xl">
-            {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" />}
-            <AvatarFallback className="rounded-xl text-sm">{initials(guild.name)}</AvatarFallback>
-          </Avatar>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold">{guild.name}</p>
-            <p className={cn("flex items-center gap-1 text-mini", present ? "text-success" : "text-warning")}>
-              {present ? <Check className="size-3" /> : <CirclePlus className="size-3" />}
-              {state}
-            </p>
-          </div>
-        </div>
-        <p className="mt-2 text-mini leading-relaxed text-muted-foreground">
-          {present ? t("nav.botAddedHint") : t("nav.botMissingHint")}
-        </p>
+      {/* The name, and nothing else. The card used to carry the server's icon
+          (a second copy of the one already under the pointer), a "bot added"
+          line, and "click to manage this server" — three things the operator
+          already knows, on a target they are already aiming at. What a rail of
+          small icons cannot say for itself is *which* server this is. */}
+      <TooltipContent side="left" sideOffset={10} className="rounded-lg border border-border bg-card px-2.5 py-1.5 shadow-lg">
+        <p className="max-w-52 truncate text-sm font-medium text-card-foreground">{guild.name}</p>
       </TooltipContent>
     </Tooltip>
   );

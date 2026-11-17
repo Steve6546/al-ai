@@ -1090,6 +1090,16 @@ CREATE TABLE IF NOT EXISTS user_preferences (
 ALTER TABLE user_preferences DROP CONSTRAINT IF EXISTS user_preferences_language_check;
 ALTER TABLE user_preferences ADD CONSTRAINT user_preferences_language_check CHECK (language IN ('ar', 'en', 'de'));
 
+-- The appearance travels with the account, so a person keeps their palette on
+-- every device instead of only in the browser that chose it. JSONB rather than
+-- five columns: the shape is owned by `packages/core/src/appearance.ts`, which
+-- validates before writing, and the next option must not need a migration.
+--
+-- Nullable on purpose — a row that never chose keeps NULL, which the server
+-- reads as "the shipped default", and that is different from a stored default
+-- that would then stop following the product's own default.
+ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS appearance JSONB;
+
 -- GOVERNANCE rule 10: the audit trail is append-only.
 -- This is enforced by the database itself, so no code path can rewrite history.
 CREATE OR REPLACE FUNCTION al_ai_audit_is_append_only() RETURNS trigger AS $$

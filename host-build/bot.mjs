@@ -87789,7 +87789,7 @@ function isNodeImage(image) {
 }
 function startSupervisor(deps) {
   const intervalMs = deps.intervalMs ?? 3e4;
-  const tick = async () => {
+  const tick = async (only) => {
     const stats = deps.pipeline.stats();
     let database2 = "reachable";
     try {
@@ -87797,7 +87797,7 @@ function startSupervisor(deps) {
     } catch {
       database2 = "unreachable";
     }
-    const guildIds = deps.guildIds();
+    const guildIds = only ? [only] : deps.guildIds();
     const state = database2 === "reachable" ? "online" : "degraded";
     const uniqueUsers = Math.max(0, Math.trunc(deps.uniqueUsers?.() ?? 0) || 0);
     const pingMs = normalisePing(deps.gatewayPingMs?.() ?? null);
@@ -87820,6 +87820,15 @@ function startSupervisor(deps) {
   timer.unref?.();
   void tick();
   return {
+    /**
+     * Report one guild now, without waiting for the next 30 s tick.
+     *
+     * Fire-and-forget by design: it is called from an event handler that must
+     * not block, and a failure is already swallowed per guild inside `tick`.
+     */
+    pushNow(guildId) {
+      return tick(guildId);
+    },
     stop() {
       clearInterval(timer);
     }
@@ -89099,6 +89108,7 @@ var runtime = {
   // of events costs one member lookup rather than one per event.
   resolveMemberRoles: (guildId, userId) => readMemberRoleIds(client, guildId, userId)
 };
+var pushJoinedGuildHealth = null;
 var dispatch = createDispatcher({
   pipeline,
   runtime,
@@ -89127,7 +89137,22 @@ var dispatch = createDispatcher({
    * Runs before the operator is offered any settings screen: the bot must own a
    * visible role in the guild so it can position the moderation roles it manages.
    */
+  /**
+   * Set once the health supervisor exists (it is created after the dispatcher).
+   * A guild can only be joined after both, so the indirection costs nothing and
+   * avoids moving the supervisor's construction ahead of everything it reads.
+   */
   onGuildJoined: (guildId, name) => {
+    const joined = client.guilds.cache.get(guildId);
+    if (joined) {
+      void database.upsertGuild({
+        id: joined.id,
+        name: joined.name,
+        iconUrl: joined.iconURL(),
+        memberCount: joined.memberCount,
+        botPresent: true
+      }).then(() => pushJoinedGuildHealth?.(guildId)).catch((error) => console.warn(`AL AI could not record the guild ${name}`, error));
+    }
     void ensureBotRole(client, guildId).then(
       (result) => console.log(
         result.created ? `AL AI created its role in ${name} (${result.roleId}).` : `AL AI role already present in ${name} (${result.roleId}).`
@@ -90614,6 +90639,7 @@ var supervisor = startSupervisor({
   // heartbeat lands; the supervisor normalises that to null.
   gatewayPingMs: () => client.ws.ping
 });
+pushJoinedGuildHealth = (guildId) => void supervisor.pushNow(guildId).catch(() => void 0);
 var adapter = readEnv(process.env, "INTEGRATION_ADAPTER_ENABLED") === "true" ? startIntegrationAdapter({
   hmacSecret,
   sourceLayer: controlPlane.instance.sourceLayer,

@@ -44,6 +44,53 @@
     root.dataset.theme = dark ? "dark" : "light";
     root.dataset.appearance = mode;
     root.dataset.accent = accent;
+
+    // The custom accent and the backdrop paint here, with the same rules
+    // `src/lib/theme.ts` applies after React starts: a custom colour replaces
+    // the named one, its label colour is computed from its luminance, and a
+    // split or gradient background goes on as an image. Without this the page
+    // would paint the default palette for a frame and then swap - which is
+    // exactly the flash this file exists to prevent.
+    var SWATCHES = { blue: "#3b82f6", violet: "#8b5cf6", emerald: "#10b981", amber: "#f59e0b", rose: "#f43f5e" };
+    var hex = /^#[0-9a-f]{6}$/i;
+    function normalise(value) {
+      if (typeof value !== "string") return null;
+      var trimmed = value.trim();
+      if (/^#[0-9a-f]{3}$/i.test(trimmed)) {
+        return ("#" + trimmed[1] + trimmed[1] + trimmed[2] + trimmed[2] + trimmed[3] + trimmed[3]).toLowerCase();
+      }
+      return hex.test(trimmed) ? trimmed.toLowerCase() : null;
+    }
+    function luminance(value) {
+      var clean = normalise(value);
+      if (!clean) return 0;
+      function channel(offset) {
+        var srgb = parseInt(clean.slice(offset, offset + 2), 16) / 255;
+        return srgb <= 0.03928 ? srgb / 12.92 : Math.pow((srgb + 0.055) / 1.055, 2.4);
+      }
+      return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+    }
+    var accentColor = normalise(prefs.accentColor) || SWATCHES[accent] || SWATCHES.blue;
+    root.style.setProperty("--primary", accentColor);
+    root.style.setProperty("--primary-foreground", luminance(accentColor) > 0.179 ? "#0b0b0b" : "#ffffff");
+    root.style.setProperty("--ring", accentColor);
+
+    var background = prefs.background || {};
+    var from = normalise(background.from);
+    var to = normalise(background.to) || from;
+    var style = background.style;
+    if (from && style && style !== "solid") {
+      var direction = style === "split-h" ? "to right" : "to bottom";
+      var image =
+        style === "gradient"
+          ? "linear-gradient(" + direction + ", " + from + ", " + to + ")"
+          : "linear-gradient(" + direction + ", " + from + " 0 50%, " + to + " 50% 100%)";
+      root.style.setProperty("--app-bg-image", image);
+      root.style.removeProperty("--app-bg-color");
+    } else if (from) {
+      root.style.setProperty("--app-bg-color", from);
+      root.style.removeProperty("--app-bg-image");
+    }
   } catch (error) {
     /* A blocked or corrupt store must not keep the app from painting. */
     document.documentElement.classList.add("light");

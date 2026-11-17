@@ -280,7 +280,16 @@ export type TwoFactorEnrollment = {
 /** The interface language. Arabic is the default; English is the alternative. */
 export type Language = "ar" | "en" | "de";
 
-export type UserPreferences = { language: Language };
+export type UserPreferences = {
+  language: Language;
+  /**
+   * The account's palette, already normalised by the server.
+   *
+   * Typed as the shared `Appearance` in the screens that use it; kept loose here
+   * so this file has no dependency on the core package.
+   */
+  appearance?: unknown;
+};
 
 /**
  * A new authenticator's one-time material, from `POST /api/me/2fa/setup`.
@@ -298,6 +307,12 @@ export type TwoFactorSetup = {
 /** One live sign-in for the account, as the security screen lists it. */
 export type SecuritySession = {
   current: boolean;
+  /**
+   * A one-way handle for this row, so one device can be signed out.
+   *
+   * Not the session id: that value *is* the cookie and never leaves the server.
+   */
+  handle: string;
   userAgent: string | null;
   createdAt: string;
   lastSeenAt: string;

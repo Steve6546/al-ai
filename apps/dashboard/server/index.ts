@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
 import fastifyCompress from "@fastify/compress";
@@ -89,7 +89,8 @@ import {
   lanUrlFor,
   normaliseRemoteAccessMode,
   reachableLanEntries,
-  SESSION_COOKIE_NAMES
+  SESSION_COOKIE_NAMES,
+  normaliseAppearance
 } from "@al-ai/core";
 import { loadEnv } from "./env.js";
 import { checkRedirectRegistration, clientIdMismatch, describeMissingRegistration, type RedirectRegistration } from "./oauth-preflight.js";
@@ -1901,18 +1902,44 @@ const REAUTH_REQUIRED = {
 app.get("/api/me/preferences", async (request, reply) => {
   const session = await requireSession(request, reply);
   if (!session) return;
-  return db.getPreferences(session.discordUserId);
+  const stored = await db.getPreferences(session.discordUserId);
+  // Normalised on the way out as well as in: a row written by an older build (or
+  // by hand) must render as a valid appearance, not as whatever JSON it holds.
+  return { language: stored.language, appearance: normaliseAppearance(stored.appearance) };
 });
 
+/**
+ * Saves the account's preferences.
+ *
+ * A partial body is the normal case — the language screen sends only a language,
+ * the appearance screen only an appearance — so an absent key means "leave it
+ * alone" rather than "reset it". Only the appearance goes through the shared
+ * normaliser before it is stored, so nothing unvalidated reaches the column the
+ * client later trusts.
+ */
 app.put("/api/me/preferences", async (request, reply) => {
   const session = await requireSession(request, reply);
   if (!session) return;
-  const language = (request.body as { language?: unknown } | null)?.language;
-  if (language !== "ar" && language !== "en" && language !== "de") {
+  const body = (request.body as { language?: unknown; appearance?: unknown } | null) ?? {};
+
+  const wantsLanguage = body.language !== undefined;
+  const language = body.language;
+  if (wantsLanguage && language !== "ar" && language !== "en" && language !== "de") {
     return reply.code(400).send({ error: "INVALID_LANGUAGE", message: "اللغة المطلوبة غير مدعومة." });
   }
-  await db.savePreferences(session.discordUserId, language);
-  return { language };
+
+  const appearance = body.appearance === undefined ? undefined : normaliseAppearance(body.appearance);
+  if (!wantsLanguage && appearance === undefined) {
+    return reply.code(400).send({ error: "NOTHING_TO_SAVE", message: "لم يصل أي تغيير لحفظه." });
+  }
+
+  await db.savePreferences(session.discordUserId, {
+    language: wantsLanguage ? (language as "ar" | "en" | "de") : undefined,
+    appearance
+  });
+
+  const stored = await db.getPreferences(session.discordUserId);
+  return { language: stored.language, appearance: normaliseAppearance(stored.appearance) };
 });
 
 app.get("/api/me/security", async (request, reply) => {
@@ -1926,6 +1953,13 @@ app.get("/api/me/security", async (request, reply) => {
     twoFactor,
     sessions: sessions.map(item => ({
       current: item.id === session.id,
+      // The session id IS the cookie, so it must never leave the server in JSON
+      // (the DB layer says so in its own comment). The screen still needs to
+      // name a row in order to sign that one device out, so each row carries a
+      // one-way handle derived from the id: enough to identify the row on a
+      // follow-up request, useless as a credential — an attacker who reads it
+      // cannot compute the id back, and it is not accepted anywhere.
+      handle: createHash("sha256").update(item.id).digest("hex").slice(0, 16),
       userAgent: item.userAgent,
       createdAt: item.createdAt.toISOString(),
       lastSeenAt: item.lastSeenAt.toISOString(),
@@ -1933,6 +1967,39 @@ app.get("/api/me/security", async (request, reply) => {
     })),
     platformOwner: Boolean(env.ownerId && env.ownerId === session.discordUserId)
   };
+});
+
+/**
+ * Signs one other device out.
+ *
+ * The handle is resolved by re-listing this account's own sessions and hashing
+ * each one, so the route never accepts anything that could be used as a session
+ * id — a guessed handle matches nothing, and a handle for somebody else's
+ * session is not in this account's list at all. The current session is refused
+ * here on purpose: "sign this device out" while it is the device asking is the
+ * logout button's job, and it has a different aftermath (the screen goes away).
+ */
+app.post("/api/me/sessions/:handle/revoke", async (request, reply) => {
+  const session = await requireSession(request, reply);
+  if (!session) return;
+  const handle = String((request.params as { handle?: unknown }).handle ?? "");
+  if (!/^[0-9a-f]{16}$/.test(handle)) return reply.code(400).send({ error: "INVALID_HANDLE" });
+
+  const sessions = await db.listSessions(session.discordUserId);
+  const target = sessions.find(item => createHash("sha256").update(item.id).digest("hex").slice(0, 16) === handle);
+  if (!target) return reply.code(404).send({ error: "SESSION_NOT_FOUND", message: "هذه الجلسة لم تعد موجودة." });
+  if (target.id === session.id) {
+    return reply.code(400).send({ error: "CANNOT_REVOKE_CURRENT", message: "استخدم «تسجيل الخروج» لإنهاء جلستك الحالية." });
+  }
+
+  await db.deleteSession(target.id);
+  await appendAudit(db, env, {
+    guildId: null,
+    eventId: "security.revoked-credential",
+    actorId: session.discordUserId,
+    payload: { credentialType: "session", reason: "user-revoked-one" }
+  }).catch(error => app.log.warn({ err: error }, "Could not audit the session revocation"));
+  return { ok: true };
 });
 
 app.post("/api/me/sessions/revoke-others", async (request, reply) => {

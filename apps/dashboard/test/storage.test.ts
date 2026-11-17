@@ -168,7 +168,11 @@ test("ensureGuild creates a guild the bot has never seen", { skip }, async () =>
   // A guild the bot is not in has no member count to report, and inventing one
   // would be worse than showing nothing.
   assert.equal(record.memberCount, 0);
-  assert.equal(record.botPresent, false);
+  // `ensureGuild` is only ever called for a guild the bot *is* in, so the row it
+  // creates says so. The old expectation here (`false`) was the defect: it made
+  // the first read after a restart report the bot as absent until a heartbeat
+  // overwrote it, which is exactly the red badge a fresh invite showed.
+  assert.equal(record.botPresent, true);
 });
 
 test("ensureGuild never overwrites the member count the bot reported", { skip }, async () => {

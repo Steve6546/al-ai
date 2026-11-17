@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { applyAccountAppearance } from "@/lib/theme";
 import { Loader2 } from "lucide-react";
 import { api, ApiError } from "@/api";
 import { AppShell, isViewKey, viewTitle, type ViewKey } from "@/components/app-shell";
@@ -138,7 +139,14 @@ export function App() {
       void api
         .preferences()
         .then(next => {
-          if (accountRef.current === userId) setLanguage(next.language);
+          if (accountRef.current !== userId) return;
+          setLanguage(next.language);
+          // The palette follows the account too, and this is the one place that
+          // learns it. `theme-boot.js` already painted the cached copy; this
+          // replaces it with what the server actually holds (the cache can be
+          // from another device or an older build) and writes it back so the
+          // next load paints the right colours in the first frame.
+          if (next.appearance) applyAccountAppearance(next.appearance);
         })
         .catch(() => undefined);
 

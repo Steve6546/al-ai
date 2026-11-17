@@ -319,7 +319,15 @@
   }
 
   body {
-    background-color: var(--background);
+    /* The account's backdrop, when one is chosen. Both variables are absent
+       until `applyThemePrefs` sets them, so the default palette is exactly what
+       it was: `--app-bg-color` falls back to the theme's own background which
+       falls back to `--background`. `background-attachment: fixed` keeps a split
+       or gradient steady behind the scrolling content instead of stretching it. */
+    background-color: var(--app-bg-color, var(--background));
+    background-image: var(--app-bg-image, none);
+    background-attachment: fixed;
+    background-size: cover;
     color: var(--foreground);
     font-family: var(--font-sans);
     /* macOS/WebKit honour this; Chrome on Windows ignores it (measured below),

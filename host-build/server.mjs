@@ -30744,7 +30744,7 @@ var require_fast_decode_uri_component = __commonJS({
       }
       return decoded + uri.slice(last);
     }
-    var HEX = {
+    var HEX2 = {
       "0": 0,
       "1": 1,
       "2": 2,
@@ -30769,7 +30769,7 @@ var require_fast_decode_uri_component = __commonJS({
       "F": 15
     };
     function hexCodeToInt(c, shift) {
-      var i = HEX[c];
+      var i = HEX2[c];
       return i === void 0 ? 255 : i << shift;
     }
     module.exports = decodeURIComponent2;
@@ -74189,7 +74189,7 @@ var require_lib3 = __commonJS({
 var import_fastify = __toESM(require_fastify(), 1);
 var import_static = __toESM(require_static(), 1);
 var import_compress = __toESM(require_compress(), 1);
-import { randomBytes as randomBytes3, randomUUID as randomUUID5 } from "node:crypto";
+import { createHash, randomBytes as randomBytes3, randomUUID as randomUUID5 } from "node:crypto";
 import { join as join3 } from "node:path";
 import { readFile } from "node:fs/promises";
 
@@ -76319,6 +76319,41 @@ function constantTimeEqual(a, b) {
   return timingSafeEqual2(left, right);
 }
 
+// packages/core/src/appearance.ts
+var NAMED_ACCENTS = ["blue", "violet", "emerald", "amber", "rose"];
+var BACKGROUND_STYLES = ["solid", "split-v", "split-h", "gradient"];
+var DEFAULT_APPEARANCE = {
+  mode: "system",
+  accent: "blue",
+  accentColor: null,
+  background: { style: "solid", from: null, to: null }
+};
+var HEX = /^#[0-9a-f]{6}$/i;
+function normaliseHex(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (/^#[0-9a-f]{3}$/i.test(trimmed)) {
+    const [r, g, b] = trimmed.slice(1);
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+  }
+  return HEX.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+function normaliseAppearance(input) {
+  const source = input ?? {};
+  const mode = source.mode === "light" || source.mode === "dark" ? source.mode : source.mode === "system" ? "system" : DEFAULT_APPEARANCE.mode;
+  const accent = NAMED_ACCENTS.includes(source.accent) ? source.accent : DEFAULT_APPEARANCE.accent;
+  const accentColor = normaliseHex(source.accentColor);
+  const style = BACKGROUND_STYLES.includes(source.background?.style) ? source.background?.style : DEFAULT_APPEARANCE.background.style;
+  const from = normaliseHex(source.background?.from);
+  const to = normaliseHex(source.background?.to);
+  return {
+    mode,
+    accent,
+    accentColor,
+    background: { style, from, to: style === "solid" ? null : to }
+  };
+}
+
 // apps/dashboard/server/env.ts
 var alwaysRequired = [
   "DISCORD_CLIENT_ID",
@@ -77213,12 +77248,32 @@ function createDatabase(pool2) {
      * which is why the overview showed "0 members" for a populated server.
      * `DO NOTHING` creates the row only when it is genuinely absent.
      */
+    /**
+     * The row for a guild the bot is in, created if the bot has not written it.
+     *
+     * Two defects lived in the `DO NOTHING` this replaces:
+     *
+     * 1. It inserted `bot_present = false`, but it is only ever called for a
+     *    guild the bot *is* in — so the first read after a restart said the bot
+     *    was absent until the next heartbeat overwrote it.
+     * 2. It never repaired a placeholder name. `upsertHealth` seeds
+     *    `(id, name = id)` so a heartbeat has a parent row to point at, and a
+     *    guild row created that way kept the raw snowflake as its display name
+     *    for as long as `DO NOTHING` ran.
+     *
+     * `member_count` is deliberately not written: only the bot can see it, and a
+     * number invented here would be indistinguishable from a real one.
+     */
     async ensureGuild(guild) {
       await pool2.query(
         `INSERT INTO guilds (id, name, icon_url, member_count, bot_present, updated_at)
-         VALUES ($1, $2, $3, 0, false, now())
-         ON CONFLICT (id) DO NOTHING`,
-        [guild.id, guild.name, guild.iconUrl]
+         VALUES ($1, $2, $3, 0, $4, now())
+         ON CONFLICT (id) DO UPDATE
+           SET name = CASE WHEN guilds.name = guilds.id OR guilds.name = '' THEN EXCLUDED.name ELSE guilds.name END,
+               icon_url = COALESCE(guilds.icon_url, EXCLUDED.icon_url),
+               bot_present = guilds.bot_present OR EXCLUDED.bot_present,
+               updated_at = now()`,
+        [guild.id, guild.name, guild.iconUrl, guild.botPresent ?? true]
       );
     },
     async getGuild(guildId) {
@@ -78105,20 +78160,43 @@ function createDatabase(pool2) {
       );
       return rowCount ?? 0;
     },
+    /**
+     * The account's language and appearance.
+     *
+     * `appearance` is stored as JSONB and returned **as stored** (null when the
+     * row never chose): normalising happens in one place — the route, with the
+     * same function the client imports — so a shape change reaches both ends at
+     * once instead of being frozen into this query.
+     */
     async getPreferences(discordUserId) {
-      const { rows } = await pool2.query(`SELECT language FROM user_preferences WHERE discord_user_id = $1`, [
-        discordUserId
-      ]);
+      const { rows } = await pool2.query(
+        `SELECT language, appearance FROM user_preferences WHERE discord_user_id = $1`,
+        [discordUserId]
+      );
       const stored = rows[0]?.language;
-      return { language: stored === "en" ? "en" : stored === "de" ? "de" : "ar" };
+      return {
+        language: stored === "en" ? "en" : stored === "de" ? "de" : "ar",
+        appearance: rows[0]?.appearance ?? null
+      };
     },
-    async savePreferences(discordUserId, language) {
+    /**
+     * Writes the account's preferences.
+     *
+     * The two halves are written independently: a screen that saves a language
+     * must not clear a palette, and a screen that saves a palette must not reset
+     * the language to its default. `undefined` means "leave this column alone",
+     * which is why both are checked rather than coalesced.
+     */
+    async savePreferences(discordUserId, changes) {
       await pool2.query(
-        `INSERT INTO user_preferences (discord_user_id, language)
-         VALUES ($1, $2)
+        `INSERT INTO user_preferences (discord_user_id, language, appearance)
+         VALUES ($1, COALESCE($2, 'ar'), $3)
          ON CONFLICT (discord_user_id)
-         DO UPDATE SET language = EXCLUDED.language, updated_at = now()`,
-        [discordUserId, language]
+         DO UPDATE SET
+           language = COALESCE($2, user_preferences.language),
+           appearance = COALESCE($3, user_preferences.appearance),
+           updated_at = now()`,
+        [discordUserId, changes.language ?? null, changes.appearance === void 0 ? null : JSON.stringify(changes.appearance)]
       );
     },
     /**
@@ -81049,17 +81127,28 @@ var REAUTH_REQUIRED = {
 app.get("/api/me/preferences", async (request2, reply) => {
   const session = await requireSession(request2, reply);
   if (!session) return;
-  return db.getPreferences(session.discordUserId);
+  const stored = await db.getPreferences(session.discordUserId);
+  return { language: stored.language, appearance: normaliseAppearance(stored.appearance) };
 });
 app.put("/api/me/preferences", async (request2, reply) => {
   const session = await requireSession(request2, reply);
   if (!session) return;
-  const language = request2.body?.language;
-  if (language !== "ar" && language !== "en" && language !== "de") {
+  const body = request2.body ?? {};
+  const wantsLanguage = body.language !== void 0;
+  const language = body.language;
+  if (wantsLanguage && language !== "ar" && language !== "en" && language !== "de") {
     return reply.code(400).send({ error: "INVALID_LANGUAGE", message: "\u0627\u0644\u0644\u063A\u0629 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629 \u063A\u064A\u0631 \u0645\u062F\u0639\u0648\u0645\u0629." });
   }
-  await db.savePreferences(session.discordUserId, language);
-  return { language };
+  const appearance = body.appearance === void 0 ? void 0 : normaliseAppearance(body.appearance);
+  if (!wantsLanguage && appearance === void 0) {
+    return reply.code(400).send({ error: "NOTHING_TO_SAVE", message: "\u0644\u0645 \u064A\u0635\u0644 \u0623\u064A \u062A\u063A\u064A\u064A\u0631 \u0644\u062D\u0641\u0638\u0647." });
+  }
+  await db.savePreferences(session.discordUserId, {
+    language: wantsLanguage ? language : void 0,
+    appearance
+  });
+  const stored = await db.getPreferences(session.discordUserId);
+  return { language: stored.language, appearance: normaliseAppearance(stored.appearance) };
 });
 app.get("/api/me/security", async (request2, reply) => {
   const session = await requireSession(request2, reply);
@@ -81072,6 +81161,13 @@ app.get("/api/me/security", async (request2, reply) => {
     twoFactor,
     sessions: sessions.map((item) => ({
       current: item.id === session.id,
+      // The session id IS the cookie, so it must never leave the server in JSON
+      // (the DB layer says so in its own comment). The screen still needs to
+      // name a row in order to sign that one device out, so each row carries a
+      // one-way handle derived from the id: enough to identify the row on a
+      // follow-up request, useless as a credential — an attacker who reads it
+      // cannot compute the id back, and it is not accepted anywhere.
+      handle: createHash("sha256").update(item.id).digest("hex").slice(0, 16),
       userAgent: item.userAgent,
       createdAt: item.createdAt.toISOString(),
       lastSeenAt: item.lastSeenAt.toISOString(),
@@ -81079,6 +81175,26 @@ app.get("/api/me/security", async (request2, reply) => {
     })),
     platformOwner: Boolean(env.ownerId && env.ownerId === session.discordUserId)
   };
+});
+app.post("/api/me/sessions/:handle/revoke", async (request2, reply) => {
+  const session = await requireSession(request2, reply);
+  if (!session) return;
+  const handle = String(request2.params.handle ?? "");
+  if (!/^[0-9a-f]{16}$/.test(handle)) return reply.code(400).send({ error: "INVALID_HANDLE" });
+  const sessions = await db.listSessions(session.discordUserId);
+  const target = sessions.find((item) => createHash("sha256").update(item.id).digest("hex").slice(0, 16) === handle);
+  if (!target) return reply.code(404).send({ error: "SESSION_NOT_FOUND", message: "\u0647\u0630\u0647 \u0627\u0644\u062C\u0644\u0633\u0629 \u0644\u0645 \u062A\u0639\u062F \u0645\u0648\u062C\u0648\u062F\u0629." });
+  if (target.id === session.id) {
+    return reply.code(400).send({ error: "CANNOT_REVOKE_CURRENT", message: "\u0627\u0633\u062A\u062E\u062F\u0645 \xAB\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062E\u0631\u0648\u062C\xBB \u0644\u0625\u0646\u0647\u0627\u0621 \u062C\u0644\u0633\u062A\u0643 \u0627\u0644\u062D\u0627\u0644\u064A\u0629." });
+  }
+  await db.deleteSession(target.id);
+  await appendAudit(db, env, {
+    guildId: null,
+    eventId: "security.revoked-credential",
+    actorId: session.discordUserId,
+    payload: { credentialType: "session", reason: "user-revoked-one" }
+  }).catch((error) => app.log.warn({ err: error }, "Could not audit the session revocation"));
+  return { ok: true };
 });
 app.post("/api/me/sessions/revoke-others", async (request2, reply) => {
   const session = await requireSession(request2, reply);
