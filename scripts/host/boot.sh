@@ -119,8 +119,11 @@ trap cleanup INT TERM
 if [ -z "${DATABASE_URL:-}" ]; then
   export PGDATA="$PG_HOME/data"
   export PGPORT="${PGPORT:-5432}"
-  DATABASE_URL="$(node scripts/host/pg.mjs --print-url)"
-  export DATABASE_URL
+  # The owner connection is only for the bootstrap: it starts nothing, it names
+  # the role that will apply the schema. The services get the least-privilege
+  # URL once PostgreSQL is ready (below), so the application never runs as the
+  # cluster superuser it was initialised with.
+  ADMIN_DATABASE_URL="$(node scripts/host/pg.mjs --print-url)"
 
   rm -f "$PG_HOME/ready"
   log "starting PostgreSQL (embedded, $PGPORT)"
@@ -140,6 +143,18 @@ if [ -z "${DATABASE_URL:-}" ]; then
   if [ ! -f "$PG_HOME/ready" ]; then
     log "PostgreSQL did not become ready within 180s"
     exit 1
+  fi
+
+  # `--print-app-url` answers with `al_ai_app` (DML only, NOBYPASSRLS) and falls
+  # back to the owner URL with a warning when the role cannot log in. The
+  # fallback is deliberate: a role problem must not stop the deployment, and the
+  # warning is what makes it visible instead of silent.
+  DATABASE_URL="$(node scripts/host/pg.mjs --print-app-url)"
+  export DATABASE_URL
+  if [ "$DATABASE_URL" = "$ADMIN_DATABASE_URL" ]; then
+    log "WARNING: the services are connecting as the database owner"
+  else
+    log "the services connect as the least-privilege application role"
   fi
   log "PostgreSQL ready"
 else

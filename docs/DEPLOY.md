@@ -341,3 +341,42 @@ VPS in production is a machine whose LAN links still work.
 
 The hosted screen is not a filtered copy of the local one: the server returns
 empty interface arrays, so there is nothing to filter.
+
+## Database roles: the services never connect as the owner
+
+`infra/schema.sql` defines two roles, and the difference is the whole point:
+
+| Role | Who uses it | What it can do |
+| --- | --- | --- |
+| `al_ai` (the `initdb` superuser) | `pg.mjs` at boot: create the database, create the app role, apply the schema | everything — DDL, files, RLS bypass |
+| `al_ai_app` | the dashboard and the bot, for every request | `SELECT/INSERT/UPDATE/DELETE` on the feature tables only; no DDL, no `pg_read_file`, **NOBYPASSRLS** |
+
+`boot.sh` starts PostgreSQL with the owner URL, waits for `ready`, then asks
+`node scripts/host/pg.mjs --print-app-url` for the least-privilege URL and
+exports **that** as `DATABASE_URL`. If the role cannot be prepared, the same
+command prints the owner URL instead and logs a warning — the deployment keeps
+running, and the log names the downgrade.
+
+`pg.mjs` mints the application password once into `.al-ai-pg/password-app`
+(mode 600) beside the owner's `.al-ai-pg/password`. The value never appears in
+`env`, in a log, or in the repository.
+
+```bash
+# Prove which role the running services use (no secrets printed):
+node scripts/host/pg.mjs --print-app-url >/dev/null && echo "app URL available"
+
+# Rotate the application password: delete the file, restart the deployment.
+rm .al-ai-pg/password-app        # next boot mints and applies a new one
+```
+
+Row-level security is enabled on every table and pinned by
+`apps/dashboard/test/schema-rls.test.ts`. `audit_trail` has only SELECT and
+INSERT policies plus `REVOKE UPDATE, DELETE`, so the append-only guarantee is
+enforced by the database, not only by the code that writes it.
+
+**External database (`DATABASE_URL` set in the panel):** `boot.sh` skips all of
+the above. Then the role in that URL is the one the services use — create a
+dedicated, non-superuser role there and point `DATABASE_URL` at it. The schema's
+DO block grants it DML and the RLS policies when it can create the role; a
+managed provider that allows only one role keeps working (with the owner's
+privileges) and the schema's `NOTICE` says policies were skipped.

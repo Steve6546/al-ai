@@ -312,12 +312,32 @@ const throttle = new RequestThrottle(API_THROTTLE_WINDOW_MS, API_THROTTLE_MAX);
 const IP_THROTTLE_MAX = 600;
 const ipThrottle = new RequestThrottle(API_THROTTLE_WINDOW_MS, IP_THROTTLE_MAX);
 
+/**
+ * The alert behind the 429.
+ *
+ * A refusal with no log line is invisible: the operator sees a dashboard that
+ * "stopped working" and the log says nothing about why. One warning per key per
+ * window keeps a flood from filling the log while still naming who was limited
+ * and where — which is the signal an alert rule can be built on.
+ */
+const alertedThrottleKeys = new Set<string>();
+function alertThrottle(request: FastifyRequest, key: string) {
+  if (alertedThrottleKeys.has(key)) return;
+  if (alertedThrottleKeys.size > 500) alertedThrottleKeys.clear();
+  alertedThrottleKeys.add(key);
+  request.log.warn(
+    { throttleKey: key, path: request.url.split("?")[0], method: request.method },
+    "request throttled: the rate limit refused this client"
+  );
+}
+
 // Forged cookies mint a session key per request until the window expires;
 // sweeping keeps that map bounded instead of growing for the process's life.
 const throttleSweep = setInterval(() => {
   const now = Date.now();
   throttle.sweep(now);
   ipThrottle.sweep(now);
+  alertedThrottleKeys.clear();
 }, API_THROTTLE_WINDOW_MS);
 throttleSweep.unref();
 
@@ -498,8 +518,10 @@ app.addHook("onRequest", async (request, reply) => {
   // so the ceiling is deliberately generous (600/min), while a signed-in
   // session still gets its own tighter 120/min bucket below.
   const now = Date.now();
-  const ipVerdict = ipThrottle.check(clientKey(request.socket.remoteAddress), now);
+  const peer = clientKey(request.socket.remoteAddress);
+  const ipVerdict = ipThrottle.check(peer, now);
   if (!ipVerdict.allowed) {
+    alertThrottle(request, `ip:${peer}`);
     return reply
       .code(429)
       .header("retry-after", String(ipVerdict.retryAfterSeconds))
@@ -515,6 +537,7 @@ app.addHook("onRequest", async (request, reply) => {
   const verdict = throttle.check(`sess:${sessionKey}`, now);
   if (verdict.allowed) return;
 
+  alertThrottle(request, `sess:${sessionKey}`);
   return reply
     .code(429)
     .header("retry-after", String(verdict.retryAfterSeconds))

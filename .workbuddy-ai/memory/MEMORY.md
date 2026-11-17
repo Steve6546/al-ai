@@ -41,6 +41,11 @@
 - **الرؤية = وجود البيانات؛ التحرير = الإذن** (متغيّران لا `isPlatformOwner && draft`).
 - **2FA إلزامي للمسؤولين:** `needsSecondFactor = requiresSecondFactor(...) || isEnrolled(...)`؛
   `second_factor_satisfied` افتراضه `FALSE` و`readSession` يُتلف أي جلسة لم تمرّ بالرمز. → `docs/API.md`.
+- **القاعدة بدورين لا دور واحد:** المالك `al_ai` (superuser) للسكيما فقط، والخدمات عبر
+  `al_ai_app` (NOSUPERUSER NOBYPASSRLS، DML فقط) بكلمة سر `.al-ai-pg/password-app`.
+  `boot.sh` يطلب `--print-app-url` **بعد** `ready`، و`--print-url` للمالك. **RLS على كل جدول**
+  بحلقة `pg_tables` (لا قائمة يدوية)، و`audit_trail` بـSELECT+INSERT فقط. ⚠️ منح لدور غير موجود
+  ليست حماية: تحقّق من `pg_roles` و`pg_tables.rowsecurity` لا من نص السكيما.
 
 ## مجالات لها ملف مرجعي — خلاصة فقط
 - **النفق:** `tunnelHostForGate` = النطاق المحجوز لا `tunnelUrl` الحيّ؛ `network.boot()` قبل

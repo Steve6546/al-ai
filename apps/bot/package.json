@@ -14,9 +14,9 @@
   "dependencies": {
     "@al-ai/core": "*",
     "@napi-rs/canvas": "^1.0.11",
-    "discord.js": "^14.21.0",
+    "discord.js": "^14.28.1",
     "dotenv": "^17.4.2",
-    "pg": "^8.13.0",
+    "pg": "^8.23.1",
     "tsx": "^4.23.13"
   },
   "devDependencies": {

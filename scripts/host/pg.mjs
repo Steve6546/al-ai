@@ -65,6 +65,15 @@ const PORT = Number(process.env.PGPORT || 5432);
 const USER = process.env.AL_AI_PG_USER || "al_ai";
 const DATABASE = process.env.AL_AI_PG_DATABASE || "al_ai";
 const PASSWORD_FILE = join(WORK, "password");
+/**
+ * The application role the two services connect as. Never the owner: the owner
+ * is the cluster superuser (`initdb`'s own role), and a bug that reaches the
+ * query layer must not also be able to read server files, drop a table, or
+ * bypass row-level security. `infra/schema.sql` creates this role when it is
+ * missing and grants it DML only; `ensureAppRole` is what gives it a password.
+ */
+const APP_USER = process.env.AL_AI_PG_APP_USER || "al_ai_app";
+const APP_PASSWORD_FILE = join(WORK, "password-app");
 const SHIM = join(WORK, "libnssshim.so");
 const SHIM_SOURCE = join(WORK, "shim.c");
 
@@ -96,6 +105,28 @@ function password() {
 
 function databaseUrl(secret) {
   return `postgres://${encodeURIComponent(USER)}:${encodeURIComponent(secret)}@127.0.0.1:${PORT}/${DATABASE}`;
+}
+
+/**
+ * The application password: minted once, kept beside the owner's, mode 600.
+ *
+ * `POSTGRES_APP_PASSWORD` wins when the operator set one. The two passwords are
+ * deliberately different files so losing one never widens the other, and a
+ * rotation is `rm password-app` then restart — `ensureAppRole` writes the new
+ * value into the role before printing the URL the services use.
+ */
+function appPassword() {
+  const fromEnv = process.env.POSTGRES_APP_PASSWORD?.trim();
+  if (fromEnv) return fromEnv;
+  if (existsSync(APP_PASSWORD_FILE)) return readFileSync(APP_PASSWORD_FILE, "utf8").trim();
+  const minted = randomBytes(24).toString("hex");
+  writeFileSync(APP_PASSWORD_FILE, minted, { mode: 0o600 });
+  chmodSync(APP_PASSWORD_FILE, 0o600);
+  return minted;
+}
+
+function appDatabaseUrl(secret) {
+  return `postgres://${encodeURIComponent(APP_USER)}:${encodeURIComponent(secret)}@127.0.0.1:${PORT}/${DATABASE}`;
 }
 
 function haveBinaries() {
@@ -295,6 +326,59 @@ async function ensureDatabase(secret) {
 }
 
 /**
+ * Give the application role its password and prove it can log in.
+ *
+ * Runs as the owner, after PostgreSQL is up and before the schema pass (the
+ * schema creates the role when it is missing). Every identifier and literal is
+ * passed through `format(%I/%L)`, so a role name from the environment cannot
+ * turn into SQL. Returns false when the role cannot be prepared here — the
+ * caller then keeps the owner URL, which is the state this deployment was in
+ * before, so a failure never takes the services down.
+ */
+async function ensureAppRole(secret) {
+  const { default: pg } = await import("pg");
+  const admin = new pg.Client({ connectionString: databaseUrl(secret) });
+  await admin.connect();
+  try {
+    const appSecret = appPassword();
+    const exists = await admin.query("select 1 from pg_roles where rolname = $1", [APP_USER]);
+    const statement = exists.rowCount
+      ? (await admin.query(
+          "select format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', $1, $2) as sql",
+          [APP_USER, appSecret]
+        )).rows[0].sql
+      : (await admin.query(
+          "select format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', $1, $2) as sql",
+          [APP_USER, appSecret]
+        )).rows[0].sql;
+    await admin.query(statement);
+    // A role with LOGIN and the right flags is the whole contract; the login
+    // probe is what proves the password just written is the one that works, so
+    // a URL is never printed for a role the services cannot use.
+    const probe = new pg.Client({ connectionString: appDatabaseUrl(appSecret) });
+    try {
+      await probe.connect();
+      const flags = (await probe.query(
+        "select rolsuper, rolbypassrls from pg_roles where rolname = current_user"
+      )).rows[0];
+      if (!flags || flags.rolsuper || flags.rolbypassrls) {
+        log(`application role ${APP_USER} is not least-privilege; services keep the owner URL`);
+        return false;
+      }
+    } finally {
+      await probe.end().catch(() => {});
+    }
+    log(`application role ${APP_USER} ready (NOSUPERUSER, NOBYPASSRLS)`);
+    return true;
+  } catch (error) {
+    log(`application role could not be prepared (${error.message}); services keep the owner URL`);
+    return false;
+  } finally {
+    await admin.end().catch(() => {});
+  }
+}
+
+/**
  * Apply `infra/schema.sql`.
  *
  * Idempotent by construction (`CREATE TABLE IF NOT EXISTS`), so it runs on
@@ -370,6 +454,37 @@ async function main() {
     console.log(databaseUrl(secret));
     return;
   }
+  // `--print-app-url` is read by boot.sh *after* PostgreSQL is ready. It mints
+  // the application password when needed and answers with the least-privilege
+  // URL only when that role can actually log in; otherwise the owner URL is
+  // printed (and a warning logged) so a role problem is a downgrade, not an
+  // outage.
+  if (process.argv.includes("--print-app-url")) {
+    const ownerUrl = databaseUrl(secret);
+    const { default: pg } = await import("pg");
+    let usable = false;
+    try {
+      const appSecret = appPassword();
+      const probe = new pg.Client({ connectionString: appDatabaseUrl(appSecret) });
+      await probe.connect();
+      try {
+        const flags = (await probe.query(
+          "select rolsuper, rolbypassrls from pg_roles where rolname = current_user"
+        )).rows[0];
+        usable = Boolean(flags) && !flags.rolsuper && !flags.rolbypassrls;
+      } finally {
+        await probe.end().catch(() => {});
+      }
+      if (usable) console.log(appDatabaseUrl(appSecret));
+    } catch (error) {
+      log(`application role is not usable yet (${error.message})`);
+    }
+    if (!usable) {
+      console.error(`[db] warning: ${APP_USER} cannot log in; printing the owner URL instead`);
+      console.log(ownerUrl);
+    }
+    return;
+  }
 
   ensureBinaries();
   fixSharedLibraries();
@@ -413,6 +528,7 @@ async function main() {
     throw new Error(`PostgreSQL did not open 127.0.0.1:${PORT}`);
   }
   await ensureDatabase(secret);
+  await ensureAppRole(secret);
   await applySchema(secret);
   writeFileSync(join(WORK, "ready"), `${new Date().toISOString()}\n`);  log("ready");
 

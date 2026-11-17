@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS bot_identity (
   CONSTRAINT bot_identity_status_check CHECK (status IN ('online','idle','dnd','invisible')),
   CONSTRAINT bot_identity_activity_type_check CHECK (activity_type IN ('playing','listening','watching','competing')),
   CONSTRAINT bot_identity_activity_text_check CHECK (length(activity_text) <= 128),
-  CONSTRAINT bot_identity_status_duration_check CHECK (status_duration IS NULL OR status_duration IN ('15m','1h','8h','24h','3d','forever'))
+  CONSTRAINT bot_identity_status_duration_check CHECK (status_duration IS NULL OR status_duration IN ('15m','30m','1h','8h','24h','3d','forever'))
 );
 -- The account-appearance columns, retired. Dropping a column takes its CHECK
 -- with it, so the three size/length constraints above need no separate DROP.
@@ -149,9 +149,14 @@ ALTER TABLE bot_identity ADD COLUMN IF NOT EXISTS status_duration TEXT;
 ALTER TABLE bot_identity ADD COLUMN IF NOT EXISTS status_expires_at TIMESTAMPTZ;
 DO $$
 BEGIN
+  -- DROP then ADD, not "ADD and swallow duplicate_object": a database that
+  -- already has this constraint would keep the *old* allowed list and reject a
+  -- duration the contracts accept. That is a silent disagreement between the
+  -- schema and the code that writes it, and it is how `30m` would have failed
+  -- on every deployment older than the day it was added.
+  ALTER TABLE bot_identity DROP CONSTRAINT IF EXISTS bot_identity_status_duration_check;
   ALTER TABLE bot_identity ADD CONSTRAINT bot_identity_status_duration_check
-    CHECK (status_duration IS NULL OR status_duration IN ('15m','1h','8h','24h','3d','forever'));
-EXCEPTION WHEN duplicate_object THEN NULL;
+    CHECK (status_duration IS NULL OR status_duration IN ('15m','30m','1h','8h','24h','3d','forever'));
 END $$;
 
 CREATE TABLE IF NOT EXISTS guild_logging (
@@ -1110,14 +1115,107 @@ CREATE TRIGGER audit_trail_no_truncate
 -- (Ignored when the role is the table owner or a superuser.)
 REVOKE TRUNCATE ON audit_trail FROM PUBLIC;
 
--- The application role (`al_ai_app` in this deployment) reads and writes every
--- feature table but owns none of them, so a table created under the owner role
--- needs its grants stated here. Wrapped rather than bare: a database initialised
--- under a different role name must not fail its whole schema pass over a grant.
+-- ---------------------------------------------------------------------------
+-- Least privilege + row-level security
+--
+-- Two roles, never one:
+--   * the owner (`al_ai`, the cluster superuser) applies this file and does
+--     nothing else at runtime;
+--   * `al_ai_app` is the role both services connect as. It cannot create,
+--     alter or drop objects, cannot read server files (`pg_read_file`), and
+--     cannot be superuser or hold BYPASSRLS.
+--
+-- RLS is enabled on every table in `public` with an explicit policy for the
+-- application role, so a table added later without a policy is DENIED instead
+-- of silently world-readable. `audit_trail` gets SELECT + INSERT only:
+-- append-only is now enforced three ways (BEFORE UPDATE/DELETE trigger,
+-- BEFORE TRUNCATE trigger, and no policy that would grant either).
+--
+-- Honest scope: this is not per-tenant isolation. Both services connect as one
+-- role, and the panel scopes rows by guild id in SQL rather than through a
+-- session GUC. What this buys is default-deny for every other role and for any
+-- future table, a second lock on the trail, and a database that can no longer
+-- be reached as a superuser from an application bug.
+--
+-- Wrapped in a DO block because a database initialised without these roles
+-- (a managed provider where the app owns its own schema) must not fail its
+-- whole schema pass over a grant.
 DO $$
+DECLARE
+  app_role CONSTANT text := 'al_ai_app';
+  owner_role CONSTANT text := current_user;
+  has_role boolean;
+  t record;
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'al_ai_app') THEN
-    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO al_ai_app;
+  SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = app_role) INTO has_role;
+
+  IF NOT has_role THEN
+    BEGIN
+      EXECUTE format(
+        'CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS',
+        app_role
+      );
+      has_role := true;
+    EXCEPTION WHEN insufficient_privilege OR duplicate_object THEN
+      RAISE NOTICE 'al_ai_app is not usable here (%); grants and RLS policies are skipped', SQLERRM;
+    END;
   END IF;
+
+  IF NOT has_role THEN
+    RETURN;
+  END IF;
+
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), app_role);
+  EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', app_role);
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I', app_role);
+  EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I', app_role);
+  -- Tables the owner adds later inherit the same DML-only grant.
+  EXECUTE format(
+    'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I',
+    app_role
+  );
+  EXECUTE format(
+    'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %I',
+    app_role
+  );
+  -- The trail is append-only, so DELETE/UPDATE never belonged to the app.
+  EXECUTE format('REVOKE UPDATE, DELETE ON public.audit_trail FROM %I', app_role);
+
+  FOR t IN
+    SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename
+  LOOP
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t.tablename);
+
+    -- Recreated every pass, so a policy edit in this file is what the next
+    -- boot applies. `IF EXISTS` keeps the pass idempotent.
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t.tablename || '_app', t.tablename);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t.tablename || '_app_read', t.tablename);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t.tablename || '_app_append', t.tablename);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t.tablename || '_owner', t.tablename);
+
+    IF t.tablename = 'audit_trail' THEN
+      EXECUTE format(
+        'CREATE POLICY %I ON public.%I FOR SELECT TO %I USING (true)',
+        t.tablename || '_app_read', t.tablename, app_role
+      );
+      EXECUTE format(
+        'CREATE POLICY %I ON public.%I FOR INSERT TO %I WITH CHECK (true)',
+        t.tablename || '_app_append', t.tablename, app_role
+      );
+    ELSE
+      EXECUTE format(
+        'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (true) WITH CHECK (true)',
+        t.tablename || '_app', t.tablename, app_role
+      );
+    END IF;
+
+    -- The role that applies this file keeps full access even when it is not a
+    -- superuser (a managed deployment), so enabling RLS can never lock the
+    -- migration role out of the schema it just created.
+    EXECUTE format(
+      'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (true) WITH CHECK (true)',
+      t.tablename || '_owner', t.tablename, owner_role
+    );
+  END LOOP;
 END $$;
 

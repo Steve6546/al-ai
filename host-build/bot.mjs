@@ -31667,6 +31667,96 @@ var require_BitField = __commonJS({
   }
 });
 
+// node_modules/discord.js/src/util/PermissionsBitField.js
+var require_PermissionsBitField = __commonJS({
+  "node_modules/discord.js/src/util/PermissionsBitField.js"(exports2, module2) {
+    "use strict";
+    var { PermissionFlagsBits } = require_v106();
+    var BitField = require_BitField();
+    var PermissionsBitField3 = class extends BitField {
+      /**
+       * Numeric permission flags.
+       * @type {PermissionFlagsBits}
+       * @memberof PermissionsBitField
+       * @see {@link https://discord.com/developers/docs/topics/permissions#permissions-bitwise-permission-flags}
+       */
+      static Flags = PermissionFlagsBits;
+      /**
+       * Bitfield representing every permission combined
+       * @type {bigint}
+       * @memberof PermissionsBitField
+       */
+      static All = Object.values(PermissionFlagsBits).reduce((all, p) => all | p, 0n);
+      /**
+       * Bitfield representing the default permissions for users
+       * @type {bigint}
+       * @memberof PermissionsBitField
+       */
+      static Default = BigInt(104324673);
+      /**
+       * Bitfield representing the permissions required for moderators of stage channels
+       * @type {bigint}
+       * @memberof PermissionsBitField
+       */
+      static StageModerator = PermissionFlagsBits.ManageChannels | PermissionFlagsBits.MuteMembers | PermissionFlagsBits.MoveMembers;
+      /**
+       * @type {bigint}
+       * @memberof PermissionsBitField
+       * @private
+       */
+      static DefaultBit = BigInt(0);
+      /**
+       * Bitfield of the packed bits
+       * @type {bigint}
+       * @name PermissionsBitField#bitfield
+       */
+      /**
+       * Data that can be resolved to give a permission number. This can be:
+       * * A string (see {@link PermissionsBitField.Flags})
+       * * A permission number
+       * * An instance of {@link PermissionsBitField}
+       * * An Array of PermissionResolvable
+       * @typedef {string|bigint|PermissionsBitField|PermissionResolvable[]} PermissionResolvable
+       */
+      /**
+       * Gets all given bits that are missing from the bitfield.
+       * @param {BitFieldResolvable} bits Bit(s) to check for
+       * @param {boolean} [checkAdmin=true] Whether to allow the administrator permission to override
+       * @returns {string[]}
+       */
+      missing(bits, checkAdmin = true) {
+        return checkAdmin && this.has(PermissionFlagsBits.Administrator) ? [] : super.missing(bits);
+      }
+      /**
+       * Checks whether the bitfield has a permission, or any of multiple permissions.
+       * @param {PermissionResolvable} permission Permission(s) to check for
+       * @param {boolean} [checkAdmin=true] Whether to allow the administrator permission to override
+       * @returns {boolean}
+       */
+      any(permission, checkAdmin = true) {
+        return checkAdmin && super.has(PermissionFlagsBits.Administrator) || super.any(permission);
+      }
+      /**
+       * Checks whether the bitfield has a permission, or multiple permissions.
+       * @param {PermissionResolvable} permission Permission(s) to check for
+       * @param {boolean} [checkAdmin=true] Whether to allow the administrator permission to override
+       * @returns {boolean}
+       */
+      has(permission, checkAdmin = true) {
+        return checkAdmin && super.has(PermissionFlagsBits.Administrator) || super.has(permission);
+      }
+      /**
+       * Gets an {@link Array} of bitfield names based on the permissions available.
+       * @returns {string[]}
+       */
+      toArray() {
+        return super.toArray(false);
+      }
+    };
+    module2.exports = PermissionsBitField3;
+  }
+});
+
 // node_modules/discord.js/src/util/AttachmentFlagsBitField.js
 var require_AttachmentFlagsBitField = __commonJS({
   "node_modules/discord.js/src/util/AttachmentFlagsBitField.js"(exports2, module2) {
@@ -32401,6 +32491,8 @@ var require_BaseChannel = __commonJS({
           this.flags ??= new ChannelFlagsBitField().freeze();
         }
         this.id = data.id;
+        this.permissions ??= null;
+        this.appPermissions ??= null;
       }
       /**
        * The timestamp the channel was created at
@@ -32634,93 +32726,93 @@ var require_CachedManager = __commonJS({
   }
 });
 
-// node_modules/discord.js/src/util/PermissionsBitField.js
-var require_PermissionsBitField = __commonJS({
-  "node_modules/discord.js/src/util/PermissionsBitField.js"(exports2, module2) {
+// node_modules/discord.js/src/structures/BaseRole.js
+var require_BaseRole = __commonJS({
+  "node_modules/discord.js/src/structures/BaseRole.js"(exports2, module2) {
     "use strict";
-    var { PermissionFlagsBits } = require_v106();
-    var BitField = require_BitField();
-    var PermissionsBitField3 = class extends BitField {
-      /**
-       * Numeric permission flags.
-       * @type {PermissionFlagsBits}
-       * @memberof PermissionsBitField
-       * @see {@link https://discord.com/developers/docs/topics/permissions#permissions-bitwise-permission-flags}
-       */
-      static Flags = PermissionFlagsBits;
-      /**
-       * Bitfield representing every permission combined
-       * @type {bigint}
-       * @memberof PermissionsBitField
-       */
-      static All = Object.values(PermissionFlagsBits).reduce((all, p) => all | p, 0n);
-      /**
-       * Bitfield representing the default permissions for users
-       * @type {bigint}
-       * @memberof PermissionsBitField
-       */
-      static Default = BigInt(104324673);
-      /**
-       * Bitfield representing the permissions required for moderators of stage channels
-       * @type {bigint}
-       * @memberof PermissionsBitField
-       */
-      static StageModerator = PermissionFlagsBits.ManageChannels | PermissionFlagsBits.MuteMembers | PermissionFlagsBits.MoveMembers;
-      /**
-       * @type {bigint}
-       * @memberof PermissionsBitField
-       * @private
-       */
-      static DefaultBit = BigInt(0);
-      /**
-       * Bitfield of the packed bits
-       * @type {bigint}
-       * @name PermissionsBitField#bitfield
-       */
-      /**
-       * Data that can be resolved to give a permission number. This can be:
-       * * A string (see {@link PermissionsBitField.Flags})
-       * * A permission number
-       * * An instance of {@link PermissionsBitField}
-       * * An Array of PermissionResolvable
-       * @typedef {string|bigint|PermissionsBitField|PermissionResolvable[]} PermissionResolvable
-       */
-      /**
-       * Gets all given bits that are missing from the bitfield.
-       * @param {BitFieldResolvable} bits Bit(s) to check for
-       * @param {boolean} [checkAdmin=true] Whether to allow the administrator permission to override
-       * @returns {string[]}
-       */
-      missing(bits, checkAdmin = true) {
-        return checkAdmin && this.has(PermissionFlagsBits.Administrator) ? [] : super.missing(bits);
+    var { roleMention } = require_dist7();
+    var { DiscordSnowflake } = require_cjs();
+    var Base = require_Base();
+    var BaseRole = class extends Base {
+      constructor(client2, data) {
+        super(client2);
+        this.icon = null;
+        this.unicodeEmoji = null;
+        this._patch(data);
+      }
+      _patch(data) {
+        this.id = data.id;
+        if ("name" in data) {
+          this.name = data.name;
+        }
+        if ("color" in data) {
+          this.color = data.color;
+        }
+        if ("colors" in data) {
+          this.colors = {
+            primaryColor: data.colors.primary_color,
+            secondaryColor: data.colors.secondary_color,
+            tertiaryColor: data.colors.tertiary_color
+          };
+        }
+        if ("position" in data) {
+          this.rawPosition = data.position;
+        }
+        if ("icon" in data) this.icon = data.icon;
+        if ("unicode_emoji" in data) this.unicodeEmoji = data.unicode_emoji;
       }
       /**
-       * Checks whether the bitfield has a permission, or any of multiple permissions.
-       * @param {PermissionResolvable} permission Permission(s) to check for
-       * @param {boolean} [checkAdmin=true] Whether to allow the administrator permission to override
-       * @returns {boolean}
+       * The timestamp the role was created at
+       *
+       * @type {number}
+       * @readonly
        */
-      any(permission, checkAdmin = true) {
-        return checkAdmin && super.has(PermissionFlagsBits.Administrator) || super.any(permission);
+      get createdTimestamp() {
+        return DiscordSnowflake.timestampFrom(this.id);
       }
       /**
-       * Checks whether the bitfield has a permission, or multiple permissions.
-       * @param {PermissionResolvable} permission Permission(s) to check for
-       * @param {boolean} [checkAdmin=true] Whether to allow the administrator permission to override
-       * @returns {boolean}
+       * The time the role was created at
+       *
+       * @type {Date}
+       * @readonly
        */
-      has(permission, checkAdmin = true) {
-        return checkAdmin && super.has(PermissionFlagsBits.Administrator) || super.has(permission);
+      get createdAt() {
+        return new Date(this.createdTimestamp);
       }
       /**
-       * Gets an {@link Array} of bitfield names based on the permissions available.
-       * @returns {string[]}
+       * The hexadecimal version of the role color, with a leading hashtag
+       *
+       * @type {string}
+       * @readonly
        */
-      toArray() {
-        return super.toArray(false);
+      get hexColor() {
+        return `#${this.colors.primaryColor.toString(16).padStart(6, "0")}`;
+      }
+      /**
+       * A link to the role's icon
+       *
+       * @param {ImageURLOptions} [options={}] Options for the image URL
+       * @returns {?string}
+       */
+      iconURL(options = {}) {
+        return this.icon && this.client.rest.cdn.roleIcon(this.id, this.icon, options);
+      }
+      /**
+       * When concatenated with a string, this automatically returns the role's mention instead of the Role object.
+       *
+       * @returns {string}
+       * @example
+       * // Logs: Role: <@&123456789012345678>
+       * console.log(`Role: ${role}`);
+       */
+      toString() {
+        return roleMention(this.id);
+      }
+      toJSON() {
+        return super.toJSON({ createdTimestamp: true });
       }
     };
-    module2.exports = PermissionsBitField3;
+    module2.exports = BaseRole;
   }
 });
 
@@ -32746,41 +32838,20 @@ var require_RoleFlagsBitField = __commonJS({
 var require_Role = __commonJS({
   "node_modules/discord.js/src/structures/Role.js"(exports2) {
     "use strict";
-    var { roleMention } = require_dist7();
-    var { DiscordSnowflake } = require_cjs();
     var { PermissionFlagsBits } = require_v106();
-    var Base = require_Base();
+    var BaseRole = require_BaseRole();
     var { DiscordjsError: DiscordjsError2, ErrorCodes: ErrorCodes2 } = require_errors2();
     var PermissionsBitField3 = require_PermissionsBitField();
     var RoleFlagsBitField = require_RoleFlagsBitField();
-    var Role = class extends Base {
+    var Role = class extends BaseRole {
       constructor(client2, data, guild) {
-        super(client2);
+        super(client2, data);
         this.guild = guild;
-        this.icon = null;
-        this.unicodeEmoji = null;
-        this._patch(data);
       }
       _patch(data) {
-        this.id = data.id;
-        if ("name" in data) {
-          this.name = data.name;
-        }
-        if ("color" in data) {
-          this.color = data.color;
-        }
-        if ("colors" in data) {
-          this.colors = {
-            primaryColor: data.colors.primary_color,
-            secondaryColor: data.colors.secondary_color,
-            tertiaryColor: data.colors.tertiary_color
-          };
-        }
+        super._patch(data);
         if ("hoist" in data) {
           this.hoist = data.hoist;
-        }
-        if ("position" in data) {
-          this.rawPosition = data.position;
         }
         if ("permissions" in data) {
           this.permissions = new PermissionsBitField3(BigInt(data.permissions)).freeze();
@@ -32791,8 +32862,6 @@ var require_Role = __commonJS({
         if ("mentionable" in data) {
           this.mentionable = data.mentionable;
         }
-        if ("icon" in data) this.icon = data.icon;
-        if ("unicode_emoji" in data) this.unicodeEmoji = data.unicode_emoji;
         if ("flags" in data) {
           this.flags = new RoleFlagsBitField(data.flags).freeze();
         } else {
@@ -32819,30 +32888,6 @@ var require_Role = __commonJS({
             this.tags.guildConnections = true;
           }
         }
-      }
-      /**
-       * The timestamp the role was created at
-       * @type {number}
-       * @readonly
-       */
-      get createdTimestamp() {
-        return DiscordSnowflake.timestampFrom(this.id);
-      }
-      /**
-       * The time the role was created at
-       * @type {Date}
-       * @readonly
-       */
-      get createdAt() {
-        return new Date(this.createdTimestamp);
-      }
-      /**
-       * The hexadecimal version of the role color, with a leading hashtag
-       * @type {string}
-       * @readonly
-       */
-      get hexColor() {
-        return `#${this.colors.primaryColor.toString(16).padStart(6, "0")}`;
       }
       /**
        * The cached guild members that have this role
@@ -33084,14 +33129,6 @@ var require_Role = __commonJS({
         return this;
       }
       /**
-       * A link to the role's icon
-       * @param {ImageURLOptions} [options={}] Options for the image URL
-       * @returns {?string}
-       */
-      iconURL(options = {}) {
-        return this.icon && this.client.rest.cdn.roleIcon(this.id, this.icon, options);
-      }
-      /**
        * Whether this role equals another role. It compares all properties, so for most operations
        * it is advisable to just compare `role.id === role2.id` as it is much faster and is often
        * what most users need.
@@ -33110,11 +33147,11 @@ var require_Role = __commonJS({
        */
       toString() {
         if (this.id === this.guild.id) return "@everyone";
-        return roleMention(this.id);
+        return super.toString();
       }
       toJSON() {
         return {
-          ...super.toJSON({ createdTimestamp: true }),
+          ...super.toJSON(),
           permissions: this.permissions.toJSON()
         };
       }
@@ -33831,6 +33868,7 @@ var require_Util = __commonJS({
     var { ChannelType: ChannelType2, RouteBases, Routes: Routes3 } = require_v106();
     var { fetch: fetch2 } = require_undici();
     var Colors = require_Colors();
+    var PermissionsBitField3 = require_PermissionsBitField();
     var { DiscordjsError: DiscordjsError2, DiscordjsRangeError: DiscordjsRangeError2, DiscordjsTypeError: DiscordjsTypeError2, ErrorCodes: ErrorCodes2 } = require_errors2();
     var isObject = (d) => typeof d === "object" && d !== null;
     var deprecationEmittedForUserFetchFlags = false;
@@ -34018,6 +34056,15 @@ var require_Util = __commonJS({
         token: token2
       };
     }
+    function resolveInteractionChannel(client2, guild, apiChannel) {
+      const { permissions, app_permissions, ...data } = apiChannel;
+      const cachedChannel = client2.channels._add(data, guild);
+      if (!cachedChannel) return apiChannel;
+      const channel = cachedChannel._clone();
+      channel.permissions = permissions === void 0 ? null : new PermissionsBitField3(permissions).freeze();
+      channel.appPermissions = app_permissions === void 0 ? null : new PermissionsBitField3(app_permissions).freeze();
+      return channel;
+    }
     function transformResolved({ client: client2, guild, channel }, { members, users, channels, roles, messages, attachments } = {}) {
       const result = {};
       if (members) {
@@ -34042,7 +34089,7 @@ var require_Util = __commonJS({
       if (channels) {
         result.channels = new Collection2();
         for (const apiChannel of Object.values(channels)) {
-          result.channels.set(apiChannel.id, client2.channels._add(apiChannel, guild) ?? apiChannel);
+          result.channels.set(apiChannel.id, resolveInteractionChannel(client2, guild, apiChannel));
         }
       }
       if (messages) {
@@ -34094,6 +34141,7 @@ var require_Util = __commonJS({
       cleanContent,
       cleanCodeBlockContent,
       parseWebhookURL,
+      resolveInteractionChannel,
       transformResolved,
       resolveSKUId,
       emitDeprecationWarningForUserFetchFlags,
@@ -34224,13 +34272,24 @@ var require_Transformers = __commonJS({
         }
       };
     }
+    function _transformAPIInviteTargetUsersJobStatus(job) {
+      return {
+        status: job.status,
+        totalUsers: job.total_users,
+        processedUsers: job.processed_users,
+        createdAt: job.created_at ? new Date(job.created_at) : null,
+        completedAt: job.completed_at ? new Date(job.completed_at) : null,
+        errorMessage: job.error_message ?? null
+      };
+    }
     module2.exports = {
       toSnakeCase,
       _transformAPIAutoModerationAction,
       _transformAPIMessageInteractionMetadata,
       _transformGuildScheduledEventRecurrenceRule,
       _transformAPIIncidentsData,
-      _transformCollectibles
+      _transformCollectibles,
+      _transformAPIInviteTargetUsersJobStatus
     };
   }
 });
@@ -34241,7 +34300,7 @@ var require_package = __commonJS({
     module2.exports = {
       $schema: "https://json.schemastore.org/package.json",
       name: "discord.js",
-      version: "14.27.0",
+      version: "14.28.1",
       description: "A powerful library for interacting with the Discord API",
       main: "./src/index.js",
       types: "./typings/index.d.ts",
@@ -34296,15 +34355,15 @@ var require_package = __commonJS({
         "@discordjs/collection": "1.5.3",
         "@discordjs/ws": "^1.2.3",
         "@sapphire/snowflake": "3.5.5",
-        "discord-api-types": "^0.38.49",
+        "discord-api-types": "^0.38.50",
         "fast-deep-equal": "3.1.3",
         "lodash.snakecase": "4.1.1",
         "magic-bytes.js": "^1.13.0",
         tslib: "^2.6.3",
         undici: "^6.27.0",
-        "@discordjs/builders": "^1.14.1",
-        "@discordjs/rest": "^2.6.2",
+        "@discordjs/builders": "^1.15.0",
         "@discordjs/formatters": "^0.6.2",
+        "@discordjs/rest": "^2.6.3",
         "@discordjs/util": "^1.2.0"
       },
       devDependencies: {
@@ -34322,9 +34381,9 @@ var require_package = __commonJS({
         tslint: "6.1.3",
         turbo: "^2.10.5",
         typescript: "~5.8.3",
+        "@discordjs/api-extractor": "^7.38.1",
         "@discordjs/docgen": "^0.12.1",
-        "@discordjs/scripts": "^0.1.0",
-        "@discordjs/api-extractor": "^7.38.1"
+        "@discordjs/scripts": "^0.1.0"
       },
       engines: {
         node: ">=18"
@@ -35278,6 +35337,175 @@ var require_MessageCollector = __commonJS({
   }
 });
 
+// node_modules/discord.js/src/structures/GuildTemplate.js
+var require_GuildTemplate = __commonJS({
+  "node_modules/discord.js/src/structures/GuildTemplate.js"(exports2, module2) {
+    "use strict";
+    var { setTimeout: setTimeout2, clearTimeout: clearTimeout2 } = __require("node:timers");
+    var { RouteBases, Routes: Routes3 } = require_v106();
+    var Base = require_Base();
+    var { resolveImage } = require_DataResolver();
+    var Events3 = require_Events();
+    var GuildTemplate2 = class extends Base {
+      /**
+       * A regular expression that matches guild template links.
+       * The `code` group property is present on the `exec()` result of this expression.
+       * @type {RegExp}
+       * @memberof GuildTemplate
+       */
+      static GuildTemplatesPattern = /discord(?:app)?\.(?:com\/template|new)\/(?<code>[\w-]{2,255})/i;
+      constructor(client2, data) {
+        super(client2);
+        this._patch(data);
+      }
+      _patch(data) {
+        if ("code" in data) {
+          this.code = data.code;
+        }
+        if ("name" in data) {
+          this.name = data.name;
+        }
+        if ("description" in data) {
+          this.description = data.description;
+        }
+        if ("usage_count" in data) {
+          this.usageCount = data.usage_count;
+        }
+        if ("creator_id" in data) {
+          this.creatorId = data.creator_id;
+        }
+        if ("creator" in data) {
+          this.creator = this.client.users._add(data.creator);
+        }
+        if ("created_at" in data) {
+          this.createdTimestamp = Date.parse(data.created_at);
+        }
+        if ("updated_at" in data) {
+          this.updatedTimestamp = Date.parse(data.updated_at);
+        }
+        if ("source_guild_id" in data) {
+          this.guildId = data.source_guild_id;
+        }
+        if ("serialized_source_guild" in data) {
+          this.serializedGuild = data.serialized_source_guild;
+        }
+        this.unSynced = "is_dirty" in data ? Boolean(data.is_dirty) : null;
+        return this;
+      }
+      /**
+       * Creates a guild based on this template.
+       * <warn>This is only available to bots in fewer than 10 guilds.</warn>
+       * @param {string} name The name of the guild
+       * @param {BufferResolvable|Base64Resolvable} [icon] The icon for the guild
+       * @returns {Promise<Guild>}
+       * @deprecated API related to guild ownership may no longer be used.
+       */
+      async createGuild(name, icon) {
+        const { client: client2 } = this;
+        const data = await client2.rest.post(Routes3.template(this.code), {
+          body: {
+            name,
+            icon: await resolveImage(icon)
+          }
+        });
+        if (client2.guilds.cache.has(data.id)) return client2.guilds.cache.get(data.id);
+        return new Promise((resolve) => {
+          const resolveGuild = (guild) => {
+            client2.off(Events3.GuildCreate, handleGuild);
+            client2.decrementMaxListeners();
+            resolve(guild);
+          };
+          const handleGuild = (guild) => {
+            if (guild.id === data.id) {
+              clearTimeout2(timeout);
+              resolveGuild(guild);
+            }
+          };
+          client2.incrementMaxListeners();
+          client2.on(Events3.GuildCreate, handleGuild);
+          const timeout = setTimeout2(() => resolveGuild(client2.guilds._add(data)), 1e4).unref();
+        });
+      }
+      /**
+       * Options used to edit a guild template.
+       * @typedef {Object} GuildTemplateEditOptions
+       * @property {string} [name] The name of this template
+       * @property {string} [description] The description of this template
+       */
+      /**
+       * Updates the metadata of this template.
+       * @param {GuildTemplateEditOptions} [options] Options for editing the template
+       * @returns {Promise<GuildTemplate>}
+       */
+      async edit({ name, description } = {}) {
+        const data = await this.client.rest.patch(Routes3.guildTemplate(this.guildId, this.code), {
+          body: { name, description }
+        });
+        return this._patch(data);
+      }
+      /**
+       * Deletes this template.
+       * @returns {Promise<GuildTemplate>}
+       */
+      async delete() {
+        await this.client.rest.delete(Routes3.guildTemplate(this.guildId, this.code));
+        return this;
+      }
+      /**
+       * Syncs this template to the current state of the guild.
+       * @returns {Promise<GuildTemplate>}
+       */
+      async sync() {
+        const data = await this.client.rest.put(Routes3.guildTemplate(this.guildId, this.code));
+        return this._patch(data);
+      }
+      /**
+       * The time when this template was created at
+       * @type {Date}
+       * @readonly
+       */
+      get createdAt() {
+        return new Date(this.createdTimestamp);
+      }
+      /**
+       * The time when this template was last synced to the guild
+       * @type {Date}
+       * @readonly
+       */
+      get updatedAt() {
+        return new Date(this.updatedTimestamp);
+      }
+      /**
+       * The guild that this template belongs to
+       * @type {?Guild}
+       * @readonly
+       */
+      get guild() {
+        return this.client.guilds.resolve(this.guildId);
+      }
+      /**
+       * The URL of this template
+       * @type {string}
+       * @readonly
+       */
+      get url() {
+        return `${RouteBases.template}/${this.code}`;
+      }
+      /**
+       * When concatenated with a string, this automatically returns the template's code instead of the template object.
+       * @returns {string}
+       * @example
+       * // Logs: Template: FKvmczH2HyUf
+       * console.log(`Template: ${guildTemplate}!`);
+       */
+      toString() {
+        return this.code;
+      }
+    };
+    module2.exports = GuildTemplate2;
+  }
+});
+
 // node_modules/discord.js/src/structures/GuildScheduledEvent.js
 var require_GuildScheduledEvent = __commonJS({
   "node_modules/discord.js/src/structures/GuildScheduledEvent.js"(exports2) {
@@ -35885,6 +36113,17 @@ var require_InviteFlagsBitField = __commonJS({
   }
 });
 
+// node_modules/discord.js/src/structures/InviteRole.js
+var require_InviteRole = __commonJS({
+  "node_modules/discord.js/src/structures/InviteRole.js"(exports2, module2) {
+    "use strict";
+    var BaseRole = require_BaseRole();
+    var InviteRole = class extends BaseRole {
+    };
+    module2.exports = InviteRole;
+  }
+});
+
 // node_modules/discord.js/src/structures/BaseGuild.js
 var require_BaseGuild = __commonJS({
   "node_modules/discord.js/src/structures/BaseGuild.js"(exports2, module2) {
@@ -36115,13 +36354,19 @@ var require_InviteGuild = __commonJS({
 var require_Invite = __commonJS({
   "node_modules/discord.js/src/structures/Invite.js"(exports2, module2) {
     "use strict";
+    var { Buffer: Buffer2 } = __require("node:buffer");
+    var { Collection: Collection2 } = require_dist6();
+    var { lazy } = require_dist();
     var { RouteBases, Routes: Routes3, PermissionFlagsBits } = require_v106();
     var Base = require_Base();
     var { GuildScheduledEvent } = require_GuildScheduledEvent();
     var IntegrationApplication = require_IntegrationApplication();
     var InviteStageInstance = require_InviteStageInstance();
     var { DiscordjsError: DiscordjsError2, ErrorCodes: ErrorCodes2 } = require_errors2();
+    var { resolveInviteTargetUsersFile } = require_DataResolver();
     var { InviteFlagsBitField } = require_InviteFlagsBitField();
+    var { _transformAPIInviteTargetUsersJobStatus } = require_Transformers();
+    var getInviteRole = lazy(() => require_InviteRole());
     var Invite2 = class extends Base {
       /**
        * A regular expression that matches Discord invite links.
@@ -36230,6 +36475,17 @@ var require_Invite = __commonJS({
         } else {
           this.flags ??= new InviteFlagsBitField().freeze();
         }
+        if ("roles" in data || "role_ids" in data) {
+          this.roles = new Collection2(
+            data.roles?.map((role) => [
+              role.id,
+              this.guild?.roles?._add(role, false) ?? new (getInviteRole())(this.client, role)
+            ]) ?? // `role_ids` is only received from gateway `INVITE_CREATE` event, so `this.guild` should be "Guild" instance
+            data.role_ids?.map((roleId) => [roleId, this.guild.roles.resolve(roleId)])
+          );
+        } else {
+          this.roles ??= null;
+        }
       }
       /**
        * The time the invite was created at
@@ -36294,6 +36550,43 @@ var require_Invite = __commonJS({
         return this;
       }
       /**
+       * Update target users of this invite.
+       *
+       * @param {UserResolvable[]|BufferResolvable} targetUsersFile An array of users or a CSV file
+       * with a single column of user ids for all the users able to accept this invite
+       * @returns {Promise<void>}
+       */
+      async updateTargetUsers(targetUsersFile) {
+        await this.client.rest.put(Routes3.inviteTargetUsers(this.code), {
+          files: [
+            {
+              key: "target_users_file",
+              data: await resolveInviteTargetUsersFile(this.client, targetUsersFile),
+              name: "users.csv",
+              contentType: "text/csv"
+            }
+          ]
+        });
+      }
+      /**
+       * Get target users of this invite.
+       *
+       * @returns {Promise<Buffer>}
+       */
+      async fetchTargetUsers() {
+        const arrayBuff = await this.client.rest.get(Routes3.inviteTargetUsers(this.code));
+        return Buffer2.from(arrayBuff);
+      }
+      /**
+       * Get status of the job processing target users of this invite.
+       *
+       * @returns {Promise<TargetUsersJobStatusForInvite>}
+       */
+      async fetchTargetUsersJobStatus() {
+        const job = await this.client.rest.get(Routes3.inviteTargetUsersJobStatus(this.code));
+        return _transformAPIInviteTargetUsersJobStatus(job);
+      }
+      /**
        * When concatenated with a string, this automatically concatenates the invite's URL instead of the object.
        * @returns {string}
        * @example
@@ -36323,175 +36616,6 @@ var require_Invite = __commonJS({
   }
 });
 
-// node_modules/discord.js/src/structures/GuildTemplate.js
-var require_GuildTemplate = __commonJS({
-  "node_modules/discord.js/src/structures/GuildTemplate.js"(exports2, module2) {
-    "use strict";
-    var { setTimeout: setTimeout2, clearTimeout: clearTimeout2 } = __require("node:timers");
-    var { RouteBases, Routes: Routes3 } = require_v106();
-    var Base = require_Base();
-    var { resolveImage } = require_DataResolver();
-    var Events3 = require_Events();
-    var GuildTemplate2 = class extends Base {
-      /**
-       * A regular expression that matches guild template links.
-       * The `code` group property is present on the `exec()` result of this expression.
-       * @type {RegExp}
-       * @memberof GuildTemplate
-       */
-      static GuildTemplatesPattern = /discord(?:app)?\.(?:com\/template|new)\/(?<code>[\w-]{2,255})/i;
-      constructor(client2, data) {
-        super(client2);
-        this._patch(data);
-      }
-      _patch(data) {
-        if ("code" in data) {
-          this.code = data.code;
-        }
-        if ("name" in data) {
-          this.name = data.name;
-        }
-        if ("description" in data) {
-          this.description = data.description;
-        }
-        if ("usage_count" in data) {
-          this.usageCount = data.usage_count;
-        }
-        if ("creator_id" in data) {
-          this.creatorId = data.creator_id;
-        }
-        if ("creator" in data) {
-          this.creator = this.client.users._add(data.creator);
-        }
-        if ("created_at" in data) {
-          this.createdTimestamp = Date.parse(data.created_at);
-        }
-        if ("updated_at" in data) {
-          this.updatedTimestamp = Date.parse(data.updated_at);
-        }
-        if ("source_guild_id" in data) {
-          this.guildId = data.source_guild_id;
-        }
-        if ("serialized_source_guild" in data) {
-          this.serializedGuild = data.serialized_source_guild;
-        }
-        this.unSynced = "is_dirty" in data ? Boolean(data.is_dirty) : null;
-        return this;
-      }
-      /**
-       * Creates a guild based on this template.
-       * <warn>This is only available to bots in fewer than 10 guilds.</warn>
-       * @param {string} name The name of the guild
-       * @param {BufferResolvable|Base64Resolvable} [icon] The icon for the guild
-       * @returns {Promise<Guild>}
-       * @deprecated API related to guild ownership may no longer be used.
-       */
-      async createGuild(name, icon) {
-        const { client: client2 } = this;
-        const data = await client2.rest.post(Routes3.template(this.code), {
-          body: {
-            name,
-            icon: await resolveImage(icon)
-          }
-        });
-        if (client2.guilds.cache.has(data.id)) return client2.guilds.cache.get(data.id);
-        return new Promise((resolve) => {
-          const resolveGuild = (guild) => {
-            client2.off(Events3.GuildCreate, handleGuild);
-            client2.decrementMaxListeners();
-            resolve(guild);
-          };
-          const handleGuild = (guild) => {
-            if (guild.id === data.id) {
-              clearTimeout2(timeout);
-              resolveGuild(guild);
-            }
-          };
-          client2.incrementMaxListeners();
-          client2.on(Events3.GuildCreate, handleGuild);
-          const timeout = setTimeout2(() => resolveGuild(client2.guilds._add(data)), 1e4).unref();
-        });
-      }
-      /**
-       * Options used to edit a guild template.
-       * @typedef {Object} GuildTemplateEditOptions
-       * @property {string} [name] The name of this template
-       * @property {string} [description] The description of this template
-       */
-      /**
-       * Updates the metadata of this template.
-       * @param {GuildTemplateEditOptions} [options] Options for editing the template
-       * @returns {Promise<GuildTemplate>}
-       */
-      async edit({ name, description } = {}) {
-        const data = await this.client.rest.patch(Routes3.guildTemplate(this.guildId, this.code), {
-          body: { name, description }
-        });
-        return this._patch(data);
-      }
-      /**
-       * Deletes this template.
-       * @returns {Promise<GuildTemplate>}
-       */
-      async delete() {
-        await this.client.rest.delete(Routes3.guildTemplate(this.guildId, this.code));
-        return this;
-      }
-      /**
-       * Syncs this template to the current state of the guild.
-       * @returns {Promise<GuildTemplate>}
-       */
-      async sync() {
-        const data = await this.client.rest.put(Routes3.guildTemplate(this.guildId, this.code));
-        return this._patch(data);
-      }
-      /**
-       * The time when this template was created at
-       * @type {Date}
-       * @readonly
-       */
-      get createdAt() {
-        return new Date(this.createdTimestamp);
-      }
-      /**
-       * The time when this template was last synced to the guild
-       * @type {Date}
-       * @readonly
-       */
-      get updatedAt() {
-        return new Date(this.updatedTimestamp);
-      }
-      /**
-       * The guild that this template belongs to
-       * @type {?Guild}
-       * @readonly
-       */
-      get guild() {
-        return this.client.guilds.resolve(this.guildId);
-      }
-      /**
-       * The URL of this template
-       * @type {string}
-       * @readonly
-       */
-      get url() {
-        return `${RouteBases.template}/${this.code}`;
-      }
-      /**
-       * When concatenated with a string, this automatically returns the template's code instead of the template object.
-       * @returns {string}
-       * @example
-       * // Logs: Template: FKvmczH2HyUf
-       * console.log(`Template: ${guildTemplate}!`);
-       */
-      toString() {
-        return this.code;
-      }
-    };
-    module2.exports = GuildTemplate2;
-  }
-});
-
 // node_modules/discord.js/src/util/DataResolver.js
 var require_DataResolver = __commonJS({
   "node_modules/discord.js/src/util/DataResolver.js"(exports2, module2) {
@@ -36501,7 +36625,16 @@ var require_DataResolver = __commonJS({
     var path = __require("node:path");
     var { fetch: fetch2 } = require_undici();
     var { DiscordjsError: DiscordjsError2, DiscordjsTypeError: DiscordjsTypeError2, ErrorCodes: ErrorCodes2 } = require_errors2();
-    var Invite2 = require_Invite();
+    async function resolveInviteTargetUsersFile(client2, targetUsersFile) {
+      let usersCsv;
+      if (Array.isArray(targetUsersFile)) {
+        usersCsv = targetUsersFile.map((user) => client2.users.resolveId(user)).join("\n");
+      } else {
+        const resolved = await resolveFile(targetUsersFile);
+        usersCsv = resolved.data.toString("utf8");
+      }
+      return usersCsv;
+    }
     function resolveCode(data, regex) {
       return regex.exec(data)?.[1] ?? data;
     }
@@ -36543,7 +36676,16 @@ var require_DataResolver = __commonJS({
       const file = await resolveFile(image);
       return resolveBase64(file.data);
     }
-    module2.exports = { resolveCode, resolveInviteCode: resolveInviteCode2, resolveGuildTemplateCode: resolveGuildTemplateCode2, resolveImage, resolveBase64, resolveFile };
+    module2.exports = {
+      resolveCode,
+      resolveInviteCode: resolveInviteCode2,
+      resolveGuildTemplateCode: resolveGuildTemplateCode2,
+      resolveImage,
+      resolveBase64,
+      resolveFile,
+      resolveInviteTargetUsersFile
+    };
+    var Invite2 = require_Invite();
   }
 });
 
@@ -37555,6 +37697,9 @@ var require_ApplicationCommand = __commonJS({
        * @property {ApplicationCommandOptionData[]} [options] Additional options if this option is a subcommand (group)
        * @property {ChannelType[]} [channelTypes] When the option type is channel,
        * the allowed types of channels that can be selected
+       * @property {FileUploadType[]} [fileTypes] When the option type is attachment,
+       * the allowed types of files that can be uploaded. When only using extensions, include `.jpg`
+       * for images and both `.mp4` and `.mov` for videos for mobile compatibility
        * @property {number} [minValue] The minimum value for an {@link ApplicationCommandOptionType.Integer} or
        * {@link ApplicationCommandOptionType.Number} option
        * @property {number} [maxValue] The maximum value for an {@link ApplicationCommandOptionType.Integer} or
@@ -37735,7 +37880,7 @@ var require_ApplicationCommand = __commonJS({
        * @private
        */
       static _optionEquals(existing, option, enforceOptionOrder = false) {
-        if (option.name !== existing.name || option.type !== existing.type || option.description !== existing.description || option.autocomplete !== existing.autocomplete || (option.required ?? ([ApplicationCommandOptionType2.Subcommand, ApplicationCommandOptionType2.SubcommandGroup].includes(option.type) ? void 0 : false)) !== existing.required || option.choices?.length !== existing.choices?.length || option.options?.length !== existing.options?.length || (option.channelTypes ?? option.channel_types)?.length !== existing.channelTypes?.length || (option.minValue ?? option.min_value) !== existing.minValue || (option.maxValue ?? option.max_value) !== existing.maxValue || (option.minLength ?? option.min_length) !== existing.minLength || (option.maxLength ?? option.max_length) !== existing.maxLength || !isEqual(option.nameLocalizations ?? option.name_localizations ?? {}, existing.nameLocalizations ?? {}) || !isEqual(
+        if (option.name !== existing.name || option.type !== existing.type || option.description !== existing.description || option.autocomplete !== existing.autocomplete || (option.required ?? ([ApplicationCommandOptionType2.Subcommand, ApplicationCommandOptionType2.SubcommandGroup].includes(option.type) ? void 0 : false)) !== existing.required || option.choices?.length !== existing.choices?.length || option.options?.length !== existing.options?.length || (option.channelTypes ?? option.channel_types)?.length !== existing.channelTypes?.length || (option.fileTypes ?? option.file_types)?.length !== existing.fileTypes?.length || (option.minValue ?? option.min_value) !== existing.minValue || (option.maxValue ?? option.max_value) !== existing.maxValue || (option.minLength ?? option.min_length) !== existing.minLength || (option.maxLength ?? option.max_length) !== existing.maxLength || !isEqual(option.nameLocalizations ?? option.name_localizations ?? {}, existing.nameLocalizations ?? {}) || !isEqual(
           option.descriptionLocalizations ?? option.description_localizations ?? {},
           existing.descriptionLocalizations ?? {}
         )) {
@@ -37764,6 +37909,12 @@ var require_ApplicationCommand = __commonJS({
             if (!newTypes.includes(type)) return false;
           }
         }
+        if (existing.fileTypes) {
+          const newTypes = option.fileTypes ?? option.file_types;
+          for (const type of existing.fileTypes) {
+            if (!newTypes.includes(type)) return false;
+          }
+        }
         if (existing.options) {
           return this.optionsEqual(existing.options, option.options, enforceOptionOrder);
         }
@@ -37787,6 +37938,9 @@ var require_ApplicationCommand = __commonJS({
        * @property {ApplicationCommandOption[]} [options] Additional options if this option is a subcommand (group)
        * @property {ApplicationCommandOptionAllowedChannelTypes[]} [channelTypes] When the option type is channel,
        * the allowed types of channels that can be selected
+       * @property {FileUploadType[]} [fileTypes] When the option type is attachment,
+       * the allowed types of files that can be uploaded. When only using extensions, include `.jpg`
+       * for images and both `.mp4` and `.mov` for videos for mobile compatibility
        * @property {number} [minValue] The minimum value for an {@link ApplicationCommandOptionType.Integer} or
        * {@link ApplicationCommandOptionType.Number} option
        * @property {number} [maxValue] The maximum value for an {@link ApplicationCommandOptionType.Integer} or
@@ -37813,6 +37967,7 @@ var require_ApplicationCommand = __commonJS({
        */
       static transformOption(option, received) {
         const channelTypesKey = received ? "channelTypes" : "channel_types";
+        const fileTypesKey = received ? "fileTypes" : "file_types";
         const minValueKey = received ? "minValue" : "min_value";
         const maxValueKey = received ? "maxValue" : "max_value";
         const minLengthKey = received ? "minLength" : "min_length";
@@ -37839,6 +37994,7 @@ var require_ApplicationCommand = __commonJS({
           })),
           options: option.options?.map((opt) => this.transformOption(opt, received)),
           [channelTypesKey]: option.channelTypes ?? option.channel_types,
+          [fileTypesKey]: option.fileTypes ?? option.file_types,
           [minValueKey]: option.minValue ?? option.min_value,
           [maxValueKey]: option.maxValue ?? option.max_value,
           [minLengthKey]: option.minLength ?? option.min_length,
@@ -44024,6 +44180,7 @@ var require_dist8 = __commonJS({
       constructor(data = {}) {
         this.data = data;
       }
+      data;
       static {
         __name(this, "StringSelectMenuOptionBuilder");
       }
@@ -44459,6 +44616,7 @@ var require_dist8 = __commonJS({
       constructor(data = {}) {
         this.data = data;
       }
+      data;
       static {
         __name(this, "CheckboxGroupOptionBuilder");
       }
@@ -44674,6 +44832,7 @@ var require_dist8 = __commonJS({
       constructor(data = {}) {
         this.data = data;
       }
+      data;
       static {
         __name(this, "RadioGroupOptionBuilder");
       }
@@ -44849,15 +45008,25 @@ var require_dist8 = __commonJS({
     __export2(Assertions_exports4, {
       fileUploadPredicate: () => fileUploadPredicate
     });
-    var import_shapeshift4 = require_cjs3();
+    var import_shapeshift5 = require_cjs3();
     var import_v107 = require_v106();
-    var fileUploadPredicate = import_shapeshift4.s.object({
-      type: import_shapeshift4.s.literal(import_v107.ComponentType.FileUpload),
+    var import_shapeshift4 = require_cjs3();
+    var fileUploadTypesValidator = import_shapeshift4.s.array(
+      import_shapeshift4.s.union([
+        import_shapeshift4.s.literal("audio"),
+        import_shapeshift4.s.literal("image"),
+        import_shapeshift4.s.literal("video"),
+        import_shapeshift4.s.string().lengthGreaterThanOrEqual(2).regex(/^\./)
+      ])
+    ).lengthLessThanOrEqual(10).setValidationEnabled(isValidationEnabled);
+    var fileUploadPredicate = import_shapeshift5.s.object({
+      type: import_shapeshift5.s.literal(import_v107.ComponentType.FileUpload),
       id: idValidator.optional(),
       custom_id: customIdValidator,
-      min_values: import_shapeshift4.s.number().greaterThanOrEqual(0).lessThanOrEqual(10).optional(),
-      max_values: import_shapeshift4.s.number().greaterThanOrEqual(1).lessThanOrEqual(10).optional(),
-      required: import_shapeshift4.s.boolean().optional()
+      min_values: import_shapeshift5.s.number().greaterThanOrEqual(0).lessThanOrEqual(10).optional(),
+      max_values: import_shapeshift5.s.number().greaterThanOrEqual(1).lessThanOrEqual(10).optional(),
+      file_types: fileUploadTypesValidator.optional(),
+      required: import_shapeshift5.s.boolean().optional()
     });
     var FileUploadBuilder = class extends ComponentBuilder {
       static {
@@ -44874,6 +45043,7 @@ var require_dist8 = __commonJS({
        * 	custom_id: "file_upload",
        *  min_values: 2,
        *  max_values: 5,
+       *  file_types: ["image", ".pdf"],
        * });
        * ```
        * @example
@@ -44883,7 +45053,9 @@ var require_dist8 = __commonJS({
        * 	custom_id: "file_upload",
        *  min_values: 2,
        *  max_values: 5,
-       * }).setRequired();
+       * })
+       * 	.setFileTypes("image", ".pdf")
+       * 	.setRequired();
        * ```
        */
       constructor(data = {}) {
@@ -44931,6 +45103,38 @@ var require_dist8 = __commonJS({
         return this;
       }
       /**
+       * Adds file types allowed in this file upload.
+       *
+       * @remarks
+       * When specifying only extensions, include `.jpg` for image uploads and both `.mp4` and `.mov`
+       * for video uploads due to mobile platform limitations.
+       * @param fileTypes - The file groups or dot-prefixed extensions to allow
+       */
+      addFileTypes(...fileTypes) {
+        this.data.file_types ??= [];
+        this.data.file_types.push(...normalizeArray(fileTypes));
+        return this;
+      }
+      /**
+       * Sets the file types allowed in this file upload.
+       *
+       * @remarks
+       * When specifying only extensions, include `.jpg` for image uploads and both `.mp4` and `.mov`
+       * for video uploads due to mobile platform limitations.
+       * @param fileTypes - The file groups or dot-prefixed extensions to allow
+       */
+      setFileTypes(...fileTypes) {
+        this.data.file_types = normalizeArray(fileTypes);
+        return this;
+      }
+      /**
+       * Clears the file types allowed in this file upload.
+       */
+      clearFileTypes() {
+        this.data.file_types = void 0;
+        return this;
+      }
+      /**
        * Sets whether this file upload is required.
        *
        * @param required - Whether this file upload is required
@@ -44961,17 +45165,17 @@ var require_dist8 = __commonJS({
       validateRequiredParameters: () => validateRequiredParameters,
       valueValidator: () => valueValidator
     });
-    var import_shapeshift5 = require_cjs3();
+    var import_shapeshift6 = require_cjs3();
     var import_v109 = require_v106();
-    var textInputStyleValidator = import_shapeshift5.s.nativeEnum(import_v109.TextInputStyle).setValidationEnabled(isValidationEnabled);
-    var minLengthValidator = import_shapeshift5.s.number().int().greaterThanOrEqual(0).lessThanOrEqual(4e3).setValidationEnabled(isValidationEnabled);
-    var maxLengthValidator = import_shapeshift5.s.number().int().greaterThanOrEqual(1).lessThanOrEqual(4e3).setValidationEnabled(isValidationEnabled);
-    var requiredValidator = import_shapeshift5.s.boolean().setValidationEnabled(isValidationEnabled);
-    var valueValidator = import_shapeshift5.s.string().lengthLessThanOrEqual(4e3).setValidationEnabled(isValidationEnabled);
-    var placeholderValidator2 = import_shapeshift5.s.string().lengthLessThanOrEqual(100).setValidationEnabled(isValidationEnabled);
-    var labelValidator = import_shapeshift5.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(45).setValidationEnabled(isValidationEnabled);
-    var textInputPredicate = import_shapeshift5.s.object({
-      type: import_shapeshift5.s.literal(import_v109.ComponentType.TextInput),
+    var textInputStyleValidator = import_shapeshift6.s.nativeEnum(import_v109.TextInputStyle).setValidationEnabled(isValidationEnabled);
+    var minLengthValidator = import_shapeshift6.s.number().int().greaterThanOrEqual(0).lessThanOrEqual(4e3).setValidationEnabled(isValidationEnabled);
+    var maxLengthValidator = import_shapeshift6.s.number().int().greaterThanOrEqual(1).lessThanOrEqual(4e3).setValidationEnabled(isValidationEnabled);
+    var requiredValidator = import_shapeshift6.s.boolean().setValidationEnabled(isValidationEnabled);
+    var valueValidator = import_shapeshift6.s.string().lengthLessThanOrEqual(4e3).setValidationEnabled(isValidationEnabled);
+    var placeholderValidator2 = import_shapeshift6.s.string().lengthLessThanOrEqual(100).setValidationEnabled(isValidationEnabled);
+    var labelValidator = import_shapeshift6.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(45).setValidationEnabled(isValidationEnabled);
+    var textInputPredicate = import_shapeshift6.s.object({
+      type: import_shapeshift6.s.literal(import_v109.ComponentType.TextInput),
       custom_id: customIdValidator,
       style: textInputStyleValidator,
       id: idValidator.optional(),
@@ -45308,56 +45512,56 @@ var require_dist8 = __commonJS({
       selectMenuStringPredicate: () => selectMenuStringPredicate,
       selectMenuUserPredicate: () => selectMenuUserPredicate
     });
-    var import_shapeshift6 = require_cjs3();
+    var import_shapeshift7 = require_cjs3();
     var import_v1013 = require_v106();
-    var selectMenuBasePredicate = import_shapeshift6.s.object({
+    var selectMenuBasePredicate = import_shapeshift7.s.object({
       id: idValidator.optional(),
-      placeholder: import_shapeshift6.s.string().lengthLessThanOrEqual(150).optional(),
-      min_values: import_shapeshift6.s.number().greaterThanOrEqual(0).lessThanOrEqual(25).optional(),
-      max_values: import_shapeshift6.s.number().greaterThanOrEqual(0).lessThanOrEqual(25).optional(),
+      placeholder: import_shapeshift7.s.string().lengthLessThanOrEqual(150).optional(),
+      min_values: import_shapeshift7.s.number().greaterThanOrEqual(0).lessThanOrEqual(25).optional(),
+      max_values: import_shapeshift7.s.number().greaterThanOrEqual(0).lessThanOrEqual(25).optional(),
       custom_id: customIdValidator,
-      disabled: import_shapeshift6.s.boolean().optional()
+      disabled: import_shapeshift7.s.boolean().optional()
     });
     var selectMenuChannelPredicate = selectMenuBasePredicate.extend({
-      type: import_shapeshift6.s.literal(import_v1013.ComponentType.ChannelSelect),
-      channel_types: import_shapeshift6.s.nativeEnum(import_v1013.ChannelType).array().optional(),
-      default_values: import_shapeshift6.s.object({ id: import_shapeshift6.s.string(), type: import_shapeshift6.s.literal(import_v1013.SelectMenuDefaultValueType.Channel) }).array().lengthLessThanOrEqual(25).optional()
+      type: import_shapeshift7.s.literal(import_v1013.ComponentType.ChannelSelect),
+      channel_types: import_shapeshift7.s.nativeEnum(import_v1013.ChannelType).array().optional(),
+      default_values: import_shapeshift7.s.object({ id: import_shapeshift7.s.string(), type: import_shapeshift7.s.literal(import_v1013.SelectMenuDefaultValueType.Channel) }).array().lengthLessThanOrEqual(25).optional()
     }).setValidationEnabled(isValidationEnabled);
     var selectMenuMentionablePredicate = selectMenuBasePredicate.extend({
-      type: import_shapeshift6.s.literal(import_v1013.ComponentType.MentionableSelect),
-      default_values: import_shapeshift6.s.object({
-        id: import_shapeshift6.s.string(),
-        type: import_shapeshift6.s.union([import_shapeshift6.s.literal(import_v1013.SelectMenuDefaultValueType.Role), import_shapeshift6.s.literal(import_v1013.SelectMenuDefaultValueType.User)])
+      type: import_shapeshift7.s.literal(import_v1013.ComponentType.MentionableSelect),
+      default_values: import_shapeshift7.s.object({
+        id: import_shapeshift7.s.string(),
+        type: import_shapeshift7.s.union([import_shapeshift7.s.literal(import_v1013.SelectMenuDefaultValueType.Role), import_shapeshift7.s.literal(import_v1013.SelectMenuDefaultValueType.User)])
       }).array().lengthLessThanOrEqual(25).optional()
     }).setValidationEnabled(isValidationEnabled);
     var selectMenuRolePredicate = selectMenuBasePredicate.extend({
-      type: import_shapeshift6.s.literal(import_v1013.ComponentType.RoleSelect),
-      default_values: import_shapeshift6.s.object({ id: import_shapeshift6.s.string(), type: import_shapeshift6.s.literal(import_v1013.SelectMenuDefaultValueType.Role) }).array().lengthLessThanOrEqual(25).optional()
+      type: import_shapeshift7.s.literal(import_v1013.ComponentType.RoleSelect),
+      default_values: import_shapeshift7.s.object({ id: import_shapeshift7.s.string(), type: import_shapeshift7.s.literal(import_v1013.SelectMenuDefaultValueType.Role) }).array().lengthLessThanOrEqual(25).optional()
     }).setValidationEnabled(isValidationEnabled);
     var selectMenuUserPredicate = selectMenuBasePredicate.extend({
-      type: import_shapeshift6.s.literal(import_v1013.ComponentType.UserSelect),
-      default_values: import_shapeshift6.s.object({ id: import_shapeshift6.s.string(), type: import_shapeshift6.s.literal(import_v1013.SelectMenuDefaultValueType.User) }).array().lengthLessThanOrEqual(25).optional()
+      type: import_shapeshift7.s.literal(import_v1013.ComponentType.UserSelect),
+      default_values: import_shapeshift7.s.object({ id: import_shapeshift7.s.string(), type: import_shapeshift7.s.literal(import_v1013.SelectMenuDefaultValueType.User) }).array().lengthLessThanOrEqual(25).optional()
     }).setValidationEnabled(isValidationEnabled);
-    var selectMenuStringOptionPredicate = import_shapeshift6.s.object({
-      label: import_shapeshift6.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(100),
-      value: import_shapeshift6.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(100),
-      description: import_shapeshift6.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(100).optional(),
+    var selectMenuStringOptionPredicate = import_shapeshift7.s.object({
+      label: import_shapeshift7.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(100),
+      value: import_shapeshift7.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(100),
+      description: import_shapeshift7.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(100).optional(),
       emoji: emojiValidator.optional(),
-      default: import_shapeshift6.s.boolean().optional()
+      default: import_shapeshift7.s.boolean().optional()
     }).setValidationEnabled(isValidationEnabled);
     var selectMenuStringPredicate = selectMenuBasePredicate.extend({
-      type: import_shapeshift6.s.literal(import_v1013.ComponentType.StringSelect),
+      type: import_shapeshift7.s.literal(import_v1013.ComponentType.StringSelect),
       options: selectMenuStringOptionPredicate.array().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(25)
     }).reshape((value) => {
       if (value.min_values !== void 0 && value.options.length < value.min_values) {
-        return import_shapeshift6.Result.err(new RangeError(`The number of options must be greater than or equal to min_values`));
+        return import_shapeshift7.Result.err(new RangeError(`The number of options must be greater than or equal to min_values`));
       }
       if (value.min_values !== void 0 && value.max_values !== void 0 && value.min_values > value.max_values) {
-        return import_shapeshift6.Result.err(
+        return import_shapeshift7.Result.err(
           new RangeError(`The maximum amount of options must be greater than or equal to the minimum amount of options`)
         );
       }
-      return import_shapeshift6.Result.ok(value);
+      return import_shapeshift7.Result.ok(value);
     }).setValidationEnabled(isValidationEnabled);
     var StringSelectMenuBuilder = class extends BaseSelectMenuBuilder {
       static {
@@ -45669,14 +45873,14 @@ var require_dist8 = __commonJS({
     __export2(Assertions_exports7, {
       labelPredicate: () => labelPredicate
     });
-    var import_shapeshift7 = require_cjs3();
+    var import_shapeshift8 = require_cjs3();
     var import_v1017 = require_v106();
-    var labelPredicate = import_shapeshift7.s.object({
+    var labelPredicate = import_shapeshift8.s.object({
       id: idValidator.optional(),
-      type: import_shapeshift7.s.literal(import_v1017.ComponentType.Label),
-      label: import_shapeshift7.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(45),
-      description: import_shapeshift7.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(100).optional(),
-      component: import_shapeshift7.s.union([
+      type: import_shapeshift8.s.literal(import_v1017.ComponentType.Label),
+      label: import_shapeshift8.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(45),
+      description: import_shapeshift8.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(100).optional(),
+      component: import_shapeshift8.s.union([
         textInputPredicate,
         selectMenuUserPredicate,
         selectMenuRolePredicate,
@@ -45871,7 +46075,7 @@ var require_dist8 = __commonJS({
       unfurledMediaItemPredicate: () => unfurledMediaItemPredicate,
       validateComponentArray: () => validateComponentArray
     });
-    var import_shapeshift8 = require_cjs3();
+    var import_shapeshift9 = require_cjs3();
     var import_v1020 = require_v106();
     var import_v1019 = require_v106();
     var ThumbnailBuilder = class extends ComponentBuilder {
@@ -45952,28 +46156,28 @@ var require_dist8 = __commonJS({
         return { ...this.data };
       }
     };
-    var unfurledMediaItemPredicate = import_shapeshift8.s.object({
-      url: import_shapeshift8.s.string().url(
+    var unfurledMediaItemPredicate = import_shapeshift9.s.object({
+      url: import_shapeshift9.s.string().url(
         { allowedProtocols: ["http:", "https:", "attachment:"] },
         { message: "Invalid protocol for media URL. Must be http:, https:, or attachment:" }
       )
     }).setValidationEnabled(isValidationEnabled);
-    var descriptionPredicate2 = import_shapeshift8.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(1024).setValidationEnabled(isValidationEnabled);
-    var filePredicate = import_shapeshift8.s.object({
-      url: import_shapeshift8.s.string().url({ allowedProtocols: ["attachment:"] }, { message: "Invalid protocol for file URL. Must be attachment:" })
+    var descriptionPredicate2 = import_shapeshift9.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(1024).setValidationEnabled(isValidationEnabled);
+    var filePredicate = import_shapeshift9.s.object({
+      url: import_shapeshift9.s.string().url({ allowedProtocols: ["attachment:"] }, { message: "Invalid protocol for file URL. Must be attachment:" })
     }).setValidationEnabled(isValidationEnabled);
-    var spoilerPredicate = import_shapeshift8.s.boolean();
-    var dividerPredicate = import_shapeshift8.s.boolean();
-    var spacingPredicate = import_shapeshift8.s.nativeEnum(import_v1020.SeparatorSpacingSize);
-    var textDisplayContentPredicate = import_shapeshift8.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(4e3).setValidationEnabled(isValidationEnabled);
-    var accessoryPredicate = import_shapeshift8.s.instance(ButtonBuilder2).or(import_shapeshift8.s.instance(ThumbnailBuilder)).setValidationEnabled(isValidationEnabled);
+    var spoilerPredicate = import_shapeshift9.s.boolean();
+    var dividerPredicate = import_shapeshift9.s.boolean();
+    var spacingPredicate = import_shapeshift9.s.nativeEnum(import_v1020.SeparatorSpacingSize);
+    var textDisplayContentPredicate = import_shapeshift9.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(4e3).setValidationEnabled(isValidationEnabled);
+    var accessoryPredicate = import_shapeshift9.s.instance(ButtonBuilder2).or(import_shapeshift9.s.instance(ThumbnailBuilder)).setValidationEnabled(isValidationEnabled);
     var containerColorPredicate = colorPredicate.nullish();
     function assertReturnOfBuilder(input, ExpectedInstanceOf) {
-      import_shapeshift8.s.instance(ExpectedInstanceOf).setValidationEnabled(isValidationEnabled).parse(input);
+      import_shapeshift9.s.instance(ExpectedInstanceOf).setValidationEnabled(isValidationEnabled).parse(input);
     }
     __name(assertReturnOfBuilder, "assertReturnOfBuilder");
     function validateComponentArray(input, min, max, ExpectedInstanceOf) {
-      (ExpectedInstanceOf ? import_shapeshift8.s.instance(ExpectedInstanceOf) : import_shapeshift8.s.instance(ComponentBuilder)).array().lengthGreaterThanOrEqual(min).lengthLessThanOrEqual(max).setValidationEnabled(isValidationEnabled).parse(input);
+      (ExpectedInstanceOf ? import_shapeshift9.s.instance(ExpectedInstanceOf) : import_shapeshift9.s.instance(ComponentBuilder)).array().lengthGreaterThanOrEqual(min).lengthLessThanOrEqual(max).setValidationEnabled(isValidationEnabled).parse(input);
     }
     __name(validateComponentArray, "validateComponentArray");
     var import_v1021 = require_v106();
@@ -46744,9 +46948,9 @@ var require_dist8 = __commonJS({
       titleValidator: () => titleValidator,
       validateRequiredParameters: () => validateRequiredParameters2
     });
-    var import_shapeshift9 = require_cjs3();
-    var titleValidator = import_shapeshift9.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(45).setValidationEnabled(isValidationEnabled);
-    var componentsValidator = import_shapeshift9.s.union([import_shapeshift9.s.instance(ActionRowBuilder2), import_shapeshift9.s.instance(LabelBuilder), import_shapeshift9.s.instance(TextDisplayBuilder)]).array().lengthGreaterThanOrEqual(1).setValidationEnabled(isValidationEnabled);
+    var import_shapeshift10 = require_cjs3();
+    var titleValidator = import_shapeshift10.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(45).setValidationEnabled(isValidationEnabled);
+    var componentsValidator = import_shapeshift10.s.union([import_shapeshift10.s.instance(ActionRowBuilder2), import_shapeshift10.s.instance(LabelBuilder), import_shapeshift10.s.instance(TextDisplayBuilder)]).array().lengthGreaterThanOrEqual(1).setValidationEnabled(isValidationEnabled);
     function validateRequiredParameters2(customId, title, components) {
       customIdValidator.parse(customId);
       titleValidator.parse(title);
@@ -46946,20 +47150,20 @@ var require_dist8 = __commonJS({
       validateRequired: () => validateRequired,
       validateRequiredParameters: () => validateRequiredParameters3
     });
-    var import_shapeshift10 = require_cjs3();
+    var import_shapeshift11 = require_cjs3();
     var import_v1030 = require_v106();
-    var namePredicate = import_shapeshift10.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(32).regex(/^[\p{Ll}\p{Lm}\p{Lo}\p{N}\p{sc=Devanagari}\p{sc=Thai}_-]+$/u).setValidationEnabled(isValidationEnabled);
+    var namePredicate = import_shapeshift11.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(32).regex(/^[\p{Ll}\p{Lm}\p{Lo}\p{N}\p{sc=Devanagari}\p{sc=Thai}_-]+$/u).setValidationEnabled(isValidationEnabled);
     function validateName(name) {
       namePredicate.parse(name);
     }
     __name(validateName, "validateName");
-    var descriptionPredicate3 = import_shapeshift10.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(100).setValidationEnabled(isValidationEnabled);
-    var localePredicate = import_shapeshift10.s.nativeEnum(import_v1030.Locale);
+    var descriptionPredicate3 = import_shapeshift11.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(100).setValidationEnabled(isValidationEnabled);
+    var localePredicate = import_shapeshift11.s.nativeEnum(import_v1030.Locale);
     function validateDescription(description) {
       descriptionPredicate3.parse(description);
     }
     __name(validateDescription, "validateDescription");
-    var maxArrayLengthPredicate = import_shapeshift10.s.unknown().array().lengthLessThanOrEqual(25).setValidationEnabled(isValidationEnabled);
+    var maxArrayLengthPredicate = import_shapeshift11.s.unknown().array().lengthLessThanOrEqual(25).setValidationEnabled(isValidationEnabled);
     function validateLocale(locale) {
       return localePredicate.parse(locale);
     }
@@ -46974,7 +47178,7 @@ var require_dist8 = __commonJS({
       validateMaxOptionsLength(options);
     }
     __name(validateRequiredParameters3, "validateRequiredParameters");
-    var booleanPredicate = import_shapeshift10.s.boolean();
+    var booleanPredicate = import_shapeshift11.s.boolean();
     function validateDefaultPermission(value) {
       booleanPredicate.parse(value);
     }
@@ -46983,29 +47187,29 @@ var require_dist8 = __commonJS({
       booleanPredicate.parse(required2);
     }
     __name(validateRequired, "validateRequired");
-    var choicesLengthPredicate = import_shapeshift10.s.number().lessThanOrEqual(25).setValidationEnabled(isValidationEnabled);
+    var choicesLengthPredicate = import_shapeshift11.s.number().lessThanOrEqual(25).setValidationEnabled(isValidationEnabled);
     function validateChoicesLength(amountAdding, choices) {
       choicesLengthPredicate.parse((choices?.length ?? 0) + amountAdding);
     }
     __name(validateChoicesLength, "validateChoicesLength");
     function assertReturnOfBuilder2(input, ExpectedInstanceOf) {
-      import_shapeshift10.s.instance(ExpectedInstanceOf).parse(input);
+      import_shapeshift11.s.instance(ExpectedInstanceOf).parse(input);
     }
     __name(assertReturnOfBuilder2, "assertReturnOfBuilder");
-    var localizationMapPredicate = import_shapeshift10.s.object(Object.fromEntries(Object.values(import_v1030.Locale).map((locale) => [locale, import_shapeshift10.s.string().nullish()]))).strict().nullish().setValidationEnabled(isValidationEnabled);
+    var localizationMapPredicate = import_shapeshift11.s.object(Object.fromEntries(Object.values(import_v1030.Locale).map((locale) => [locale, import_shapeshift11.s.string().nullish()]))).strict().nullish().setValidationEnabled(isValidationEnabled);
     function validateLocalizationMap(value) {
       localizationMapPredicate.parse(value);
     }
     __name(validateLocalizationMap, "validateLocalizationMap");
-    var dmPermissionPredicate = import_shapeshift10.s.boolean().nullish();
+    var dmPermissionPredicate = import_shapeshift11.s.boolean().nullish();
     function validateDMPermission(value) {
       dmPermissionPredicate.parse(value);
     }
     __name(validateDMPermission, "validateDMPermission");
-    var memberPermissionPredicate = import_shapeshift10.s.union([
-      import_shapeshift10.s.bigint().transform((value) => value.toString()),
-      import_shapeshift10.s.number().safeInt().transform((value) => value.toString()),
-      import_shapeshift10.s.string().regex(/^\d+$/)
+    var memberPermissionPredicate = import_shapeshift11.s.union([
+      import_shapeshift11.s.bigint().transform((value) => value.toString()),
+      import_shapeshift11.s.number().safeInt().transform((value) => value.toString()),
+      import_shapeshift11.s.string().regex(/^\d+$/)
     ]).nullish();
     function validateDefaultMemberPermissions(permissions) {
       return memberPermissionPredicate.parse(permissions);
@@ -47015,11 +47219,11 @@ var require_dist8 = __commonJS({
       booleanPredicate.parse(value);
     }
     __name(validateNSFW, "validateNSFW");
-    var contextsPredicate = import_shapeshift10.s.array(
-      import_shapeshift10.s.nativeEnum(import_v1030.InteractionContextType).setValidationEnabled(isValidationEnabled)
+    var contextsPredicate = import_shapeshift11.s.array(
+      import_shapeshift11.s.nativeEnum(import_v1030.InteractionContextType).setValidationEnabled(isValidationEnabled)
     );
-    var integrationTypesPredicate = import_shapeshift10.s.array(
-      import_shapeshift10.s.nativeEnum(import_v1030.ApplicationIntegrationType).setValidationEnabled(isValidationEnabled)
+    var integrationTypesPredicate = import_shapeshift11.s.array(
+      import_shapeshift11.s.nativeEnum(import_v1030.ApplicationIntegrationType).setValidationEnabled(isValidationEnabled)
     );
     var import_ts_mixer6 = require_cjs4();
     var SharedNameAndDescription = class {
@@ -47283,6 +47487,48 @@ var require_dist8 = __commonJS({
        */
       type = import_v1032.ApplicationCommandOptionType.Attachment;
       /**
+       * The file types allowed for this attachment option.
+       */
+      file_types;
+      /**
+       * Adds file types allowed for this attachment option.
+       *
+       * @remarks
+       * When specifying only extensions, include `.jpg` for image uploads and both `.mp4` and `.mov`
+       * for video uploads due to mobile platform limitations.
+       * @param fileTypes - The file groups or dot-prefixed extensions to allow
+       */
+      addFileTypes(...fileTypes) {
+        const normalizedFileTypes = normalizeArray(fileTypes);
+        fileUploadTypesValidator.parse([...this.file_types ?? [], ...normalizedFileTypes]);
+        if (this.file_types === void 0) {
+          Reflect.set(this, "file_types", []);
+        }
+        this.file_types.push(...normalizedFileTypes);
+        return this;
+      }
+      /**
+       * Sets the file types allowed for this attachment option.
+       *
+       * @remarks
+       * When specifying only extensions, include `.jpg` for image uploads and both `.mp4` and `.mov`
+       * for video uploads due to mobile platform limitations.
+       * @param fileTypes - The file groups or dot-prefixed extensions to allow
+       */
+      setFileTypes(...fileTypes) {
+        const normalizedFileTypes = normalizeArray(fileTypes);
+        fileUploadTypesValidator.parse(normalizedFileTypes);
+        Reflect.set(this, "file_types", normalizedFileTypes);
+        return this;
+      }
+      /**
+       * Clears the file types allowed for this attachment option.
+       */
+      clearFileTypes() {
+        Reflect.set(this, "file_types", void 0);
+        return this;
+      }
+      /**
        * {@inheritDoc ApplicationCommandOptionBase.toJSON}
        */
       toJSON() {
@@ -47309,7 +47555,7 @@ var require_dist8 = __commonJS({
     };
     var import_v1035 = require_v106();
     var import_ts_mixer = require_cjs4();
-    var import_shapeshift11 = require_cjs3();
+    var import_shapeshift12 = require_cjs3();
     var import_v1034 = require_v106();
     var allowedChannelTypes = [
       import_v1034.ChannelType.GuildText,
@@ -47323,7 +47569,7 @@ var require_dist8 = __commonJS({
       import_v1034.ChannelType.GuildForum,
       import_v1034.ChannelType.GuildMedia
     ];
-    var channelTypesPredicate = import_shapeshift11.s.array(import_shapeshift11.s.union(allowedChannelTypes.map((type) => import_shapeshift11.s.literal(type))));
+    var channelTypesPredicate = import_shapeshift12.s.array(import_shapeshift12.s.union(allowedChannelTypes.map((type) => import_shapeshift12.s.literal(type))));
     var ApplicationCommandOptionChannelTypesMixin = class {
       static {
         __name(this, "ApplicationCommandOptionChannelTypesMixin");
@@ -47362,7 +47608,7 @@ var require_dist8 = __commonJS({
     SlashCommandChannelOption = __decorateClass([
       (0, import_ts_mixer.mix)(ApplicationCommandOptionChannelTypesMixin)
     ], SlashCommandChannelOption);
-    var import_shapeshift14 = require_cjs3();
+    var import_shapeshift15 = require_cjs3();
     var import_v1037 = require_v106();
     var import_ts_mixer2 = require_cjs4();
     var ApplicationCommandNumericOptionMinMaxValueMixin = class {
@@ -47378,8 +47624,8 @@ var require_dist8 = __commonJS({
        */
       min_value;
     };
-    var import_shapeshift12 = require_cjs3();
-    var booleanPredicate2 = import_shapeshift12.s.boolean();
+    var import_shapeshift13 = require_cjs3();
+    var booleanPredicate2 = import_shapeshift13.s.boolean();
     var ApplicationCommandOptionWithAutocompleteMixin = class {
       static {
         __name(this, "ApplicationCommandOptionWithAutocompleteMixin");
@@ -47408,14 +47654,14 @@ var require_dist8 = __commonJS({
         return this;
       }
     };
-    var import_shapeshift13 = require_cjs3();
+    var import_shapeshift14 = require_cjs3();
     var import_v1036 = require_v106();
-    var stringPredicate = import_shapeshift13.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(100);
-    var numberPredicate = import_shapeshift13.s.number().greaterThan(Number.NEGATIVE_INFINITY).lessThan(Number.POSITIVE_INFINITY);
-    var choicesPredicate = import_shapeshift13.s.object({
+    var stringPredicate = import_shapeshift14.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(100);
+    var numberPredicate = import_shapeshift14.s.number().greaterThan(Number.NEGATIVE_INFINITY).lessThan(Number.POSITIVE_INFINITY);
+    var choicesPredicate = import_shapeshift14.s.object({
       name: stringPredicate,
       name_localizations: localizationMapPredicate,
-      value: import_shapeshift13.s.union([stringPredicate, numberPredicate])
+      value: import_shapeshift14.s.union([stringPredicate, numberPredicate])
     }).array();
     var ApplicationCommandOptionWithChoicesMixin = class {
       static {
@@ -47472,7 +47718,7 @@ var require_dist8 = __commonJS({
         return this;
       }
     };
-    var numberValidator = import_shapeshift14.s.number().int();
+    var numberValidator = import_shapeshift15.s.number().int();
     var SlashCommandIntegerOption = class extends ApplicationCommandOptionBase {
       /**
        * The type of this option.
@@ -47530,10 +47776,10 @@ var require_dist8 = __commonJS({
         return { ...this };
       }
     };
-    var import_shapeshift15 = require_cjs3();
+    var import_shapeshift16 = require_cjs3();
     var import_v1039 = require_v106();
     var import_ts_mixer3 = require_cjs4();
-    var numberValidator2 = import_shapeshift15.s.number();
+    var numberValidator2 = import_shapeshift16.s.number();
     var SlashCommandNumberOption = class extends ApplicationCommandOptionBase {
       /**
        * The type of this option.
@@ -47591,11 +47837,11 @@ var require_dist8 = __commonJS({
         return { ...this };
       }
     };
-    var import_shapeshift16 = require_cjs3();
+    var import_shapeshift17 = require_cjs3();
     var import_v1041 = require_v106();
     var import_ts_mixer4 = require_cjs4();
-    var minLengthValidator2 = import_shapeshift16.s.number().greaterThanOrEqual(0).lessThanOrEqual(6e3);
-    var maxLengthValidator2 = import_shapeshift16.s.number().greaterThanOrEqual(1).lessThanOrEqual(6e3);
+    var minLengthValidator2 = import_shapeshift17.s.number().greaterThanOrEqual(0).lessThanOrEqual(6e3);
+    var maxLengthValidator2 = import_shapeshift17.s.number().greaterThanOrEqual(1).lessThanOrEqual(6e3);
     var SlashCommandStringOption = class extends ApplicationCommandOptionBase {
       /**
        * The type of this option.
@@ -47941,11 +48187,11 @@ var require_dist8 = __commonJS({
       validateRequiredParameters: () => validateRequiredParameters4,
       validateType: () => validateType
     });
-    var import_shapeshift17 = require_cjs3();
+    var import_shapeshift18 = require_cjs3();
     var import_v1044 = require_v106();
-    var namePredicate2 = import_shapeshift17.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(32).regex(/\S/).setValidationEnabled(isValidationEnabled);
-    var typePredicate = import_shapeshift17.s.union([import_shapeshift17.s.literal(import_v1044.ApplicationCommandType.User), import_shapeshift17.s.literal(import_v1044.ApplicationCommandType.Message)]).setValidationEnabled(isValidationEnabled);
-    var booleanPredicate3 = import_shapeshift17.s.boolean();
+    var namePredicate2 = import_shapeshift18.s.string().lengthGreaterThanOrEqual(1).lengthLessThanOrEqual(32).regex(/\S/).setValidationEnabled(isValidationEnabled);
+    var typePredicate = import_shapeshift18.s.union([import_shapeshift18.s.literal(import_v1044.ApplicationCommandType.User), import_shapeshift18.s.literal(import_v1044.ApplicationCommandType.Message)]).setValidationEnabled(isValidationEnabled);
+    var booleanPredicate3 = import_shapeshift18.s.boolean();
     function validateDefaultPermission2(value) {
       booleanPredicate3.parse(value);
     }
@@ -47963,25 +48209,25 @@ var require_dist8 = __commonJS({
       validateType(type);
     }
     __name(validateRequiredParameters4, "validateRequiredParameters");
-    var dmPermissionPredicate2 = import_shapeshift17.s.boolean().nullish();
+    var dmPermissionPredicate2 = import_shapeshift18.s.boolean().nullish();
     function validateDMPermission2(value) {
       dmPermissionPredicate2.parse(value);
     }
     __name(validateDMPermission2, "validateDMPermission");
-    var memberPermissionPredicate2 = import_shapeshift17.s.union([
-      import_shapeshift17.s.bigint().transform((value) => value.toString()),
-      import_shapeshift17.s.number().safeInt().transform((value) => value.toString()),
-      import_shapeshift17.s.string().regex(/^\d+$/)
+    var memberPermissionPredicate2 = import_shapeshift18.s.union([
+      import_shapeshift18.s.bigint().transform((value) => value.toString()),
+      import_shapeshift18.s.number().safeInt().transform((value) => value.toString()),
+      import_shapeshift18.s.string().regex(/^\d+$/)
     ]).nullish();
     function validateDefaultMemberPermissions2(permissions) {
       return memberPermissionPredicate2.parse(permissions);
     }
     __name(validateDefaultMemberPermissions2, "validateDefaultMemberPermissions");
-    var contextsPredicate2 = import_shapeshift17.s.array(
-      import_shapeshift17.s.nativeEnum(import_v1044.InteractionContextType).setValidationEnabled(isValidationEnabled)
+    var contextsPredicate2 = import_shapeshift18.s.array(
+      import_shapeshift18.s.nativeEnum(import_v1044.InteractionContextType).setValidationEnabled(isValidationEnabled)
     );
-    var integrationTypesPredicate2 = import_shapeshift17.s.array(
-      import_shapeshift17.s.nativeEnum(import_v1044.ApplicationIntegrationType).setValidationEnabled(isValidationEnabled)
+    var integrationTypesPredicate2 = import_shapeshift18.s.array(
+      import_shapeshift18.s.nativeEnum(import_v1044.ApplicationIntegrationType).setValidationEnabled(isValidationEnabled)
     );
     var ContextMenuCommandBuilder = class {
       static {
@@ -48156,7 +48402,7 @@ var require_dist8 = __commonJS({
       return (data.title?.length ?? 0) + (data.description?.length ?? 0) + (data.fields?.reduce((prev, curr) => prev + curr.name.length + curr.value.length, 0) ?? 0) + (data.footer?.text.length ?? 0) + (data.author?.name.length ?? 0);
     }
     __name(embedLength, "embedLength");
-    var version = "1.14.1";
+    var version = "1.15.0";
   }
 });
 
@@ -56045,6 +56291,9 @@ var require_BaseGuildTextChannel = __commonJS({
        * required if `targetType` is {@link InviteTargetType.Stream}, the application must have the
        * {@link InviteTargetType.EmbeddedApplication} flag
        * @property {InviteTargetType} [targetType] The type of the target for this voice channel invite
+       * @property {UserResolvable[]|BufferResolvable} [targetUsersFile] An array of users or a CSV file
+       * with a single column of user ids for all the users able to accept this invite
+       * @property {RoleResolvable[]} [roles] The roles in the guild given to users that accept this invite
        * @property {string} [reason] The reason for creating the invite
        */
       /**
@@ -59314,6 +59563,7 @@ var require_ChannelSelectMenuInteraction = __commonJS({
     "use strict";
     var { Collection: Collection2 } = require_dist6();
     var MessageComponentInteraction = require_MessageComponentInteraction();
+    var { resolveInteractionChannel } = require_Util();
     var ChannelSelectMenuInteraction = class extends MessageComponentInteraction {
       constructor(client2, data) {
         super(client2, data);
@@ -59321,7 +59571,7 @@ var require_ChannelSelectMenuInteraction = __commonJS({
         this.values = values ?? [];
         this.channels = new Collection2();
         for (const channel of Object.values(resolved?.channels ?? {})) {
-          this.channels.set(channel.id, this.client.channels._add(channel, this.guild) ?? channel);
+          this.channels.set(channel.id, resolveInteractionChannel(this.client, this.guild, channel));
         }
       }
     };
@@ -59337,6 +59587,7 @@ var require_CommandInteraction = __commonJS({
     var BaseInteraction = require_BaseInteraction();
     var InteractionWebhook = require_InteractionWebhook();
     var InteractionResponses = require_InteractionResponses();
+    var { resolveInteractionChannel } = require_Util();
     var CommandInteraction = class extends BaseInteraction {
       constructor(client2, data) {
         super(client2, data);
@@ -59408,7 +59659,7 @@ var require_CommandInteraction = __commonJS({
           const member = resolved.members?.[option.value];
           if (member) result.member = this.guild?.members._add({ user, ...member }) ?? member;
           const channel = resolved.channels?.[option.value];
-          if (channel) result.channel = this.client.channels._add(channel, this.guild) ?? channel;
+          if (channel) result.channel = resolveInteractionChannel(this.client, this.guild, channel);
           const role = resolved.roles?.[option.value];
           if (role) result.role = this.guild?.roles._add(role) ?? role;
           const attachment = resolved.attachments?.[option.value];
@@ -59817,7 +60068,7 @@ var require_ModalSubmitInteraction = __commonJS({
     var InteractionWebhook = require_InteractionWebhook();
     var ModalSubmitFields = require_ModalSubmitFields();
     var InteractionResponses = require_InteractionResponses();
-    var { transformResolved } = require_Util();
+    var { resolveInteractionChannel, transformResolved } = require_Util();
     var getMessage = lazy(() => require_Message().Message);
     var getAttachment = lazy(() => require_Attachment());
     var ModalSubmitInteraction = class _ModalSubmitInteraction extends BaseInteraction {
@@ -59891,7 +60142,7 @@ var require_ModalSubmitInteraction = __commonJS({
               data.channels = new Collection2();
               for (const [id, apiChannel] of Object.entries(channels)) {
                 if (valueSet.has(id)) {
-                  data.channels.set(id, client2.channels._add(apiChannel, guild) ?? apiChannel);
+                  data.channels.set(id, resolveInteractionChannel(client2, guild, apiChannel));
                 }
               }
             }
@@ -70210,12 +70461,14 @@ var require_GuildEmojiManager = __commonJS({
 var require_GuildInviteManager = __commonJS({
   "node_modules/discord.js/src/managers/GuildInviteManager.js"(exports2, module2) {
     "use strict";
+    var { Buffer: Buffer2 } = __require("node:buffer");
     var { Collection: Collection2 } = require_dist6();
     var { Routes: Routes3 } = require_v106();
     var CachedManager = require_CachedManager();
     var { DiscordjsError: DiscordjsError2, ErrorCodes: ErrorCodes2 } = require_errors2();
     var Invite2 = require_Invite();
-    var { resolveInviteCode: resolveInviteCode2 } = require_DataResolver();
+    var { resolveInviteCode: resolveInviteCode2, resolveInviteTargetUsersFile } = require_DataResolver();
+    var { _transformAPIInviteTargetUsersJobStatus } = require_Transformers();
     var GuildInviteManager = class extends CachedManager {
       constructor(guild, iterable) {
         super(guild.client, Invite2, iterable);
@@ -70276,6 +70529,17 @@ var require_GuildInviteManager = __commonJS({
        * @property {GuildInvitableChannelResolvable} [channelId]
        * The channel to fetch all invites from
        * @property {boolean} [cache=true] Whether or not to cache the fetched invites
+       */
+      /**
+       * Job status for target users of an invite
+       *
+       * @typedef {Object} TargetUsersJobStatusForInvite
+       * @property {InviteTargetUsersJobStatus} status The status of job processing the users
+       * @property {number} totalUsers The total number of users provided in the list
+       * @property {number} processedUsers The total number of users processed so far
+       * @property {Date|null} createdAt The time when the job was created
+       * @property {Date|null} completedAt The time when the job was successfully completed
+       * @property {string|null} errorMessage The error message if the job failed
        */
       /**
        * Fetches invite(s) from Discord.
@@ -70353,7 +70617,7 @@ var require_GuildInviteManager = __commonJS({
       }
       /**
        * Create an invite to the guild from the provided channel.
-       * @param {GuildInvitableChannelResolvable} channel The options for creating the invite from a channel.
+       * @param {GuildInvitableChannelResolvable} channel The channel where the invite should be created.
        * @param {InviteCreateOptions} [options={}] The options for creating the invite from a channel.
        * @returns {Promise<Invite>}
        * @example
@@ -70362,20 +70626,41 @@ var require_GuildInviteManager = __commonJS({
        *   .then(console.log)
        *   .catch(console.error);
        */
-      async create(channel, { temporary, maxAge, maxUses, unique, targetUser, targetApplication, targetType, reason } = {}) {
+      async create(channel, {
+        temporary,
+        maxAge,
+        maxUses,
+        unique,
+        targetUser,
+        targetApplication,
+        targetType,
+        roles,
+        targetUsersFile,
+        reason
+      } = {}) {
         const id = this.guild.channels.resolveId(channel);
         if (!id) throw new DiscordjsError2(ErrorCodes2.GuildChannelResolve);
+        const options = {
+          temporary,
+          max_age: maxAge,
+          max_uses: maxUses,
+          unique,
+          target_user_id: this.client.users.resolveId(targetUser),
+          target_application_id: targetApplication?.id ?? targetApplication?.applicationId ?? targetApplication,
+          role_ids: roles?.map((role) => this.guild.roles.resolveId(role)),
+          target_type: targetType
+        };
         const invite = await this.client.rest.post(Routes3.channelInvites(id), {
-          body: {
-            temporary,
-            max_age: maxAge,
-            max_uses: maxUses,
-            unique,
-            target_user_id: this.client.users.resolveId(targetUser),
-            target_application_id: targetApplication?.id ?? targetApplication?.applicationId ?? targetApplication,
-            target_type: targetType
-          },
-          reason
+          body: options,
+          reason,
+          files: targetUsersFile ? [
+            {
+              key: "target_users_file",
+              data: await resolveInviteTargetUsersFile(this.client, targetUsersFile),
+              name: "users.csv",
+              contentType: "text/csv"
+            }
+          ] : []
         });
         return new Invite2(this.client, invite);
       }
@@ -70388,6 +70673,49 @@ var require_GuildInviteManager = __commonJS({
       async delete(invite, reason) {
         const code = resolveInviteCode2(invite);
         await this.client.rest.delete(Routes3.invite(code), { reason });
+      }
+      /**
+       * Get target users for an invite.
+       *
+       * @param {InviteResolvable} invite The invite to get the target users
+       * @returns {Promise<Buffer>} The csv file containing target users
+       */
+      async fetchTargetUsers(invite) {
+        const code = resolveInviteCode2(invite);
+        const arrayBuff = await this.client.rest.get(Routes3.inviteTargetUsers(code));
+        return Buffer2.from(arrayBuff);
+      }
+      /**
+       * Updates target users for an invite.
+       *
+       * @param {InviteResolvable} invite The invite to update the target users
+       * @param {UserResolvable[]|BufferResolvable} targetUsersFile An array of users or a CSV file
+       * with a single column of user ids for all the users able to accept this invite
+       * @returns {Promise<void>}
+       */
+      async updateTargetUsers(invite, targetUsersFile) {
+        const code = resolveInviteCode2(invite);
+        await this.client.rest.put(Routes3.inviteTargetUsers(code), {
+          files: [
+            {
+              key: "target_users_file",
+              data: await resolveInviteTargetUsersFile(this.client, targetUsersFile),
+              name: "users.csv",
+              contentType: "text/csv"
+            }
+          ]
+        });
+      }
+      /**
+       * Get status of the job processing target users of an invite.
+       *
+       * @param {InviteResolvable} invite The invite to get the target users for
+       * @returns {Promise<TargetUsersJobStatusForInvite>} The target users
+       */
+      async fetchTargetUsersJobStatus(invite) {
+        const code = resolveInviteCode2(invite);
+        const job = await this.client.rest.get(Routes3.inviteTargetUsersJobStatus(code));
+        return _transformAPIInviteTargetUsersJobStatus(job);
       }
     };
     module2.exports = GuildInviteManager;
@@ -76585,6 +76913,7 @@ var require_src = __commonJS({
     exports2.BaseGuildEmoji = require_BaseGuildEmoji();
     exports2.BaseGuildTextChannel = require_BaseGuildTextChannel();
     exports2.BaseGuildVoiceChannel = require_BaseGuildVoiceChannel();
+    exports2.BaseRole = require_BaseRole();
     exports2.ButtonBuilder = require_ButtonBuilder();
     exports2.ButtonComponent = require_ButtonComponent();
     exports2.ButtonInteraction = require_ButtonInteraction();
@@ -76634,6 +76963,7 @@ var require_src = __commonJS({
     exports2.Invite = require_Invite();
     exports2.InviteStageInstance = require_InviteStageInstance();
     exports2.InviteGuild = require_InviteGuild();
+    exports2.InviteRole = require_InviteRole();
     exports2.LabelComponent = require_LabelComponent();
     exports2.Message = require_Message().Message;
     exports2.Attachment = require_Attachment();
@@ -77731,7 +78061,14 @@ var require_utils2 = __commonJS({
   "node_modules/pg/lib/utils.js"(exports2, module2) {
     "use strict";
     var defaults2 = require_defaults();
+    var nodeUtils = __require("util");
     var { isDate } = __require("util/types");
+    var invalidDateDeprecationNotice = nodeUtils.deprecate(
+      () => {
+      },
+      "Sending an invalid date to Postgres is deprecated and will throw an error in the next major version of pg. Ensure any Date object passed as a query parameter is valid.",
+      "PG_INVALID_DATE"
+    );
     function escapeElement(elementRepresentation) {
       const escaped = elementRepresentation.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       return '"' + escaped + '"';
@@ -77771,6 +78108,9 @@ var require_utils2 = __commonJS({
           return Buffer.from(val.buffer, val.byteOffset, val.byteLength);
         }
         if (isDate(val)) {
+          if (isNaN(val.getTime())) {
+            invalidDateDeprecationNotice();
+          }
           if (defaults2.parseInputDatesAsUTC) {
             return dateToStringUTC(val);
           } else {
@@ -77821,7 +78161,7 @@ var require_utils2 = __commonJS({
       return ret;
     }
     function normalizeQueryConfig(config, values, callback) {
-      config = typeof config === "string" ? { text: config } : config;
+      config = typeof config === "string" ? { text: config } : cloneQueryConfig(config);
       if (values) {
         if (typeof values === "function") {
           config.callback = values;
@@ -77833,6 +78173,12 @@ var require_utils2 = __commonJS({
         config.callback = callback;
       }
       return config;
+    }
+    function cloneQueryConfig(config) {
+      if (config == null) {
+        return config;
+      }
+      return Object.defineProperties(Object.create(Object.getPrototypeOf(config)), Object.getOwnPropertyDescriptors(config));
     }
     var escapeIdentifier2 = function(str) {
       return '"' + str.replace(/"/g, '""') + '"';
@@ -78023,7 +78369,7 @@ var require_cert_signatures = __commonJS({
           }
           throw x509Error("unknown hash OID " + hashOID, data);
         }
-        // Ed25519 -- see https: return//github.com/openssl/openssl/issues/15477
+        // Ed25519 -- see https://github.com/openssl/openssl/issues/15477
         case "1.3.101.110":
         case "1.3.101.112":
           return "SHA-512";
@@ -78295,7 +78641,7 @@ var require_pg_connection_string = __commonJS({
         config.client_encoding = result.searchParams.get("encoding");
         return config;
       }
-      const hostname = dummyHost ? "" : result.hostname;
+      const hostname = (dummyHost ? "" : result.hostname).replace(/^\[(.+)\]$/, "$1");
       if (!config.host) {
         config.host = decodeURIComponent(hostname);
       } else if (hostname && /^%2f/i.test(hostname)) {
@@ -78832,7 +79178,7 @@ var require_query = __commonJS({
         return null;
       }
       hasBeenParsed(connection) {
-        return this.name && (connection.parsedStatements[this.name] || connection.submittedNamedStatements[this.name]);
+        return this.name && (connection.parsedStatements[this.name] !== void 0 || connection.submittedNamedStatements[this.name] !== void 0);
       }
       handlePortalSuspended(connection) {
         this._getRows(connection, this.rows);
@@ -79074,7 +79420,7 @@ var require_buffer_writer = __commonJS({
           const oldBuffer = this.buffer;
           const newSize = oldBuffer.length + (oldBuffer.length >> 1) + size;
           this.buffer = Buffer.allocUnsafe(newSize);
-          oldBuffer.copy(this.buffer);
+          oldBuffer.copy(this.buffer, 0, 0, this.offset);
         }
       }
       addInt32(num) {
@@ -79134,6 +79480,15 @@ var require_buffer_writer = __commonJS({
         otherBuffer.copy(this.buffer, this.offset);
         this.offset += otherBuffer.length;
         return this;
+      }
+      /**
+       * Appends an uninitialized block of {@link size} bytes to the buffer and returns its offset.
+       */
+      reserveUnsafe(size) {
+        const offset = this.offset;
+        this.ensure(size);
+        this.offset += size;
+        return offset;
       }
       join(code) {
         if (code) {
@@ -79227,30 +79582,23 @@ var require_serializer = __commonJS({
         /* code.parse */
       );
     };
-    var paramWriter = new buffer_writer_1.Writer();
-    var writeValues = function(values, valueMapper) {
-      for (let i = 0; i < values.length; i++) {
+    var writeValues = function(values, valueMapper, formatsOffset) {
+      const len = values.length;
+      for (let i = 0; i < len; i++) {
         const mappedVal = valueMapper ? valueMapper(values[i], i) : values[i];
+        let formatByte = 0;
         if (mappedVal == null) {
-          writer.addInt16(
-            0
-            /* ParamType.STRING */
-          );
-          paramWriter.addInt32(-1);
+          writer.addInt32(-1);
         } else if (mappedVal instanceof Buffer) {
-          writer.addInt16(
-            1
-            /* ParamType.BINARY */
-          );
-          paramWriter.addInt32(mappedVal.length);
-          paramWriter.add(mappedVal);
+          formatByte = 1;
+          writer.addInt32(mappedVal.length);
+          writer.add(mappedVal);
         } else {
-          writer.addInt16(
-            0
-            /* ParamType.STRING */
-          );
-          paramWriter.addInt32PrefixedString(mappedVal);
+          writer.addInt32PrefixedString(mappedVal);
         }
+        const buf = writer.buffer;
+        buf[formatsOffset++] = 0;
+        buf[formatsOffset++] = formatByte;
       }
     };
     var bind = (config = {}) => {
@@ -79261,15 +79609,14 @@ var require_serializer = __commonJS({
       const len = values.length;
       writer.addCString(portal).addCString(statement);
       writer.addInt16(len);
+      const formatsOffset = writer.reserveUnsafe(len * 2);
+      writer.addInt16(len);
       try {
-        writeValues(values, config.valueMapper);
+        writeValues(values, config.valueMapper, formatsOffset);
       } catch (err) {
         writer.clear();
-        paramWriter.clear();
         throw err;
       }
-      writer.addInt16(len);
-      writer.add(paramWriter.flush());
       writer.addInt16(1);
       writer.addInt16(
         binary ? 1 : 0
@@ -79927,7 +80274,12 @@ var require_connection2 = __commonJS({
       upgradeToSSL(host, reportStreamError) {
         const self2 = this;
         const options = {
-          socket: self2.stream
+          socket: self2.stream,
+          // tls.connect checks the server identity against `servername`, falling
+          // back to `host` and then to 'localhost'. `servername` must stay unset
+          // for IP addresses (see below), so `host` is needed to keep certificate
+          // validation working when connecting to an IP address.
+          host
         };
         if (self2.ssl !== true) {
           Object.assign(options, self2.ssl);
@@ -80005,7 +80357,6 @@ var require_connection2 = __commonJS({
         }
       }
       sync() {
-        this._ending = true;
         this._send(syncBuffer);
       }
       ref() {
@@ -80960,6 +81311,15 @@ var require_client2 = __commonJS({
         if (query._result && !query._result._types) {
           query._result._types = this._types;
         }
+        if (this.pipeline) {
+          const portalQuery = typeof config.submit === "function" && !(query instanceof Query2) ? "Custom query classes such as pg-cursor and pg-query-stream are" : query.rows ? "The `rows` option is" : null;
+          if (portalQuery) {
+            process.nextTick(() => {
+              query.handleError(new Error(`${portalQuery} not supported in pipeline mode`), this.connection);
+            });
+            return result;
+          }
+        }
         if (!this._queryable) {
           process.nextTick(() => {
             query.handleError(new Error("Client has encountered a connection error and is not queryable"), this.connection);
@@ -81481,6 +81841,8 @@ var require_query2 = __commonJS({
       sqlState: "code",
       statementPosition: "position",
       messagePrimary: "message",
+      messageDetail: "detail",
+      messageHint: "hint",
       context: "where",
       schemaName: "schema",
       tableName: "table",
@@ -81564,7 +81926,7 @@ var require_query2 = __commonJS({
           console.error("This can cause conflicts and silent errors executing queries");
         }
         const values = (this.values || []).map(utils.prepareValue);
-        if (client2.namedQueries[this.name]) {
+        if (client2.namedQueries[this.name] !== void 0) {
           if (this.text && client2.namedQueries[this.name] !== this.text) {
             const err = new Error(`Prepared statements must be unique - '${this.name}' was used for a different statement`);
             return after(err);
@@ -81856,7 +82218,7 @@ var require_client3 = __commonJS({
         this.hasExecuted = true;
         nativeQueries.push(query);
         const values = query.values ? query.values.map(utils.prepareValue) : null;
-        const pipelineEntry = { text: query.text, name: query.name };
+        const pipelineEntry = { text: query.text, name: query.name, arrayMode: query._arrayMode };
         if (values) {
           pipelineEntry.values = values;
         }
@@ -81868,12 +82230,16 @@ var require_client3 = __commonJS({
       this.native.pipeline(queries, function(err, results) {
         self2._pipelineInFlight = false;
         if (err) {
+          self2._connected = false;
+          self2._queryable = false;
           for (let i = 0; i < nativeQueries.length; i++) {
             const q = nativeQueries[i];
             q.native = self2.native;
             q.handleError(err);
           }
-          self2._pulsePipelinedQueryQueue();
+          self2._errorAllQueries(err);
+          self2.emit("error", err);
+          self2.emit("end");
           return;
         }
         for (let i = 0; i < nativeQueries.length; i++) {
