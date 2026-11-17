@@ -198,11 +198,18 @@ indistinguishable until `boot.log` existed:
 Measured from outside the container, 4 probes/second against the public URL:
 
 ```text
-restart, same commit, deps unchanged      : 0.9 s – 10 s of 502 (platform swap; see below)
-restart on a new commit, deps unchanged   : 39.4 s of 502
-restart that has to install a dependency  : 44.6 s of 502 (one time only)
-restart before this fix, deps re-installed: 100–180 s of 502
+restart, same commit, deps unchanged      : 0.9 s, 8.0 s, 10 s and 53 s (eight samples)
+restart on a new commit, deps unchanged   : 39.4 s
+restart that has to install a dependency  : 44.6 s (one time only)
+restart before this fix, deps re-installed: 100–180 s
 ```
+
+The spread in the first line is the honest part: our boot is a flat 4 s in every
+one of those samples — `boot.log` proves it — so the rest is the platform's own
+stop/start gap, and it is not constant. A 53 s sample was recorded on 2026-11-17
+with no `npm ci` anywhere in it. That is why a deploy is never declared finished
+from the panel's state: the poller keeps asking until the public URL answers 200,
+and only then is the version read.
 
 **The residual window is the platform's container swap, not our boot.** `boot.log`
 records the whole boot in 4 seconds, so a restart that is still 8 seconds
