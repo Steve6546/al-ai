@@ -1178,7 +1178,13 @@ export function createDatabase(pool: pg.Pool) {
      * route, and revocation is by "all except mine" rather than by id.
      */
     async listSessions(discordUserId: string) {
-      const { rows } = await pool.query<{
+      // `asIdentity`, not `pool.query`: this read sits on `oauth_sessions`, which
+      // is one of the tables scoped by the declared identity, so the actor has to
+      // be set for the statement's own transaction. The call site was the last
+      // one still passing the context as a first argument to `pool.query`, which
+      // takes a string — the migration had moved every other site and left this
+      // one behind, and it did not compile.
+      const { rows } = await asIdentity<{
         id: string;
         user_agent: string | null;
         created_at: Date;

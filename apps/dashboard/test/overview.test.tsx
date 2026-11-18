@@ -5,7 +5,7 @@ import { renderToString } from "react-dom/server";
 import { buildStats, DashboardView, OverviewContent } from "../src/views/dashboard";
 import { I18nProvider } from "../src/lib/i18n";
 import { en } from "../src/lib/i18n.en";
-import type { Guild, GuildMetrics } from "../src/types";
+import type { Guild, GuildMetrics, GuildModuleState } from "../src/types";
 
 /**
  * The overview's arithmetic, pinned without a browser.
