@@ -76332,15 +76332,7 @@ function constantTimeEqual(a, b) {
   return timingSafeEqual2(left, right);
 }
 
-// packages/core/src/appearance.ts
-var NAMED_ACCENTS = ["blue", "violet", "emerald", "amber", "rose"];
-var BACKGROUND_STYLES = ["solid", "split-v", "split-h", "gradient"];
-var DEFAULT_APPEARANCE = {
-  mode: "system",
-  accent: "blue",
-  accentColor: null,
-  background: { style: "solid", from: null, to: null }
-};
+// packages/core/src/theme-engine.ts
 var HEX = /^#[0-9a-f]{6}$/i;
 function normaliseHex(value) {
   if (typeof value !== "string") return null;
@@ -76351,21 +76343,93 @@ function normaliseHex(value) {
   }
   return HEX.test(trimmed) ? trimmed.toLowerCase() : null;
 }
+
+// packages/core/src/appearance.ts
+var APPEARANCE_VERSION = 2;
+var MAX_COLORS = 5;
+var ACCENT_SWATCHES = {
+  blue: "#3b82f6",
+  violet: "#8b5cf6",
+  emerald: "#10b981",
+  amber: "#f59e0b",
+  rose: "#f43f5e"
+};
+var preset = (id, colors, options = {}) => ({
+  id,
+  appearance: {
+    version: 2,
+    mode: options.mode ?? "dark",
+    colors,
+    angle: options.angle ?? 135,
+    intensity: options.intensity ?? 55,
+    scope: options.scope ?? "tinted",
+    accent: options.accent ?? null
+  }
+});
+var APPEARANCE_PRESETS = [
+  // The default: one hue, so the panels are a whisper of it rather than a wash.
+  preset("default", ["#4f6bed"], { mode: "system", intensity: 45 }),
+  // OLED black: no tint at all, for people who want the pixels off.
+  preset("oled", ["#000000"], { intensity: 0 }),
+  preset("midnight", ["#0b1020", "#221a4a"], { angle: 160, intensity: 60 }),
+  preset("nebula", ["#2b1055", "#7597de"], { angle: 145, intensity: 65 }),
+  preset("ocean", ["#04222b", "#071626"], { angle: 120, intensity: 58 }),
+  preset("forest", ["#0f2a1d", "#1d4b2f"], { angle: 135, intensity: 52 }),
+  preset("sunset", ["#f97316", "#db2777"], { angle: 30, intensity: 62 }),
+  preset("cottonCandy", ["#c084fc", "#f9a8d4", "#fde68a"], { angle: 45, intensity: 48 }),
+  preset("ember", ["#7f1d1d", "#f59e0b"], { angle: 20, intensity: 55 }),
+  preset("steel", ["#1e293b", "#475569"], { angle: 200, intensity: 40 }),
+  preset("daylight", ["#ffffff"], { mode: "light", intensity: 0 }),
+  preset("porcelain", ["#eef2ff", "#e0e7ff"], { mode: "light", angle: 150, intensity: 45 }),
+  preset("mint", ["#ecfdf5", "#d1fae5"], { mode: "light", angle: 140, intensity: 50 }),
+  preset("sand", ["#fdf6e3", "#f5e6c8"], { mode: "light", angle: 160, intensity: 42 })
+];
 function normaliseAppearance(input) {
   const source = input ?? {};
-  const mode = source.mode === "light" || source.mode === "dark" ? source.mode : source.mode === "system" ? "system" : DEFAULT_APPEARANCE.mode;
-  const accent = NAMED_ACCENTS.includes(source.accent) ? source.accent : DEFAULT_APPEARANCE.accent;
-  const accentColor = normaliseHex(source.accentColor);
-  const style = BACKGROUND_STYLES.includes(source.background?.style) ? source.background?.style : DEFAULT_APPEARANCE.background.style;
-  const from = normaliseHex(source.background?.from);
-  const to = normaliseHex(source.background?.to);
-  return {
-    mode,
-    accent,
-    accentColor,
-    background: { style, from, to: style === "solid" ? null : to }
-  };
+  const mode = normaliseMode(source.mode);
+  const colors = normaliseColors(source);
+  const intensity = clampNumber(source.intensity, 0, 100, 55);
+  const angle = wrapAngle(source.angle);
+  const scope = source.scope === "canvas" ? "canvas" : "tinted";
+  const accent = normaliseHex(source.accent) ?? legacyAccent(source);
+  return { version: APPEARANCE_VERSION, mode, colors, angle, intensity, scope, accent };
 }
+function normaliseMode(value) {
+  return value === "light" || value === "dark" || value === "system" ? value : "system";
+}
+function wrapAngle(value) {
+  const number = typeof value === "string" ? Number(value) : value;
+  if (typeof number !== "number" || !Number.isFinite(number)) return 135;
+  return Math.round((number % 360 + 360) % 360);
+}
+function clampNumber(value, min, max, fallback2) {
+  const number = typeof value === "string" ? Number(value) : value;
+  if (typeof number !== "number" || !Number.isFinite(number)) return fallback2;
+  return Math.min(max, Math.max(min, number));
+}
+function normaliseColors(source) {
+  const raw = Array.isArray(source.colors) ? source.colors : null;
+  if (raw) {
+    const colors = raw.map((value) => normaliseHex(value)).filter((value) => value !== null);
+    if (colors.length > 0) return colors.slice(0, MAX_COLORS);
+  }
+  const background = source.background;
+  const legacy = [normaliseHex(background?.from), normaliseHex(background?.to)].filter(
+    (value) => value !== null
+  );
+  if (legacy.length > 0) return legacy.slice(0, MAX_COLORS);
+  return [...DEFAULT_COLORS];
+}
+function legacyAccent(source) {
+  const custom = normaliseHex(source.accentColor);
+  if (custom) return custom;
+  const named = source.accent;
+  if (typeof named === "string" && named in ACCENT_SWATCHES) {
+    return ACCENT_SWATCHES[named];
+  }
+  return null;
+}
+var DEFAULT_COLORS = ["#4f6bed"];
 
 // packages/core/src/series.ts
 var HOUR_MS = 60 * 60 * 1e3;

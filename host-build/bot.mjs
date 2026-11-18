@@ -83470,7 +83470,7 @@ function commandDurationSeconds(definition, duration) {
 }
 function resolveCommandDuration(config, reason) {
   if (config.defaultDuration === "custom") return "custom";
-  return config.presetReasons.find((preset) => preset.label === reason)?.duration ?? config.defaultDuration;
+  return config.presetReasons.find((preset2) => preset2.label === reason)?.duration ?? config.defaultDuration;
 }
 var MAX_PURGE_DAYS = 7;
 var MAX_COOLDOWN_SECONDS = 60 * 60;
@@ -84500,6 +84500,38 @@ function normaliseWelcomeMessageSettings(value) {
     image: normaliseWelcomeImageConfig(source.image)
   };
 }
+
+// packages/core/src/appearance.ts
+var preset = (id, colors, options = {}) => ({
+  id,
+  appearance: {
+    version: 2,
+    mode: options.mode ?? "dark",
+    colors,
+    angle: options.angle ?? 135,
+    intensity: options.intensity ?? 55,
+    scope: options.scope ?? "tinted",
+    accent: options.accent ?? null
+  }
+});
+var APPEARANCE_PRESETS = [
+  // The default: one hue, so the panels are a whisper of it rather than a wash.
+  preset("default", ["#4f6bed"], { mode: "system", intensity: 45 }),
+  // OLED black: no tint at all, for people who want the pixels off.
+  preset("oled", ["#000000"], { intensity: 0 }),
+  preset("midnight", ["#0b1020", "#221a4a"], { angle: 160, intensity: 60 }),
+  preset("nebula", ["#2b1055", "#7597de"], { angle: 145, intensity: 65 }),
+  preset("ocean", ["#04222b", "#071626"], { angle: 120, intensity: 58 }),
+  preset("forest", ["#0f2a1d", "#1d4b2f"], { angle: 135, intensity: 52 }),
+  preset("sunset", ["#f97316", "#db2777"], { angle: 30, intensity: 62 }),
+  preset("cottonCandy", ["#c084fc", "#f9a8d4", "#fde68a"], { angle: 45, intensity: 48 }),
+  preset("ember", ["#7f1d1d", "#f59e0b"], { angle: 20, intensity: 55 }),
+  preset("steel", ["#1e293b", "#475569"], { angle: 200, intensity: 40 }),
+  preset("daylight", ["#ffffff"], { mode: "light", intensity: 0 }),
+  preset("porcelain", ["#eef2ff", "#e0e7ff"], { mode: "light", angle: 150, intensity: 45 }),
+  preset("mint", ["#ecfdf5", "#d1fae5"], { mode: "light", angle: 140, intensity: 50 }),
+  preset("sand", ["#fdf6e3", "#f5e6c8"], { mode: "light", angle: 160, intensity: 42 })
+];
 
 // packages/core/src/series.ts
 var HOUR_MS = 60 * 60 * 1e3;
@@ -89929,11 +89961,11 @@ bindEvents(client, guardedDispatch, {
     }
     const config = normaliseCommandConfig(definition, configured.get(canonical));
     const needle = focusedValue.trim().toLowerCase();
-    return config.presetReasons.filter((preset) => !needle || preset.label.toLowerCase().includes(needle)).map((preset) => ({
+    return config.presetReasons.filter((preset2) => !needle || preset2.label.toLowerCase().includes(needle)).map((preset2) => ({
       // Discord echoes the value back as the option's text, so it is the label
       // the operator sees and the string the handler matches a duration on.
-      name: preset.duration ? `${preset.label} \u2014 ${preset.duration}` : preset.label,
-      value: preset.label
+      name: preset2.duration ? `${preset2.label} \u2014 ${preset2.duration}` : preset2.label,
+      value: preset2.label
     }));
   },
   /**
@@ -90019,9 +90051,9 @@ bindEvents(client, guardedDispatch, {
       return;
     }
     if (!config.allowCustomReason && config.presetReasons.length > 0) {
-      const known = config.presetReasons.some((preset) => preset.label === trimmedReason);
+      const known = config.presetReasons.some((preset2) => preset2.label === trimmedReason);
       if (!known) {
-        const offered = config.presetReasons.map((preset) => preset.label).slice(0, 10).join("\u060C ");
+        const offered = config.presetReasons.map((preset2) => preset2.label).slice(0, 10).join("\u060C ");
         await reject(`\u0647\u0630\u0627 \u0627\u0644\u0623\u0645\u0631 \u064A\u0642\u0628\u0644 \u0623\u0633\u0628\u0627\u0628\u0627\u064B \u0645\u062D\u062F\u062F\u0629 \u0641\u0642\u0637: ${offered}`, "REASON_NOT_ALLOWED");
         return;
       }
