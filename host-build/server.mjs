@@ -78192,7 +78192,7 @@ function createDatabase(pool2) {
      * route, and revocation is by "all except mine" rather than by id.
      */
     async listSessions(discordUserId) {
-      const { rows } = await pool2.query(
+      const { rows } = await asIdentity(
         { "al_ai.actor": discordUserId },
         `SELECT id, user_agent, created_at, last_seen_at, expires_at
          FROM oauth_sessions
