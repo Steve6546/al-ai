@@ -295,7 +295,7 @@ export const en = {
   "appearance.preset.mint": "Mint",
   "appearance.preset.sand": "Sand",
   "settings.section.appearance": "Appearance",
-  "settings.section.appearanceBody": "Theme and accent for this device.",
+  "settings.section.appearanceBody": "The dashboard's theme and colours, saved to your account.",
   "settings.section.language": "Language and direction",
   "settings.section.languageBody": "The whole interface switches immediately, without signing in again.",
   "settings.section.security": "Security and two-factor authentication",

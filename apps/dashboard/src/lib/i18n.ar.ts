@@ -267,7 +267,7 @@ export const ar: Record<TranslationKey, string> = {
   "appearance.preset.mint": "نعناع",
   "appearance.preset.sand": "رمل",
   "settings.section.appearance": "المظهر",
-  "settings.section.appearanceBody": "السمة ولون التمييز على هذا الجهاز.",
+  "settings.section.appearanceBody": "سمة اللوحة وألوانها، محفوظة في حسابك.",
   "settings.section.language": "اللغة واتجاه الواجهة",
   "settings.section.languageBody": "تتبدّل الواجهة كلها فوراً دون تسجيل دخول من جديد.",
   "settings.section.security": "الأمان والتحقق بخطوتين",

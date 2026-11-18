@@ -262,7 +262,7 @@ export const de: Record<TranslationKey, string> = {
   "appearance.preset.mint": "Minze",
   "appearance.preset.sand": "Sand",
   "settings.section.appearance": "Aussehen",
-  "settings.section.appearanceBody": "Thema und Akzent für dieses Gerät.",
+  "settings.section.appearanceBody": "Design und Farben der Oberfläche, in deinem Konto gespeichert.",
   "settings.section.language": "Sprache und Regie",
   "settings.section.languageBody": "Die gesamte Oberfläche wechselt sofort, ohne dass Sie sich erneut anmelden müssen.",
   "settings.section.security": "Sicherheit und Zwei-Faktor-Authentifizierung",

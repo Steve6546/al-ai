@@ -1950,6 +1950,10 @@ async function main() {
       console.log(
         `${customOk ? "PASS" : "FAIL"}  theme customizer   stops=${written.stored?.colors?.length} angle=${written.stored?.angle} intensity=${written.stored?.intensity} painted=${written.painted}`
       );
+      // The screenshot is the only artefact a person can judge: a gradient that
+      // applies without error can still leave a panel unreadable.
+      const customShot = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
+      await writeFile(join(outDir, "appearance-customizer.png"), Buffer.from(customShot.data, "base64"));
     }
 
     // The designer's canvas, measured for real: the selection box must hug
