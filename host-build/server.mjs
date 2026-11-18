@@ -3064,14 +3064,14 @@ var require_wrap_thenable = __commonJS({
     var { setErrorStatusCode } = require_error_status();
     var diagnostics = __require("node:diagnostics_channel");
     var channels = diagnostics.tracingChannel("fastify.request.handler");
-    function wrapThenable(thenable, reply, store) {
-      if (store) store.async = true;
+    function wrapThenable(thenable, reply, store2) {
+      if (store2) store2.async = true;
       thenable.then(function(payload) {
         if (reply[kReplyHijacked] === true) {
           return;
         }
-        if (store) {
-          channels.asyncStart.publish(store);
+        if (store2) {
+          channels.asyncStart.publish(store2);
         }
         try {
           if (payload !== void 0 || //
@@ -3085,16 +3085,16 @@ var require_wrap_thenable = __commonJS({
             }
           }
         } finally {
-          if (store) {
-            channels.asyncEnd.publish(store);
+          if (store2) {
+            channels.asyncEnd.publish(store2);
           }
         }
       }, function(err) {
-        if (store) {
-          store.error = err;
+        if (store2) {
+          store2.error = err;
           setErrorStatusCode(reply, err);
-          channels.error.publish(store);
-          channels.asyncStart.publish(store);
+          channels.error.publish(store2);
+          channels.asyncStart.publish(store2);
         }
         try {
           if (reply.sent === true) {
@@ -3106,8 +3106,8 @@ var require_wrap_thenable = __commonJS({
         } catch (err2) {
           reply.send(err2);
         } finally {
-          if (store) {
-            channels.asyncEnd.publish(store);
+          if (store2) {
+            channels.asyncEnd.publish(store2);
           }
         }
       });
@@ -4441,7 +4441,7 @@ var require_handle_request = __commonJS({
       if (!channels.hasSubscribers || context[kFourOhFourContext] === null) {
         preHandlerCallbackInner(err, request2, reply);
       } else {
-        const store = {
+        const store2 = {
           request: request2,
           reply,
           async: false,
@@ -4450,19 +4450,19 @@ var require_handle_request = __commonJS({
             method: context.config.method
           }
         };
-        reply[kDiagnosticsStore] = store;
-        channels.start.runStores(store, preHandlerCallbackInner, void 0, err, request2, reply, store);
+        reply[kDiagnosticsStore] = store2;
+        channels.start.runStores(store2, preHandlerCallbackInner, void 0, err, request2, reply, store2);
       }
     }
-    function preHandlerCallbackInner(err, request2, reply, store) {
+    function preHandlerCallbackInner(err, request2, reply, store2) {
       const context = request2[kRouteContext];
       try {
         if (err != null) {
           reply[kReplyIsError] = true;
-          if (store) {
-            store.error = err;
+          if (store2) {
+            store2.error = err;
             setErrorStatusCode(reply, err);
-            channels.error.publish(store);
+            channels.error.publish(store2);
           }
           reply.send(err);
           return;
@@ -4471,10 +4471,10 @@ var require_handle_request = __commonJS({
         try {
           result = context.handler(request2, reply);
         } catch (err2) {
-          if (store) {
-            store.error = err2;
+          if (store2) {
+            store2.error = err2;
             setErrorStatusCode(reply, err2);
-            channels.error.publish(store);
+            channels.error.publish(store2);
           }
           reply[kReplyIsError] = true;
           reply.send(err2);
@@ -4482,13 +4482,13 @@ var require_handle_request = __commonJS({
         }
         if (result !== void 0) {
           if (result !== null && typeof result.then === "function") {
-            wrapThenable(result, reply, store);
+            wrapThenable(result, reply, store2);
           } else {
             reply.send(result);
           }
         }
       } finally {
-        if (store) channels.end.publish(store);
+        if (store2) channels.end.publish(store2);
       }
     }
     module.exports = handleRequest;
@@ -8912,8 +8912,8 @@ var require_tools = __commonJS({
       if (asJsonChan.hasSubscribers === false) {
         return _asJson.call(this, obj, msg, num, time);
       }
-      const store = { instance: this, arguments };
-      return asJsonChan.traceSync(_asJson, store, this, obj, msg, num, time);
+      const store2 = { instance: this, arguments };
+      return asJsonChan.traceSync(_asJson, store2, this, obj, msg, num, time);
     }
     function _asJson(obj, msg, num, time) {
       const stringify2 = this[stringifySym];
@@ -11189,8 +11189,8 @@ var require_error_handler = __commonJS({
         const result = func(error, reply.request, reply);
         if (result !== void 0) {
           if (result !== null && typeof result.then === "function") {
-            const store = reply[kDiagnosticsStore] || null;
-            wrapThenable(result, reply, store);
+            const store2 = reply[kDiagnosticsStore] || null;
+            wrapThenable(result, reply, store2);
           } else {
             reply.send(result);
           }
@@ -31986,8 +31986,8 @@ var require_http_method = __commonJS({
           get: (type) => {
             return handlers.get(type) || null;
           },
-          set: (type, store) => {
-            handlers.set(type, store);
+          set: (type, store2) => {
+            handlers.set(type, store2);
           }
         };
       },
@@ -32227,14 +32227,14 @@ var require_handler_storage = __commonJS({
       // Builds a store object that maps from constraint values to a bitmap of handler indexes which pass the constraint for a value
       // So for a host constraint, this might look like { "fastify.io": 0b0010, "google.ca": 0b0101 }, meaning the 3rd handler is constrainted to fastify.io, and the 2nd and 4th handlers are constrained to google.ca.
       // The store's implementation comes from the strategies provided to the Router.
-      _buildConstraintStore(store, constraint) {
+      _buildConstraintStore(store2, constraint) {
         for (let i = 0; i < this.handlers.length; i++) {
           const handler = this.handlers[i];
           const constraintValue = handler.constraints[constraint];
           if (constraintValue !== void 0) {
-            let indexes = store.get(constraintValue) || 0;
+            let indexes = store2.get(constraintValue) || 0;
             indexes |= 1 << i;
-            store.set(constraintValue, indexes);
+            store2.set(constraintValue, indexes);
           }
         }
       }
@@ -32259,9 +32259,9 @@ var require_handler_storage = __commonJS({
       _compileGetHandlerMatchingConstraints(constrainer) {
         this.constrainedHandlerStores = {};
         for (const constraint of this.constraints) {
-          const store = constrainer.newStoreForConstraint(constraint);
-          this.constrainedHandlerStores[constraint] = store;
-          this._buildConstraintStore(store, constraint);
+          const store2 = constrainer.newStoreForConstraint(constraint);
+          this.constrainedHandlerStores[constraint] = store2;
+          this._buildConstraintStore(store2, constraint);
         }
         const lines = ["'use strict'"];
         lines.push(`
@@ -33179,7 +33179,7 @@ var require_accept_version = __commonJS({
       this.maxMinors = {};
       this.maxPatches = {};
     }
-    SemVerStore.prototype.set = function(version, store) {
+    SemVerStore.prototype.set = function(version, store2) {
       if (typeof version !== "string") {
         throw new TypeError("Version should be a string");
       }
@@ -33192,21 +33192,21 @@ var require_accept_version = __commonJS({
       patch = Number(patch) || 0;
       if (major >= this.maxMajor) {
         this.maxMajor = major;
-        this.store.set("x", store);
-        this.store.set("*", store);
-        this.store.set("x.x", store);
-        this.store.set("x.x.x", store);
+        this.store.set("x", store2);
+        this.store.set("*", store2);
+        this.store.set("x.x", store2);
+        this.store.set("x.x.x", store2);
       }
       if (minor >= (this.maxMinors[major] || 0)) {
         this.maxMinors[major] = minor;
-        this.store.set(`${major}.x`, store);
-        this.store.set(`${major}.x.x`, store);
+        this.store.set(`${major}.x`, store2);
+        this.store.set(`${major}.x.x`, store2);
       }
       if (patch >= (this.maxPatches[`${major}.${minor}`] || 0)) {
         this.maxPatches[`${major}.${minor}`] = patch;
-        this.store.set(`${major}.${minor}.x`, store);
+        this.store.set(`${major}.${minor}.x`, store2);
       }
-      this.store.set(`${major}.${minor}.${patch}`, store);
+      this.store.set(`${major}.${minor}.${patch}`, store2);
       return this;
     };
     SemVerStore.prototype.get = function(version) {
@@ -33552,10 +33552,10 @@ var require_find_my_way = __commonJS({
       const byPattern = router._routesByMethodAndPattern.get(method);
       return byPattern === void 0 ? void 0 : byPattern.get(pattern);
     }
-    Router.prototype.on = function on(method, path, opts, handler, store) {
+    Router.prototype.on = function on(method, path, opts, handler, store2) {
       if (typeof opts === "function") {
         if (handler !== void 0) {
-          store = handler;
+          store2 = handler;
         }
         handler = opts;
         opts = {};
@@ -33569,8 +33569,8 @@ var require_find_my_way = __commonJS({
         assert(path.length === optionalParamMatch.index + optionalParamMatch[0].length, "Optional Parameter needs to be the last parameter of the path");
         const pathFull = path.replace(OPTIONAL_PARAM_REGEXP, "$1$2");
         const pathOptional = path.replace(OPTIONAL_PARAM_REGEXP, "$2") || "/";
-        this.on(method, pathFull, opts, handler, store);
-        this.on(method, pathOptional, opts, handler, store);
+        this.on(method, pathFull, opts, handler, store2);
+        this.on(method, pathOptional, opts, handler, store2);
         return;
       }
       const route = path;
@@ -33584,10 +33584,10 @@ var require_find_my_way = __commonJS({
       for (const method2 of methods) {
         assert(typeof method2 === "string", "Method should be a string");
         assert(httpMethods.includes(method2), `Method '${method2}' is not an http method.`);
-        this._on(method2, path, opts, handler, store, route);
+        this._on(method2, path, opts, handler, store2, route);
       }
     };
-    Router.prototype._on = function _on(method, path, opts, handler, store) {
+    Router.prototype._on = function _on(method, path, opts, handler, store2) {
       let constraints = {};
       if (opts.constraints !== void 0) {
         assert(typeof opts.constraints === "object" && opts.constraints !== null, "Constraints should be an object");
@@ -33717,7 +33717,7 @@ var require_find_my_way = __commonJS({
           }
         }
       }
-      const route = { method, path, pattern, params, opts, handler, store };
+      const route = { method, path, pattern, params, opts, handler, store: store2 };
       this.routes.push(route);
       if (sameRoutes !== void 0) {
         sameRoutes.push(route);
@@ -34156,8 +34156,8 @@ var require_find_my_way = __commonJS({
     Router.prototype._rebuild = function(routes) {
       this.reset();
       for (const route of routes) {
-        const { method, path, opts, handler, store } = route;
-        this._on(method, path, opts, handler, store);
+        const { method, path, opts, handler, store: store2 } = route;
+        this._on(method, path, opts, handler, store2);
       }
     };
     Router.prototype._defaultRoute = function(req, res, ctx) {
@@ -34217,12 +34217,12 @@ var require_find_my_way = __commonJS({
       if (!httpMethods.hasOwnProperty(i)) continue;
       const m = httpMethods[i];
       const methodName = m.toLowerCase();
-      Router.prototype[methodName] = function(path, handler, store) {
-        return this.on(m, path, handler, store);
+      Router.prototype[methodName] = function(path, handler, store2) {
+        return this.on(m, path, handler, store2);
       };
     }
-    Router.prototype.all = function(path, handler, store) {
-      this.on(httpMethods, path, handler, store);
+    Router.prototype.all = function(path, handler, store2) {
+      this.on(httpMethods, path, handler, store2);
     };
     Router.sanitizeUrlPath = function sanitizeUrlPath(url, useSemicolonDelimiter) {
       const decoded = safeDecodeURI(url, useSemicolonDelimiter);
@@ -77294,9 +77294,118 @@ var defaults = import_lib.default.defaults;
 var esm_default = import_lib.default;
 
 // apps/dashboard/server/db.ts
+import { randomUUID as randomUUID3 } from "node:crypto";
+
+// apps/dashboard/server/db-scope.ts
+import { AsyncLocalStorage } from "node:async_hooks";
+
+// apps/dashboard/server/session.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
+function parseCookies(header) {
+  if (!header) return {};
+  return Object.fromEntries(
+    header.split(";").flatMap((part) => {
+      const index = part.indexOf("=");
+      if (index < 0) return [];
+      const key = part.slice(0, index).trim();
+      const value = part.slice(index + 1).trim();
+      try {
+        return key ? [[key, decodeURIComponent(value)]] : [];
+      } catch {
+        return [];
+      }
+    })
+  );
+}
+function cookiePolicyFor(context, production = SESSION_COOKIE_SECURE) {
+  if (!context) return { name: SESSION_COOKIE_NAME, secure: SESSION_COOKIE_SECURE };
+  const host = typeof context.headers.host === "string" ? context.headers.host : "";
+  return sessionCookiePolicyFor({ protocol: context.protocol, host }, production);
+}
+function derivedCookieName(suffix, context, production) {
+  return `${cookiePolicyFor(context, production).name}${suffix}`;
+}
+function serializeCookie(name, value, maxAge, secure) {
+  const parts = [
+    `${name}=${encodeURIComponent(value)}`,
+    `Path=${SESSION_COOKIE_OPTIONS.path}`,
+    `Max-Age=${maxAge}`,
+    SESSION_COOKIE_OPTIONS.httpOnly ? "HttpOnly" : "",
+    `SameSite=${SESSION_COOKIE_OPTIONS.sameSite === "lax" ? "Lax" : "Strict"}`,
+    secure ? "Secure" : ""
+  ];
+  return parts.filter(Boolean).join("; ");
+}
+var UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function sessionCookieHeader(sessionId, context) {
+  const policy = cookiePolicyFor(context);
+  return serializeCookie(policy.name, sessionId, SESSION_MAX_AGE_SECONDS, policy.secure);
+}
+function policyCookieHeader(name, value, maxAgeSeconds, context) {
+  return serializeCookie(name, value, maxAgeSeconds, cookiePolicyFor(context).secure);
+}
+function clearedCookieHeader(context) {
+  const policy = cookiePolicyFor(context);
+  return serializeCookie(policy.name, "", 0, policy.secure);
+}
+async function readSession(db2, request2) {
+  const cookies = parseCookies(request2.headers.cookie);
+  const id = cookies[cookiePolicyFor(request2).name];
+  if (!id || !UUID_PATTERN.test(id)) return null;
+  const session = await db2.getSession(id);
+  if (!session) return null;
+  if (session.secondFactorRequired && !session.secondFactorSatisfied) {
+    await db2.deleteSession(id);
+    return null;
+  }
+  await db2.touchSession(id);
+  return session;
+}
+function sessionAccessToken(session, env2) {
+  try {
+    return decryptSecret(session.accessTokenCiphertext, env2.encryptionKey);
+  } catch {
+    return null;
+  }
+}
+async function issueSession(db2, env2, input) {
+  const id = randomUUID2();
+  const expiresAt = await db2.createSession({
+    id,
+    discordUserId: input.discordUserId,
+    discordUsername: input.discordUsername,
+    discordHandle: input.discordHandle ?? null,
+    discordAvatar: input.discordAvatar ?? null,
+    accessTokenCiphertext: encryptSecret(input.accessToken, env2.encryptionKey),
+    scopes: input.scopes,
+    userAgent: input.userAgent ?? null,
+    secondFactorSatisfied: input.secondFactorSatisfied ?? false
+  });
+  return { id, expiresAt };
+}
+async function destroySession(db2, request2) {
+  const cookies = parseCookies(request2.headers.cookie);
+  const id = cookies[cookiePolicyFor(request2).name];
+  if (id && UUID_PATTERN.test(id)) await db2.deleteSession(id);
+}
+
+// apps/dashboard/server/db-scope.ts
+var store = new AsyncLocalStorage();
+function runAsSession(sessionId, fn) {
+  return store.run(sessionId, fn);
+}
+function currentSessionId() {
+  return store.getStore() ?? null;
+}
+function sessionIdFromRequest(context) {
+  const header = typeof context.headers.cookie === "string" ? context.headers.cookie : void 0;
+  const cookies = parseCookies(header);
+  return cookies[cookiePolicyFor(context).name] ?? null;
+}
+
+// apps/dashboard/server/db.ts
 var { Pool: Pool2 } = esm_default;
-function createPool(databaseUrl) {
+function createPool(databaseUrl, options = {}) {
   const pool2 = new Pool2({
     connectionString: databaseUrl,
     // Sized to the embedded server's max_connections=8 together with the bot's
@@ -77311,7 +77420,23 @@ function createPool(databaseUrl) {
     options: "-c statement_timeout=15000 -c idle_in_transaction_session_timeout=10000"
   });
   pool2.on("error", (error) => console.error("AL AI database pool error", error));
-  return pool2;
+  const scopedQuery = async (text, values) => {
+    const sessionId = currentSessionId() ?? options.sessionIdForContextlessQueries ?? "";
+    const client = await pool2.connect();
+    try {
+      await client.query("SELECT set_config('al_ai.session_id', $1, false)", [sessionId]);
+      return await client.query(text, values);
+    } finally {
+      client.release();
+    }
+  };
+  return new Proxy(pool2, {
+    get(target, property, receiver) {
+      if (property === "query") return scopedQuery;
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
 }
 function mapSyncJob(row) {
   return {
@@ -77336,6 +77461,7 @@ function createDatabase(pool2) {
     const client = await pool2.connect();
     try {
       await client.query("BEGIN");
+      await client.query("SELECT set_config('al_ai.session_id', $1, true)", [currentSessionId() ?? ""]);
       for (const [key, value] of Object.entries(settings)) {
         await client.query("SELECT set_config($1, $2, true)", [key, value]);
       }
@@ -77400,6 +77526,50 @@ function createDatabase(pool2) {
       const row = rows[0];
       if (!row) return null;
       return { id: row.id, name: row.name, iconUrl: row.icon_url, memberCount: row.member_count, botPresent: row.bot_present };
+    },
+    /**
+     * Records a membership the route layer just verified against Discord.
+     *
+     * The policies on every guild table resolve the caller through this table,
+     * so the write has to happen before the first guild read of the request.
+     * The tier here only ever narrows what the route already allowed — it is
+     * not a substitute for `assertTier`, which asks the guild's own role
+     * configuration on every write.
+     */
+    async grantGuildAccess(entry) {
+      await pool2.query(
+        `INSERT INTO guild_acl (guild_id, discord_user_id, tier, updated_at)
+         VALUES ($1, $2, $3, now())
+         ON CONFLICT (guild_id, discord_user_id)
+         DO UPDATE SET tier = EXCLUDED.tier, updated_at = now()`,
+        [entry.guildId, entry.discordUserId, entry.tier]
+      );
+    },
+    /**
+     * Drops access rows for guilds the account no longer administers.
+     *
+     * Called with the authoritative Discord list on every `/api/guilds` read,
+     * so losing a role closes the database boundary even though the route
+     * guard would have refused the request anyway.
+     */
+    async pruneGuildAccess(discordUserId, keepGuildIds) {
+      const { rowCount } = await pool2.query(
+        `DELETE FROM guild_acl WHERE discord_user_id = $1 AND NOT (guild_id = ANY($2::text[]))`,
+        [discordUserId, keepGuildIds]
+      );
+      return rowCount ?? 0;
+    },
+    /** Removes one account's access to one guild, when the guard says it lost it. */
+    async revokeGuildAccess(guildId, discordUserId) {
+      await pool2.query(`DELETE FROM guild_acl WHERE guild_id = $1 AND discord_user_id = $2`, [guildId, discordUserId]);
+    },
+    /** What the database believes this account may reach (tests and probes). */
+    async listGuildAccess(discordUserId) {
+      const { rows } = await pool2.query(
+        `SELECT guild_id, tier, updated_at FROM guild_acl WHERE discord_user_id = $1 ORDER BY guild_id`,
+        [discordUserId]
+      );
+      return rows.map((row) => ({ guildId: row.guild_id, tier: row.tier, updatedAt: row.updated_at }));
     },
     async getTierRoles(guildId) {
       const { rows } = await pool2.query(
@@ -77918,7 +78088,7 @@ function createDatabase(pool2) {
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (guild_id, kind, level, required_voice_level, role_id) DO NOTHING
          RETURNING id, kind, level, required_voice_level, role_id`,
-        [randomUUID2(), guildId, reward.kind, reward.level, reward.voiceLevel, reward.roleId, reward.alwaysKeep]
+        [randomUUID3(), guildId, reward.kind, reward.level, reward.voiceLevel, reward.roleId, reward.alwaysKeep]
       );
       const row = rows[0];
       if (!row) return null;
@@ -77987,7 +78157,7 @@ function createDatabase(pool2) {
       }
       const inserted = await pool2.query(
         `INSERT INTO level_sync_jobs (id, guild_id) VALUES ($1, $2) RETURNING *`,
-        [randomUUID2(), guildId]
+        [randomUUID3(), guildId]
       );
       return mapSyncJob(inserted.rows[0]);
     },
@@ -78135,6 +78305,7 @@ function createDatabase(pool2) {
       const client = await pool2.connect();
       try {
         await client.query("BEGIN");
+        await client.query("SELECT set_config('al_ai.session_id', $1, true)", [currentSessionId() ?? ""]);
         await client.query(
           `INSERT INTO guild_logging (guild_id, enabled, mode, global_channel_id, ignored_channel_ids, ignored_role_ids, embed_color, category_colors, event_flags, category_channels, event_channels, event_colors, updated_at)
            VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, now())
@@ -78672,96 +78843,6 @@ function createDatabase(pool2) {
       await pool2.end();
     }
   };
-}
-
-// apps/dashboard/server/session.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
-function parseCookies(header) {
-  if (!header) return {};
-  return Object.fromEntries(
-    header.split(";").flatMap((part) => {
-      const index = part.indexOf("=");
-      if (index < 0) return [];
-      const key = part.slice(0, index).trim();
-      const value = part.slice(index + 1).trim();
-      try {
-        return key ? [[key, decodeURIComponent(value)]] : [];
-      } catch {
-        return [];
-      }
-    })
-  );
-}
-function cookiePolicyFor(context, production = SESSION_COOKIE_SECURE) {
-  if (!context) return { name: SESSION_COOKIE_NAME, secure: SESSION_COOKIE_SECURE };
-  const host = typeof context.headers.host === "string" ? context.headers.host : "";
-  return sessionCookiePolicyFor({ protocol: context.protocol, host }, production);
-}
-function derivedCookieName(suffix, context, production) {
-  return `${cookiePolicyFor(context, production).name}${suffix}`;
-}
-function serializeCookie(name, value, maxAge, secure) {
-  const parts = [
-    `${name}=${encodeURIComponent(value)}`,
-    `Path=${SESSION_COOKIE_OPTIONS.path}`,
-    `Max-Age=${maxAge}`,
-    SESSION_COOKIE_OPTIONS.httpOnly ? "HttpOnly" : "",
-    `SameSite=${SESSION_COOKIE_OPTIONS.sameSite === "lax" ? "Lax" : "Strict"}`,
-    secure ? "Secure" : ""
-  ];
-  return parts.filter(Boolean).join("; ");
-}
-var UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function sessionCookieHeader(sessionId, context) {
-  const policy = cookiePolicyFor(context);
-  return serializeCookie(policy.name, sessionId, SESSION_MAX_AGE_SECONDS, policy.secure);
-}
-function policyCookieHeader(name, value, maxAgeSeconds, context) {
-  return serializeCookie(name, value, maxAgeSeconds, cookiePolicyFor(context).secure);
-}
-function clearedCookieHeader(context) {
-  const policy = cookiePolicyFor(context);
-  return serializeCookie(policy.name, "", 0, policy.secure);
-}
-async function readSession(db2, request2) {
-  const cookies = parseCookies(request2.headers.cookie);
-  const id = cookies[cookiePolicyFor(request2).name];
-  if (!id || !UUID_PATTERN.test(id)) return null;
-  const session = await db2.getSession(id);
-  if (!session) return null;
-  if (session.secondFactorRequired && !session.secondFactorSatisfied) {
-    await db2.deleteSession(id);
-    return null;
-  }
-  await db2.touchSession(id);
-  return session;
-}
-function sessionAccessToken(session, env2) {
-  try {
-    return decryptSecret(session.accessTokenCiphertext, env2.encryptionKey);
-  } catch {
-    return null;
-  }
-}
-async function issueSession(db2, env2, input) {
-  const id = randomUUID3();
-  const expiresAt = await db2.createSession({
-    id,
-    discordUserId: input.discordUserId,
-    discordUsername: input.discordUsername,
-    discordHandle: input.discordHandle ?? null,
-    discordAvatar: input.discordAvatar ?? null,
-    accessTokenCiphertext: encryptSecret(input.accessToken, env2.encryptionKey),
-    scopes: input.scopes,
-    userAgent: input.userAgent ?? null,
-    secondFactorSatisfied: input.secondFactorSatisfied ?? false
-  });
-  return { id, expiresAt };
-}
-async function destroySession(db2, request2) {
-  const cookies = parseCookies(request2.headers.cookie);
-  const id = cookies[cookiePolicyFor(request2).name];
-  if (id && UUID_PATTERN.test(id)) await db2.deleteSession(id);
 }
 
 // apps/dashboard/server/audit.ts
@@ -80428,6 +80509,17 @@ var app = (0, import_fastify.default)({
   bodyLimit: REQUEST_BODY_LIMIT,
   trustProxy: trustProxyOnlyLoopback
 });
+{
+  const registerRoute = app.route.bind(app);
+  app.route = ((options) => {
+    const handler = options.handler;
+    if (typeof handler !== "function") return registerRoute(options);
+    const scoped = function(request2, reply) {
+      return runAsSession(sessionIdFromRequest(request2), () => handler.call(this, request2, reply));
+    };
+    return registerRoute({ ...options, handler: scoped });
+  });
+}
 await app.register(import_compress.default, {
   global: true,
   encodings: ["br", "gzip", "deflate"],
@@ -80616,6 +80708,15 @@ async function resolveGuildMembership(request2, reply, guildId) {
     reply.code(403).send({ error: "NOT_A_MEMBER", message: "\u0644\u0627 \u062A\u0645\u0644\u0643 \u0648\u0635\u0648\u0644\u0627\u064B \u0625\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0633\u064A\u0631\u0641\u0631." });
     return null;
   }
+  if (isAdministrable(membership.permissions)) {
+    await db.grantGuildAccess({
+      guildId,
+      discordUserId: session.discordUserId,
+      tier: membership.owner ? "owner" : hasPermission(membership.permissions, DISCORD_PERMISSION_BITS.ADMINISTRATOR) ? "admin" : "moderator"
+    });
+  } else {
+    await db.revokeGuildAccess(guildId, session.discordUserId).catch(() => void 0);
+  }
   return { session, membership };
 }
 async function requireGuildAccess(request2, reply, guildId) {
@@ -80655,6 +80756,9 @@ async function requireTierForGuild(request2, reply, guildId, required = "admin")
       return null;
     }
     throw error;
+  }
+  if (tier) {
+    await db.grantGuildAccess({ guildId, discordUserId: session.discordUserId, tier });
   }
   return { session, tier, membership };
 }
@@ -81561,6 +81665,11 @@ app.get("/api/guilds", async (request2, reply) => {
   const guilds = await Promise.all(
     administrable.map(async (guild) => {
       const botPresent = botGuildIds.has(guild.id);
+      await db.grantGuildAccess({
+        guildId: guild.id,
+        discordUserId: session.discordUserId,
+        tier: guild.owner ? "owner" : hasPermission(guild.permissions, DISCORD_PERMISSION_BITS.ADMINISTRATOR) ? "admin" : "moderator"
+      });
       let memberCount = null;
       if (botPresent) {
         await db.ensureGuild({ id: guild.id, name: guild.name, iconUrl: guild.icon });
@@ -81574,9 +81683,13 @@ app.get("/api/guilds", async (request2, reply) => {
         userIsGuildOwner: guild.owner,
         userIsAdministrator: hasPermission(guild.permissions, DISCORD_PERMISSION_BITS.ADMINISTRATOR)
       }) : null;
+      if (tier) {
+        await db.grantGuildAccess({ guildId: guild.id, discordUserId: session.discordUserId, tier });
+      }
       return describeGuildAccess({ guild, botPresent, memberCount, tier });
     })
   );
+  await db.pruneGuildAccess(session.discordUserId, administrable.map((guild) => guild.id));
   return { guilds };
 });
 app.get("/api/guilds/:guildId/invite", async (request2, reply) => {

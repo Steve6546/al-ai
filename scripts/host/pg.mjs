@@ -74,6 +74,20 @@ const PASSWORD_FILE = join(WORK, "password");
  */
 const APP_USER = process.env.AL_AI_PG_APP_USER || "al_ai_app";
 const APP_PASSWORD_FILE = join(WORK, "password-app");
+/**
+ * The bot is a second runtime identity.
+ *
+ * The panel answers for one signed-in account and is scoped by row policies to
+ * that account's guilds. The bot has no session: it serves every guild, so the
+ * policies cannot answer "whose session is this?" for it, and pretending it is
+ * some user would be a lie the database would enforce. It gets its own role
+ * with BYPASSRLS — no DDL, no superuser, DML only — which is the smallest
+ * privilege that can do its job. It is the one documented exception to the
+ * default-deny model, and it is a separate password file so losing the panel's
+ * credential never widens the bot's.
+ */
+const BOT_USER = process.env.AL_AI_PG_BOT_USER || "al_ai_bot";
+const BOT_PASSWORD_FILE = join(WORK, "password-bot");
 const SHIM = join(WORK, "libnssshim.so");
 const SHIM_SOURCE = join(WORK, "shim.c");
 
@@ -127,6 +141,21 @@ function appPassword() {
 
 function appDatabaseUrl(secret) {
   return `postgres://${encodeURIComponent(APP_USER)}:${encodeURIComponent(secret)}@127.0.0.1:${PORT}/${DATABASE}`;
+}
+
+/** The bot password: same rules as the application password, separate file. */
+function botPassword() {
+  const fromEnv = process.env.POSTGRES_BOT_PASSWORD?.trim();
+  if (fromEnv) return fromEnv;
+  if (existsSync(BOT_PASSWORD_FILE)) return readFileSync(BOT_PASSWORD_FILE, "utf8").trim();
+  const minted = randomBytes(24).toString("hex");
+  writeFileSync(BOT_PASSWORD_FILE, minted, { mode: 0o600 });
+  chmodSync(BOT_PASSWORD_FILE, 0o600);
+  return minted;
+}
+
+function botDatabaseUrl(secret) {
+  return `postgres://${encodeURIComponent(BOT_USER)}:${encodeURIComponent(secret)}@127.0.0.1:${PORT}/${DATABASE}`;
 }
 
 function haveBinaries() {
@@ -384,6 +413,56 @@ async function ensureAppRole(secret) {
 }
 
 /**
+ * Creates/repairs the bot role.
+ *
+ * `BYPASSRLS` is granted deliberately and is the only such role: the bot serves
+ * every guild and has no user session for a policy to resolve. It still cannot
+ * create objects, read server files or become superuser, and it runs with its
+ * own password file. Returns false when the role cannot be prepared here, in
+ * which case the bot keeps the application URL — and then the guild policies
+ * would refuse its reads, so the caller is warned rather than left guessing.
+ */
+async function ensureBotRole(secret) {
+  const { default: pg } = await import("pg");
+  const admin = new pg.Client({ connectionString: databaseUrl(secret) });
+  await admin.connect();
+  try {
+    const botSecret = botPassword();
+    const exists = await admin.query("select 1 from pg_roles where rolname = $1", [BOT_USER]);
+    const statement = exists.rowCount
+      ? (await admin.query(
+          "select format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS PASSWORD %L', $1::text, $2::text) as sql",
+          [BOT_USER, botSecret]
+        )).rows[0].sql
+      : (await admin.query(
+          "select format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS PASSWORD %L', $1::text, $2::text) as sql",
+          [BOT_USER, botSecret]
+        )).rows[0].sql;
+    await admin.query(statement);
+    const probe = new pg.Client({ connectionString: botDatabaseUrl(botSecret) });
+    try {
+      await probe.connect();
+      const flags = (await probe.query(
+        "select rolsuper, rolbypassrls from pg_roles where rolname = current_user"
+      )).rows[0];
+      if (!flags || flags.rolsuper) {
+        log(`bot role ${BOT_USER} is not usable (superuser); the bot keeps the application URL`);
+        return false;
+      }
+    } finally {
+      await probe.end().catch(() => {});
+    }
+    log(`bot role ${BOT_USER} ready (NOSUPERUSER, BYPASSRLS, DML only)`);
+    return true;
+  } catch (error) {
+    log(`bot role could not be prepared (${error.message}); the bot keeps the application URL`);
+    return false;
+  } finally {
+    await admin.end().catch(() => {});
+  }
+}
+
+/**
  * Apply `infra/schema.sql`.
  *
  * Idempotent by construction (`CREATE TABLE IF NOT EXISTS`), so it runs on
@@ -470,6 +549,38 @@ async function main() {
   // that starts with a log line: it tokenises it and reports `host: "base"`
   // (`database` split down the middle), which is an outage that names nothing
   // real. Diagnostics go to stderr.
+  // Same contract as `--print-app-url`: stdout is one URL, diagnostics go to
+  // stderr, and an unusable bot role falls back to the application URL so the
+  // bot still starts (the guild policies then log refusals rather than the
+  // process dying at boot).
+  if (process.argv.includes("--print-bot-url")) {
+    const { default: pg } = await import("pg");
+    let usable = false;
+    try {
+      const botSecret = botPassword();
+      const probe = new pg.Client({ connectionString: botDatabaseUrl(botSecret) });
+      await probe.connect();
+      try {
+        const flags = (await probe.query(
+          "select rolsuper from pg_roles where rolname = current_user"
+        )).rows[0];
+        usable = Boolean(flags) && !flags.rolsuper;
+      } finally {
+        await probe.end().catch(() => {});
+      }
+      if (usable) console.log(botDatabaseUrl(botSecret));
+    } catch (error) {
+      console.error(`[db] bot role is not usable yet (${error.message})`);
+    }
+    if (!usable) {
+      console.error(`[db] warning: ${BOT_USER} cannot log in; the bot keeps the application URL`);
+      // The application URL is the safe fallback: the URL that must never be
+      // printed here is the owner's.
+      console.log(appDatabaseUrl(appPassword()));
+    }
+    return;
+  }
+
   if (process.argv.includes("--print-app-url")) {
     const ownerUrl = databaseUrl(secret);
     const { default: pg } = await import("pg");
@@ -540,6 +651,7 @@ async function main() {
   }
   await ensureDatabase(secret);
   await ensureAppRole(secret);
+  await ensureBotRole(secret);
   await applySchema(secret);
   writeFileSync(join(WORK, "ready"), `${new Date().toISOString()}\n`);  log("ready");
 

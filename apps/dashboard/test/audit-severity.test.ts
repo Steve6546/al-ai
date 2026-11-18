@@ -6,6 +6,7 @@ import type pg from "pg";
 import { eventSchema, requireEvent } from "@al-ai/core";
 import { appendAudit } from "../server/audit.js";
 import { createDatabase, createPool } from "../server/db.js";
+import { seedIdentity } from "./live-identity.js";
 import type { Database } from "../server/db.js";
 import type { BffEnv } from "../server/env.js";
 
@@ -104,7 +105,17 @@ test("an unregistered event is refused instead of stored unclassified", async ()
 const envFile = resolve(import.meta.dirname, "../../../.env");
 if (!process.env.DATABASE_URL && existsSync(envFile)) process.loadEnvFile(envFile);
 
-const pool = process.env.DATABASE_URL ? createPool(process.env.DATABASE_URL) : null;
+const connectionUrl = process.env.DATABASE_URL;
+/**
+ * A real session and access rows, created the same way a request would create
+ * them, so the row policies answer these fixture writes as the application role
+ * rather than being bypassed by an administrative connection.
+ */
+const pool = connectionUrl
+  ? createPool(connectionUrl, {
+      sessionIdForContextlessQueries: await seedIdentity(connectionUrl).catch(() => undefined)
+    })
+  : null;
 
 let reachable = false;
 if (pool) {

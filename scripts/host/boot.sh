@@ -190,6 +190,17 @@ if [ -z "${DATABASE_URL:-}" ]; then
       ;;
   esac
   export DATABASE_URL
+
+  # The bot is a separate identity: it serves every guild and has no session, so
+  # the panel's row policies cannot describe it. `al_ai_bot` is that identity
+  # (DML only, no DDL, BYPASSRLS) and it is handed to the bot process alone —
+  # the dashboard above keeps the scoped application role. A role problem falls
+  # back to the application URL instead of stopping the deployment.
+  BOT_URL="$(node scripts/host/pg.mjs --print-bot-url 2>/dev/null | tail -n 1)"
+  case "$BOT_URL" in
+    postgres://*|postgresql://*) export BOT_DATABASE_URL="$BOT_URL" ;;
+    *) log "WARNING: the bot role URL was unusable; the bot connects as the application role" ;;
+  esac
   log "PostgreSQL ready"
 else
   log "using the DATABASE_URL from the environment; no local database is started"
@@ -228,10 +239,10 @@ log "dashboard ready"
 # --- bot -------------------------------------------------------------------
 log "starting the Discord bot"
 if [ "$COMPILED" = "1" ]; then
-  NODE_OPTIONS="--max-old-space-size=$HEAP_BOT" node "$ROOT/host-build/bot.mjs" \
+  DATABASE_URL="${BOT_DATABASE_URL:-$DATABASE_URL}" NODE_OPTIONS="--max-old-space-size=$HEAP_BOT" node "$ROOT/host-build/bot.mjs" \
     > >(tee -a "$LOG_DIR/bot.log") 2>&1 &
 else
-  NODE_OPTIONS="--max-old-space-size=$HEAP_BOT" node --import tsx apps/bot/src/index.ts \
+  DATABASE_URL="${BOT_DATABASE_URL:-$DATABASE_URL}" NODE_OPTIONS="--max-old-space-size=$HEAP_BOT" node --import tsx apps/bot/src/index.ts \
     > >(tee -a "$LOG_DIR/bot.log") 2>&1 &
 fi
 pids+=($!)

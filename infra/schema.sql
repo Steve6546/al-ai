@@ -1126,6 +1126,56 @@ CREATE TRIGGER audit_trail_no_truncate
 REVOKE TRUNCATE ON audit_trail FROM PUBLIC;
 
 -- ---------------------------------------------------------------------------
+-- Guild access list and the identity helpers the policies read
+--
+-- The panel is multi-tenant: a guild id is public (it sits in every invite
+-- link), so "the query filters by guild_id" is only a filter, not a boundary.
+-- `guild_acl` records the membership the route layer already verified against
+-- Discord, and the policies below ask it the same question the guard asks.
+--
+-- Who fills it: `requireGuildAccess` / `requireTierForGuild` / `/api/guilds`
+-- after Discord said the account may administer that guild, and only then. A
+-- stale row is defence-in-depth only; the route guard re-asks Discord on every
+-- request, so losing a role closes the panel before the row is refreshed.
+--
+-- The identity travels as `al_ai.session_id`, a transaction-scoped value the
+-- connection wrapper sets from the request's own cookie. `al_ai_session_user()`
+-- resolves it with the owner's rights, so a policy can answer "who is asking"
+-- without granting the application role a read of every session row.
+CREATE TABLE IF NOT EXISTS guild_acl (
+  guild_id TEXT NOT NULL,
+  discord_user_id TEXT NOT NULL,
+  tier TEXT NOT NULL DEFAULT 'moderator' CHECK (tier IN ('owner', 'admin', 'moderator')),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (guild_id, discord_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS guild_acl_user_idx ON guild_acl (discord_user_id);
+
+CREATE OR REPLACE FUNCTION al_ai_current_session() RETURNS text
+LANGUAGE sql STABLE AS $$
+  SELECT nullif(current_setting('al_ai.session_id', true), '')
+$$;
+
+CREATE OR REPLACE FUNCTION al_ai_session_user() RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+  SELECT s.discord_user_id
+    FROM oauth_sessions s
+   WHERE s.id::text = al_ai_current_session()
+     AND s.expires_at > now()
+$$;
+
+CREATE OR REPLACE FUNCTION al_ai_can_access_guild(candidate text) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+  SELECT EXISTS (
+    SELECT 1
+      FROM guild_acl a
+     WHERE a.guild_id = candidate
+       AND a.discord_user_id = al_ai_session_user()
+  )
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Least privilege + row-level security
 --
 -- Two roles, never one:
@@ -1141,11 +1191,14 @@ REVOKE TRUNCATE ON audit_trail FROM PUBLIC;
 -- append-only is now enforced three ways (BEFORE UPDATE/DELETE trigger,
 -- BEFORE TRUNCATE trigger, and no policy that would grant either).
 --
--- Honest scope: this is not per-tenant isolation. Both services connect as one
--- role, and the panel scopes rows by guild id in SQL rather than through a
--- session GUC. What this buys is default-deny for every other role and for any
--- future table, a second lock on the trail, and a database that can no longer
--- be reached as a superuser from an application bug.
+-- Honest scope: the runtime identity is `al_ai_app`, and every guild-scoped
+-- row must belong to a guild in that caller's access list. The bot is a
+-- separate identity (`al_ai_bot`) that needs every guild, so it holds BYPASSRLS
+-- and no DDL — a deliberate, documented exception, because a service with no
+-- user cannot answer "whose session is this?". The owner role bypasses RLS by
+-- ownership; it is the migration and backup identity and never serves a request
+-- (backups read through it on purpose, so a scoped role cannot export a table
+-- empty).
 --
 -- Wrapped in a DO block because a database initialised without these roles
 -- (a managed provider where the app owns its own schema) must not fail its
@@ -1155,9 +1208,12 @@ DECLARE
   app_role CONSTANT text := 'al_ai_app';
   owner_role CONSTANT text := current_user;
   has_role boolean;
+  has_bot boolean;
+  has_guild_column boolean;
   t record;
 BEGIN
   SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = app_role) INTO has_role;
+  SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'al_ai_bot') INTO has_bot;
 
   IF NOT has_role THEN
     BEGIN
@@ -1191,10 +1247,34 @@ BEGIN
   -- The trail is append-only, so DELETE/UPDATE never belonged to the app.
   EXECUTE format('REVOKE UPDATE, DELETE ON public.audit_trail FROM %I', app_role);
 
+  -- The policy expressions call these, so the application role needs EXECUTE.
+  -- PUBLIC never does: a role that cannot read a session must not be able to
+  -- ask these functions to resolve one.
+  REVOKE ALL ON FUNCTION al_ai_current_session(), al_ai_session_user(), al_ai_can_access_guild(text) FROM PUBLIC;
+  EXECUTE format('GRANT EXECUTE ON FUNCTION al_ai_current_session(), al_ai_session_user(), al_ai_can_access_guild(text) TO %I', app_role);
+
+  IF has_bot THEN
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO al_ai_bot', current_database());
+    EXECUTE format('GRANT USAGE ON SCHEMA public TO al_ai_bot');
+    EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO al_ai_bot');
+    EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO al_ai_bot');
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO al_ai_bot');
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO al_ai_bot');
+  END IF;
+
   FOR t IN
     SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename
   LOOP
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t.tablename);
+
+    -- Which boundary this table has. `guild_acl` and `guilds` are handled by
+    -- name above because their key column is not `guild_id`.
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns c
+       WHERE c.table_schema = 'public'
+         AND c.table_name = t.tablename
+         AND c.column_name = 'guild_id'
+    ) INTO has_guild_column;
 
     -- Recreated every pass, so a policy edit in this file is what the next
     -- boot applies. `IF EXISTS` keeps the pass idempotent.
@@ -1203,14 +1283,46 @@ BEGIN
     EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t.tablename || '_app_append', t.tablename);
     EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t.tablename || '_owner', t.tablename);
 
-    IF t.tablename = 'audit_trail' THEN
+    IF t.tablename IN ('instance_settings', 'bot_identity', 'security_nonces') THEN
+      -- Instance-wide configuration, by design: one row that belongs to the
+      -- deployment rather than to a guild or an account. The predicate names
+      -- the runtime role it is for; there is no per-tenant row here to isolate.
       EXECUTE format(
-        'CREATE POLICY %I ON public.%I FOR SELECT TO %I USING (true)',
-        t.tablename || '_app_read', t.tablename, app_role
+        'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (%s) WITH CHECK (%s)',
+        t.tablename || '_app', t.tablename, app_role,
+        $i$current_user = 'al_ai_app'::name$i$,
+        $i$current_user = 'al_ai_app'::name$i$
+      );
+    ELSIF t.tablename = 'guild_acl' THEN
+      -- The access list itself: an account may maintain only its own rows, so
+      -- it cannot grant itself a guild and cannot read who else holds one.
+      EXECUTE format(
+        'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (%s) WITH CHECK (%s)',
+        t.tablename || '_app', t.tablename, app_role,
+        $i$discord_user_id = al_ai_session_user()$i$,
+        $i$discord_user_id = al_ai_session_user()$i$
+      );
+    ELSIF t.tablename = 'guilds' THEN
+      -- Guild metadata follows the same access list as the guild's settings.
+      EXECUTE format(
+        'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (%s) WITH CHECK (%s)',
+        t.tablename || '_app', t.tablename, app_role,
+        $i$al_ai_can_access_guild(id)$i$,
+        $i$al_ai_can_access_guild(id)$i$
+      );
+    ELSIF t.tablename = 'audit_trail' THEN
+      -- A trail row is readable only inside its guild. Instance-level rows
+      -- (guild_id IS NULL) are the deployment's own events, so any live
+      -- session may read them; an expired or absent session may not.
+      EXECUTE format(
+        'CREATE POLICY %I ON public.%I FOR SELECT TO %I USING (%s)',
+        t.tablename || '_app_read', t.tablename, app_role,
+        $i$al_ai_can_access_guild(guild_id) OR (guild_id IS NULL AND al_ai_session_user() IS NOT NULL)$i$
       );
       EXECUTE format(
-        'CREATE POLICY %I ON public.%I FOR INSERT TO %I WITH CHECK (true)',
-        t.tablename || '_app_append', t.tablename, app_role
+        'CREATE POLICY %I ON public.%I FOR INSERT TO %I WITH CHECK (%s)',
+        t.tablename || '_app_append', t.tablename, app_role,
+        $i$al_ai_can_access_guild(guild_id) OR (guild_id IS NULL AND al_ai_session_user() IS NOT NULL)$i$
       );
     ELSIF t.tablename = 'oauth_sessions' THEN
       -- The encrypted Discord access token lives in this row, so "the app role
@@ -1239,10 +1351,24 @@ BEGIN
         $p$discord_user_id = current_setting('al_ai.actor', true)$p$
       );
     ELSE
-      EXECUTE format(
-        'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (true) WITH CHECK (true)',
-        t.tablename || '_app', t.tablename, app_role
-      );
+      IF has_guild_column THEN
+        -- Every guild-scoped table. `WITH CHECK` runs on INSERT and on the new
+        -- row of an UPDATE, so a row cannot be created in — or moved into — a
+        -- guild the caller does not hold.
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (%s) WITH CHECK (%s)',
+          t.tablename || '_app', t.tablename, app_role,
+          $i$al_ai_can_access_guild(guild_id)$i$,
+          $i$al_ai_can_access_guild(guild_id)$i$
+        );
+      ELSE
+        -- No boundary this file can name: deny rather than expose. A future
+        -- table without `guild_id` must be added to a branch above on purpose.
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (false) WITH CHECK (false)',
+          t.tablename || '_app', t.tablename, app_role
+        );
+      END IF;
     END IF;
 
     -- The role that applies this file keeps full access even when it is not a

@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { commandFlagsFor, defaultCommandConfig, requireCommand, DEFAULT_ANTI_NUKE_LIMITS, DEFAULT_PROTECTION_SETTINGS, MAX_IMAGE_DATA_URL_LENGTH } from "@al-ai/core";
 import { createDatabase, createPool } from "../server/db.js";
+import { FIXTURE_ACCOUNT, seedIdentity } from "./live-identity.js";
 
 /**
  * Integration tests for the dashboard's guild bookkeeping.
@@ -28,7 +29,17 @@ if (!process.env.DATABASE_URL && existsSync(envFile)) {
 const GUILD_ID = "900000000000000001";
 const REAL_MEMBER_COUNT = 1234;
 
-const pool = process.env.DATABASE_URL ? createPool(process.env.DATABASE_URL!) : null;
+const connectionUrl = process.env.DATABASE_URL;
+/**
+ * A real session and access rows, created the same way a request would create
+ * them, so the row policies answer these fixture writes as the application role
+ * rather than being bypassed by an administrative connection.
+ */
+const pool = connectionUrl
+  ? createPool(connectionUrl, {
+      sessionIdForContextlessQueries: await seedIdentity(connectionUrl).catch(() => undefined)
+    })
+  : null;
 const db = pool ? createDatabase(pool) : null;
 
 let reachable = false;
@@ -660,6 +671,10 @@ test("getModuleStates reads each module's own row, and defaults protection to ar
   if (!db) return t.skip(reason);
   const id = `91${RUN}1`;
 
+  // The row policies answer "may this caller reach this guild?" through the
+  // access list, so a fixture that invents a guild id has to record the access
+  // first — exactly what `/api/guilds` does for a real one.
+  await db.grantGuildAccess({ guildId: id, discordUserId: FIXTURE_ACCOUNT, tier: "owner" });
   await db.ensureGuild({ id, name: "Modules", iconUrl: null, botPresent: true });
 
   // A guild with nothing configured: protection is armed by default (that is
@@ -706,6 +721,7 @@ test("getModuleStates reads each module's own row, and defaults protection to ar
 test("auditSeries buckets by hour and counts only the requested window", async t => {
   if (!db) return t.skip(reason);
   const id = `91${RUN}2`;
+  await db.grantGuildAccess({ guildId: id, discordUserId: FIXTURE_ACCOUNT, tier: "owner" });
   await db.ensureGuild({ id, name: "Histogram", iconUrl: null, botPresent: true });
 
   const insert = (eventId: string, agoMinutes: number) =>

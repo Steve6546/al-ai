@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createDatabase, createPool } from "../server/db.js";
+import { seedIdentity } from "./live-identity.js";
 
 /**
  * Integration tests for the levels system's storage: settings round trips,
@@ -22,7 +23,17 @@ const GUILD_ID = "900000000000000002";
 const ROLE_A = "811111111111111111";
 const ROLE_B = "822222222222222222";
 
-const pool = process.env.DATABASE_URL ? createPool(process.env.DATABASE_URL!) : null;
+const connectionUrl = process.env.DATABASE_URL;
+/**
+ * A real session and access rows, created the same way a request would create
+ * them, so the row policies answer these fixture writes as the application role
+ * rather than being bypassed by an administrative connection.
+ */
+const pool = connectionUrl
+  ? createPool(connectionUrl, {
+      sessionIdForContextlessQueries: await seedIdentity(connectionUrl).catch(() => undefined)
+    })
+  : null;
 const db = pool ? createDatabase(pool) : null;
 
 let reachable = false;

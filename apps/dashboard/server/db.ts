@@ -5,6 +5,8 @@ import { DEFAULT_ANTI_NUKE_CONFIG, DEFAULT_BOT_PRESENCE, DEFAULT_CUSTOMIZATION, 
 
 const { Pool } = pg;
 
+import { currentSessionId } from "./db-scope.js";
+
 export type SessionRecord = {
   id: string;
   discordUserId: string;
@@ -23,7 +25,18 @@ export type SessionRecord = {
   secondFactorRequired: boolean;
 };
 
-export function createPool(databaseUrl: string) {
+export function createPool(
+  databaseUrl: string,
+  options: {
+    /**
+     * Only for scripts and tests that run outside a request: the identity their
+     * statements declare. A request's own cookie always wins — the value is
+     * read only when no request context exists, so it cannot become a way to
+     * serve a request as somebody else.
+     */
+    sessionIdForContextlessQueries?: string;
+  } = {}
+) {
   const pool = new Pool({
     connectionString: databaseUrl,
     // Sized to the embedded server's max_connections=8 together with the bot's
@@ -38,7 +51,44 @@ export function createPool(databaseUrl: string) {
     options: "-c statement_timeout=15000 -c idle_in_transaction_session_timeout=10000"
   });
   pool.on("error", error => console.error("AL AI database pool error", error));
-  return pool;
+
+  /**
+   * Every statement declares which session is asking, before it runs.
+   *
+   * The row policies on guild tables resolve the caller from
+   * `al_ai.session_id`, so a statement that arrives without one sees nothing.
+   * The value is written on the checked-out connection and left there until
+   * the next statement overwrites it: the connection is held for exactly these
+   * two statements, and the next checkout begins by writing its own identity
+   * (or the empty string), so an identity can never survive into another
+   * request. `false` rather than `SET LOCAL` because this path has no explicit
+   * transaction; `pool.connect()` callers that open one set it themselves.
+   */
+  const scopedQuery = async <T extends pg.QueryResultRow = pg.QueryResultRow>(
+    text: string,
+    values?: unknown[]
+  ): Promise<pg.QueryResult<T>> => {
+    const sessionId = currentSessionId() ?? options.sessionIdForContextlessQueries ?? "";
+    const client = await pool.connect();
+    try {
+      await client.query("SELECT set_config('al_ai.session_id', $1, false)", [sessionId]);
+      return await client.query<T>(text, values as unknown[] | undefined);
+    } finally {
+      client.release();
+    }
+  };
+
+  // The pool is handed out behind a proxy so every caller — the database
+  // facade in this file, a test, a script — goes through the same declaration
+  // step. A caller that used the raw pool would read nothing rather than
+  // everything, which is the correct direction for a mistake to fail.
+  return new Proxy(pool, {
+    get(target, property, receiver) {
+      if (property === "query") return scopedQuery;
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  }) as pg.Pool;
 }
 
 export type Database = ReturnType<typeof createDatabase>;
@@ -116,6 +166,10 @@ export function createDatabase(pool: pg.Pool) {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      // The session id is written on every transaction, not only when the
+      // caller supplies one: a pooled connection must never begin a statement
+      // under the previous caller's identity.
+      await client.query("SELECT set_config('al_ai.session_id', $1, true)", [currentSessionId() ?? ""]);
       for (const [key, value] of Object.entries(settings)) {
         await client.query("SELECT set_config($1, $2, true)", [key, value]);
       }
@@ -183,6 +237,54 @@ export function createDatabase(pool: pg.Pool) {
       const row = rows[0];
       if (!row) return null;
       return { id: row.id, name: row.name, iconUrl: row.icon_url, memberCount: row.member_count, botPresent: row.bot_present };
+    },
+
+    /**
+     * Records a membership the route layer just verified against Discord.
+     *
+     * The policies on every guild table resolve the caller through this table,
+     * so the write has to happen before the first guild read of the request.
+     * The tier here only ever narrows what the route already allowed — it is
+     * not a substitute for `assertTier`, which asks the guild's own role
+     * configuration on every write.
+     */
+    async grantGuildAccess(entry: { guildId: string; discordUserId: string; tier: "owner" | "admin" | "moderator" }) {
+      await pool.query(
+        `INSERT INTO guild_acl (guild_id, discord_user_id, tier, updated_at)
+         VALUES ($1, $2, $3, now())
+         ON CONFLICT (guild_id, discord_user_id)
+         DO UPDATE SET tier = EXCLUDED.tier, updated_at = now()`,
+        [entry.guildId, entry.discordUserId, entry.tier]
+      );
+    },
+
+    /**
+     * Drops access rows for guilds the account no longer administers.
+     *
+     * Called with the authoritative Discord list on every `/api/guilds` read,
+     * so losing a role closes the database boundary even though the route
+     * guard would have refused the request anyway.
+     */
+    async pruneGuildAccess(discordUserId: string, keepGuildIds: string[]) {
+      const { rowCount } = await pool.query(
+        `DELETE FROM guild_acl WHERE discord_user_id = $1 AND NOT (guild_id = ANY($2::text[]))`,
+        [discordUserId, keepGuildIds]
+      );
+      return rowCount ?? 0;
+    },
+
+    /** Removes one account's access to one guild, when the guard says it lost it. */
+    async revokeGuildAccess(guildId: string, discordUserId: string) {
+      await pool.query(`DELETE FROM guild_acl WHERE guild_id = $1 AND discord_user_id = $2`, [guildId, discordUserId]);
+    },
+
+    /** What the database believes this account may reach (tests and probes). */
+    async listGuildAccess(discordUserId: string) {
+      const { rows } = await pool.query<{ guild_id: string; tier: string; updated_at: Date }>(
+        `SELECT guild_id, tier, updated_at FROM guild_acl WHERE discord_user_id = $1 ORDER BY guild_id`,
+        [discordUserId]
+      );
+      return rows.map(row => ({ guildId: row.guild_id, tier: row.tier, updatedAt: row.updated_at }));
     },
 
     async getTierRoles(guildId: string): Promise<TierRoles | null> {
@@ -1030,6 +1132,10 @@ export function createDatabase(pool: pg.Pool) {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
+        // This path opens its own transaction instead of using `asIdentity`,
+        // so it declares the identity itself. Without it the guild policies
+        // would refuse the write.
+        await client.query("SELECT set_config('al_ai.session_id', $1, true)", [currentSessionId() ?? ""]);
         await client.query(
           `INSERT INTO guild_logging (guild_id, enabled, mode, global_channel_id, ignored_channel_ids, ignored_role_ids, embed_color, category_colors, event_flags, category_channels, event_channels, event_colors, updated_at)
            VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, now())

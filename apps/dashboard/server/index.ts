@@ -101,6 +101,7 @@ import { checkRedirectRegistration, clientIdMismatch, describeMissingRegistratio
 import { elevateFirewall, ensureFirewall, firewallStatus } from "./firewall.js";
 import { isPlatformOwner } from "./authorization.js";
 import { createDatabase, createPool } from "./db.js";
+import { runAsSession, sessionIdFromRequest } from "./db-scope.js";
 import { clearedCookieHeader, derivedCookieName, destroySession, issueSession, parseCookies, policyCookieHeader, readSession, sessionAccessToken, sessionCookieHeader } from "./session.js";
 import { assertTier, AuthorizationError, botIdentityPermissionStatus, resolveActorTier } from "./authorization.js";
 import { appendAudit } from "./audit.js";
@@ -265,6 +266,30 @@ const app = Fastify({
   bodyLimit: REQUEST_BODY_LIMIT,
   trustProxy: trustProxyOnlyLoopback
 });
+
+/**
+ * Every route handler runs under the identity of the cookie that addressed it.
+ *
+ * The database policies on guild tables ask "whose session is this?" before
+ * they return a row, and the only trustworthy answer is the cookie the request
+ * arrived with — not a `guild_id` in the URL or a `user_id` in the body, both of
+ * which the caller chooses. Fastify's route shorthands (`app.get`, `app.post`, …)
+ * all funnel through `app.route`, so wrapping that one method covers every
+ * route registered below, including any added later, with no per-route list to
+ * keep in sync. The wrapper only sets the context; the handler's own guards
+ * still decide what the caller may do.
+ */
+{
+  const registerRoute = app.route.bind(app) as unknown as (options: { handler: unknown } & Record<string, unknown>) => unknown;
+  app.route = ((options: { handler: unknown } & Record<string, unknown>) => {
+    const handler = options.handler;
+    if (typeof handler !== "function") return registerRoute(options);
+    const scoped = function (this: unknown, request: FastifyRequest, reply: FastifyReply) {
+      return runAsSession(sessionIdFromRequest(request), () => handler.call(this, request, reply));
+    };
+    return registerRoute({ ...options, handler: scoped });
+  }) as unknown as typeof app.route;
+}
 
 /**
  * Compression, because the entry bundle is not small and the platform proxy
@@ -718,6 +743,28 @@ async function resolveGuildMembership(request: FastifyRequest, reply: FastifyRep
     return null;
   }
 
+  // Discord just confirmed the account is in the guild. Whether it may
+  // administer it is `isAdministrable`, checked by both guards below; the
+  // access row is written only for a caller that passes it, so a plain member
+  // never becomes visible to the row policies. Writing it here — before any
+  // guild-scoped query — is what lets those policies answer at all.
+  if (isAdministrable(membership.permissions)) {
+    await db.grantGuildAccess({
+      guildId,
+      discordUserId: session.discordUserId,
+      tier: membership.owner
+        ? "owner"
+        : hasPermission(membership.permissions, DISCORD_PERMISSION_BITS.ADMINISTRATOR)
+          ? "admin"
+          : "moderator"
+    });
+  } else {
+    // A role that was taken away must not leave a database boundary behind for
+    // the next request to inherit, even though the guard above already refused
+    // this one.
+    await db.revokeGuildAccess(guildId, session.discordUserId).catch(() => undefined);
+  }
+
   return { session, membership };
 }
 
@@ -774,6 +821,13 @@ async function requireTierForGuild(request: FastifyRequest, reply: FastifyReply,
       return null;
     }
     throw error;
+  }
+
+  // The precise tier the guild's own configuration produced, recorded for the
+  // next request. The route still re-resolves it every time; this row is a
+  // boundary for the database, not a cached authorisation decision.
+  if (tier) {
+    await db.grantGuildAccess({ guildId, discordUserId: session.discordUserId, tier });
   }
 
   return { session, tier, membership };
@@ -2228,6 +2282,20 @@ app.get("/api/guilds", async (request, reply) => {
     administrable.map(async guild => {
       const botPresent = botGuildIds.has(guild.id);
 
+      // Before the first guild read: the row policies resolve "may this caller
+      // see this guild" through the access list, so it has to exist first.
+      // The tier written here is the coarse Discord verdict; `resolveActorTier`
+      // below replaces it with the guild's configured tier.
+      await db.grantGuildAccess({
+        guildId: guild.id,
+        discordUserId: session.discordUserId,
+        tier: guild.owner
+          ? "owner"
+          : hasPermission(guild.permissions, DISCORD_PERMISSION_BITS.ADMINISTRATOR)
+            ? "admin"
+            : "moderator"
+      });
+
       // The member count belongs to the bot, the only layer that can see it. It
       // is `null` — "unknown", not zero — for a guild the bot has not joined,
       // because reporting 0 would be a number we made up. Same reason no row is
@@ -2255,9 +2323,18 @@ app.get("/api/guilds", async (request, reply) => {
 
       // `describeGuildAccess` also re-asserts that an absent bot means no count
       // and no tier, so the rule survives a caller that forgets it.
+      if (tier) {
+        await db.grantGuildAccess({ guildId: guild.id, discordUserId: session.discordUserId, tier });
+      }
       return describeGuildAccess({ guild, botPresent, memberCount, tier });
     })
   );
+
+  // The list Discord just returned is authoritative: anything else in the
+  // access list is a guild this account no longer administers. Pruning here
+  // keeps the database boundary as fresh as the guard, instead of relying on a
+  // row that was written when the account still held the role.
+  await db.pruneGuildAccess(session.discordUserId, administrable.map(guild => guild.id));
 
   return { guilds };
 });
