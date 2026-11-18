@@ -77392,8 +77392,8 @@ async function destroySession(db2, request2) {
 
 // apps/dashboard/server/db-scope.ts
 var store = new AsyncLocalStorage();
-function runAsSession(sessionId, fn) {
-  return store.run(sessionId, fn);
+function enterSession(sessionId) {
+  store.enterWith(sessionId);
 }
 function currentSessionId() {
   return store.getStore() ?? null;
@@ -80516,17 +80516,10 @@ var app = (0, import_fastify.default)({
   bodyLimit: REQUEST_BODY_LIMIT,
   trustProxy: trustProxyOnlyLoopback
 });
-{
-  const registerRoute = app.route.bind(app);
-  app.route = ((options) => {
-    const handler = options.handler;
-    if (typeof handler !== "function") return registerRoute(options);
-    const scoped = function(request2, reply) {
-      return runAsSession(sessionIdFromRequest(request2), () => handler.call(this, request2, reply));
-    };
-    return registerRoute({ ...options, handler: scoped });
-  });
-}
+app.addHook("onRequest", (request2, _reply, done) => {
+  enterSession(sessionIdFromRequest(request2));
+  done();
+});
 await app.register(import_compress.default, {
   global: true,
   encodings: ["br", "gzip", "deflate"],

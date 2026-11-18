@@ -24,6 +24,18 @@ export function runAsSession<T>(sessionId: string | null, fn: () => T): T {
 }
 
 /**
+ * Sets the identity for the rest of the current request.
+ *
+ * Used by the `onRequest` hook: Fastify's `app.get`/`app.post` shorthands call
+ * the router directly instead of `app.route`, so wrapping registration is not
+ * possible without patching internals. A hook is the supported seam, and the
+ * store it writes belongs to this request's async context alone.
+ */
+export function enterSession(sessionId: string | null): void {
+  store.enterWith(sessionId);
+}
+
+/**
  * The identity of the statement currently executing, or null outside a request
  * (a boot-time read, a timer, the schema pass). Null is not "trusted": the
  * policies treat it as nobody.

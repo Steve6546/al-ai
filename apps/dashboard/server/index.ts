@@ -101,7 +101,7 @@ import { checkRedirectRegistration, clientIdMismatch, describeMissingRegistratio
 import { elevateFirewall, ensureFirewall, firewallStatus } from "./firewall.js";
 import { isPlatformOwner } from "./authorization.js";
 import { createDatabase, createPool } from "./db.js";
-import { runAsSession, sessionIdFromRequest } from "./db-scope.js";
+import { enterSession, sessionIdFromRequest } from "./db-scope.js";
 import { clearedCookieHeader, derivedCookieName, destroySession, issueSession, parseCookies, policyCookieHeader, readSession, sessionAccessToken, sessionCookieHeader } from "./session.js";
 import { assertTier, AuthorizationError, botIdentityPermissionStatus, resolveActorTier } from "./authorization.js";
 import { appendAudit } from "./audit.js";
@@ -284,28 +284,21 @@ const app = Fastify({
 });
 
 /**
- * Every route handler runs under the identity of the cookie that addressed it.
+ * Every request runs under the identity of the cookie that addressed it.
  *
  * The database policies on guild tables ask "whose session is this?" before
  * they return a row, and the only trustworthy answer is the cookie the request
  * arrived with — not a `guild_id` in the URL or a `user_id` in the body, both of
- * which the caller chooses. Fastify's route shorthands (`app.get`, `app.post`, …)
- * all funnel through `app.route`, so wrapping that one method covers every
- * route registered below, including any added later, with no per-route list to
- * keep in sync. The wrapper only sets the context; the handler's own guards
- * still decide what the caller may do.
+ * which the caller chooses. `onRequest` is the seam: Fastify's `app.get`/
+ * `app.post` shorthands call the router directly rather than `app.route`, so
+ * there is no registration-level wrapper to hook; the store this writes belongs
+ * to this request's async context and is gone when it ends. The hook only sets
+ * the context — each handler's own guards still decide what the caller may do.
  */
-{
-  const registerRoute = app.route.bind(app) as unknown as (options: { handler: unknown } & Record<string, unknown>) => unknown;
-  app.route = ((options: { handler: unknown } & Record<string, unknown>) => {
-    const handler = options.handler;
-    if (typeof handler !== "function") return registerRoute(options);
-    const scoped = function (this: unknown, request: FastifyRequest, reply: FastifyReply) {
-      return runAsSession(sessionIdFromRequest(request), () => handler.call(this, request, reply));
-    };
-    return registerRoute({ ...options, handler: scoped });
-  }) as unknown as typeof app.route;
-}
+app.addHook("onRequest", (request, _reply, done) => {
+  enterSession(sessionIdFromRequest(request));
+  done();
+});
 
 /**
  * Compression, because the entry bundle is not small and the platform proxy
