@@ -76492,6 +76492,7 @@ function loadEnv() {
     clientSecret: read("DISCORD_CLIENT_SECRET"),
     redirectUri: read("DISCORD_REDIRECT_URI"),
     databaseUrl: read("DATABASE_URL"),
+    botDatabaseUrl: read("BOT_DATABASE_URL"),
     sessionSecret,
     eventHmacSecret: read("EVENT_HMAC_SECRET"),
     encryptionKey: encryptionKey2,
@@ -77400,7 +77401,11 @@ function currentSessionId() {
 function sessionIdFromRequest(context) {
   const header = typeof context.headers.cookie === "string" ? context.headers.cookie : void 0;
   const cookies = parseCookies(header);
-  return cookies[cookiePolicyFor(context).name] ?? null;
+  for (const name of SESSION_COOKIE_NAMES) {
+    const value = cookies[name];
+    if (value) return value;
+  }
+  return null;
 }
 
 // apps/dashboard/server/db.ts
@@ -77410,7 +77415,7 @@ function createPool(databaseUrl, options = {}) {
     connectionString: databaseUrl,
     // Sized to the embedded server's max_connections=8 together with the bot's
     // pool (4): 3 + 4 leaves one slot for the bootstrapper/admin connection.
-    max: 3,
+    max: options.max ?? 3,
     idleTimeoutMillis: 3e4,
     // A hung query used to pin a slot forever — ten wedged queries exhausted
     // the pool and every request then queued on checkout. The statement cap
@@ -80473,6 +80478,8 @@ function invalidateBotAccountProfile(token) {
 var env = loadEnv();
 var pool = createPool(env.databaseUrl);
 var db = createDatabase(pool);
+var servicePool = env.botDatabaseUrl && env.botDatabaseUrl !== env.databaseUrl ? createPool(env.botDatabaseUrl, { max: 1 }) : null;
+var serviceDb = servicePool ? createDatabase(servicePool) : null;
 var secondFactor = createSecondFactorStore(pool);
 var PENDING_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function pendingLoginId(request2) {
@@ -80832,7 +80839,8 @@ app.post("/internal/layer/health", { logLevel: "silent" }, async (request2, repl
   if (!await verifyLayerCall(request2, reply)) return;
   const body = request2.body;
   if (!body?.guildId) return reply.code(400).send({ error: "GUILD_ID_REQUIRED" });
-  await db.upsertHealth(
+  if (!serviceDb) return { accepted: true, persisted: false };
+  await serviceDb.upsertHealth(
     body.guildId,
     body.state ?? "unknown",
     Boolean(body.botPresent),
@@ -83046,6 +83054,7 @@ try {
     app.log.error(error, "The dashboard could not start");
   }
   await db.close().catch(() => void 0);
+  await serviceDb?.close().catch(() => void 0);
   process.exit(1);
 }
 void checkRedirectRegistration({ botToken: env.botToken, redirectUri: env.redirectUri }).then((state) => {

@@ -35,13 +35,15 @@ export function createPool(
      * serve a request as somebody else.
      */
     sessionIdForContextlessQueries?: string;
+    /** Override the pool size for a pool that issues one kind of statement. */
+    max?: number;
   } = {}
 ) {
   const pool = new Pool({
     connectionString: databaseUrl,
     // Sized to the embedded server's max_connections=8 together with the bot's
     // pool (4): 3 + 4 leaves one slot for the bootstrapper/admin connection.
-    max: 3,
+    max: options.max ?? 3,
     idleTimeoutMillis: 30_000,
     // A hung query used to pin a slot forever — ten wedged queries exhausted
     // the pool and every request then queued on checkout. The statement cap

@@ -196,6 +196,22 @@ import {
 const env = loadEnv();
 const pool = createPool(env.databaseUrl);
 const db = createDatabase(pool);
+
+/**
+ * The bot's own role, for the one write the dashboard makes on the bot's
+ * behalf.
+ *
+ * `/internal/layer/health` is signed by the bot, not by a user, so there is no
+ * session for the row policies to resolve — the guild metadata it writes would
+ * be refused. The bot normally writes that same row itself; when a service URL
+ * is configured the dashboard can persist it too (a split deployment), and when
+ * it is not, the request is acknowledged without a second write rather than
+ * failing the bot's health push.
+ */
+const servicePool = env.botDatabaseUrl && env.botDatabaseUrl !== env.databaseUrl
+  ? createPool(env.botDatabaseUrl, { max: 1 })
+  : null;
+const serviceDb = servicePool ? createDatabase(servicePool) : null;
 const secondFactor = createSecondFactorStore(pool);
 
 /** A pending second-factor login is addressed by a UUID cookie, never by a user id. */
@@ -953,7 +969,10 @@ app.post("/internal/layer/health", { logLevel: "silent" }, async (request, reply
     | { guildId?: string; state?: string; botPresent?: boolean; gatewayEvents?: number; uniqueUsers?: number }
     | undefined;
   if (!body?.guildId) return reply.code(400).send({ error: "GUILD_ID_REQUIRED" });
-  await db.upsertHealth(
+  // The bot writes this row through its own connection as well; this is the
+  // dashboard's copy, so it uses the bot identity and never the caller's.
+  if (!serviceDb) return { accepted: true, persisted: false };
+  await serviceDb.upsertHealth(
     body.guildId,
     body.state ?? "unknown",
     Boolean(body.botPresent),
@@ -4580,6 +4599,7 @@ try {
     app.log.error(error, "The dashboard could not start");
   }
   await db.close().catch(() => undefined);
+  await serviceDb?.close().catch(() => undefined);
   process.exit(1);
 }
 

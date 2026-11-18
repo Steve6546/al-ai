@@ -39,6 +39,13 @@ export type BffEnv = {
   clientSecret: string;
   redirectUri: string;
   databaseUrl: string;
+  /**
+   * The bot's own role when the deployment has one. The dashboard uses it for
+   * the one machine-to-machine write it performs on the bot's behalf (the
+   * signed health snapshot), because that call carries no user session for the
+   * row policies to resolve.
+   */
+  botDatabaseUrl: string | null;
   sessionSecret: string;
   eventHmacSecret: string;
   encryptionKey: string;
@@ -91,6 +98,7 @@ export function loadEnv(): BffEnv {
     clientSecret: read("DISCORD_CLIENT_SECRET")!,
     redirectUri: read("DISCORD_REDIRECT_URI")!,
     databaseUrl: read("DATABASE_URL")!,
+    botDatabaseUrl: read("BOT_DATABASE_URL"),
     sessionSecret,
     eventHmacSecret: read("EVENT_HMAC_SECRET")!,
     encryptionKey,
