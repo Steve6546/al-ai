@@ -1,70 +1,67 @@
 /**
- * The appearance preferences: the theme mode and the accent colour.
+ * The appearance, applied to the document.
  *
- * Three rules shape this module:
+ * The engine (`@al-ai/core`) decides *what* the tokens are; this module decides
+ * *when* they reach the DOM, and it never lets two things disagree about the
+ * answer:
  *
- * 1. **The reader's choice, following the account.** The palette is stored on
- *    the account (`user_preferences.appearance`) so it is the same on every
- *    device, and mirrored into `localStorage` as a paint-time cache: `theme-boot.js`
- *    reads that cache before the first frame, then `main.tsx` reconciles with
- *    what the server says. Without the cache the page would paint in the default
- *    palette and repaint once the session loaded — the flash this module exists
- *    to prevent. The cache is never the source of truth; it is only the fastest
- *    available copy of it.
+ * 1. **One write per frame.** Dragging a 360° angle slider fires `input` events
+ *    far faster than the screen refreshes, and each one used to mean a fresh
+ *    `setProperty` for every token — 27 style writes per event, from JavaScript,
+ *    on a thread that also has to lay out the page. The changes are therefore
+ *    coalesced: `scheduleApply` keeps the latest appearance and paints it once per
+ *    `requestAnimationFrame`, so the sliders run at the compositor's rate instead
+ *    of at the pointer's rate.
  *
- * 2. **Applied before the first paint.** `applyThemePrefs` is called from
- *    `main.tsx` before React renders, so the page never flashes the wrong
- *    palette on the way to the right one.
+ * 2. **The derived tokens are cached, not just the choice.** `theme-boot.js` runs
+ *    before any module loads, and it cannot import the colour engine — so the
+ *    tokens are written to `localStorage` alongside the preference, and the boot
+ *    script only has to put them back. That is what keeps a themed page from
+ *    flashing the default palette for a frame: no maths in the boot path, just
+ *    27 property writes it already knows the value of.
  *
- * 3. **The system is a mode, not a guess.** "system" means "follow the
- *    operating system *now*", and it keeps following it: a listener on the
- *    media query re-applies the palette when the OS flips at sunset.
+ * 3. **The cache is a copy.** `applyAccountAppearance` recomputes from the
+ *    account's stored preference on every session load and rewrites both keys, so
+ *    a stale cache (an older build's tokens, a theme changed on another device)
+ *    is corrected before the person sees it.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-  ACCENT_SWATCHES,
-  APPEARANCE_PRESETS,
   DEFAULT_APPEARANCE,
-  backgroundImage,
+  MAX_THEME_COLORS,
+  THEME_TOKEN_NAMES,
+  appearanceEquals,
+  buildThemeTokens,
   normaliseAppearance,
-  normaliseHex,
-  readableOn,
-  type AccentName,
-  type Appearance
+  type Appearance,
+  type ThemeMode
 } from "@al-ai/core/browser";
 
-export type ThemeMode = Appearance["mode"];
-export type { AccentName };
-
-/**
- * The stored preference is the shared appearance shape: one definition, used by
- * the server to validate, by the boot script to paint, and here to render.
- */
 export type ThemePrefs = Appearance;
+export type { ThemeMode };
 
 export const THEME_STORAGE_KEY = "al-ai.appearance";
-
-export const ACCENTS: { name: AccentName; label: string; swatch: string }[] = (
-  ["blue", "violet", "emerald", "amber", "rose"] as AccentName[]
-).map(name => ({ name, label: name, swatch: ACCENT_SWATCHES[name] }));
+/**
+ * The derived tokens, as last painted.
+ *
+ * Stored separately from the preference so a cache written by an older build is
+ * recognisable: the boot script only trusts it when the two shapes agree.
+ */
+export const THEME_TOKENS_STORAGE_KEY = "al-ai.appearance.tokens";
+/** Bumped when the token set changes; a mismatch makes the boot script ignore the cache. */
+export const THEME_TOKENS_VERSION = 2;
 
 export const DEFAULT_THEME_PREFS: ThemePrefs = DEFAULT_APPEARANCE;
-export { APPEARANCE_PRESETS, backgroundImage, normaliseHex, readableOn };
 
-/** The preferences as stored, or the defaults when nothing usable is stored. */
-export function readThemePrefs(storage: Pick<Storage, "getItem"> | null = safeStorage()): ThemePrefs {
-  if (!storage) return { ...DEFAULT_THEME_PREFS };
+/** Whether this browser can interpolate a gradient in OKLCH. */
+export function supportsOklchGradients(): boolean {
   try {
-    const raw = storage.getItem(THEME_STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_THEME_PREFS };
-    // `normaliseAppearance` repairs whatever is there field by field, so a cache
-    // written by an older build still paints with the parts that still make sense.
-    return normaliseAppearance(JSON.parse(raw));
+    return typeof CSS !== "undefined" && typeof CSS.supports === "function"
+      ? CSS.supports("background-image", "linear-gradient(0deg in oklch, red, blue)")
+      : false;
   } catch {
-    // A corrupt or unreadable value must not break the app; the defaults are
-    // always a working appearance.
-    return { ...DEFAULT_THEME_PREFS };
+    return false;
   }
 }
 
@@ -72,10 +69,73 @@ function safeStorage(): Storage | null {
   try {
     return typeof window === "undefined" ? null : window.localStorage;
   } catch {
-    // Storage can be blocked entirely (a private window, a locked-down
-    // profile). The app still has to work.
+    // Storage can be blocked entirely (a private window, a locked-down profile).
+    // The app still has to work; it just cannot pre-paint the next load.
     return null;
   }
+}
+
+/** The preferences as stored, or the defaults when nothing usable is stored. */
+export function readThemePrefs(storage: Pick<Storage, "getItem"> | null = safeStorage()): ThemePrefs {
+  if (!storage) return { ...DEFAULT_THEME_PREFS };
+  try {
+    const raw = storage.getItem(THEME_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_THEME_PREFS };
+    // `normaliseAppearance` repairs whatever is there field by field — including
+    // a v1 row, which it migrates — so a cache written by an older build still
+    // paints with the parts that still make sense.
+    return normaliseAppearance(JSON.parse(raw));
+  } catch {
+    return { ...DEFAULT_THEME_PREFS };
+  }
+}
+
+/** The cached tokens, when they were written for this exact preference and shape. */
+export function readCachedTokens(
+  prefs: ThemePrefs,
+  storage: Pick<Storage, "getItem"> | null = safeStorage()
+): Record<string, string> | null {
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(THEME_TOKENS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { version?: unknown; for?: unknown; tokens?: unknown };
+    if (parsed.version !== THEME_TOKENS_VERSION) return null;
+    if (typeof parsed.for !== "string" || parsed.for !== fingerprint(prefs)) return null;
+    if (!parsed.tokens || typeof parsed.tokens !== "object") return null;
+    return parsed.tokens as Record<string, string>;
+  } catch {
+    return null;
+  }
+}
+
+/** A stable description of a choice, used to tie a token cache to it. */
+export function fingerprint(prefs: ThemePrefs): string {
+  return [prefs.mode, prefs.angle, prefs.intensity, prefs.scope, prefs.accent ?? "-", prefs.colors.join(",")].join("|");
+}
+
+function writeThemePrefs(
+  prefs: ThemePrefs,
+  tokens: Record<string, string>,
+  theme: "light" | "dark",
+  storage: Pick<Storage, "setItem"> | null = safeStorage()
+) {
+  if (storage) {
+    try {
+      storage.setItem(THEME_STORAGE_KEY, JSON.stringify(prefs));
+      storage.setItem(
+        THEME_TOKENS_STORAGE_KEY,
+        // `dark` is stored because `mode: "system"` resolves differently depending
+        // on the OS at load time: a cache built for the light side of that
+        // decision must not be painted on the dark side.
+        JSON.stringify({ version: THEME_TOKENS_VERSION, for: fingerprint(prefs), dark: theme === "dark", tokens })
+      );
+    } catch {
+      // A full or blocked storage must not break the change: the palette is
+      // already applied, it just will not survive a reload.
+    }
+  }
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(THEME_CHANGE_EVENT));
 }
 
 /** What the palette should actually be, given the mode and the system. */
@@ -84,116 +144,195 @@ export function resolveTheme(mode: ThemeMode, systemPrefersDark: boolean): "ligh
   return mode;
 }
 
+function systemPrefersDark(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-color-scheme: dark)").matches
+    : false;
+}
+
 /**
- * Puts the palette on the document.
+ * Puts the derived tokens on the document.
  *
- * HeroUI reads `data-theme` *and* the `light`/`dark` class, and Tailwind's
- * `dark:` variant reads the class - so both are set, and the mode is written
- * back onto the element as `data-appearance` for the few places that need to
- * know what the reader actually chose (the appearance menu, for one).
+ * `data-theme` and the `light`/`dark` class both change, because HeroUI reads the
+ * attribute and Tailwind's `dark:` variant reads the class. The tokens go on as
+ * custom properties, which is what makes the CSS follow without a class per
+ * theme: every utility in the product is built from these names.
  */
-export function applyThemePrefs(prefs: ThemePrefs, root: HTMLElement | null = document?.documentElement ?? null): "light" | "dark" {
-  if (!root) return "light";
-  const systemPrefersDark =
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia("(prefers-color-scheme: dark)").matches
-      : false;
-  const theme = resolveTheme(prefs.mode, systemPrefersDark);
+export function applyAppearance(
+  prefs: ThemePrefs,
+  root: HTMLElement | null = typeof document === "undefined" ? null : document.documentElement
+): { theme: "light" | "dark"; tokens: Record<string, string> } {
+  const tokens = buildThemeTokens(prefs, { oklchGradients: supportsOklchGradients() });
+  if (!root) return { theme: "dark", tokens };
+
+  const theme = resolveTheme(prefs.mode, systemPrefersDark());
+  // The mode decides the ladder, so a `system` theme has to resolve before the
+  // tokens are built — otherwise the engine would derive dark surfaces for a
+  // light OS preference.
+  const resolved = theme === prefs.mode ? prefs : { ...prefs, mode: theme as ThemeMode };
+  const resolvedTokens = theme === prefs.mode ? tokens : buildThemeTokens(resolved, { oklchGradients: supportsOklchGradients() });
 
   root.classList.toggle("dark", theme === "dark");
   root.classList.toggle("light", theme === "light");
   root.dataset.theme = theme;
   root.dataset.appearance = prefs.mode;
-  root.dataset.accent = prefs.accent;
+  root.dataset.themeScope = prefs.scope;
 
-  /**
-   * The accent and the backdrop, as variables rather than classes.
-   *
-   * A custom colour cannot be expressed as one of the five `data-accent` blocks
-   * in the stylesheet, so the two properties the accent actually drives are set
-   * inline and win over the block. The label colour is computed from the accent
-   * itself (`readableOn`), which is what keeps button text legible when somebody
-   * picks pale yellow — a fixed white label would vanish there.
-   */
-  const accentColor = normaliseHex(prefs.accentColor) ?? ACCENT_SWATCHES[prefs.accent] ?? ACCENT_SWATCHES.blue;
-  root.style.setProperty("--primary", accentColor);
-  root.style.setProperty("--primary-foreground", readableOn(accentColor));
-  root.style.setProperty("--ring", accentColor);
-
-  const image = backgroundImage(prefs.background);
-  const solid = normaliseHex(prefs.background.from);
-  if (image) {
-    root.style.setProperty("--app-bg-image", image);
-    root.style.removeProperty("--app-bg-color");
-  } else {
-    root.style.removeProperty("--app-bg-image");
-    if (solid) root.style.setProperty("--app-bg-color", solid);
-    else root.style.removeProperty("--app-bg-color");
+  for (const name of THEME_TOKEN_NAMES) {
+    const value = resolvedTokens[name];
+    if (value === undefined) continue;
+    // An empty string is a deliberate "clear this one": a theme that switches
+    // from a gradient to a solid must not leave the old image set on the page.
+    if (value === "") root.style.removeProperty(name);
+    else root.style.setProperty(name, value);
   }
-  return theme;
+  return { theme, tokens: resolvedTokens };
 }
 
 const THEME_CHANGE_EVENT = "al-ai:appearance-changed";
 
-function writeThemePrefs(prefs: ThemePrefs, storage: Pick<Storage, "setItem"> | null = safeStorage()) {
-  if (storage) {
-    try {
-      storage.setItem(THEME_STORAGE_KEY, JSON.stringify(prefs));
-    } catch {
-      // A full or blocked storage must not break the change: the palette is
-      // already applied, it just will not survive a reload.
+/**
+ * Coalesces applications into one per animation frame.
+ *
+ * A pointer drag on the angle slider produces ~120 events a second; the screen
+ * shows 60. Without this, 60 of those events cost a full token rebuild plus 27
+ * style writes that are never painted — and the writes are synchronous style
+ * invalidation, so the drag itself gets slower the faster the operator moves.
+ */
+export function createAppearanceScheduler(root: HTMLElement | null = typeof document === "undefined" ? null : document.documentElement) {
+  let frame = 0;
+  let pending: ThemePrefs | null = null;
+  let last = { theme: "dark" as "light" | "dark", tokens: {} as Record<string, string> };
+
+  const paint = () => {
+    frame = 0;
+    if (!pending) return;
+    const next = pending;
+    pending = null;
+    last = applyAppearance(next, root);
+    writeThemePrefs(next, last.tokens, last.theme);
+  };
+
+  return {
+    /** Queue an appearance; it is painted on the next frame. */
+    schedule(prefs: ThemePrefs) {
+      pending = prefs;
+      if (frame) return;
+      if (typeof requestAnimationFrame === "function") frame = requestAnimationFrame(paint);
+      else paint();
+    },
+    /** Paint now — used for the first application and for a discrete change. */
+    flush(prefs: ThemePrefs) {
+      pending = prefs;
+      if (frame && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
+      paint();
+    },
+    get last() {
+      return last;
     }
-  }
-  // Every hook instance (the header menu, the sidebar menu and the settings
-  // panel) reads its own state. The event keeps them in agreement without
-  // turning a two-value preference into a provider.
-  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(THEME_CHANGE_EVENT));
+  };
+}
+
+/** Kept for the call sites that only need "apply this, now". */
+export function applyThemePrefs(prefs: ThemePrefs, root?: HTMLElement | null) {
+  const { theme } = applyAppearance(prefs, root ?? (typeof document === "undefined" ? null : document.documentElement));
+  return theme;
 }
 
 /**
- * The appearance state, and the two setters that change it.
+ * The appearance state, and the setters that change it.
  *
- * The state lives in the hook rather than in a context: the only consumer is
- * the appearance menu, and a provider would mean threading the palette through
- * the tree for two buttons.
+ * Every setter normalises through `normaliseAppearance`, so the shape the UI can
+ * produce is exactly the shape the server accepts — a five-colour ceiling or a
+ * wrapped angle cannot be committed from here even by a bug in a control.
  */
 export function useThemePrefs() {
   const [prefs, setPrefs] = useState<ThemePrefs>(() => readThemePrefs());
+  const scheduler = useRef<ReturnType<typeof createAppearanceScheduler> | null>(null);
 
-  const commit = useCallback((next: ThemePrefs) => {
-    setPrefs(next);
-    writeThemePrefs(next);
-    applyThemePrefs(next);
+  const getScheduler = useCallback(() => {
+    if (!scheduler.current) {
+      scheduler.current = createAppearanceScheduler();
+    }
+    return scheduler.current;
   }, []);
 
-  const setMode = useCallback((mode: ThemeMode) => commit({ ...prefs, mode }), [commit, prefs]);
-  const setAccent = useCallback((accent: AccentName) => commit({ ...prefs, accent, accentColor: null }), [commit, prefs]);
-  /** A custom accent; passing null returns to the named one. */
-  const setAccentColor = useCallback(
-    (accentColor: string | null) => commit({ ...prefs, accentColor: normaliseHex(accentColor) }),
-    [commit, prefs]
+  /**
+   * Commits a change.
+   *
+   * `live` means "a control is being dragged": the palette is queued for the next
+   * frame and the preference is not written until it lands. Both paths write the
+   * cache in the same place, so a reload mid-drag paints the last frame that was
+   * actually shown.
+   *
+   * The next value may be an update function, and the setters below always pass
+   * one. That is not a stylistic choice: React batches the events of one task, so
+   * a preset press followed by a slider move in that same task used to compose
+   * the slider's change onto the *pre-preset* palette (`{ ...prefs, angle }`,
+   * where `prefs` is the closure of the last render) and silently undo the
+   * preset. Reading the latest choice from a ref makes the setters compose, which
+   * is what a control that only changes one field has to do.
+   */
+  const latest = useRef(prefs);
+  latest.current = prefs;
+  const commit = useCallback(
+    (next: ThemePrefs | ((current: ThemePrefs) => ThemePrefs), { live = false }: { live?: boolean } = {}) => {
+      const normalised = normaliseAppearance(typeof next === "function" ? next(latest.current) : next);
+      latest.current = normalised;
+      setPrefs(normalised);
+      const painter = getScheduler();
+      if (live) painter.schedule(normalised);
+      else painter.flush(normalised);
+      return normalised;
+    },
+    [getScheduler]
   );
-  const setBackground = useCallback(
-    (background: Partial<ThemePrefs["background"]>) =>
-      commit(normaliseAppearance({ ...prefs, background: { ...prefs.background, ...background } })),
-    [commit, prefs]
-  );
-  /** A ready-made palette, applied whole (mode, accent and backdrop together). */
-  const applyPreset = useCallback((appearance: ThemePrefs) => commit(normaliseAppearance(appearance)), [commit]);
-  const resetTheme = useCallback(() => commit({ ...DEFAULT_THEME_PREFS }), [commit]);
 
-  // "system" means "follow the system *now*": when the operating system flips
-  // at sunset, the page follows it without a reload.
+  const setMode = useCallback((mode: ThemeMode) => commit(current => ({ ...current, mode })), [commit]);
+  const setColors = useCallback(
+    (colors: string[], options?: { live?: boolean }) =>
+      commit(current => ({ ...current, colors: colors.slice(0, MAX_THEME_COLORS) }), options),
+    [commit]
+  );
+  /**
+   * The palette, derived from the palette itself.
+   *
+   * Adding, deleting and reordering a stop are all "look at the current list and
+   * produce the next one", so they take the updater form: two such edits in one
+   * task would otherwise both start from the list of the last render and the
+   * second would drop the first.
+   */
+  const updateColors = useCallback(
+    (update: (colors: string[]) => string[], options?: { live?: boolean }) =>
+      commit(current => ({ ...current, colors: update(current.colors).slice(0, MAX_THEME_COLORS) }), options),
+    [commit]
+  );
+  const setAngle = useCallback(
+    (angle: number, options?: { live?: boolean }) => commit(current => ({ ...current, angle }), options),
+    [commit]
+  );
+  const setIntensity = useCallback(
+    (intensity: number, options?: { live?: boolean }) => commit(current => ({ ...current, intensity }), options),
+    [commit]
+  );
+  const setScope = useCallback((scope: ThemePrefs["scope"]) => commit(current => ({ ...current, scope })), [commit]);
+  const setAccent = useCallback((accent: string | null) => commit(current => ({ ...current, accent })), [commit]);
+  const applyPreset = useCallback((appearance: ThemePrefs) => commit(normaliseAppearance(appearance)), [commit]);
+  const resetTheme = useCallback(() => commit(() => ({ ...DEFAULT_THEME_PREFS })), [commit]);
+
+  // "system" means "follow the system *now*": when the operating system flips at
+  // sunset, the page follows it without a reload.
   useEffect(() => {
     if (prefs.mode !== "system") return;
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
     const query = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => applyThemePrefs(prefs);
+    const onChange = () => getScheduler().flush(prefs);
     query.addEventListener("change", onChange);
     return () => query.removeEventListener("change", onChange);
-  }, [prefs]);
+  }, [prefs, getScheduler]);
 
-  // Another mounted menu or the settings panel may have written a new value.
+  // Another mounted surface (the settings panel, a second tab) may have written
+  // a new value; the event keeps every instance in agreement.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const sync = () => setPrefs(readThemePrefs());
@@ -201,20 +340,33 @@ export function useThemePrefs() {
     return () => window.removeEventListener(THEME_CHANGE_EVENT, sync);
   }, []);
 
-  return { prefs, setMode, setAccent, setAccentColor, setBackground, applyPreset, resetTheme };
+  return {
+    prefs,
+    commit,
+    setMode,
+    setColors,
+    updateColors,
+    setAngle,
+    setIntensity,
+    setScope,
+    setAccent,
+    applyPreset,
+    resetTheme,
+    isDefault: appearanceEquals(prefs, DEFAULT_THEME_PREFS)
+  };
 }
 
 /**
  * Applies the palette the account holds, and caches it for the next first paint.
  *
  * Called once per session, from the loader that already asked for the account's
- * preferences. It writes the same key `theme-boot.js` reads, so the next page
+ * preferences. It writes the same two keys `theme-boot.js` reads, so the next page
  * load paints the account's palette before React exists — the cache is a copy,
  * never a competing source of truth.
  */
 export function applyAccountAppearance(appearance: unknown): ThemePrefs {
   const prefs = normaliseAppearance(appearance);
-  writeThemePrefs(prefs);
-  applyThemePrefs(prefs);
+  const { tokens, theme } = applyAppearance(prefs);
+  writeThemePrefs(prefs, tokens, theme);
   return prefs;
 }

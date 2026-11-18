@@ -1449,14 +1449,19 @@ async function main() {
       const card = JSON.parse(hoverCard.result.value);
       const hoverShot = await cdp.send("Page.captureScreenshot", { format: "png" }, sessionId);
       await writeFile(join(outDir, "rail-hover.png"), Buffer.from(hoverShot.data, "base64"));
+      // The card names the server and nothing else: the state is already the dot
+      // under the pointer and the trigger's accessible name, so repeating it in a
+      // tooltip was a third copy of one fact. What the card has to say is *which*
+      // server this icon is, and the label still has to carry the state for a
+      // screen reader (and for the dot's meaning, which is colour alone).
       const named = card.text.includes("سيرفر بدون البوت");
-      const missing = card.text.includes("البوت غير مضاف");
-      if (!card.shown || !named || !missing) {
+      const labelHasState = (rail.target.label ?? "").includes("البوت غير مضاف");
+      if (!card.shown || !named || !labelHasState) {
         failures.push(
-          `the rail hover card does not name the guild and its bot state (shown=${card.shown}, text="${card.text.slice(0, 80)}")`
+          `the rail hover card does not name the guild, or its trigger lost the bot state (shown=${card.shown}, text="${card.text.slice(0, 80)}", label="${rail.target.label ?? ""}")`
         );
       }
-      console.log(`${card.shown && named && missing ? "PASS" : "FAIL"}  rail hover card    text="${card.text.slice(0, 60)}"`);
+      console.log(`${card.shown && named && labelHasState ? "PASS" : "FAIL"}  rail hover card    text="${card.text.slice(0, 60)}"`);
     }
 
     /*
@@ -1582,7 +1587,7 @@ async function main() {
           const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
           const buttons = [...sheet.querySelectorAll("button")];
           const labelled = name => buttons.find(b => (b.textContent || "").includes(name));
-          const settingsRoot = labelled("لوحة التحكم")?.closest('[data-radix-scroll-area-viewport]');
+          const settingsRoot = labelled("نظرة عامة")?.closest('[data-radix-scroll-area-viewport]');
           let lastReachable = null;
           if (settingsRoot) {
             settingsRoot.scrollTop = settingsRoot.scrollHeight;
@@ -1591,7 +1596,7 @@ async function main() {
           }
           const rail = sheet.querySelector('nav[aria-label="البوتات"]');
           const railRect = rail?.getBoundingClientRect();
-          const settingsNav = labelled("لوحة التحكم")?.closest("nav");
+          const settingsNav = labelled("نظرة عامة")?.closest("nav");
           const navRect = settingsNav?.getBoundingClientRect();
           return JSON.stringify({
             welcomeInView: inView(labelled("رسائل الترحيب")),
@@ -1846,6 +1851,104 @@ async function main() {
       }
       console.log(
         `${switched ? "PASS" : "FAIL"}  appearance panel   pick=${pickResult} theme=${themeResult.theme} stored=${themeResult.stored}`
+      );
+
+      /*
+       * The customizer's own controls, driven end to end.
+       *
+       * A mode switch only proves the panel is wired to the theme applier. What
+       * this screen exists for is the palette, the angle, the intensity and the
+       * presets, so this sets both sliders through their native setter (the way
+       * a drag does), presses a preset, adds a stop, and reads the *stored*
+       * choice and the painted gradient back. If the panel wrote a value the
+       * engine never painted, the two would disagree here.
+       */
+      const customizer = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `(() => {
+            const byLabel = name => document.querySelector('input[type=range][aria-label="' + name + '"]');
+            const setRange = (element, value) => {
+              const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+              setter.call(element, String(value));
+              element.dispatchEvent(new Event("input", { bubbles: true }));
+            };
+            const read = () => {
+              const value = JSON.parse(window.localStorage.getItem("al-ai.appearance") ?? "{}");
+              return { stops: Array.isArray(value.colors) ? value.colors.length : 0, first: value.colors?.[0] ?? null, angle: value.angle, intensity: value.intensity };
+            };
+            const trace = [];
+            const angle = byLabel("اتجاه التدرّج");
+            const intensity = byLabel("شدّة اللون");
+            if (!angle || !intensity) return JSON.stringify({ ok: false, reason: "no sliders" });
+            trace.push({ step: "start", ...read() });
+            const tile = [...document.querySelectorAll("[role='listitem']")].find(node => (node.textContent ?? "").includes("سديم"));
+            if (!tile) return JSON.stringify({ ok: false, reason: "no preset tile" });
+            const target = tile.querySelector("button") ?? tile;
+            target.click();
+            trace.push({ step: "preset", ...read() });
+            // The sliders are set *after* the preset, so the last word is theirs:
+            // a preset that quietly overwrote a later edit would make the two
+            // controls disagree about who owns the value.
+            setRange(angle, 270);
+            trace.push({ step: "angle", ...read() });
+            setRange(intensity, 30);
+            trace.push({ step: "intensity", ...read() });
+            const add = [...document.querySelectorAll("button")].find(node => (node.textContent ?? "").trim() === "إضافة لون");
+            if (add) add.click();
+            trace.push({ step: "add", ...read() });
+            return JSON.stringify({ ok: true, trace });
+          })()`,
+          returnByValue: true
+        },
+        sessionId
+      );
+      await sleep(700);
+      const customRead = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `(() => {
+            const stored = JSON.parse(window.localStorage.getItem("al-ai.appearance") ?? "null");
+            const image = getComputedStyle(document.documentElement).getPropertyValue("--app-bg-image");
+            const card = getComputedStyle(document.documentElement).getPropertyValue("--card");
+            return JSON.stringify({
+              stored,
+              painted: image.includes("linear-gradient") && image.includes("deg"),
+              card: card.trim()
+            });
+          })()`,
+          returnByValue: true
+        },
+        sessionId
+      );
+      const probe = JSON.parse(customizer.result.value);
+      const written = JSON.parse(customRead.result.value);
+      const steps = Array.isArray(probe.trace) ? probe.trace : [];
+      const last = steps[steps.length - 1] ?? {};
+      const customOk =
+        probe.ok === true &&
+        written.stored?.version === 2 &&
+        Array.isArray(written.stored.colors) &&
+        // The preset applied two stops, and the add made it three: reading the
+        // stored choice after every step is what shows *which* control lost it.
+        last.stops === 3 &&
+        // The sliders had the last word: 270° and 30%, not the preset's 145°/65%.
+        // Adding a stop must not move them — a control that resets its neighbours
+        // is how a customizer loses work.
+        last.angle === 270 &&
+        last.intensity === 30 &&
+        written.stored.angle === 270 &&
+        written.stored.intensity === 30 &&
+        written.stored.colors.length === 3 &&
+        written.painted &&
+        written.card.startsWith("#");
+      if (!customOk) {
+        failures.push(
+          `the customizer did not store and paint what it was given: trace=${JSON.stringify(steps)} stored=${JSON.stringify(written.stored)} painted=${written.painted} card=${written.card}`
+        );
+      }
+      console.log(
+        `${customOk ? "PASS" : "FAIL"}  theme customizer   stops=${written.stored?.colors?.length} angle=${written.stored?.angle} intensity=${written.stored?.intensity} painted=${written.painted}`
       );
     }
 

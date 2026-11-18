@@ -144,6 +144,21 @@ test("a first sign-in shows the key, the otpauth link and ten codes exactly once
   assert.match(html, /تأكيد التسجيل والدخول/);
 });
 
+test("the first-sign-in card fits a wide viewport: two columns, capped card, collapsed URI", async () => {
+  stubFetch(firstEnrollmentPayload);
+  const { html } = await mountScreen({ enrolled: false, onVerified: noop, onCancelled: noop, onExpired: noop });
+
+  // The page itself stops scrolling from lg up; the card owns any overflow.
+  assert.match(html, /max-lg:overflow-y-auto/, "wide screens do not scroll the whole page");
+  assert.match(html, /lg:max-h-full/, "the card is capped to the viewport");
+  assert.match(html, /lg:grid-cols-2/, "enrolment material and the code field share one row");
+  assert.match(html, /<details[^>]*>[\s\S]*otpauth:\/\/totp\//, "the duplicate URI is collapsed, not removed");
+  assert.match(html, /sm:grid-cols-5/, "the ten codes use the tighter grid");
+
+  const enrolled = await mountScreen({ enrolled: true, onVerified: noop, onCancelled: noop, onExpired: noop });
+  assert.match(enrolled.html, /lg:col-span-2/, "an enrolled admin keeps the single centred column");
+});
+
 test("a wrong code is reported with the remaining attempts and invents no success", async () => {
   const calls = stubFetch(enrolledPayload, {
     status: 400,

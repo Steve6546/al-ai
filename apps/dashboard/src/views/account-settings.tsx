@@ -72,20 +72,15 @@ import {
 import { formatDateTime, initials } from "@/lib/format";
 import { LANGUAGES, Translate, type Language, useI18n } from "@/lib/i18n";
 import { Flag } from "@/components/flag";
-import { ACCENTS, APPEARANCE_PRESETS, useThemePrefs, type AccentName, type ThemeMode } from "@/lib/theme";
+import { useThemePrefs } from "@/lib/theme";
+import { AppearancePanel } from "@/views/settings/appearance-panel";
 import { useCopy } from "@/lib/use-copy";
 import { cn } from "@/lib/utils";
 import type { Guild, SecurityOverview, SecuritySession, SessionInfo, TwoFactorSetup } from "@/types";
-import { ACCENT_SWATCHES, appearanceEquals, readableOn, describeUserAgent, type UserAgentDescription } from "@al-ai/core/browser";
+import { describeUserAgent, type UserAgentDescription } from "@al-ai/core/browser";
 
 type Section = "account" | "appearance" | "language" | "security" | "sessions";
 type VerifyIntent = "change" | "disable" | "regenerate";
-
-const MODES: { value: ThemeMode; key: "appearance.light" | "appearance.dark" | "appearance.system"; icon: typeof Sun }[] = [
-  { value: "light", key: "appearance.light", icon: Sun },
-  { value: "dark", key: "appearance.dark", icon: Moon },
-  { value: "system", key: "appearance.system", icon: MonitorSmartphone }
-];
 
 /** mm:ss for a setup window, clamped at zero. */
 function formatCountdown(ms: number): string {
@@ -176,7 +171,7 @@ export function SettingsView({
   guild: Guild;
 }) {
   const { t, language, setLanguage } = useI18n();
-  const { prefs, setMode, setAccent, setAccentColor, setBackground, applyPreset, resetTheme } = useThemePrefs();
+  const { prefs } = useThemePrefs();
   const { copied, copy } = useCopy();
 
   const [section, setSection] = useState<Section>("account");
@@ -291,7 +286,6 @@ export function SettingsView({
   const appearanceSaved = useRef(prefs);
   const [appearanceState, setAppearanceState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   useEffect(() => {
-    if (appearanceState === "idle" && appearanceSaved.current === prefs) return;
     if (appearanceSaved.current === prefs) return;
     appearanceSaved.current = prefs;
     setAppearanceState("saving");
@@ -302,7 +296,7 @@ export function SettingsView({
         .catch(() => setAppearanceState("error"));
     }, 350);
     return () => clearTimeout(timer);
-  }, [prefs, appearanceState]);
+  }, [prefs]);
 
   async function confirmLanguage(next: Language) {
     if (next === language) return;
@@ -615,221 +609,7 @@ export function SettingsView({
             </Card>
           ) : null}
 
-          {section === "appearance" ? (
-            <Card>
-              <CardHeader className="flex-row items-center gap-3">
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/12 text-primary">
-                  <Palette className="size-5" aria-hidden />
-                </span>
-                <div className="min-w-0">
-                  <CardTitle className="text-base">{t("settings.section.appearance")}</CardTitle>
-                  <CardDescription>{t("settings.section.appearanceBody")}</CardDescription>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-5">
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">{t("appearance.mode")}</p>
-                  <div className="grid gap-2 sm:grid-cols-3" role="group" aria-label={t("appearance.modeLabel")}>
-                    {MODES.map(mode => {
-                      const Icon = mode.icon;
-                      const active = prefs.mode === mode.value;
-                      return (
-                        <button
-                          key={mode.value}
-                          type="button"
-                          onClick={() => setMode(mode.value)}
-                          aria-pressed={active}
-                          className={cn(
-                            "flex items-center gap-2 rounded-xl border px-3 py-3 text-sm transition-ui",
-                            active
-                              ? "border-primary bg-primary/10 font-medium"
-                              : "border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                          )}
-                        >
-                          <Icon className={cn("size-4", active && "text-primary")} aria-hidden />
-                          <span className="min-w-0 flex-1 text-start">{t(mode.key)}</span>
-                          {active ? <Check className="size-4 text-primary" aria-hidden /> : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">{t("appearance.accent")}</p>
-                  <div className="flex flex-wrap gap-2.5" role="group" aria-label={t("appearance.accent")}>
-                    {ACCENTS.map(accent => {
-                      const active = prefs.accent === accent.name;
-                      return (
-                        <button
-                          key={accent.name}
-                          type="button"
-                          onClick={() => setAccent(accent.name as AccentName)}
-                          aria-label={t(`appearance.${accent.name}` as "appearance.blue")}
-                          aria-pressed={active}
-                          title={t(`appearance.${accent.name}` as "appearance.blue")}
-                          className={cn(
-                            "grid size-9 place-items-center rounded-full border-2 transition-ui",
-                            active ? "border-foreground" : "border-transparent hover:border-muted-foreground/50"
-                          )}
-                          style={{ backgroundColor: accent.swatch }}
-                        >
-                          {active ? <Check className="size-4 text-white" aria-hidden /> : null}
-                        </button>
-                      );
-                    })}
-                    {/* The custom accent: a real colour input, so any colour is
-                        reachable. Choosing one clears the named swatch inside
-                        `setAccentColor` — two "active" marks would be a lie about
-                        which colour is actually in force. */}
-                    <label
-                      className={cn(
-                        "grid size-9 cursor-pointer place-items-center rounded-full border-2 transition-ui",
-                        prefs.accentColor
-                          ? "border-foreground"
-                          : "border-dashed border-muted-foreground/50 hover:border-muted-foreground"
-                      )}
-                      title={t("appearance.customAccent")}
-                      style={prefs.accentColor ? { backgroundColor: prefs.accentColor } : undefined}
-                    >
-                      <input
-                        type="color"
-                        value={prefs.accentColor ?? ACCENT_SWATCHES[prefs.accent]}
-                        onChange={event => setAccentColor(event.target.value)}
-                        aria-label={t("appearance.customAccent")}
-                        className="size-0 opacity-0"
-                      />
-                      {prefs.accentColor ? (
-                        <Check className="size-4" style={{ color: readableOn(prefs.accentColor) }} aria-hidden />
-                      ) : (
-                        <Plus className="size-4 text-muted-foreground" aria-hidden />
-                      )}
-                    </label>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">{t("appearance.presets")}</p>
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                    {APPEARANCE_PRESETS.map(preset => {
-                      const active = appearanceEquals(prefs, preset.appearance);
-                      const from = preset.appearance.background.from;
-                      const to = preset.appearance.background.to;
-                      return (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => applyPreset(preset.appearance)}
-                          aria-pressed={active}
-                          className={cn(
-                            "flex items-center gap-2 rounded-xl border px-2.5 py-2 text-sm transition-ui",
-                            active ? "border-primary bg-primary/10 font-medium" : "border-border hover:bg-muted/50"
-                          )}
-                        >
-                          <span
-                            aria-hidden
-                            className="size-7 shrink-0 rounded-lg ring-1 ring-black/20"
-                            style={{
-                              background: from
-                                ? to
-                                  ? `linear-gradient(to bottom, ${from}, ${to})`
-                                  : from
-                                : "var(--background)"
-                            }}
-                          />
-                          <span className="min-w-0 flex-1 truncate text-start">
-                            {t(`appearance.preset.${preset.id}` as "appearance.preset.oled")}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">{t("appearance.background")}</p>
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4" role="group" aria-label={t("appearance.background")}>
-                    {([
-                      { style: "solid" as const, key: "appearance.bg.solid" as const },
-                      { style: "split-v" as const, key: "appearance.bg.splitV" as const },
-                      { style: "split-h" as const, key: "appearance.bg.splitH" as const },
-                      { style: "gradient" as const, key: "appearance.bg.gradient" as const }
-                    ]).map(option => {
-                      const active = prefs.background.style === option.style;
-                      return (
-                        <button
-                          key={option.style}
-                          type="button"
-                          onClick={() => setBackground({ style: option.style })}
-                          aria-pressed={active}
-                          className={cn(
-                            "rounded-xl border px-3 py-2 text-sm transition-ui",
-                            active
-                              ? "border-primary bg-primary/10 font-medium"
-                              : "border-border text-muted-foreground hover:bg-muted/50"
-                          )}
-                        >
-                          {t(option.key)}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="flex flex-wrap items-end gap-3">
-                    <label className="space-y-1 text-xs text-muted-foreground">
-                      <span className="block">
-                        {prefs.background.style === "solid" ? t("appearance.colour") : t("appearance.colourFrom")}
-                      </span>
-                      <input
-                        type="color"
-                        value={prefs.background.from ?? (prefs.mode === "light" ? "#ffffff" : "#0b0d12")}
-                        onChange={event => setBackground({ from: event.target.value })}
-                        className="h-9 w-16 cursor-pointer rounded-lg border border-border bg-transparent"
-                      />
-                    </label>
-                    {prefs.background.style !== "solid" ? (
-                      <label className="space-y-1 text-xs text-muted-foreground">
-                        <span className="block">{t("appearance.colourTo")}</span>
-                        <input
-                          type="color"
-                          value={prefs.background.to ?? "#1a2030"}
-                          onChange={event => setBackground({ to: event.target.value })}
-                          className="h-9 w-16 cursor-pointer rounded-lg border border-border bg-transparent"
-                        />
-                      </label>
-                    ) : null}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-9 gap-1"
-                      onClick={() => setBackground({ style: "solid", from: null, to: null })}
-                    >
-                      <RotateCcw className="size-3.5" aria-hidden />
-                      {t("appearance.clearBackground")}
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="outline" size="sm" className="gap-1" onClick={resetTheme}>
-                    <RotateCcw className="size-3.5" aria-hidden />
-                    {t("appearance.reset")}
-                  </Button>
-                  {appearanceState === "saving" ? (
-                    <span className="text-mini text-muted-foreground">{t("appearance.saving")}</span>
-                  ) : appearanceState === "saved" ? (
-                    <span className="flex items-center gap-1 text-mini text-success">
-                      <Check className="size-3" aria-hidden />
-                      {t("appearance.saved")}
-                    </span>
-                  ) : appearanceState === "error" ? (
-                    <span className="text-mini text-destructive">{t("appearance.saveFailed")}</span>
-                  ) : null}
-                </div>
-
-                <p className="text-mini leading-relaxed text-muted-foreground">{t("settings.appearance.note")}</p>
-              </CardContent>
-            </Card>
-          ) : null}
+          {section === "appearance" ? <AppearancePanel saveState={appearanceState} /> : null}
 
           {section === "language" ? (
             <Card>

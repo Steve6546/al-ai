@@ -199,32 +199,91 @@ the bot avatar was served back from the CDN as 1,030,806 bytes with a different
 SHA-256, under an `a_…` hash (animated, accepted). Byte-identity therefore holds
 up to Discord's edge, not through it.
 
-## The account's appearance: one shape, three consumers
+## The appearance: a colour engine, a cache, and one write per frame
 
-`user_preferences.appearance` is JSONB, nullable, and validated by
-`packages/core/src/appearance.ts` — the same module the browser imports. Three
-consumers read that one definition, which is what keeps them from drifting:
+The theme is not a list of CSS classes. `packages/core/src/theme-engine.ts` is a
+pure function — `buildThemeTokens(appearance)` — that turns a choice into the 27
+custom properties the stylesheet already reads. Nothing else decides a colour,
+so the picker, the preset tiles, the boot script and the server all describe the
+same theme instead of four approximations of it.
 
-| Consumer | Reads it for |
+**OKLCH, not HSL.** HSL lightness is not perceptual: `hsl(60 100% 50%)` is a
+screaming yellow and `hsl(240 100% 50%)` is a dark blue at the same "lightness",
+so a ladder built on it produces surfaces of wildly different apparent depth per
+hue. OKLCH is near-uniform, which is what lets one set of lightness steps work for
+every palette. The chosen colours supply **hue and chroma**; the mode supplies
+**lightness**:
+
+| Token | dark | light |
+| --- | --- | --- |
+| `--app-bg-image` (stops) | L 0.130 → 0.270 | L 0.990−0.025·i → −0.085 |
+| `--background` | first stop | first stop |
+| `--sidebar` | canvas + 0.045 | canvas − 0.022 |
+| `--card` | canvas + 0.080 | canvas + 0.020 (≤ 0.995) |
+| `--muted` | canvas + 0.130 | canvas − 0.040 |
+
+Two properties of that table are load-bearing:
+
+- **The mode owns the ladder.** A dark preset viewed in light mode is a *light*
+  page carrying the same hues — the first implementation reused the picked
+  colours' own lightness, so choosing a dark theme in light mode produced a black
+  page, and choosing `#3b82f6` (L ≈ 0.62) produced a canvas brighter than the
+  panels above it.
+- **Intensity scales chroma and nothing else.** `intensity: 0` is a genuinely
+  neutral theme (that is what the OLED preset is), with no chroma floor, and the
+  light canvas start also moves with intensity so "no tint" lands on white rather
+  than on a grey-white.
+
+`scope: "tinted"` lets the colour reach the panels; `scope: "canvas"` keeps the
+gradient on the page and leaves every surface at chroma 0. That is the switch the
+old system did not have, and the reason cards used to stay black under a themed
+page.
+
+**Contrast is computed per surface, never fixed.** `readableText(surface)` picks
+near-white or near-black by comparing WCAG contrast; for a gradient it is
+`readableOnEvery(stops)`, choosing against the *worst* stop — a white label that
+passes on the dark end of a sunset and fails on its orange end is the bug that
+rule exists to prevent. Every shipped preset is asserted readable in both modes.
+
+**Three consumers of one shape:**
+
+| Consumer | Role |
 | --- | --- |
-| `apps/dashboard/server/index.ts` | `normaliseAppearance` before any write, and again before any read, so nothing unvalidated reaches the column or the client |
-| `public/theme-boot.js` | paints the **cached** copy before the first frame; duplicates only the two arithmetic rules (hex normalising, WCAG luminance) because it runs before any module can load |
-| `src/lib/theme.ts` | applies the account's value after sign-in and writes the cache back |
+| `apps/dashboard/server/index.ts` | `normaliseAppearance` on write and again on read; nothing unvalidated reaches the JSONB column or the client |
+| `public/theme-boot.js` | paints the **cached tokens** before the first frame, and computes no colour maths |
+| `src/lib/theme.ts` | applies the account's value after sign-in, writes the cache back, coalesces live changes |
 
-The cache (`localStorage["al-ai.appearance"]`) is a copy for speed, never a source
-of truth: `App.tsx` overwrites it from the server on every session load. Without
-it the page would paint the default palette and repaint once the session resolved.
+The boot script deliberately contains **no** colour engine: re-deriving an OKLCH
+ladder in plain ES5 would mean two implementations of the contrast rule that
+must agree forever. Instead `lib/theme.ts` stores the tokens it derived next to
+the choice, keyed by a fingerprint of that choice (`mode|angle|intensity|scope|
+accent|stops|side-of-system`). A cache that does not match is discarded rather
+than partially applied — a correct unthemed page beats a mismatched one, and
+React paints the real palette immediately after. Measured consequence: swapping
+the stored preference without the matching cache leaves the page on the
+stylesheet defaults until React mounts, which is why `main.tsx` applies the
+preference itself.
 
-**Auto-contrast is measured, not fixed.** `readableOn` compares the accent's
-relative luminance with 0.1791 — the point where white and black score the same
-WCAG contrast. Above it the label is near-black, below it white. A fixed white
-label fails on pale amber; a fixed black label fails on deep violet; four of the
-five shipped accents sit on the near-black side.
+**One write per frame.** Dragging the angle slider fires ~120 events a second
+against a 60 Hz screen. `createAppearanceScheduler().schedule()` keeps the latest
+choice and paints it once per `requestAnimationFrame`; `flush()` paints
+immediately for discrete changes (a preset, a reset). Each paint is 27
+`setProperty` calls — synchronous style invalidation — so uncoalesced it would
+make the drag slower the faster the operator moves.
 
-**Backgrounds** are a hard-stop gradient for the two split modes (`0 50%` /
-`50% 100%` on the chosen axis) and a smooth interpolation for `gradient`. A solid
-backdrop sets `--app-bg-color` and no image, so switching back leaves nothing
-behind for the next paint to blend with.
+**The picker** is `react-colorful` (2.8 kB, no dependencies) restyled through one
+extra class of specificity, because the library injects its own stylesheet after
+ours. Beside it: a hex field that accepts `#abc`, `AABBCC`, `rgb()/rgba()` and
+bare decimal triples, a copy button, swatches, and the `EyeDropper` API when it
+exists — feature-detected, because a button that silently does nothing on Firefox
+is worse than no button.
+
+**Limits, stated rather than discovered:** in light mode `--card` stays nearly
+white (L ≈ 0.99) by design — a tinted page under white cards is what light UI
+does, and there is no room in the gamut above L 0.995 for chroma; the tint is
+visible in `--background`, `--sidebar` and every accent surface. The appearance is
+stored on the account (`user_preferences.appearance`), not per device, so it
+follows the operator between browsers; only the *cache* is per browser.
 
 ## Sessions: what the screen may know
 

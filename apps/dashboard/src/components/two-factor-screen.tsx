@@ -235,23 +235,23 @@ export function TwoFactorScreen({
    * ---------------------------------------------------------------- */
   return (
     /*
-     * One column, one job: enter a code.
+     * Two states, one card, no second route.
      *
-     * The screen used to be a split card — a near-black plate carrying the
-     * brand (or the QR) on one side and the form on the other. For a sign-in
-     * step that plate was decoration: the operator has already enrolled, so a
-     * lock emblem beside the field said nothing the title did not, and on a
-     * laptop it halved the width available to six code boxes. The form now owns
-     * the card, centred, in the order it is read: what this is, what to type,
-     * how long it lasts, then the two actions.
+     * An admin who is already enrolled only needs the code field: it stays a
+     * single centred column, exactly as before. A first sign-in also has to
+     * show the QR, the key and ten recovery codes — stacked, that material was
+     * taller than the viewport and pushed the code field below the fold. On a
+     * wide screen the card now uses two columns: enrolment material on one
+     * side, the code field and the two actions on the other. Below `lg` it
+     * still stacks, because a phone cannot fit two readable columns.
      *
-     * Enrolment keeps its QR — it is the only thing that makes a first sign-in
-     * possible — but it sits *in* the column above the field instead of beside
-     * it, so there is no second layout to maintain.
+     * The card, not the page, owns the scrollbar on wide screens: the page is
+     * `overflow-hidden` from `lg` up and the card is capped to the viewport.
+     * The QR is generated locally from the otpauth URI; no third party sees it.
      */
     <div
       dir={dir}
-      className="relative flex h-full justify-center overflow-y-auto overscroll-contain bg-[#050807] p-4 sm:p-6"
+      className="relative flex h-full items-center justify-center overflow-hidden bg-[#050807] p-3 max-lg:overflow-y-auto sm:p-6"
     >
       {/* The dithered blue-green texture from the supplied artwork, drawn with
           gradients so no image ever has to be downloaded. */}
@@ -265,9 +265,9 @@ export function TwoFactorScreen({
         }}
       />
 
-      <div className="relative my-auto w-full max-w-md overflow-hidden rounded-3xl border border-white/10 bg-[#080d0b] shadow-[0_30px_120px_rgba(0,0,0,0.65)]">
-        <div className="space-y-5 p-6 sm:p-8">
-          <header className="space-y-1.5 text-center">
+      <div className="relative my-auto w-full max-w-md overflow-hidden rounded-3xl border border-white/10 bg-[#080d0b] shadow-[0_30px_120px_rgba(0,0,0,0.65)] lg:max-h-full lg:max-w-4xl lg:overflow-y-auto">
+        <div className="grid gap-5 p-4 sm:p-5 lg:grid-cols-2 lg:gap-x-8">
+          <header className="space-y-1.5 text-center lg:col-span-2">
             <h1 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">{t("twoFactor.title")}</h1>
             <p className="text-sm leading-relaxed text-white/50">
               {enrolled ? t("twoFactor.subtitleEnrolled") : t("twoFactor.subtitleSetup")}
@@ -275,13 +275,13 @@ export function TwoFactorScreen({
           </header>
 
           {notice && (
-            <p className="rounded-lg border border-primary/20 bg-primary/[0.06] px-3 py-2 text-center text-mini text-primary">
+            <p className="rounded-lg border border-primary/20 bg-primary/[0.06] px-3 py-2 text-center text-mini text-primary lg:col-span-2">
               {notice}
             </p>
           )}
 
           {copyStatus && (
-            <p role="status" aria-live="polite" className="text-center text-mini text-primary">
+            <p role="status" aria-live="polite" className="text-center text-mini text-primary lg:col-span-2">
               {copyStatus}
             </p>
           )}
@@ -290,7 +290,7 @@ export function TwoFactorScreen({
               third-party QR service. It lives in the column because without it
               there is no first code to enter. */}
           {!enrolled && (
-            <section aria-label={t("twoFactor.guideTitle")} className="space-y-4">
+            <section aria-label={t("twoFactor.guideTitle")} className="min-w-0 space-y-3">
               <div className="rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2.5">
                 <p className="flex items-start gap-2 text-mini leading-relaxed text-amber-200/90">
                   <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
@@ -322,11 +322,11 @@ export function TwoFactorScreen({
                 </p>
               ) : (
                 <div className="space-y-4">
-                  {/* Narrower than the shared panel's own cap: in a 504px
-                      column the default 16rem QR pushed the code field — the
-                      thing the operator came here to fill — below the fold. */}
+                  {/* In the wide layout this panel shares a half-width column
+                      with the key and the recovery codes. 10rem is still a
+                      scannable code, but no longer pushes the form down. */}
                   {qrReady && enrollment.otpauthUri && (
-                    <div className="mx-auto w-full max-w-[14rem]">
+                    <div className="mx-auto w-full max-w-[8rem]">
                       <QrPanel
                         value={enrollment.otpauthUri}
                         label={t("settings.security.qrLabel")}
@@ -343,13 +343,19 @@ export function TwoFactorScreen({
                       hideLabel={t("twoFactor.hideSecret")}
                       copyLabel={t("twoFactor.copySecret")}
                       defaultVisible
+                      showWarning={false}
                     />
                   )}
 
+                  {/* The URI carries the same secret as the QR and the key.
+                      Keeping it available but collapsed removes a full row from
+                      the tall first-sign-in column without taking it away. */}
                   {enrollment.otpauthUri && (
-                    <div className="space-y-1.5">
-                      <p className="text-mini font-medium text-white/55">{t("twoFactor.uri")}</p>
-                      <div className="flex items-center gap-1.5">
+                    <details className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                      <summary className="cursor-pointer text-mini font-medium text-white/55">
+                        {t("twoFactor.uri")}
+                      </summary>
+                      <div className="mt-2 flex items-center gap-1.5">
                         <code
                           dir="ltr"
                           className="min-w-0 flex-1 truncate rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 font-mono text-micro text-white/55"
@@ -365,7 +371,7 @@ export function TwoFactorScreen({
                           <Copy className="size-4" aria-hidden />
                         </button>
                       </div>
-                    </div>
+                    </details>
                   )}
 
                   {enrollment.recoveryCodes.length > 0 && (
@@ -376,6 +382,7 @@ export function TwoFactorScreen({
                       copyAllLabel={t("twoFactor.copyRecovery")}
                       downloadLabel={t("twoFactor.downloadRecovery")}
                       copyEachLabel={t("twoFactor.copyEach")}
+                      dense
                     />
                   )}
 
@@ -394,7 +401,7 @@ export function TwoFactorScreen({
           )}
 
           {expired ? (
-            <div className="space-y-3">
+            <div className="space-y-3 lg:col-span-2 lg:mx-auto lg:max-w-md">
               <div className="rounded-xl border border-red-400/25 bg-red-400/[0.06] p-3 text-center">
                 <p className="text-sm font-medium text-red-200">{t("twoFactor.expiredTitle")}</p>
                 <p className="mt-1 text-mini leading-relaxed text-red-200/70">
@@ -410,7 +417,10 @@ export function TwoFactorScreen({
               </button>
             </div>
           ) : (
-            <form onSubmit={verify} className="space-y-4">
+            <form
+              onSubmit={verify}
+              className={enrolled ? "space-y-4 lg:col-span-2 lg:mx-auto lg:max-w-md" : "min-w-0 space-y-4"}
+            >
               <div className="space-y-2.5">
                 {/* The 30-second ring sits on the label line, next to the words
                     it qualifies — «code» and «how long it stays valid». */}

@@ -118,7 +118,8 @@ export function SecretField({
   showLabel,
   hideLabel,
   copyLabel,
-  defaultVisible = false
+  defaultVisible = false,
+  showWarning = true
 }: {
   secret: string;
   label: string;
@@ -127,6 +128,8 @@ export function SecretField({
   copyLabel: string;
   /** The enrolment flow starts readable: the key has to be typed somewhere. */
   defaultVisible?: boolean;
+  /** The login screen already carries the same warning in its banner. */
+  showWarning?: boolean;
 }) {
   const { t } = useI18n();
   const [visible, setVisible] = useState(defaultVisible);
@@ -168,7 +171,7 @@ export function SecretField({
           {copied ? <Check className="size-4 text-primary" aria-hidden /> : <Copy className="size-4" aria-hidden />}
         </button>
       </div>
-      <p className="text-micro leading-relaxed text-white/35">{t("settings.security.secretWarning")}</p>
+      {showWarning ? <p className="text-micro leading-relaxed text-white/35">{t("settings.security.secretWarning")}</p> : null}
     </div>
   );
 }
@@ -192,6 +195,7 @@ export function RecoveryCodeGrid({
   copyAllLabel,
   downloadLabel,
   copyEachLabel,
+  dense = false,
   downloadFilename = "al-ai-recovery-codes.txt"
 }: {
   codes: string[];
@@ -200,6 +204,8 @@ export function RecoveryCodeGrid({
   copyAllLabel: string;
   downloadLabel: string;
   copyEachLabel: string;
+  /** Tighter three-column cards for the half-width first-sign-in column. */
+  dense?: boolean;
   downloadFilename?: string;
 }) {
   const { t } = useI18n();
@@ -248,21 +254,27 @@ export function RecoveryCodeGrid({
         </div>
       </div>
 
-      <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2" aria-label={title}>
+      <ul
+        className={cn("grid gap-1.5", dense ? "grid-cols-2 sm:grid-cols-5" : "grid-cols-1 sm:grid-cols-2")}
+        aria-label={title}
+      >
         {codes.map((code, index) => (
           <li key={`${index}-${code}`}>
             <button
               type="button"
               onClick={() => void copyOne(code, String(index))}
               aria-label={`${copyEachLabel}: ${code}`}
-              className="group flex w-full items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2 text-start transition hover:border-primary/40 hover:bg-white/[0.06]"
+              className={cn(
+                "group flex w-full items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.03] text-start transition hover:border-primary/40 hover:bg-white/[0.06]",
+                dense ? "px-2 py-1.5" : "px-2.5 py-2"
+              )}
             >
-              <code dir="ltr" className="font-mono text-mini tracking-wide text-white/80">
+              <code dir="ltr" className={cn("font-mono tracking-wide text-white/80", dense ? "text-micro" : "text-mini")}>
                 {code}
               </code>
               {copied === String(index) ? (
                 <Check className="size-3.5 shrink-0 text-primary" aria-hidden />
-              ) : (
+              ) : dense ? null : (
                 <Copy className="size-3.5 shrink-0 text-white/25 group-hover:text-primary" aria-hidden />
               )}
             </button>
@@ -270,7 +282,7 @@ export function RecoveryCodeGrid({
         ))}
       </ul>
 
-      <p className="text-micro leading-relaxed text-white/35">{t("settings.security.oneTimeBody")}</p>
+      {dense ? null : <p className="text-micro leading-relaxed text-white/35">{t("settings.security.oneTimeBody")}</p>}
     </div>
   );
 }

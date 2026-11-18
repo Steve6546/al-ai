@@ -508,3 +508,123 @@
     margin: 0;
   }
 }
+
+@layer components {
+  /*
+   * The colour picker.
+   *
+   * `react-colorful` injects its own stylesheet when it mounts, and an injected
+   * `<style>` element comes after this file in the document — so on equal
+   * specificity the library wins. Every rule here is therefore scoped through
+   * `.appearance-picker`, which costs one class of specificity and keeps the
+   * library's layout (the absolute pointers, the draggable interactive layer)
+   * while replacing its look: 28px pointers and an 8px radius read as a
+   * third-party widget next to 12px cards, so the pointer shrinks and the
+   * corners take the product's own radius.
+   */
+  .appearance-picker .react-colorful {
+    width: 100%;
+    height: auto;
+    gap: 10px;
+  }
+
+  .appearance-picker .react-colorful__saturation {
+    height: 168px;
+    flex-grow: 0;
+    border-bottom: none;
+    border-radius: var(--radius);
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
+  }
+
+  .appearance-picker .react-colorful__hue {
+    height: 14px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
+  }
+
+  .appearance-picker .react-colorful__pointer {
+    width: 18px;
+    height: 18px;
+    border-width: 2px;
+    border-color: #fff;
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 25%),
+      0 2px 6px rgb(0 0 0 / 30%);
+  }
+
+  /* The pointer fill is what actually shows the chosen colour; the white ring
+     around it stays white so the pointer is visible on a white page. */
+  .appearance-picker .react-colorful__pointer-fill {
+    border-radius: 999px;
+  }
+
+  .appearance-picker .react-colorful__interactive:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: var(--radius);
+  }
+
+  /*
+   * The two sliders.
+   *
+   * A native `input[type=range]` is the only control that gets keyboard, touch,
+   * screen-reader and pointer behaviour right for free, so it is kept and only
+   * restyled. The track is drawn with `--appearance-track` so the hue rail of the
+   * angle slider can carry the theme's own colours instead of a generic grey.
+   */
+  .appearance-range {
+    appearance: none;
+    height: 22px;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .appearance-range::-webkit-slider-runnable-track {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--appearance-track, var(--muted));
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
+  }
+
+  .appearance-range::-moz-range-track {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--appearance-track, var(--muted));
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
+  }
+
+  .appearance-range::-webkit-slider-thumb {
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    margin-top: -6px;
+    border-radius: 999px;
+    border: 2px solid #fff;
+    background: var(--foreground);
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 25%),
+      0 2px 6px rgb(0 0 0 / 25%);
+    transition: transform 120ms ease;
+  }
+
+  .appearance-range::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    border: 2px solid #fff;
+    background: var(--foreground);
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 25%),
+      0 2px 6px rgb(0 0 0 / 25%);
+  }
+
+  .appearance-range:active::-webkit-slider-thumb {
+    transform: scale(1.12);
+  }
+
+  .appearance-range:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 3px;
+    border-radius: 999px;
+  }
+}

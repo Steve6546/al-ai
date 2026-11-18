@@ -16,6 +16,7 @@
     "@fastify/static": "^10.1.11",
     "fastify": "^5.12.8",
     "pg": "^8.13.0",
+    "react-colorful": "^5.8.1",
     "tsx": "^4.23.13"
   },
   "devDependencies": {

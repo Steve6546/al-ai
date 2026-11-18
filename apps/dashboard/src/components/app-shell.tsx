@@ -683,7 +683,11 @@ function NavButton({
         // sets `--sidebar-primary` from `--primary`, which is what the appearance
         // screen writes (named accent or custom hex). A neutral grey here made the
         // active row the one element on the page that ignored the chosen colour.
-        active && "bg-sidebar-primary/12 font-medium text-sidebar-primary",
+        // The label stays in the surface's own foreground: the accent at its light
+        // step does not reach 4.5:1 against a 12% tint of itself, and a row whose
+        // text is hard to read is not "marked", it is damaged. The tint and the
+        // accent bar below carry the colour instead.
+        active && "bg-sidebar-primary/12 font-medium",
         disabled && "cursor-not-allowed opacity-40 hover:bg-transparent"
       )}
     >
@@ -696,7 +700,7 @@ function NavButton({
           active ? "opacity-100" : "opacity-0"
         )}
       />
-      <Icon className="size-4 shrink-0" />
+      <Icon className={cn("size-4 shrink-0", active && "text-sidebar-primary")} />
       <span className="min-w-0 flex-1 truncate">{label}</span>
     </button>
   );

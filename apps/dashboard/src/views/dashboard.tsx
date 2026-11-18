@@ -172,13 +172,23 @@ export function OverviewContent({
 }) {
   const { t, language } = useI18n();
   const locale = language === "en" ? "en" : "ar";
-  const stats = useMemo(() => buildStats(metrics, locale, t), [metrics, locale, t]);
-
   const { bot, members, punishments24h, recentActivity, series } = metrics;
   // A payload without these fields is not a metrics screen with zero values -
   // it is a response this screen cannot read. Reporting zeros would be a number
   // we made up (the same rule the guild list follows: "unknown" is not "none").
-  if (!bot || !members || !punishments24h || !Array.isArray(recentActivity)) {
+  //
+  // The check has to happen *before* `buildStats` reads the payload, and the
+  // memo has to stay unconditional (the hook count cannot depend on the data),
+  // so the memo is given `null` instead of a payload it would throw on. That is
+  // the difference between an error card and a screen that cannot render at
+  // all: a malformed response must never reach the arithmetic.
+  const readable = Boolean(bot && members && punishments24h && Array.isArray(recentActivity));
+  const stats = useMemo(
+    () => (readable ? buildStats(metrics, locale, t) : null),
+    [readable, metrics, locale, t]
+  );
+
+  if (!readable || !stats) {
     return <LoadError message={t("dashboard.incomplete")} />;
   }
 

@@ -110,6 +110,31 @@ test("the screen renders its loading state rather than crashing", () => {
   assert.ok(html.includes("Loading the server metrics"), html.slice(0, 200));
 });
 
+test("a metrics payload the screen cannot read shows an error card, not a crash", () => {
+  // The API stub in the browser pass answers `{}` for endpoints it does not know.
+  // That payload used to reach `buildStats` before the readability guard and throw
+  // on `recentActivity.length`, so the screen rendered the error boundary instead
+  // of the sentence it has for exactly this case.
+  const guild = { id: "1", name: "G", iconUrl: null, memberCount: 1, tier: null, botPresent: true } as unknown as Guild;
+  const html = renderToString(
+    createElement(
+      I18nProvider,
+      {
+        initialLanguage: "en",
+        children: createElement(OverviewContent, {
+          guild,
+          // A response shape, not a metrics one: every field is missing.
+          metrics: {} as GuildMetrics,
+          modules: null,
+          modulesFailed: false,
+          onOpen: () => {}
+        })
+      }
+    )
+  );
+  assert.ok(html.includes("incomplete"), html.slice(0, 300));
+});
+
 test("the module grid renders one card per system, with its real state", () => {
   // The grid is the half of the screen that lists what the project actually has.
   // Nine cards existed before this test and none of them was ever rendered: a
