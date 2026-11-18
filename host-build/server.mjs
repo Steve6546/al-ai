@@ -78974,16 +78974,37 @@ function mapPending(row) {
   };
 }
 function createSecondFactorStore(pool2) {
+  async function scoped(settings, text, values) {
+    const client = await pool2.connect();
+    try {
+      await client.query("BEGIN");
+      for (const [key, value] of Object.entries(settings)) {
+        await client.query("SELECT set_config($1, $2, true)", [key, value]);
+      }
+      const result = await client.query(text, values);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => void 0);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  const asAccount = (discordUserId, text, values) => scoped({ "al_ai.actor": discordUserId }, text, values);
+  const asPending = (id, text, values) => scoped({ "al_ai.pending_id": id }, text, values);
   return {
     async isEnrolled(discordUserId) {
-      const { rowCount } = await pool2.query(
+      const { rowCount } = await asAccount(
+        discordUserId,
         `SELECT 1 FROM admin_two_factor WHERE discord_user_id = $1`,
         [discordUserId]
       );
       return (rowCount ?? 0) > 0;
     },
     async createPending(input) {
-      await pool2.query(
+      await scoped(
+        { "al_ai.actor": input.discordUserId, "al_ai.pending_id": input.id },
         `INSERT INTO admin_two_factor_pending
            (id, discord_user_id, discord_username, discord_handle, discord_avatar,
             access_token_ciphertext, scopes, enrollment_ciphertext, expires_at)
@@ -79002,7 +79023,8 @@ function createSecondFactorStore(pool2) {
       );
     },
     async getPending(id) {
-      const { rows } = await pool2.query(
+      const { rows } = await asPending(
+        id,
         `SELECT id, discord_user_id, discord_username, discord_handle, discord_avatar,
                 access_token_ciphertext, scopes, enrollment_ciphertext, expires_at, attempts
          FROM admin_two_factor_pending WHERE id = $1 AND expires_at > now()`,
@@ -79011,7 +79033,7 @@ function createSecondFactorStore(pool2) {
       return rows[0] ? mapPending(rows[0]) : null;
     },
     async deletePending(id) {
-      await pool2.query(`DELETE FROM admin_two_factor_pending WHERE id = $1`, [id]);
+      await asPending(id, `DELETE FROM admin_two_factor_pending WHERE id = $1`, [id]);
     },
     async purgeExpiredPending() {
       const { rowCount } = await pool2.query(`DELETE FROM admin_two_factor_pending WHERE expires_at <= now()`);
@@ -79019,7 +79041,8 @@ function createSecondFactorStore(pool2) {
     },
     /** One atomic attempt counter; `expired` means the row vanished mid-guess. */
     async recordFailedAttempt(id) {
-      const { rows } = await pool2.query(
+      const { rows } = await asPending(
+        id,
         `UPDATE admin_two_factor_pending SET attempts = attempts + 1
          WHERE id = $1 AND expires_at > now() RETURNING attempts`,
         [id]
@@ -79028,7 +79051,8 @@ function createSecondFactorStore(pool2) {
     },
     /** COALESCE keeps the first secret: a retry must not change what was shown. */
     async ensureEnrollment(id, freshEnvelope) {
-      const { rows } = await pool2.query(
+      const { rows } = await asPending(
+        id,
         `UPDATE admin_two_factor_pending
          SET enrollment_ciphertext = COALESCE(enrollment_ciphertext, $2)
          WHERE id = $1 AND expires_at > now()
@@ -79040,7 +79064,8 @@ function createSecondFactorStore(pool2) {
       return envelope;
     },
     async credential(discordUserId) {
-      const { rows } = await pool2.query(
+      const { rows } = await asAccount(
+        discordUserId,
         `SELECT secret_ciphertext, last_counter FROM admin_two_factor WHERE discord_user_id = $1`,
         [discordUserId]
       );
@@ -79060,6 +79085,7 @@ function createSecondFactorStore(pool2) {
       const client = await pool2.connect();
       try {
         await client.query("BEGIN");
+        await client.query("SELECT set_config('al_ai.actor', $1, true)", [input.discordUserId]);
         const inserted = await client.query(
           `INSERT INTO admin_two_factor (discord_user_id, secret_ciphertext, last_counter)
            VALUES ($1, $2, $3) ON CONFLICT (discord_user_id) DO NOTHING`,
@@ -79087,7 +79113,8 @@ function createSecondFactorStore(pool2) {
     },
     /** A TOTP code is accepted once: only a strictly newer counter wins. */
     async consumeTotpCounter(discordUserId, counter) {
-      const { rowCount } = await pool2.query(
+      const { rowCount } = await asAccount(
+        discordUserId,
         `UPDATE admin_two_factor SET last_counter = $2, updated_at = now()
          WHERE discord_user_id = $1 AND (last_counter IS NULL OR last_counter < $2)`,
         [discordUserId, counter]
@@ -79096,7 +79123,8 @@ function createSecondFactorStore(pool2) {
     },
     /** DELETE ... RETURNING makes one recovery code impossible to spend twice. */
     async consumeRecoveryCode(discordUserId, hash) {
-      const { rowCount } = await pool2.query(
+      const { rowCount } = await asAccount(
+        discordUserId,
         `DELETE FROM admin_two_factor_recovery WHERE code_hash = $1 AND discord_user_id = $2`,
         [hash, discordUserId]
       );

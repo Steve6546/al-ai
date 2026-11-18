@@ -151,6 +151,12 @@ test("every table with a guild_id is protected by the access list", { skip }, as
   assert.ok(rows.length >= 29, `expected the full schema, saw ${rows.length} tables`);
   for (const row of rows) {
     assert.equal(row.rls, true, `${row.tablename} must have row level security enabled`);
+    // A table with no branch in `infra/schema.sql` falls into the default-deny
+    // policy. That is the right default for an unknown table, but it silently
+    // disables a feature when a *known* table is missed — the 2FA tables were,
+    // and the second factor could not be enrolled at all. Every table in the
+    // schema today is covered by a branch, so none may answer `false`.
+    assert.notEqual(String(row.qual), "false", `${row.tablename} has a deny-all policy: no feature can read it`);
     if (row.guild_scoped && row.tablename === "guild_acl") {
       // The access list cannot be scoped by itself; it is scoped by account.
       assert.match(String(row.qual), /al_ai_session_user/, "guild_acl must scope rows by the session's account");

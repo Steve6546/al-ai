@@ -112,6 +112,11 @@ async function cleanup() {
 }
 
 await client.connect();
+// The row policy on `oauth_sessions` requires every statement to declare whose
+// account it acts for. This check is the test account throughout, and the
+// value is set on its own connection so the fixtures below can be written
+// without weakening a policy for tests.
+await client.query(`SELECT set_config('al_ai.actor', $1, false)`, [testUser]);
 try {
   await cleanup();
   console.log(`check:2fa — ${origin} (pending cookie: ${pendingCookieName})`);

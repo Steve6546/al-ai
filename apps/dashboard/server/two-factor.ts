@@ -27,7 +27,7 @@ import {
   hashRecoveryCode,
   normaliseRecoveryCode
 } from "@al-ai/core";
-import type { Pool } from "pg";
+import type { Pool, QueryResult, QueryResultRow } from "pg";
 import { isAdministrable } from "./guild-access.js";
 import { derivedCookieName, policyCookieHeader, type CookieContext } from "./session.js";
 import type { BffEnv } from "./env.js";
@@ -220,9 +220,47 @@ function mapPending(row: PendingRow): PendingLogin {
  * requests submit it in the same tick.
  */
 export function createSecondFactorStore(pool: Pool) {
+  /**
+   * One statement, one identity.
+   *
+   * These tables are keyed by account, but two flows run *before* a session
+   * exists: the pending login (addressed by its own cookie id) and the
+   * credential check that decides whether a second factor is required. Those
+   * statements declare who they act for — transaction-scoped, so a pooled
+   * connection can never carry one caller's identity into the next caller's
+   * statement — and the row policy compares that against the row.
+   */
+  async function scoped<T extends QueryResultRow>(
+    settings: Record<string, string>,
+    text: string,
+    values: unknown[]
+  ): Promise<QueryResult<T>> {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const [key, value] of Object.entries(settings)) {
+        await client.query("SELECT set_config($1, $2, true)", [key, value]);
+      }
+      const result = await client.query<T>(text, values);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  const asAccount = <T extends QueryResultRow>(discordUserId: string, text: string, values: unknown[]) =>
+    scoped<T>({ "al_ai.actor": discordUserId }, text, values);
+  const asPending = <T extends QueryResultRow>(id: string, text: string, values: unknown[]) =>
+    scoped<T>({ "al_ai.pending_id": id }, text, values);
+
   return {
     async isEnrolled(discordUserId: string): Promise<boolean> {
-      const { rowCount } = await pool.query(
+      const { rowCount } = await asAccount(
+        discordUserId,
         `SELECT 1 FROM admin_two_factor WHERE discord_user_id = $1`,
         [discordUserId]
       );
@@ -230,7 +268,8 @@ export function createSecondFactorStore(pool: Pool) {
     },
 
     async createPending(input: Omit<PendingLogin, "attempts">): Promise<void> {
-      await pool.query(
+      await scoped(
+        { "al_ai.actor": input.discordUserId, "al_ai.pending_id": input.id },
         `INSERT INTO admin_two_factor_pending
            (id, discord_user_id, discord_username, discord_handle, discord_avatar,
             access_token_ciphertext, scopes, enrollment_ciphertext, expires_at)
@@ -250,7 +289,8 @@ export function createSecondFactorStore(pool: Pool) {
     },
 
     async getPending(id: string): Promise<PendingLogin | null> {
-      const { rows } = await pool.query(
+      const { rows } = await asPending<{ [key: string]: unknown }>(
+        id,
         `SELECT id, discord_user_id, discord_username, discord_handle, discord_avatar,
                 access_token_ciphertext, scopes, enrollment_ciphertext, expires_at, attempts
          FROM admin_two_factor_pending WHERE id = $1 AND expires_at > now()`,
@@ -260,17 +300,20 @@ export function createSecondFactorStore(pool: Pool) {
     },
 
     async deletePending(id: string): Promise<void> {
-      await pool.query(`DELETE FROM admin_two_factor_pending WHERE id = $1`, [id]);
+      await asPending(id, `DELETE FROM admin_two_factor_pending WHERE id = $1`, [id]);
     },
 
     async purgeExpiredPending(): Promise<number> {
+      // An already-expired row is the one case a policy must allow without an
+      // identity, otherwise the purge timer would quietly stop cleaning up.
       const { rowCount } = await pool.query(`DELETE FROM admin_two_factor_pending WHERE expires_at <= now()`);
       return rowCount ?? 0;
     },
 
     /** One atomic attempt counter; `expired` means the row vanished mid-guess. */
     async recordFailedAttempt(id: string): Promise<{ attempts: number; expired: boolean }> {
-      const { rows } = await pool.query(
+      const { rows } = await asPending<{ attempts: number }>(
+        id,
         `UPDATE admin_two_factor_pending SET attempts = attempts + 1
          WHERE id = $1 AND expires_at > now() RETURNING attempts`,
         [id]
@@ -282,7 +325,8 @@ export function createSecondFactorStore(pool: Pool) {
 
     /** COALESCE keeps the first secret: a retry must not change what was shown. */
     async ensureEnrollment(id: string, freshEnvelope: string): Promise<string> {
-      const { rows } = await pool.query(
+      const { rows } = await asPending<{ enrollment_ciphertext: string }>(
+        id,
         `UPDATE admin_two_factor_pending
          SET enrollment_ciphertext = COALESCE(enrollment_ciphertext, $2)
          WHERE id = $1 AND expires_at > now()
@@ -295,7 +339,8 @@ export function createSecondFactorStore(pool: Pool) {
     },
 
     async credential(discordUserId: string): Promise<{ secretCiphertext: string; lastCounter: number | null } | null> {
-      const { rows } = await pool.query(
+      const { rows } = await asAccount<{ secret_ciphertext: string; last_counter: number | null }>(
+        discordUserId,
         `SELECT secret_ciphertext, last_counter FROM admin_two_factor WHERE discord_user_id = $1`,
         [discordUserId]
       );
@@ -321,6 +366,9 @@ export function createSecondFactorStore(pool: Pool) {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
+        // No session exists yet at this point of a login, so the transaction
+        // declares the account it is enrolling.
+        await client.query("SELECT set_config('al_ai.actor', $1, true)", [input.discordUserId]);
         const inserted = await client.query(
           `INSERT INTO admin_two_factor (discord_user_id, secret_ciphertext, last_counter)
            VALUES ($1, $2, $3) ON CONFLICT (discord_user_id) DO NOTHING`,
@@ -349,7 +397,8 @@ export function createSecondFactorStore(pool: Pool) {
 
     /** A TOTP code is accepted once: only a strictly newer counter wins. */
     async consumeTotpCounter(discordUserId: string, counter: number): Promise<boolean> {
-      const { rowCount } = await pool.query(
+      const { rowCount } = await asAccount(
+        discordUserId,
         `UPDATE admin_two_factor SET last_counter = $2, updated_at = now()
          WHERE discord_user_id = $1 AND (last_counter IS NULL OR last_counter < $2)`,
         [discordUserId, counter]
@@ -359,7 +408,8 @@ export function createSecondFactorStore(pool: Pool) {
 
     /** DELETE ... RETURNING makes one recovery code impossible to spend twice. */
     async consumeRecoveryCode(discordUserId: string, hash: string): Promise<boolean> {
-      const { rowCount } = await pool.query(
+      const { rowCount } = await asAccount(
+        discordUserId,
         `DELETE FROM admin_two_factor_recovery WHERE code_hash = $1 AND discord_user_id = $2`,
         [hash, discordUserId]
       );

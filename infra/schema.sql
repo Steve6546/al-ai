@@ -1350,6 +1350,27 @@ BEGIN
         $p$discord_user_id = current_setting('al_ai.actor', true)$p$,
         $p$discord_user_id = current_setting('al_ai.actor', true)$p$
       );
+    ELSIF t.tablename IN ('admin_two_factor', 'admin_two_factor_recovery', 'admin_two_factor_setup') THEN
+      -- The account's own credential. Two clauses because two flows reach it:
+      -- the settings screen has a session, while the login that must decide
+      -- "is a second factor required?" has none yet and declares the account
+      -- it just authenticated with Discord.
+      EXECUTE format(
+        'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (%s) WITH CHECK (%s)',
+        t.tablename || '_app', t.tablename, app_role,
+        $i$discord_user_id = al_ai_session_user() OR discord_user_id = current_setting('al_ai.actor', true)$i$,
+        $i$discord_user_id = al_ai_session_user() OR discord_user_id = current_setting('al_ai.actor', true)$i$
+      );
+    ELSIF t.tablename = 'admin_two_factor_pending' THEN
+      -- A pending login is addressed by its own cookie id, before any session
+      -- exists. `expires_at <= now()` keeps the purge timer working without an
+      -- identity; nothing else in this table survives without one of the two.
+      EXECUTE format(
+        'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (%s) WITH CHECK (%s)',
+        t.tablename || '_app', t.tablename, app_role,
+        $i$id::text = current_setting('al_ai.pending_id', true) OR discord_user_id = current_setting('al_ai.actor', true) OR expires_at <= now()$i$,
+        $i$id::text = current_setting('al_ai.pending_id', true) OR discord_user_id = current_setting('al_ai.actor', true) OR expires_at <= now()$i$
+      );
     ELSE
       IF has_guild_column THEN
         -- Every guild-scoped table. `WITH CHECK` runs on INSERT and on the new
