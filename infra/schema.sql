@@ -1354,12 +1354,21 @@ BEGIN
       -- The account's own credential. Two clauses because two flows reach it:
       -- the settings screen has a session, while the login that must decide
       -- "is a second factor required?" has none yet and declares the account
-      -- it just authenticated with Discord.
+      -- it just authenticated with Discord. An already-expired setup row stays
+      -- reachable so the housekeeping sweep can delete it without an identity;
+      -- without that clause the delete matched nothing and the job reported
+      -- success while the encrypted envelope lived on.
       EXECUTE format(
         'CREATE POLICY %I ON public.%I FOR ALL TO %I USING (%s) WITH CHECK (%s)',
         t.tablename || '_app', t.tablename, app_role,
-        $i$discord_user_id = al_ai_session_user() OR discord_user_id = current_setting('al_ai.actor', true)$i$,
-        $i$discord_user_id = al_ai_session_user() OR discord_user_id = current_setting('al_ai.actor', true)$i$
+        CASE WHEN t.tablename = 'admin_two_factor_setup'
+          THEN $i$discord_user_id = al_ai_session_user() OR discord_user_id = current_setting('al_ai.actor', true) OR expires_at <= now()$i$
+          ELSE $i$discord_user_id = al_ai_session_user() OR discord_user_id = current_setting('al_ai.actor', true)$i$
+        END,
+        CASE WHEN t.tablename = 'admin_two_factor_setup'
+          THEN $i$discord_user_id = al_ai_session_user() OR discord_user_id = current_setting('al_ai.actor', true) OR expires_at <= now()$i$
+          ELSE $i$discord_user_id = al_ai_session_user() OR discord_user_id = current_setting('al_ai.actor', true)$i$
+        END
       );
     ELSIF t.tablename = 'admin_two_factor_pending' THEN
       -- A pending login is addressed by its own cookie id, before any session

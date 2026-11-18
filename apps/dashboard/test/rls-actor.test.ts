@@ -147,3 +147,22 @@ test("preferences belong to one account and are writable only by it", { skip }, 
     await as({ "al_ai.actor": account }, `DELETE FROM user_preferences WHERE discord_user_id = $1`, [account]);
   }
 });
+
+test("housekeeping can delete an expired authenticator setup without an identity", { skip }, async () => {
+  // The five-minute sweep runs outside any request, so it has no session. An
+  // expired row is the one case a policy must allow without one; otherwise the
+  // encrypted enrolment envelope is never cleaned up and the job fails silently.
+  const account = `rls-setup-${randomUUID()}`;
+  await as(
+    { "al_ai.actor": account },
+    `INSERT INTO admin_two_factor_setup (discord_user_id, enrollment_ciphertext, expires_at)
+     VALUES ($1, 'fixture-envelope', now() - interval '1 minute')`,
+    [account]
+  );
+  const { rowCount } = await as(
+    {},
+    `DELETE FROM admin_two_factor_setup WHERE discord_user_id = $1 AND expires_at <= now()`,
+    [account]
+  );
+  assert.equal(rowCount, 1, "an expired setup row must be purged without an identity");
+});
